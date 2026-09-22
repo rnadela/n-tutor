@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key Screen — Parent View: Source Test capture and upload</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,600;0,700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   KEY SCREEN — Parent View: Source Test capture and upload (UJ-1, SM-1)
+   ----------------------------------------------------------------------------
+   SPINE SECTIONS GOVERNING THIS SCREEN
+   ----------------------------------------------------------------------------
+   DESIGN.md
+     - Color / Palette ....... Clear Room, accent split. Parent View primary
+                               #0B5FA5 (NOT Student teal #0F6E78).           [Q1]
+     - Typography ............ Source Sans 3 (chrome) only — this screen shows
+                               no generated Question content, so no Literata.
+                               Tabular figures on allowance counts.     [Q2e/Q2f]
+     - Shapes ................ Paper vs Control. Everything here is CONTROL
+                               role: 8px radius on thumbnails, buttons,
+                               chips, controls, sheets.                      [Q3]
+     - Elevation and Depth ... Flat with borders. No shadows. Overlays use
+                               scrim + 1px divider border.                   [Q4]
+     - Density ............... density.compact (Parent View): row 40,
+                               card-padding 12, gap 8, section-margin 20,
+                               min tap target 44px — thumbnails and their
+                               retake/delete controls included.              [Q5]
+                               TAP-TARGET DISAGREEMENT RESOLVED AT 44px:
+                               Q10a said page thumbnails were 48px, while the
+                               density token and this mock said 44px. Q5 pins
+                               tap-target floors per SURFACE, not per
+                               component — 48px in Student Mode because a
+                               10-year-old aims worse, 44px in Parent View.
+                               Capture is Parent View, therefore
+                               density.compact, therefore the floor is 44px.
+                               The Q10a "48px" was a Student-Mode number
+                               applied to a Parent-Mode screen. 44px stands
+                               and is what every control here measures.
+     - Motion ................ Functional + progress only. State 5 progress
+                               is one of the few permitted places.           [Q6]
+   EXPERIENCE.md
+     - Component Patterns .... Capture viewfinder + accumulating ordered
+                               thumbnail strip; page-management list with
+                               reorder / retake / delete; count selector;
+                               progress screen.                       [Q10a/Q13a]
+     - State Patterns ........ Batch legibility result (advisory, overridable,
+                               per-page retake, allowance visible); generation
+                               in-progress; uncommitted capture/classification
+                               state survives the 15-min idle timeout.
+                                                              [Q10b/Q13a/Q14c]
+     - Allowances ............ Upload Allowance and Generation Allowance.
+                               Message names tier + usage-against-limit +
+                               reset date. Cost stated BEFORE the control
+                               fires.                                 [Q12c/Q13b]
+     - Voice and Tone ........ Parent View: dense, factual, student named in
+                               the third person. No pleasantries, no
+                               exclamation marks. Anti-reference: gamified
+                               ed-tech.                                     [Q17a]
+     - Accessibility Floor ... WCAG 2.1 AA. Legibility flag = icon + text
+                               label + colour, never colour alone. 44px
+                               targets. prefers-reduced-motion honoured. [Q18/Q6]
+     - Key Flow UJ-1 ......... Upload -> Classify (Student Profile, Subject,
+                               Grade Level) -> Capture -> Generate -> (review
+                               drafts) -> release. Steps 3 and 4 are rendered
+                               here; classification shown as already chosen.
+   ----------------------------------------------------------------------------
+   ACCENT CORRECTION — the dark-mode Parent accent no longer floats free
+   ----------------------------------------------------------------------------
+   The coherence lens flagged #7FB6E8 (the DARK-MODE Parent primary) appearing
+   in a light-theme mock. Verified: it appeared on the shutter ring, the
+   "Done" control and the next-page thumbnail placeholder. All three sit on
+   the INVERTED camera chrome (#10202E), not on a light surface, and the
+   light Parent accent #0B5FA5 measures only 2.52:1 there — swapping it in
+   would have replaced a token error with an SC 1.4.11 failure.
+   Resolution, and it needs spine adoption:
+     - #0B5FA5 is the Parent accent and is what EVERY light-surface control on
+       this screen uses. It appears nowhere on the inverted chrome.
+     - The camera viewfinder is an INVERTED SURFACE inside the light theme —
+       not a dark-mode screen. Inverted surfaces need their own accent and
+       divider counterparts, which the spines do not currently define.
+       Declared here as new tokens:
+         primary.onInverted  #7FB6E8   (7.70:1 on #10202E)
+         divider.onInverted  #6A747E   (3.48:1 on #10202E, 3.04:1 on #1B2B39)
+       #7FB6E8 is the same hex as the dark-mode Parent primary by coincidence
+       of the palette, not by borrowing the dark theme — the spines should
+       name it as an inverted-surface role so this stops reading as leakage.
+     - The old inverted divider #3C4E5D measured 1.92:1 and was the sole
+       boundary of the camera-roll button, the back control and the chips.
+       Replaced by divider.onInverted throughout.
+
+   ----------------------------------------------------------------------------
+   TINT TOKENS USED HERE — UNDECLARED IN THE SPINES, ADOPTION REQUIRED
+   ----------------------------------------------------------------------------
+   DESIGN.md bans tinted surfaces yet requires a hover tint, and this mock
+   uses four wash hues behind state. Declared explicitly rather than smuggled:
+     state.washWarning  #FFF8EA  (legibility flag, blurry badge)
+     state.washInfo     #EFF5FA  (stay-on-this-screen note)
+     state.washSuccess  #EFF7F3  (readable badge)
+     state.washPrimary  #EAF2F9  (reserved; selected/hover on a light control)
+   BINDING RULE: a wash may REINFORCE state, never CARRY it. Every washed
+   block here also has a full-strength 1px semantic border, a 3px left rule,
+   a glyph and a literal word, so it survives greyscale and survives the wash
+   being deleted. The pale border hexes that previously outlined these blocks
+   (#E4CFA3, #B9D7CB, #C6DAE9, #E6C4C1, all ~1.4:1) have been replaced by the
+   full-strength semantic colours, since those borders were the sole outer
+   boundary of the block.
+
+   ----------------------------------------------------------------------------
+   DIVIDER — RECOMPUTED (replaces #DCE3E9)
+   ----------------------------------------------------------------------------
+   #DCE3E9 measured 1.30:1 on paper. Shadows are banned (Q4), so the divider
+   is the SOLE boundary of every control — every page row, every icon button,
+   every card. That is a direct SC 1.4.11 failure, not decorative separation.
+     light  #7C8894  on paper #FFFFFF 3.62:1 · on default #F6F8FA 3.40:1
+                     on warning wash #FFF8EA 3.42:1
+     dark   #6A747E  on paper #16202C 3.45:1 · on default #0E1620 3.82:1
+   Applied identically across all four mocks; the spines should adopt these.
+
+   ----------------------------------------------------------------------------
+   COMPUTED CONTRAST RATIOS (WCAG 2.1, light theme — every value recomputed
+   for this pass; the four mocks previously published three different numbers
+   for the same pairs)
+   ----------------------------------------------------------------------------
+     text.primary  #10202E on paper   #FFFFFF ......... 16.56:1  AAA
+     text.primary  #10202E on default #F6F8FA ......... 15.56:1  AAA
+     text.primary  #10202E on warning wash #FFF8EA .... 15.67:1  AAA
+     text.secondary#4E6070 on paper   #FFFFFF ..........  6.50:1  AA (AAA @19px+)
+     text.secondary#4E6070 on default #F6F8FA ..........  6.11:1  AA
+     text.secondary#4E6070 on warning wash #FFF8EA .....  6.15:1  AA
+     primary       #0B5FA5 on paper   #FFFFFF ..........  6.57:1  AA
+     primary       #0B5FA5 on default #F6F8FA ..........  6.18:1  AA
+     white         #FFFFFF on primary #0B5FA5 ..........  6.57:1  AA
+     warning       #8A5A00 on paper   #FFFFFF ..........  5.93:1  AA
+     warning       #8A5A00 on warning wash #FFF8EA ......  5.61:1  AA
+     error         #B3261E on paper   #FFFFFF ..........  6.54:1  AA
+     success       #0F6B4F on paper   #FFFFFF ..........  6.49:1  AA
+     success       #0F6B4F on success wash #EFF7F3 ......  5.95:1  AA
+     info          #2E6E9E on paper   #FFFFFF ..........  5.47:1  AA
+     info          #2E6E9E on info wash #EFF5FA .........  4.98:1  AA
+     white         #FFFFFF on viewfinder ground #10202E . 16.56:1  AAA
+     primary.onInverted #7FB6E8 on #10202E .............  7.70:1  AA
+     divider       #7C8894 on paper   #FFFFFF ..........  3.62:1  AA non-text
+     divider       #7C8894 on default #F6F8FA ..........  3.40:1  AA non-text
+     divider.onInverted #6A747E on #10202E .............  3.48:1  AA non-text
+   The blurry-page flag is carried by a warning triangle glyph + the literal
+   word "Blurry" + a 3px left rule — it never depends on colour alone.
+
+   ----------------------------------------------------------------------------
+   ALLOWANCE UNIT — Generation Allowance is denominated in PRACTICE TESTS
+   ----------------------------------------------------------------------------
+   One unit = one Practice Test reaching draft state (FR-31). A single FR-10
+   request may produce 1–5 Practice Tests and therefore consumes 1–5 units,
+   and the request is BOUNDED AT INITIATION by the remaining allowance — which
+   is exactly why 3, 4 and 5 render dashed and labelled "Over limit" in State
+   4 for a Free account with 2 remaining, rather than being offered and then
+   refused. This mock was already correct; key-analytics.html was not and has
+   been corrected to match. Reset date is 1 October in every artifact.
+   ============================================================================ */
+
+:root{
+  --bg-default:#F6F8FA; --bg-paper:#FFFFFF;
+  --text-primary:#10202E; --text-secondary:#4E6070;
+  --divider:#7C8894;              /* recomputed for SC 1.4.11 — 3.62:1 / 3.40:1 */
+  --success:#0F6B4F; --error:#B3261E; --warning:#8A5A00; --info:#2E6E9E;
+  --primary:#0B5FA5;              /* Parent View accent — LIGHT. Never #7FB6E8 on a light surface. */
+  /* NEW TOKENS awaiting spine adoption — inverted camera chrome, see header */
+  --primary-inverted:#7FB6E8;     /* primary.onInverted — 7.70:1 on #10202E   */
+  --divider-inverted:#6A747E;     /* divider.onInverted — 3.48:1 on #10202E   */
+  /* NEW TOKENS awaiting spine adoption — washes. Reinforce state, never carry it. */
+  --warn-wash:#FFF8EA; --info-wash:#EFF5FA; --success-wash:#EFF7F3; --primary-wash:#EAF2F9;
+  --r-control:8px;                /* CONTROL role radius */
+  --row:40px; --pad:12px; --gap:8px; --sect:20px; --tap:44px;
+  --sans:"Source Sans 3","Segoe UI",Roboto,-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:var(--sans); background:#E4E9EE; color:var(--text-primary);
+  -webkit-font-smoothing:antialiased; padding:32px 20px 56px;
+}
+
+/* ---- gallery chrome (annotation only — not part of the product) ---------- */
+.sheet-head{max-width:1400px;margin:0 auto 28px;}
+.sheet-head h1{font-size:20px;line-height:1.35;font-weight:600;}
+.sheet-head p{font-size:13px;line-height:1.4;color:var(--text-secondary);margin-top:4px;}
+.rail{display:flex;flex-wrap:wrap;gap:32px;justify-content:center;align-items:flex-start;max-width:1500px;margin:0 auto;}
+.slot{width:330px;}
+.slot-label{font-size:13px;line-height:1.4;font-weight:600;letter-spacing:.02em;color:var(--text-secondary);text-transform:uppercase;margin-bottom:6px;}
+.slot-label b{display:block;font-size:15px;text-transform:none;letter-spacing:0;color:var(--text-primary);font-weight:600;margin-top:2px;}
+.slot-note{font-size:12px;line-height:1.45;color:var(--text-secondary);margin-top:10px;}
+
+/* ---- device frame -------------------------------------------------------- */
+.device{
+  width:330px;height:690px;border-radius:34px;background:#10202E;
+  padding:9px;border:1px solid #0A1520;
+}
+.screen{
+  width:100%;height:100%;border-radius:26px;overflow:hidden;
+  background:var(--bg-default);display:flex;flex-direction:column;position:relative;
+}
+.status{
+  flex:0 0 26px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;font-size:12px;font-weight:600;color:var(--text-primary);
+  background:var(--bg-paper);
+}
+.status.on-dark{background:#10202E;color:#FFFFFF;}
+.status .dots{letter-spacing:1px;}
+
+/* ---- app bar + step context --------------------------------------------- */
+.appbar{
+  flex:0 0 auto;background:var(--bg-paper);border-bottom:1px solid var(--divider);
+  padding:8px var(--pad) 10px;
+}
+.appbar.on-dark{background:#10202E;border-bottom-color:var(--divider-inverted);}
+.bar-row{display:flex;align-items:center;gap:var(--gap);min-height:32px;}
+.back{
+  width:32px;height:32px;flex:0 0 32px;border:1px solid var(--divider);border-radius:var(--r-control);
+  background:var(--bg-paper);color:var(--text-primary);font-size:15px;line-height:30px;text-align:center;
+}
+.appbar.on-dark .back{background:transparent;border-color:var(--divider-inverted);color:#FFFFFF;}
+.bar-title{font-size:17px;line-height:1.35;font-weight:600;}
+.appbar.on-dark .bar-title{color:#FFFFFF;}
+.step{
+  font-size:13px;line-height:1.4;color:var(--text-secondary);margin-top:6px;
+}
+.appbar.on-dark .step{color:#C6D2DC;}
+.classctx{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+.chip{
+  font-size:13px;line-height:1.4;border-radius:var(--r-control);
+  border:1px solid var(--divider);background:var(--bg-default);
+  color:var(--text-primary);padding:3px 8px;
+}
+.appbar.on-dark .chip{background:#1B2B39;border-color:var(--divider-inverted);color:#E7EEF5;}
+
+/* ---- body / sections ----------------------------------------------------- */
+.body{flex:1 1 auto;overflow:hidden;padding:var(--sect) var(--pad);display:flex;flex-direction:column;gap:var(--sect);}
+.body.tight{gap:var(--gap);}
+.card{background:var(--bg-paper);border:1px solid var(--divider);border-radius:var(--r-control);padding:var(--pad);}
+.card-title{font-size:20px;line-height:1.35;font-weight:600;}
+.label{font-size:14px;line-height:1.40;font-weight:600;letter-spacing:.02em;}
+.dash{font-size:17px;line-height:1.55;}
+.cap{font-size:13px;line-height:1.40;color:var(--text-secondary);}
+.cell{font-size:16px;line-height:1.45;}
+.num{font-variant-numeric:tabular-nums;}
+.muted{color:var(--text-secondary);}
+
+/* ---- buttons ------------------------------------------------------------- */
+.btn{
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  min-height:var(--tap);border-radius:var(--r-control);
+  font-family:var(--sans);font-size:16px;line-height:1.45;font-weight:600;
+  padding:0 14px;border:1px solid transparent;width:100%;
+}
+.btn-primary{background:var(--primary);color:#FFFFFF;border-color:var(--primary);}
+.btn-secondary{background:var(--bg-paper);color:var(--primary);border-color:var(--primary);}
+.btn-quiet{background:var(--bg-paper);color:var(--text-primary);border-color:var(--divider);}
+.btn-row{display:flex;gap:var(--gap);}
+.btn-row .btn{width:auto;flex:1 1 0;}
+.footer{
+  flex:0 0 auto;background:var(--bg-paper);border-top:1px solid var(--divider);
+  padding:var(--pad);display:flex;flex-direction:column;gap:var(--gap);
+}
+
+/* ==========================================================================
+   STATE 1 — Continuous capture
+   ========================================================================== */
+.viewfinder{
+  flex:1 1 auto;position:relative;background:#10202E;overflow:hidden;
+  display:flex;flex-direction:column;
+}
+/* CSS-drawn stand-in for the live camera feed. No remote images anywhere. */
+.feed{
+  position:absolute;inset:0;
+  background:
+    radial-gradient(120% 90% at 50% 30%, #2B3D4C 0%, #16232F 60%, #0C1620 100%);
+}
+.paper-sim{
+  position:absolute;left:14%;top:12%;width:72%;height:62%;
+  background:#EDEFF1;border:1px solid #C9CFD5;border-radius:2px;
+  transform:rotate(-2.4deg);
+  padding:14px 12px;overflow:hidden;
+}
+.paper-sim .ln{height:5px;background:#C2C9D0;border-radius:1px;margin-bottom:9px;}
+.paper-sim .ln.s{width:46%} .paper-sim .ln.m{width:78%} .paper-sim .ln.l{width:92%}
+.paper-sim .ln.hd{height:8px;width:58%;background:#96A2AC;margin-bottom:14px;}
+.brackets{position:absolute;inset:8% 6% 30% 6%;}
+.brackets i{position:absolute;width:26px;height:26px;border:2px solid rgba(255,255,255,.85);}
+.brackets i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0;}
+.brackets i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0;}
+.brackets i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0;}
+.brackets i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0;}
+.vf-hint{
+  position:absolute;left:0;right:0;top:8px;text-align:center;
+  font-size:13px;line-height:1.4;color:#FFFFFF;
+}
+.vf-hint span{background:rgba(16,32,46,.78);border:1px solid var(--divider-inverted);border-radius:var(--r-control);padding:3px 8px;}
+
+/* thumbnail strip — accumulating, ordered */
+.strip{
+  position:absolute;left:0;right:0;bottom:0;background:rgba(16,32,46,.92);
+  border-top:1px solid var(--divider-inverted);padding:var(--pad);display:flex;flex-direction:column;gap:var(--gap);
+}
+.strip-head{display:flex;align-items:baseline;justify-content:space-between;color:#FFFFFF;}
+.strip-head .cap{color:#C6D2DC;}
+.thumbs{display:flex;gap:var(--gap);align-items:flex-end;}
+.thumb{
+  position:relative;width:52px;height:68px;border-radius:var(--r-control);
+  background:#E7EAED;border:1px solid #C9CFD5;overflow:hidden;flex:0 0 auto;
+  padding:7px 6px;
+}
+.thumb .ln{height:3px;background:#BFC7CE;border-radius:1px;margin-bottom:5px;}
+.thumb .ln.hd{height:5px;width:60%;background:#98A4AE;margin-bottom:7px;}
+.thumb .ln.a{width:88%} .thumb .ln.b{width:70%} .thumb .ln.c{width:80%}
+.thumb .no{
+  position:absolute;left:0;bottom:0;background:#10202E;color:#FFFFFF;
+  font-size:12px;font-weight:600;line-height:1;padding:3px 5px;border-top-right-radius:6px;
+  font-variant-numeric:tabular-nums;
+}
+.thumb.blur .ln{filter:blur(1.6px);}
+.thumb.shooting{
+  background:transparent;border:2px dashed var(--primary-inverted);display:flex;align-items:center;justify-content:center;
+  color:#C6D2DC;font-size:12px;line-height:1.3;text-align:center;padding:4px;
+}
+.controls{
+  flex:0 0 auto;background:#10202E;border-top:1px solid var(--divider-inverted);
+  padding:10px var(--pad) 12px;display:flex;align-items:center;justify-content:space-between;gap:var(--gap);
+}
+.roll{
+  min-height:var(--tap);min-width:var(--tap);display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;border:1px solid var(--divider-inverted);border-radius:var(--r-control);background:#1B2B39;color:#FFFFFF;
+  font-size:12px;line-height:1.3;font-weight:600;padding:4px 8px;width:88px;
+}
+.roll .ico{font-size:15px;line-height:1;}
+.shutter{
+  width:58px;height:58px;border-radius:50%;background:#FFFFFF;border:3px solid var(--primary-inverted);flex:0 0 58px;
+}
+.done{
+  min-height:var(--tap);width:88px;border:1px solid var(--primary-inverted);border-radius:var(--r-control);
+  background:transparent;color:#FFFFFF;font-size:16px;font-weight:600;line-height:1.45;
+  display:flex;align-items:center;justify-content:center;
+}
+
+/* ==========================================================================
+   STATE 2 — Page management
+   ========================================================================== */
+.pagelist{display:flex;flex-direction:column;gap:var(--gap);}
+.page-row{
+  display:flex;align-items:center;gap:var(--gap);background:var(--bg-paper);
+  border:1px solid var(--divider);border-radius:var(--r-control);padding:8px;
+}
+.page-row .thumb{width:40px;height:52px;padding:5px 4px;}
+.page-meta{flex:1 1 auto;min-width:0;}
+.page-meta .label{display:block;}
+.page-meta .cap{display:block;}
+.acts{display:flex;gap:6px;}
+.iconbtn{
+  width:var(--tap);height:var(--tap);flex:0 0 var(--tap);
+  border:1px solid var(--divider);border-radius:var(--r-control);background:var(--bg-paper);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  font-size:11px;line-height:1;font-weight:600;color:var(--text-primary);
+}
+.iconbtn .ico{font-size:14px;line-height:1;}
+.iconbtn.danger{color:var(--error);border-color:var(--error);}
+.reorder{display:flex;flex-direction:column;gap:2px;}
+.reorder .iconbtn{height:21px;width:var(--tap);font-size:11px;}
+.hitnote{font-size:11px;color:var(--text-secondary);}
+
+/* ==========================================================================
+   STATE 3 — Batch legibility check result
+   ========================================================================== */
+.flag{
+  background:var(--warn-wash);border:1px solid var(--warning);border-left:3px solid var(--warning);
+  border-radius:var(--r-control);padding:var(--pad);
+}
+.flag-head{display:flex;align-items:center;gap:6px;color:var(--warning);}
+.flag-head .ico{font-size:16px;line-height:1;}
+.flag-head .label{letter-spacing:.02em;}
+.flag p{font-size:17px;line-height:1.55;margin-top:6px;}
+.flag .cap{margin-top:6px;}
+.badge{
+  display:inline-flex;align-items:center;gap:4px;border-radius:var(--r-control);
+  border:1px solid var(--warning);background:var(--warn-wash);color:var(--warning);
+  font-size:12px;line-height:1.3;font-weight:600;padding:2px 6px;
+}
+.badge.ok{border-color:var(--success);background:var(--success-wash);color:var(--success);}
+.allow{
+  border:1px solid var(--divider);border-radius:var(--r-control);background:var(--bg-default);
+  padding:var(--pad);
+}
+.allow .label{color:var(--text-primary);}
+.allow p{font-size:16px;line-height:1.45;margin-top:4px;}
+
+/* ==========================================================================
+   STATE 4 — Generate step
+   ========================================================================== */
+.counts{display:flex;gap:var(--gap);margin-top:10px;}
+.count{
+  flex:1 1 0;min-height:var(--tap);border-radius:var(--r-control);
+  border:1px solid var(--divider);background:var(--bg-paper);
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;font-weight:600;line-height:1.45;font-variant-numeric:tabular-nums;
+}
+.count.sel{background:var(--primary);border-color:var(--primary);color:#FFFFFF;}
+.count.off{background:var(--bg-default);color:var(--text-secondary);border-style:dashed;border-color:var(--text-secondary);}
+.countscale{display:flex;gap:var(--gap);margin-top:4px;}
+.countscale span{flex:1 1 0;text-align:center;font-size:11px;line-height:1.3;color:var(--text-secondary);}
+
+/* ==========================================================================
+   STATE 5 — Generation progress
+   ========================================================================== */
+.progwrap{margin-top:10px;}
+.track{height:8px;border-radius:var(--r-control);background:var(--bg-default);border:1px solid var(--divider);overflow:hidden;}
+.fill{height:100%;width:42%;background:var(--primary);border-radius:var(--r-control);}
+.fill.anim{animation:crawl 2.6s ease-in-out infinite alternate;}
+@keyframes crawl{from{width:38%}to{width:56%}}
+.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--info);vertical-align:middle;margin-right:6px;}
+.pulse.anim{animation:blink 1.6s ease-in-out infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.note{
+  background:var(--info-wash);border:1px solid var(--info);border-left:3px solid var(--info);
+  border-radius:var(--r-control);padding:var(--pad);
+}
+.note .label{color:var(--info);}
+.note p{font-size:17px;line-height:1.55;margin-top:6px;}
+.steps{display:flex;flex-direction:column;gap:6px;margin-top:10px;}
+.stepline{display:flex;align-items:center;gap:8px;min-height:24px;font-size:16px;line-height:1.45;}
+.stepline .mark{width:18px;flex:0 0 18px;text-align:center;font-size:13px;font-weight:700;}
+.stepline.done .mark{color:var(--success);}
+.stepline.now .mark{color:var(--info);}
+.stepline.wait{color:var(--text-secondary);}
+.linkbtn{
+  background:none;border:0;padding:0;min-height:var(--tap);
+  font-family:var(--sans);font-size:16px;line-height:1.45;font-weight:600;color:var(--primary);
+  text-decoration:underline;text-underline-offset:3px;width:100%;
+}
+
+/* ---- reduced motion (Q6 rider, product-wide) ----
+   The generation progress track and the step pulse are the only animations in
+   this file. They are stilled explicitly (the track keeps a meaningful width
+   rather than collapsing), and a blanket guard follows so any transition added
+   later is covered too. */
+@media (prefers-reduced-motion: reduce){
+  .fill.anim,.pulse.anim{animation:none;}
+  .fill.anim{width:46%;}
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="sheet-head">
+  <h1>Parent View — Source Test capture and upload</h1>
+  <p>UJ-1, steps 3–4. Maria, phone, kitchen, five minutes. Carries SM-1 (≥80% of started uploads reach a released Practice Test). Parent View accent #0B5FA5, density.compact, flat with borders, Source Sans 3 only.</p>
+</div>
+
+<div class="rail">
+
+  <!-- ================= STATE 1 — CONTINUOUS CAPTURE ================= -->
+  <div class="slot">
+    <div class="slot-label">State 1<b>Continuous capture</b></div>
+    <div class="device"><div class="screen">
+      <div class="status on-dark"><span class="num">7:42</span><span class="dots">▮▮▯ ⌁ 61%</span></div>
+
+      <div class="appbar on-dark">
+        <div class="bar-row">
+          <div class="back">‹</div>
+          <div class="bar-title">Capture pages</div>
+        </div>
+        <div class="step">Step 3 of 4 · Upload → Classify → <strong>Capture</strong> → Generate</div>
+        <div class="classctx">
+          <span class="chip">Noah</span><span class="chip">Math</span><span class="chip">Grade 5</span>
+        </div>
+      </div>
+
+      <div class="viewfinder">
+        <div class="feed"></div>
+        <div class="paper-sim">
+          <div class="ln hd"></div>
+          <div class="ln l"></div><div class="ln m"></div><div class="ln l"></div>
+          <div class="ln s"></div><div class="ln m"></div><div class="ln l"></div>
+          <div class="ln s"></div><div class="ln m"></div>
+        </div>
+        <div class="brackets"><i></i><i></i><i></i><i></i></div>
+        <div class="vf-hint"><span>Fill the frame with page 3</span></div>
+
+        <div class="strip">
+          <div class="strip-head">
+            <span class="label">Pages captured</span>
+            <span class="cap num">2 of 10</span>
+          </div>
+          <div class="thumbs">
+            <div class="thumb"><div class="ln hd"></div><div class="ln a"></div><div class="ln b"></div><div class="ln c"></div><div class="ln a"></div><div class="ln b"></div><span class="no">1</span></div>
+            <div class="thumb blur"><div class="ln hd"></div><div class="ln a"></div><div class="ln c"></div><div class="ln b"></div><div class="ln a"></div><div class="ln c"></div><span class="no">2</span></div>
+            <div class="thumb shooting">Page 3<br>next</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="roll"><span class="ico">▤</span>Camera roll</div>
+        <div class="shutter"></div>
+        <div class="done">Done</div>
+      </div>
+    </div></div>
+    <p class="slot-note">Camera stays open across pages; pages accumulate as an ordered strip. Camera roll sits beside the shutter — selected photos mix freely with shot pages and source is never surfaced. No inline review-and-accept.</p>
+  </div>
+
+  <!-- ================= STATE 2 — PAGE MANAGEMENT ================= -->
+  <div class="slot">
+    <div class="slot-label">State 2<b>Page management</b></div>
+    <div class="device"><div class="screen">
+      <div class="status"><span class="num">7:43</span><span class="dots">▮▮▯ ⌁ 61%</span></div>
+
+      <div class="appbar">
+        <div class="bar-row">
+          <div class="back">‹</div>
+          <div class="bar-title">Pages</div>
+        </div>
+        <div class="step">Step 3 of 4 · Capture</div>
+        <div class="classctx">
+          <span class="chip">Noah</span><span class="chip">Math</span><span class="chip">Grade 5</span>
+        </div>
+      </div>
+
+      <div class="body tight">
+        <div>
+          <div class="label">Order</div>
+          <p class="cap">Pages are used in this order. <span class="num">3 of 10</span> page images.</p>
+        </div>
+
+        <div class="pagelist">
+          <div class="page-row">
+            <div class="reorder">
+              <div class="iconbtn">▲</div>
+              <div class="iconbtn">▼</div>
+            </div>
+            <div class="thumb"><div class="ln hd"></div><div class="ln a"></div><div class="ln b"></div><div class="ln c"></div><span class="no">1</span></div>
+            <div class="page-meta">
+              <span class="label">Page 1</span>
+              <span class="cap">Front, questions 1–8</span>
+            </div>
+            <div class="acts">
+              <div class="iconbtn"><span class="ico">↺</span>Retake</div>
+              <div class="iconbtn danger"><span class="ico">✕</span>Delete</div>
+            </div>
+          </div>
+
+          <div class="page-row">
+            <div class="reorder">
+              <div class="iconbtn">▲</div>
+              <div class="iconbtn">▼</div>
+            </div>
+            <div class="thumb blur"><div class="ln hd"></div><div class="ln a"></div><div class="ln c"></div><div class="ln b"></div><span class="no">2</span></div>
+            <div class="page-meta">
+              <span class="label">Page 2</span>
+              <span class="cap">Back, questions 9–15</span>
+            </div>
+            <div class="acts">
+              <div class="iconbtn"><span class="ico">↺</span>Retake</div>
+              <div class="iconbtn danger"><span class="ico">✕</span>Delete</div>
+            </div>
+          </div>
+
+          <div class="page-row">
+            <div class="reorder">
+              <div class="iconbtn">▲</div>
+              <div class="iconbtn">▼</div>
+            </div>
+            <div class="thumb"><div class="ln hd"></div><div class="ln b"></div><div class="ln a"></div><div class="ln c"></div><span class="no">3</span></div>
+            <div class="page-meta">
+              <span class="label">Page 3</span>
+              <span class="cap">Answer key</span>
+            </div>
+            <div class="acts">
+              <div class="iconbtn"><span class="ico">↺</span>Retake</div>
+              <div class="iconbtn danger"><span class="ico">✕</span>Delete</div>
+            </div>
+          </div>
+        </div>
+
+        <p class="hitnote">Every thumbnail, reorder pair, retake and delete control meets the 44px Parent View tap-target floor. 44px, not 48px: Q5 pins the floor per surface, and this is density.compact. 48px is the Student Mode floor.</p>
+      </div>
+
+      <div class="footer">
+        <div class="btn-row">
+          <div class="btn btn-quiet">Add page</div>
+          <div class="btn btn-primary">Check pages</div>
+        </div>
+      </div>
+    </div></div>
+    <p class="slot-note">Reorder, retake and delete act on the strip after capture ends, with page order explicit and numbered. Add page returns to the viewfinder or the camera roll.</p>
+  </div>
+
+  <!-- ================= STATE 3 — BATCH LEGIBILITY CHECK ================= -->
+  <div class="slot">
+    <div class="slot-label">State 3<b>Legibility check result</b></div>
+    <div class="device"><div class="screen">
+      <div class="status"><span class="num">7:43</span><span class="dots">▮▮▯ ⌁ 60%</span></div>
+
+      <div class="appbar">
+        <div class="bar-row">
+          <div class="back">‹</div>
+          <div class="bar-title">Page check</div>
+        </div>
+        <div class="step">Step 3 of 4 · Capture · checked once, all 3 pages</div>
+        <div class="classctx">
+          <span class="chip">Noah</span><span class="chip">Math</span><span class="chip">Grade 5</span>
+        </div>
+      </div>
+
+      <div class="body tight">
+        <div class="flag">
+          <div class="flag-head"><span class="ico" aria-hidden="true">⚠</span><span class="label">BLURRY — PAGE 2</span></div>
+          <p>Page 2 is too blurry to read reliably. Questions on that page may be missed or copied wrong.</p>
+          <p class="cap">This check is a warning, not a block. You can continue with page 2 as it is.</p>
+        </div>
+
+        <div class="page-row">
+          <div class="thumb blur"><div class="ln hd"></div><div class="ln a"></div><div class="ln c"></div><div class="ln b"></div><span class="no">2</span></div>
+          <div class="page-meta">
+            <span class="label">Page 2</span>
+            <span class="cap">Back, questions 9–15</span>
+          </div>
+          <span class="badge"><span aria-hidden="true">⚠</span> Blurry</span>
+        </div>
+
+        <div class="page-row">
+          <div class="thumb"><div class="ln hd"></div><div class="ln a"></div><div class="ln b"></div><div class="ln c"></div><span class="no">1</span></div>
+          <div class="page-meta"><span class="label">Page 1</span><span class="cap">Front, questions 1–8</span></div>
+          <span class="badge ok"><span aria-hidden="true">✓</span> Readable</span>
+        </div>
+
+        <div class="page-row">
+          <div class="thumb"><div class="ln hd"></div><div class="ln b"></div><div class="ln a"></div><div class="ln c"></div><span class="no">3</span></div>
+          <div class="page-meta"><span class="label">Page 3</span><span class="cap">Answer key</span></div>
+          <span class="badge ok"><span aria-hidden="true">✓</span> Readable</span>
+        </div>
+
+        <div class="allow">
+          <div class="label">CONTINUING USES AN UPLOAD</div>
+          <p class="num">You've used 0 of 2 uploads this month on the Free tier. Resets 1 October.</p>
+          <p class="cap">Continuing charges 1 upload, whether or not page 2 reads well.</p>
+        </div>
+      </div>
+
+      <div class="footer">
+        <div class="btn btn-primary">Retake page 2</div>
+        <div class="btn btn-secondary">Continue with all 3 pages</div>
+      </div>
+    </div></div>
+    <p class="slot-note">One batch result, run the moment capture ended. Names the page, offers retake of that page alone, states plainly that proceeding is allowed, and puts the Upload Allowance cost in front of the decision. Flag = triangle glyph + the word “Blurry” + a left rule, never colour alone.</p>
+  </div>
+
+  <!-- ================= STATE 4 — GENERATE STEP ================= -->
+  <div class="slot">
+    <div class="slot-label">State 4<b>Generate</b></div>
+    <div class="device"><div class="screen">
+      <div class="status"><span class="num">7:44</span><span class="dots">▮▮▯ ⌁ 60%</span></div>
+
+      <div class="appbar">
+        <div class="bar-row">
+          <div class="back">‹</div>
+          <div class="bar-title">Generate practice tests</div>
+        </div>
+        <div class="step">Step 4 of 4 · Upload → Classify → Capture → <strong>Generate</strong></div>
+        <div class="classctx">
+          <span class="chip">Noah</span><span class="chip">Math</span><span class="chip">Grade 5</span><span class="chip num">3 pages</span>
+        </div>
+      </div>
+
+      <div class="body tight">
+        <div class="card">
+          <div class="card-title">How many practice tests?</div>
+          <p class="cap">About 15 questions each, drawn from Noah's Math test.</p>
+          <div class="counts">
+            <div class="count">1</div>
+            <div class="count sel">2</div>
+            <div class="count off">3</div>
+            <div class="count off">4</div>
+            <div class="count off">5</div>
+          </div>
+          <div class="countscale">
+            <span>&nbsp;</span><span>&nbsp;</span><span>Over limit</span><span>Over limit</span><span>Over limit</span>
+          </div>
+        </div>
+
+        <div class="allow">
+          <div class="label">GENERATION ALLOWANCE</div>
+          <p class="num">You've used 0 of 2 practice tests this month on the Free tier. Resets 1 October.</p>
+          <p class="cap num">Generating 2 leaves 0 for this month. 3 to 5 are above the Free tier limit.</p>
+        </div>
+
+        <div class="allow">
+          <div class="label">UPLOAD ALLOWANCE</div>
+          <p class="num">You've used 1 of 2 uploads this month on the Free tier. Resets 1 October.</p>
+          <p class="cap">Charged when this Source Test was accepted.</p>
+        </div>
+      </div>
+
+      <div class="footer">
+        <div class="btn btn-primary">Generate 2 practice tests</div>
+        <p class="cap">Drafts go to you for review before Noah sees them.</p>
+      </div>
+    </div></div>
+    <p class="slot-note">1–5 offered, bounded by the remaining Generation Allowance; over-limit counts stay visible but dashed and labelled, not silently absent. Cost is stated before the control fires.</p>
+  </div>
+
+  <!-- ================= STATE 5 — GENERATION PROGRESS ================= -->
+  <div class="slot">
+    <div class="slot-label">State 5<b>Generation in progress</b></div>
+    <div class="device"><div class="screen">
+      <div class="status"><span class="num">7:44</span><span class="dots">▮▮▯ ⌁ 60%</span></div>
+
+      <div class="appbar">
+        <div class="bar-row">
+          <div class="bar-title">Generating</div>
+        </div>
+        <div class="step">Step 4 of 4 · Generate</div>
+        <div class="classctx">
+          <span class="chip">Noah</span><span class="chip">Math</span><span class="chip">Grade 5</span><span class="chip num">3 pages</span>
+        </div>
+      </div>
+
+      <div class="body tight">
+        <div class="card">
+          <div class="card-title">Making 2 practice tests for Noah</div>
+          <div class="progwrap">
+            <div class="track"><div class="fill anim"></div></div>
+            <p class="cap" style="margin-top:6px;"><span class="pulse anim" aria-hidden="true"></span>Draft 1 of 2 · writing questions</p>
+          </div>
+          <div class="steps">
+            <div class="stepline done"><span class="mark" aria-hidden="true">✓</span><span>Pages read</span></div>
+            <div class="stepline done"><span class="mark" aria-hidden="true">✓</span><span>Topics identified</span></div>
+            <div class="stepline now"><span class="mark" aria-hidden="true">▶</span><span>Writing questions</span></div>
+            <div class="stepline wait"><span class="mark" aria-hidden="true">·</span><span>Drafts ready for your review</span></div>
+          </div>
+        </div>
+
+        <div class="note">
+          <div class="label">STAY ON THIS SCREEN</div>
+          <p>This is the only place that tells you the moment the drafts are ready. There are no notifications yet.</p>
+          <p class="cap">If you leave, generation keeps running and nothing is lost. The drafts wait for you under Pending drafts — you just won't be told when they arrive.</p>
+        </div>
+
+        <p class="cap">Usually about a minute for 2 tests.</p>
+      </div>
+
+      <div class="footer">
+        <div class="btn btn-quiet">Leave and check Pending drafts later</div>
+      </div>
+    </div></div>
+    <p class="slot-note">Progress motion is the one place Q6 permits it, and it is functional only — a crawling determinate track plus a live step list, both stilled under prefers-reduced-motion. Copy advises staying without claiming data loss.</p>
+  </div>
+
+</div>
+</body>
+</html>

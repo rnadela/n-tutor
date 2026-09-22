@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>n-test-reviewer — Clear Room divergence strategies</title>
+<style>
+  :root{
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);background:#EEF1F4;color:#10202E;line-height:1.45;-webkit-font-smoothing:antialiased}
+  .page{max-width:1360px;margin:0 auto;padding:40px 28px 80px}
+  header.masthead{border-bottom:2px solid #10202E;padding-bottom:18px;margin-bottom:34px}
+  h1{font-size:23px;margin:0 0 6px;letter-spacing:-0.01em}
+  .sub{font-size:13.5px;color:#4E6070;max-width:78ch;margin:0 0 4px}
+  .basebar{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+  .basechip{font-family:var(--mono);font-size:10.5px;background:#fff;border:1px solid #DCE3E9;border-radius:3px;padding:3px 7px;color:#10202E}
+  .basechip b{font-weight:600}
+  .sw{display:inline-block;width:9px;height:9px;border-radius:2px;border:1px solid rgba(0,0,0,.2);vertical-align:-1px;margin-right:5px}
+
+  section.strategy{margin-bottom:52px;background:#fff;border:1px solid #D3DBE2;border-radius:8px;padding:24px 24px 26px}
+  .stitle{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .stitle h2{font-size:18px;margin:0;letter-spacing:-0.01em}
+  .snum{font-family:var(--mono);font-size:11px;background:#10202E;color:#fff;border-radius:3px;padding:2px 7px}
+  .mech{font-size:13px;color:#4E6070;max-width:92ch;margin:0 0 4px}
+  .held{font-size:12px;color:#4E6070;background:#F6F8FA;border-left:3px solid #DCE3E9;padding:8px 11px;margin:12px 0 18px;max-width:110ch}
+  .held b{color:#10202E}
+
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+  @media (max-width:980px){.grid{grid-template-columns:1fr}}
+
+  .panelwrap{border:1px solid #D3DBE2;border-radius:7px;overflow:hidden;background:#fff}
+  .plabel{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;padding:8px 12px;background:#10202E;color:#fff}
+  .plabel .mode{font-weight:400;letter-spacing:.04em;opacity:.72}
+
+  /* ---- the themed panel body ---- */
+  .panel{padding:16px;background:var(--def);color:var(--tp)}
+  .approw{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+  .apptitle{font-size:13px;font-weight:600;color:var(--tp)}
+  .appmeta{font-size:11px;color:var(--ts)}
+  .card{background:var(--paper);border:1px solid var(--div);border-radius:7px;padding:12px 13px;margin-bottom:9px}
+  .card.tight{padding:11px 13px}
+  .cardtop{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .cname{font-size:13.5px;font-weight:600;color:var(--tp);margin:0 0 3px}
+  .cmeta{font-size:11.5px;color:var(--ts)}
+  .btn{font-family:var(--font);font-size:11.5px;font-weight:600;border:1px solid var(--pri);color:var(--pri);background:transparent;border-radius:5px;padding:5px 11px;white-space:nowrap}
+  .btn.solid{background:var(--pri);border-color:var(--pri);color:var(--onpri)}
+  .state{font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ts);border:1px solid var(--div);border-radius:3px;padding:2px 6px;display:inline-block}
+  .state.done{color:var(--ok);border-color:var(--ok)}
+
+  .secttl{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ts);margin:15px 0 7px}
+  .qrow{background:var(--paper);border:1px solid var(--div);border-radius:7px;padding:11px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start}
+  .qrow.bad{border-left:4px solid var(--err)}
+  .qrow.good{border-left:4px solid var(--ok)}
+  .qmark{font-size:14px;line-height:1.2;font-weight:700;flex:0 0 auto;width:18px;text-align:center}
+  .qmark.ok{color:var(--ok)}
+  .qmark.no{color:var(--err)}
+  .qbody{min-width:0;flex:1}
+  .qtag{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;display:inline-block;margin-bottom:3px}
+  .qtag.ok{color:var(--ok)}
+  .qtag.no{color:var(--err)}
+  .qtext{font-size:12.5px;color:var(--tp);margin:0 0 4px}
+  .qans{font-size:11.5px;color:var(--ts);margin:0 0 7px}
+  .explain{font-size:11.5px;font-weight:600;color:var(--pri);border:1px solid var(--pri);border-radius:5px;padding:4px 9px;display:inline-block}
+
+  /* parent snippets */
+  .topic{margin-bottom:11px}
+  .toprow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12.5px;color:var(--tp);margin-bottom:5px}
+  .topname{font-weight:600}
+  .pct{font-family:var(--mono);font-size:12.5px;font-weight:600}
+  .pct.ok{color:var(--ok)}
+  .pct.weak{color:var(--warn)}
+  .bar{height:7px;border-radius:4px;background:var(--div);overflow:hidden}
+  .bar span{display:block;height:100%;border-radius:4px}
+  .weakflag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:2px 6px;margin-top:6px}
+  .summary{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--div);border-radius:7px;background:var(--paper);overflow:hidden;margin-top:4px}
+  .scell{flex:1 1 0;min-width:92px;padding:9px 11px;border-right:1px solid var(--div)}
+  .scell:last-child{border-right:0}
+  .snum2{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--tp);display:block;line-height:1.2}
+  .slab{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ts)}
+
+  /* ---- footer of each panel ---- */
+  .meta{border-top:1px solid #E3E8ED;padding:10px 12px;background:#FBFCFD}
+  .ratio{font-family:var(--mono);font-size:10.5px;color:#10202E;margin:0 0 7px}
+  .ratio b{color:#0F6B4F}
+  .chips{display:flex;flex-wrap:wrap;gap:4px}
+  .chip{font-family:var(--mono);font-size:9.5px;border:1px solid #DCE3E9;border-radius:3px;padding:2px 6px;background:#fff;color:#10202E;white-space:nowrap}
+  .chip.same{opacity:.5;border-style:dashed}
+  .chip .sw{width:8px;height:8px;margin-right:4px}
+  .legend{font-size:10.5px;color:#4E6070;margin-top:7px}
+
+  .verdict{margin-top:20px;border:1px solid #D3DBE2;border-left:4px solid #0B5FA5;border-radius:6px;background:#F6F8FA;padding:12px 14px;font-size:12.5px;color:#10202E;max-width:118ch}
+  .verdict b{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#4E6070;margin-bottom:4px}
+  .notes{font-size:12px;color:#4E6070;max-width:100ch;margin:34px auto 0;border-top:1px solid #D3DBE2;padding-top:16px}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="masthead">
+  <h1>n-test-reviewer — Clear Room: three ways to make Student Mode and Parent View different rooms</h1>
+  <p class="sub">Palette is settled: <b>Clear Room</b> — cool clinical daylight, neutral, zero opinion. Open question on this page only: <b>how the two surfaces diverge inside that family</b>. Crossing the 4-digit Parent PIN should feel like walking into a different room of the same building, not into a different building. Twelve panels: three mechanisms &times; (Student, Parent) &times; (light, dark).</p>
+  <div class="basebar">
+    <span class="basechip"><span class="sw" style="background:#0B5FA5"></span><b>base primary</b> #0B5FA5 / #7FB6E8</span>
+    <span class="basechip"><span class="sw" style="background:#0F6B4F"></span><b>correct</b> #0F6B4F / #6FD1AC</span>
+    <span class="basechip"><span class="sw" style="background:#B3261E"></span><b>incorrect</b> #B3261E / #F19B94</span>
+    <span class="basechip"><span class="sw" style="background:#8A5A00"></span><b>weak area</b> #8A5A00 / #E3B457</span>
+    <span class="basechip"><span class="sw" style="background:#F6F8FA"></span><b>bg.default</b> #F6F8FA / #0E1620</span>
+    <span class="basechip"><span class="sw" style="background:#FFFFFF"></span><b>bg.paper</b> #FFFFFF / #16202C</span>
+    <span class="basechip"><span class="sw" style="background:#10202E"></span><b>text.primary</b> #10202E / #E7EEF5</span>
+  </div>
+</header>
+
+<!-- ============================================================ STRATEGY 1 -->
+<section class="strategy">
+  <div class="stitle"><span class="snum">01</span><h2>Temperature shift — same hues, two white points</h2></div>
+  <p class="mech">The divergence lives in the <b>neutral white point</b>. Noah's room is lit warm: paper drifts to a faint cream, the divider warms, and primary softens one step toward a muted mid-blue so nothing snaps. Maria's room is lit cool: paper goes faintly blue-white and primary stays the full clinical <code>#0B5FA5</code>. Semantic hues (correct / incorrect / weak area) are untouched, so a wrong answer reads identically in both rooms — only the air temperature changed.</p>
+  <div class="held"><b>Held constant from base:</b> success <code>#0F6B4F</code>/<code>#6FD1AC</code>, error <code>#B3261E</code>/<code>#F19B94</code>, warning <code>#8A5A00</code>/<code>#E3B457</code>, info, and all type scale / radii / spacing. <b>Diverged:</b> background.default, background.paper, divider, text.secondary, primary.</p>
+
+  <div class="grid">
+
+    <!-- S1 Student light -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Student Mode — warm room</span><span class="mode">light</span></div>
+      <div class="panel" style="--paper:#FFFCF6;--def:#F7F3EA;--tp:#17222C;--ts:#5A5C58;--div:#E8E0D2;--pri:#2A6E9E;--onpri:#FFFFFF;--ok:#0F6B4F;--err:#B3261E;--warn:#8A5A00">
+        <div class="approw"><span class="apptitle">Practice Tests</span><span class="appmeta">Noah &middot; Grade 5</span></div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set A</p><span class="cmeta">Math &middot; Grade 5 &middot; 15 questions</span><br><span class="state" style="margin-top:6px">Not started</span></div>
+            <button class="btn solid">Start</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set B</p><span class="cmeta">Math &middot; Grade 5 &middot; Completed 11/15</span><br><span class="state done" style="margin-top:6px">Completed</span></div>
+            <button class="btn">Review</button>
+          </div>
+        </div>
+        <p class="secttl">Results &mdash; Set B</p>
+        <div class="qrow good"><span class="qmark ok">&#10003;</span><div class="qbody"><span class="qtag ok">&#10003; Correct</span><p class="qtext">Q6 &middot; Which fraction is equivalent to 3/4?</p><p class="qans" style="margin:0">You answered 6/8.</p></div></div>
+        <div class="qrow bad"><span class="qmark no">&#10007;</span><div class="qbody"><span class="qtag no">&#10007; Not correct</span><p class="qtext">Q7 &middot; 47 pencils are shared equally into 5 boxes. How many are left over?</p><p class="qans">You answered 7. The answer is 2.</p><span class="explain">Explain this</span></div></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#17222C</span> on paper <span style="font-family:var(--mono)">#FFFCF6</span> = <b>15.76:1</b> &nbsp;|&nbsp; on default <b>14.57:1</b> &nbsp;|&nbsp; secondary <b>6.60:1</b> &nbsp;|&nbsp; primary <b>5.36:1</b> &nbsp;|&nbsp; correct <b>6.34:1</b> &nbsp;|&nbsp; incorrect <b>6.38:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip"><span class="sw" style="background:#FFFCF6"></span>paper #FFFCF6</span>
+          <span class="chip"><span class="sw" style="background:#F7F3EA"></span>default #F7F3EA</span>
+          <span class="chip"><span class="sw" style="background:#E8E0D2"></span>divider #E8E0D2</span>
+          <span class="chip"><span class="sw" style="background:#5A5C58"></span>text.sec #5A5C58</span>
+          <span class="chip"><span class="sw" style="background:#2A6E9E"></span>primary #2A6E9E</span>
+          <span class="chip same"><span class="sw" style="background:#17222C"></span>text.pri #17222C</span>
+          <span class="chip same"><span class="sw" style="background:#0F6B4F"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#B3261E"></span>error held</span>
+          <span class="chip same"><span class="sw" style="background:#8A5A00"></span>warning held</span>
+        </div>
+        <p class="legend">Dashed = unchanged from Clear Room base. State is carried by icon + word + color, never color alone.</p>
+      </div>
+    </div>
+
+    <!-- S1 Parent light -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Parent View — cool room</span><span class="mode">light</span></div>
+      <div class="panel" style="--paper:#FBFDFF;--def:#F0F5FA;--tp:#0E1E2C;--ts:#46606F;--div:#D9E3EB;--pri:#0B5FA5;--onpri:#FFFFFF;--ok:#0F6B4F;--err:#B3261E;--warn:#8A5A00">
+        <div class="approw"><span class="apptitle">Mastery by Topic</span><span class="appmeta">Noah &middot; last 30 days</span></div>
+        <div class="card tight">
+          <div class="topic">
+            <div class="toprow"><span class="topname">Equivalent fractions</span><span class="pct ok">90%</span></div>
+            <div class="bar"><span style="width:90%;background:#0F6B4F"></span></div>
+          </div>
+          <div class="topic" style="margin-bottom:0">
+            <div class="toprow"><span class="topname">Division with remainders</span><span class="pct weak">40%</span></div>
+            <div class="bar"><span style="width:40%;background:#8A5A00"></span></div>
+            <span class="weakflag">&#9650; Weak area &middot; below 60%</span>
+          </div>
+        </div>
+        <p class="secttl">Practice tests</p>
+        <div class="summary">
+          <div class="scell"><span class="snum2">1</span><span class="slab">Not started</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Completed 11/15</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Draft</span></div>
+        </div>
+        <div style="margin-top:10px"><button class="btn solid">Review &amp; release draft</button></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#0E1E2C</span> on paper <span style="font-family:var(--mono)">#FBFDFF</span> = <b>16.60:1</b> &nbsp;|&nbsp; on default <b>15.43:1</b> &nbsp;|&nbsp; secondary <b>6.51:1</b> &nbsp;|&nbsp; primary <b>6.45:1</b> &nbsp;|&nbsp; weak-area <b>5.81:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip"><span class="sw" style="background:#FBFDFF"></span>paper #FBFDFF</span>
+          <span class="chip"><span class="sw" style="background:#F0F5FA"></span>default #F0F5FA</span>
+          <span class="chip"><span class="sw" style="background:#D9E3EB"></span>divider #D9E3EB</span>
+          <span class="chip"><span class="sw" style="background:#46606F"></span>text.sec #46606F</span>
+          <span class="chip same"><span class="sw" style="background:#0B5FA5"></span>primary #0B5FA5 held</span>
+          <span class="chip same"><span class="sw" style="background:#0F6B4F"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#B3261E"></span>error held</span>
+          <span class="chip same"><span class="sw" style="background:#8A5A00"></span>warning held</span>
+        </div>
+        <p class="legend">Weak area = color + caret icon + the words "below 60%". Percentage is also stated numerically.</p>
+      </div>
+    </div>
+
+    <!-- S1 Student dark -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Student Mode — warm room</span><span class="mode">dark</span></div>
+      <div class="panel" style="--paper:#221F19;--def:#191712;--tp:#F3EEE4;--ts:#B7AD9D;--div:#33302A;--pri:#8FBBD9;--onpri:#191712;--ok:#6FD1AC;--err:#F19B94;--warn:#E3B457">
+        <div class="approw"><span class="apptitle">Practice Tests</span><span class="appmeta">Noah &middot; Grade 5</span></div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set A</p><span class="cmeta">Math &middot; Grade 5 &middot; 15 questions</span><br><span class="state" style="margin-top:6px">Not started</span></div>
+            <button class="btn solid">Start</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set B</p><span class="cmeta">Math &middot; Grade 5 &middot; Completed 11/15</span><br><span class="state done" style="margin-top:6px">Completed</span></div>
+            <button class="btn">Review</button>
+          </div>
+        </div>
+        <p class="secttl">Results &mdash; Set B</p>
+        <div class="qrow good"><span class="qmark ok">&#10003;</span><div class="qbody"><span class="qtag ok">&#10003; Correct</span><p class="qtext">Q6 &middot; Which fraction is equivalent to 3/4?</p><p class="qans" style="margin:0">You answered 6/8.</p></div></div>
+        <div class="qrow bad"><span class="qmark no">&#10007;</span><div class="qbody"><span class="qtag no">&#10007; Not correct</span><p class="qtext">Q7 &middot; 47 pencils are shared equally into 5 boxes. How many are left over?</p><p class="qans">You answered 7. The answer is 2.</p><span class="explain">Explain this</span></div></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#F3EEE4</span> on paper <span style="font-family:var(--mono)">#221F19</span> = <b>14.21:1</b> &nbsp;|&nbsp; on default <b>15.49:1</b> &nbsp;|&nbsp; secondary <b>7.42:1</b> &nbsp;|&nbsp; primary <b>8.04:1</b> &nbsp;|&nbsp; correct <b>8.91:1</b> &nbsp;|&nbsp; incorrect <b>7.71:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip"><span class="sw" style="background:#221F19"></span>paper #221F19</span>
+          <span class="chip"><span class="sw" style="background:#191712"></span>default #191712</span>
+          <span class="chip"><span class="sw" style="background:#33302A"></span>divider #33302A</span>
+          <span class="chip"><span class="sw" style="background:#F3EEE4"></span>text.pri #F3EEE4</span>
+          <span class="chip"><span class="sw" style="background:#B7AD9D"></span>text.sec #B7AD9D</span>
+          <span class="chip"><span class="sw" style="background:#8FBBD9"></span>primary #8FBBD9</span>
+          <span class="chip same"><span class="sw" style="background:#6FD1AC"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#F19B94"></span>error held</span>
+        </div>
+        <p class="legend">Dark warm = brown-neutral, not sepia. Semantic dark hues unchanged from base.</p>
+      </div>
+    </div>
+
+    <!-- S1 Parent dark -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Parent View — cool room</span><span class="mode">dark</span></div>
+      <div class="panel" style="--paper:#111C29;--def:#0A121C;--tp:#E7EEF5;--ts:#A3B3C2;--div:#22303E;--pri:#7FB6E8;--onpri:#0A121C;--ok:#6FD1AC;--err:#F19B94;--warn:#E3B457">
+        <div class="approw"><span class="apptitle">Mastery by Topic</span><span class="appmeta">Noah &middot; last 30 days</span></div>
+        <div class="card tight">
+          <div class="topic">
+            <div class="toprow"><span class="topname">Equivalent fractions</span><span class="pct ok">90%</span></div>
+            <div class="bar"><span style="width:90%;background:#6FD1AC"></span></div>
+          </div>
+          <div class="topic" style="margin-bottom:0">
+            <div class="toprow"><span class="topname">Division with remainders</span><span class="pct weak">40%</span></div>
+            <div class="bar"><span style="width:40%;background:#E3B457"></span></div>
+            <span class="weakflag">&#9650; Weak area &middot; below 60%</span>
+          </div>
+        </div>
+        <p class="secttl">Practice tests</p>
+        <div class="summary">
+          <div class="scell"><span class="snum2">1</span><span class="slab">Not started</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Completed 11/15</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Draft</span></div>
+        </div>
+        <div style="margin-top:10px"><button class="btn solid">Review &amp; release draft</button></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#E7EEF5</span> on paper <span style="font-family:var(--mono)">#111C29</span> = <b>14.69:1</b> &nbsp;|&nbsp; on default <b>16.08:1</b> &nbsp;|&nbsp; secondary <b>8.01:1</b> &nbsp;|&nbsp; primary <b>7.99:1</b> &nbsp;|&nbsp; weak-area <b>8.95:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip"><span class="sw" style="background:#111C29"></span>paper #111C29</span>
+          <span class="chip"><span class="sw" style="background:#0A121C"></span>default #0A121C</span>
+          <span class="chip"><span class="sw" style="background:#22303E"></span>divider #22303E</span>
+          <span class="chip same"><span class="sw" style="background:#E7EEF5"></span>text.pri held</span>
+          <span class="chip same"><span class="sw" style="background:#A3B3C2"></span>text.sec held</span>
+          <span class="chip same"><span class="sw" style="background:#7FB6E8"></span>primary #7FB6E8 held</span>
+          <span class="chip same"><span class="sw" style="background:#6FD1AC"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#E3B457"></span>warning held</span>
+        </div>
+        <p class="legend">Parent dark is the base dark, nudged one step cooler and deeper. Almost nothing diverges.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="verdict"><b>Verdict &mdash; build cost &amp; payoff</b>
+    <b style="display:none"></b>
+    <span><b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Cost:</b> two MUI themes, but they are one <code>createTheme</code> factory called twice with a neutrals-and-primary token object &mdash; roughly 10 overridden palette keys per mode, zero component overrides. <b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Buys:</b> the softest divergence of the three. Noah's room genuinely feels less clinical without becoming childish, and no semantic meaning shifts across the PIN. <b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Risk:</b> on a cheap family tablet with a cool display profile the warm shift may read as "screen looks yellow" rather than as an intentional room.</span>
+  </div>
+</section>
+
+<!-- ============================================================ STRATEGY 2 -->
+<section class="strategy">
+  <div class="stitle"><span class="snum">02</span><h2>Surface inversion — Parent View is a back-office, even in light mode</h2></div>
+  <p class="mech">Hues are held nearly constant; the divergence is entirely in <b>elevation and ground</b>. Student Mode is the untouched Clear Room: high-white, airy, generous. Parent View renders on deep slate <em>in both modes</em> &mdash; light mode simply means a slightly lifted slate, dark mode a deeper one. Maria's room is dim and dense by construction, so a 30-second kitchen scan lands on data, not on white space. Crossing the PIN is the most physical of the three: the lights change.</p>
+  <div class="held"><b>Held constant from base:</b> primary hue family, success, error, warning, info, type scale, radii. Student light and Student dark are the Clear Room base <em>verbatim</em>. <b>Diverged:</b> Parent background.default, background.paper, divider, text.primary, text.secondary &mdash; and Parent light borrows the <em>dark</em> semantic ramp because its ground is dark.</p>
+
+  <div class="grid">
+
+    <!-- S2 Student light -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Student Mode — daylight (base, unchanged)</span><span class="mode">light</span></div>
+      <div class="panel" style="--paper:#FFFFFF;--def:#F6F8FA;--tp:#10202E;--ts:#4E6070;--div:#DCE3E9;--pri:#0B5FA5;--onpri:#FFFFFF;--ok:#0F6B4F;--err:#B3261E;--warn:#8A5A00">
+        <div class="approw"><span class="apptitle">Practice Tests</span><span class="appmeta">Noah &middot; Grade 5</span></div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set A</p><span class="cmeta">Math &middot; Grade 5 &middot; 15 questions</span><br><span class="state" style="margin-top:6px">Not started</span></div>
+            <button class="btn solid">Start</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set B</p><span class="cmeta">Math &middot; Grade 5 &middot; Completed 11/15</span><br><span class="state done" style="margin-top:6px">Completed</span></div>
+            <button class="btn">Review</button>
+          </div>
+        </div>
+        <p class="secttl">Results &mdash; Set B</p>
+        <div class="qrow good"><span class="qmark ok">&#10003;</span><div class="qbody"><span class="qtag ok">&#10003; Correct</span><p class="qtext">Q6 &middot; Which fraction is equivalent to 3/4?</p><p class="qans" style="margin:0">You answered 6/8.</p></div></div>
+        <div class="qrow bad"><span class="qmark no">&#10007;</span><div class="qbody"><span class="qtag no">&#10007; Not correct</span><p class="qtext">Q7 &middot; 47 pencils are shared equally into 5 boxes. How many are left over?</p><p class="qans">You answered 7. The answer is 2.</p><span class="explain">Explain this</span></div></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#10202E</span> on paper <span style="font-family:var(--mono)">#FFFFFF</span> = <b>16.56:1</b> &nbsp;|&nbsp; on default <b>15.56:1</b> &nbsp;|&nbsp; secondary <b>6.50:1</b> &nbsp;|&nbsp; primary <b>6.57:1</b> &nbsp;|&nbsp; correct <b>6.49:1</b> &nbsp;|&nbsp; incorrect <b>6.54:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip same"><span class="sw" style="background:#FFFFFF"></span>paper held</span>
+          <span class="chip same"><span class="sw" style="background:#F6F8FA"></span>default held</span>
+          <span class="chip same"><span class="sw" style="background:#DCE3E9"></span>divider held</span>
+          <span class="chip same"><span class="sw" style="background:#10202E"></span>text.pri held</span>
+          <span class="chip same"><span class="sw" style="background:#4E6070"></span>text.sec held</span>
+          <span class="chip same"><span class="sw" style="background:#0B5FA5"></span>primary held</span>
+          <span class="chip same"><span class="sw" style="background:#0F6B4F"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#B3261E"></span>error held</span>
+        </div>
+        <p class="legend">Zero tokens diverge here &mdash; this is the Clear Room light base as shipped.</p>
+      </div>
+    </div>
+
+    <!-- S2 Parent light -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Parent View — back-office slate</span><span class="mode">light</span></div>
+      <div class="panel" style="--paper:#232F3C;--def:#1B2530;--tp:#E8EFF5;--ts:#A7B7C5;--div:#33414F;--pri:#7FB6E8;--onpri:#141D26;--ok:#6FD1AC;--err:#F19B94;--warn:#E3B457">
+        <div class="approw"><span class="apptitle">Mastery by Topic</span><span class="appmeta">Noah &middot; last 30 days</span></div>
+        <div class="card tight">
+          <div class="topic">
+            <div class="toprow"><span class="topname">Equivalent fractions</span><span class="pct ok">90%</span></div>
+            <div class="bar"><span style="width:90%;background:#6FD1AC"></span></div>
+          </div>
+          <div class="topic" style="margin-bottom:0">
+            <div class="toprow"><span class="topname">Division with remainders</span><span class="pct weak">40%</span></div>
+            <div class="bar"><span style="width:40%;background:#E3B457"></span></div>
+            <span class="weakflag">&#9650; Weak area &middot; below 60%</span>
+          </div>
+        </div>
+        <p class="secttl">Practice tests</p>
+        <div class="summary">
+          <div class="scell"><span class="snum2">1</span><span class="slab">Not started</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Completed 11/15</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Draft</span></div>
+        </div>
+        <div style="margin-top:10px"><button class="btn solid">Review &amp; release draft</button></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#E8EFF5</span> on paper <span style="font-family:var(--mono)">#232F3C</span> = <b>11.73:1</b> &nbsp;|&nbsp; on default <b>13.37:1</b> &nbsp;|&nbsp; secondary <b>6.62:1</b> &nbsp;|&nbsp; primary <b>6.32:1</b> &nbsp;|&nbsp; weak-area <b>7.08:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip"><span class="sw" style="background:#232F3C"></span>paper #232F3C</span>
+          <span class="chip"><span class="sw" style="background:#1B2530"></span>default #1B2530</span>
+          <span class="chip"><span class="sw" style="background:#33414F"></span>divider #33414F</span>
+          <span class="chip"><span class="sw" style="background:#E8EFF5"></span>text.pri #E8EFF5</span>
+          <span class="chip"><span class="sw" style="background:#A7B7C5"></span>text.sec #A7B7C5</span>
+          <span class="chip"><span class="sw" style="background:#7FB6E8"></span>primary #7FB6E8 (dark ramp)</span>
+          <span class="chip"><span class="sw" style="background:#6FD1AC"></span>success #6FD1AC</span>
+          <span class="chip"><span class="sw" style="background:#E3B457"></span>warning #E3B457</span>
+        </div>
+        <p class="legend">Same hue family as base, lifted to the dark ramp because the ground inverted. This is "light mode".</p>
+      </div>
+    </div>
+
+    <!-- S2 Student dark -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Student Mode — daylight (base, unchanged)</span><span class="mode">dark</span></div>
+      <div class="panel" style="--paper:#16202C;--def:#0E1620;--tp:#E7EEF5;--ts:#A3B3C2;--div:#26333F;--pri:#7FB6E8;--onpri:#0E1620;--ok:#6FD1AC;--err:#F19B94;--warn:#E3B457">
+        <div class="approw"><span class="apptitle">Practice Tests</span><span class="appmeta">Noah &middot; Grade 5</span></div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set A</p><span class="cmeta">Math &middot; Grade 5 &middot; 15 questions</span><br><span class="state" style="margin-top:6px">Not started</span></div>
+            <button class="btn solid">Start</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set B</p><span class="cmeta">Math &middot; Grade 5 &middot; Completed 11/15</span><br><span class="state done" style="margin-top:6px">Completed</span></div>
+            <button class="btn">Review</button>
+          </div>
+        </div>
+        <p class="secttl">Results &mdash; Set B</p>
+        <div class="qrow good"><span class="qmark ok">&#10003;</span><div class="qbody"><span class="qtag ok">&#10003; Correct</span><p class="qtext">Q6 &middot; Which fraction is equivalent to 3/4?</p><p class="qans" style="margin:0">You answered 6/8.</p></div></div>
+        <div class="qrow bad"><span class="qmark no">&#10007;</span><div class="qbody"><span class="qtag no">&#10007; Not correct</span><p class="qtext">Q7 &middot; 47 pencils are shared equally into 5 boxes. How many are left over?</p><p class="qans">You answered 7. The answer is 2.</p><span class="explain">Explain this</span></div></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#E7EEF5</span> on paper <span style="font-family:var(--mono)">#16202C</span> = <b>14.05:1</b> &nbsp;|&nbsp; on default <b>15.55:1</b> &nbsp;|&nbsp; secondary <b>7.66:1</b> &nbsp;|&nbsp; primary <b>7.64:1</b> &nbsp;|&nbsp; correct <b>8.92:1</b> &nbsp;|&nbsp; incorrect <b>7.72:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip same"><span class="sw" style="background:#16202C"></span>paper held</span>
+          <span class="chip same"><span class="sw" style="background:#0E1620"></span>default held</span>
+          <span class="chip same"><span class="sw" style="background:#26333F"></span>divider held</span>
+          <span class="chip same"><span class="sw" style="background:#E7EEF5"></span>text.pri held</span>
+          <span class="chip same"><span class="sw" style="background:#A3B3C2"></span>text.sec held</span>
+          <span class="chip same"><span class="sw" style="background:#7FB6E8"></span>primary held</span>
+          <span class="chip same"><span class="sw" style="background:#6FD1AC"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#F19B94"></span>error held</span>
+        </div>
+        <p class="legend">Zero tokens diverge &mdash; Clear Room dark base as shipped. Note the collision risk with Parent light.</p>
+      </div>
+    </div>
+
+    <!-- S2 Parent dark -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Parent View — back-office slate</span><span class="mode">dark</span></div>
+      <div class="panel" style="--paper:#111A24;--def:#0A111A;--tp:#E7EEF5;--ts:#9FB0BF;--div:#1E2A36;--pri:#7FB6E8;--onpri:#0A111A;--ok:#6FD1AC;--err:#F19B94;--warn:#E3B457">
+        <div class="approw"><span class="apptitle">Mastery by Topic</span><span class="appmeta">Noah &middot; last 30 days</span></div>
+        <div class="card tight">
+          <div class="topic">
+            <div class="toprow"><span class="topname">Equivalent fractions</span><span class="pct ok">90%</span></div>
+            <div class="bar"><span style="width:90%;background:#6FD1AC"></span></div>
+          </div>
+          <div class="topic" style="margin-bottom:0">
+            <div class="toprow"><span class="topname">Division with remainders</span><span class="pct weak">40%</span></div>
+            <div class="bar"><span style="width:40%;background:#E3B457"></span></div>
+            <span class="weakflag">&#9650; Weak area &middot; below 60%</span>
+          </div>
+        </div>
+        <p class="secttl">Practice tests</p>
+        <div class="summary">
+          <div class="scell"><span class="snum2">1</span><span class="slab">Not started</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Completed 11/15</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Draft</span></div>
+        </div>
+        <div style="margin-top:10px"><button class="btn solid">Review &amp; release draft</button></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#E7EEF5</span> on paper <span style="font-family:var(--mono)">#111A24</span> = <b>14.99:1</b> &nbsp;|&nbsp; on default <b>16.20:1</b> &nbsp;|&nbsp; secondary <b>7.88:1</b> &nbsp;|&nbsp; primary <b>8.15:1</b> &nbsp;|&nbsp; weak-area <b>9.13:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip"><span class="sw" style="background:#111A24"></span>paper #111A24</span>
+          <span class="chip"><span class="sw" style="background:#0A111A"></span>default #0A111A</span>
+          <span class="chip"><span class="sw" style="background:#1E2A36"></span>divider #1E2A36</span>
+          <span class="chip"><span class="sw" style="background:#9FB0BF"></span>text.sec #9FB0BF</span>
+          <span class="chip same"><span class="sw" style="background:#E7EEF5"></span>text.pri held</span>
+          <span class="chip same"><span class="sw" style="background:#7FB6E8"></span>primary held</span>
+          <span class="chip same"><span class="sw" style="background:#6FD1AC"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#E3B457"></span>warning held</span>
+        </div>
+        <p class="legend">One step deeper than base dark so Parent still reads as the denser room in dark mode.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="verdict"><b>Verdict &mdash; build cost &amp; payoff</b>
+    <span><b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Cost:</b> the most expensive. Effectively <b>three</b> MUI themes (Student light, shared dark, Parent slate) plus <code>mode: 'dark'</code> forced on Parent while the app is in light mode &mdash; every component that assumes <code>palette.mode</code> matches the OS setting needs auditing, and Parent needs its own <code>onPrimary</code>/contrastText pass. <b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Buys:</b> unmistakable. Nobody confuses the rooms; the PIN gate has real weight, and dense slate genuinely suits Maria's 30-second kitchen scan. <b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Risk:</b> Student-dark and Parent-light are both dark slate &mdash; the divergence collapses for a family that runs the tablet in dark mode. Needs a second cue (density, a persistent Parent header bar) to hold it up.</span>
+  </div>
+</section>
+
+<!-- ============================================================ STRATEGY 3 -->
+<section class="strategy">
+  <div class="stitle"><span class="snum">03</span><h2>Accent split — identical rooms, different fixtures</h2></div>
+  <p class="mech">Every neutral is byte-identical across the two surfaces: same paper, same default, same divider, same text ramp, same semantics. The <b>only</b> thing that diverges is <code>palette.primary</code> &mdash; the color of every interactive element. Student gets a calm desaturated teal that reads as "yours, and nothing is at stake"; Parent keeps clinical <code>#0B5FA5</code>. The room is the same room; someone swapped the light fixtures and the door handles.</p>
+  <div class="held"><b>Held constant from base:</b> background.default, background.paper, divider, text.primary, text.secondary, success, error, warning, info, type, radii &mdash; <em>everything except primary</em>. <b>Diverged:</b> primary only (<code>#0F6E78</code> light / <code>#71C3CE</code> dark for Student).</p>
+
+  <div class="grid">
+
+    <!-- S3 Student light -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Student Mode — teal fixtures</span><span class="mode">light</span></div>
+      <div class="panel" style="--paper:#FFFFFF;--def:#F6F8FA;--tp:#10202E;--ts:#4E6070;--div:#DCE3E9;--pri:#0F6E78;--onpri:#FFFFFF;--ok:#0F6B4F;--err:#B3261E;--warn:#8A5A00">
+        <div class="approw"><span class="apptitle">Practice Tests</span><span class="appmeta">Noah &middot; Grade 5</span></div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set A</p><span class="cmeta">Math &middot; Grade 5 &middot; 15 questions</span><br><span class="state" style="margin-top:6px">Not started</span></div>
+            <button class="btn solid">Start</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set B</p><span class="cmeta">Math &middot; Grade 5 &middot; Completed 11/15</span><br><span class="state done" style="margin-top:6px">Completed</span></div>
+            <button class="btn">Review</button>
+          </div>
+        </div>
+        <p class="secttl">Results &mdash; Set B</p>
+        <div class="qrow good"><span class="qmark ok">&#10003;</span><div class="qbody"><span class="qtag ok">&#10003; Correct</span><p class="qtext">Q6 &middot; Which fraction is equivalent to 3/4?</p><p class="qans" style="margin:0">You answered 6/8.</p></div></div>
+        <div class="qrow bad"><span class="qmark no">&#10007;</span><div class="qbody"><span class="qtag no">&#10007; Not correct</span><p class="qtext">Q7 &middot; 47 pencils are shared equally into 5 boxes. How many are left over?</p><p class="qans">You answered 7. The answer is 2.</p><span class="explain">Explain this</span></div></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#10202E</span> on paper <span style="font-family:var(--mono)">#FFFFFF</span> = <b>16.56:1</b> &nbsp;|&nbsp; on default <b>15.56:1</b> &nbsp;|&nbsp; secondary <b>6.50:1</b> &nbsp;|&nbsp; primary <b>5.96:1</b> &nbsp;|&nbsp; correct <b>6.49:1</b> &nbsp;|&nbsp; incorrect <b>6.54:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip"><span class="sw" style="background:#0F6E78"></span>primary #0F6E78</span>
+          <span class="chip same"><span class="sw" style="background:#FFFFFF"></span>paper held</span>
+          <span class="chip same"><span class="sw" style="background:#F6F8FA"></span>default held</span>
+          <span class="chip same"><span class="sw" style="background:#DCE3E9"></span>divider held</span>
+          <span class="chip same"><span class="sw" style="background:#10202E"></span>text.pri held</span>
+          <span class="chip same"><span class="sw" style="background:#4E6070"></span>text.sec held</span>
+          <span class="chip same"><span class="sw" style="background:#0F6B4F"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#B3261E"></span>error held</span>
+        </div>
+        <p class="legend">Exactly one token diverged. Teal sits far enough from success green to avoid a "this button means correct" misread.</p>
+      </div>
+    </div>
+
+    <!-- S3 Parent light -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Parent View — clinical blue fixtures</span><span class="mode">light</span></div>
+      <div class="panel" style="--paper:#FFFFFF;--def:#F6F8FA;--tp:#10202E;--ts:#4E6070;--div:#DCE3E9;--pri:#0B5FA5;--onpri:#FFFFFF;--ok:#0F6B4F;--err:#B3261E;--warn:#8A5A00">
+        <div class="approw"><span class="apptitle">Mastery by Topic</span><span class="appmeta">Noah &middot; last 30 days</span></div>
+        <div class="card tight">
+          <div class="topic">
+            <div class="toprow"><span class="topname">Equivalent fractions</span><span class="pct ok">90%</span></div>
+            <div class="bar"><span style="width:90%;background:#0F6B4F"></span></div>
+          </div>
+          <div class="topic" style="margin-bottom:0">
+            <div class="toprow"><span class="topname">Division with remainders</span><span class="pct weak">40%</span></div>
+            <div class="bar"><span style="width:40%;background:#8A5A00"></span></div>
+            <span class="weakflag">&#9650; Weak area &middot; below 60%</span>
+          </div>
+        </div>
+        <p class="secttl">Practice tests</p>
+        <div class="summary">
+          <div class="scell"><span class="snum2">1</span><span class="slab">Not started</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Completed 11/15</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Draft</span></div>
+        </div>
+        <div style="margin-top:10px"><button class="btn solid">Review &amp; release draft</button></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#10202E</span> on paper <span style="font-family:var(--mono)">#FFFFFF</span> = <b>16.56:1</b> &nbsp;|&nbsp; on default <b>15.56:1</b> &nbsp;|&nbsp; secondary <b>6.50:1</b> &nbsp;|&nbsp; primary <b>6.57:1</b> &nbsp;|&nbsp; weak-area <b>5.93:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip same"><span class="sw" style="background:#0B5FA5"></span>primary #0B5FA5 held</span>
+          <span class="chip same"><span class="sw" style="background:#FFFFFF"></span>paper held</span>
+          <span class="chip same"><span class="sw" style="background:#F6F8FA"></span>default held</span>
+          <span class="chip same"><span class="sw" style="background:#DCE3E9"></span>divider held</span>
+          <span class="chip same"><span class="sw" style="background:#10202E"></span>text.pri held</span>
+          <span class="chip same"><span class="sw" style="background:#4E6070"></span>text.sec held</span>
+          <span class="chip same"><span class="sw" style="background:#0F6B4F"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#8A5A00"></span>warning held</span>
+        </div>
+        <p class="legend">Nothing diverges &mdash; Parent is the untouched Clear Room base in both modes.</p>
+      </div>
+    </div>
+
+    <!-- S3 Student dark -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Student Mode — teal fixtures</span><span class="mode">dark</span></div>
+      <div class="panel" style="--paper:#16202C;--def:#0E1620;--tp:#E7EEF5;--ts:#A3B3C2;--div:#26333F;--pri:#71C3CE;--onpri:#0E1620;--ok:#6FD1AC;--err:#F19B94;--warn:#E3B457">
+        <div class="approw"><span class="apptitle">Practice Tests</span><span class="appmeta">Noah &middot; Grade 5</span></div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set A</p><span class="cmeta">Math &middot; Grade 5 &middot; 15 questions</span><br><span class="state" style="margin-top:6px">Not started</span></div>
+            <button class="btn solid">Start</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cardtop">
+            <div><p class="cname">Fractions &amp; Division &mdash; Set B</p><span class="cmeta">Math &middot; Grade 5 &middot; Completed 11/15</span><br><span class="state done" style="margin-top:6px">Completed</span></div>
+            <button class="btn">Review</button>
+          </div>
+        </div>
+        <p class="secttl">Results &mdash; Set B</p>
+        <div class="qrow good"><span class="qmark ok">&#10003;</span><div class="qbody"><span class="qtag ok">&#10003; Correct</span><p class="qtext">Q6 &middot; Which fraction is equivalent to 3/4?</p><p class="qans" style="margin:0">You answered 6/8.</p></div></div>
+        <div class="qrow bad"><span class="qmark no">&#10007;</span><div class="qbody"><span class="qtag no">&#10007; Not correct</span><p class="qtext">Q7 &middot; 47 pencils are shared equally into 5 boxes. How many are left over?</p><p class="qans">You answered 7. The answer is 2.</p><span class="explain">Explain this</span></div></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#E7EEF5</span> on paper <span style="font-family:var(--mono)">#16202C</span> = <b>14.05:1</b> &nbsp;|&nbsp; on default <b>15.55:1</b> &nbsp;|&nbsp; secondary <b>7.66:1</b> &nbsp;|&nbsp; primary <b>8.14:1</b> &nbsp;|&nbsp; correct <b>8.92:1</b> &nbsp;|&nbsp; incorrect <b>7.72:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip"><span class="sw" style="background:#71C3CE"></span>primary #71C3CE</span>
+          <span class="chip same"><span class="sw" style="background:#16202C"></span>paper held</span>
+          <span class="chip same"><span class="sw" style="background:#0E1620"></span>default held</span>
+          <span class="chip same"><span class="sw" style="background:#26333F"></span>divider held</span>
+          <span class="chip same"><span class="sw" style="background:#E7EEF5"></span>text.pri held</span>
+          <span class="chip same"><span class="sw" style="background:#A3B3C2"></span>text.sec held</span>
+          <span class="chip same"><span class="sw" style="background:#6FD1AC"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#F19B94"></span>error held</span>
+        </div>
+        <p class="legend">Teal vs. success mint is the tightest pair in the system &mdash; verify at 100% zoom before shipping.</p>
+      </div>
+    </div>
+
+    <!-- S3 Parent dark -->
+    <div class="panelwrap">
+      <div class="plabel"><span>Parent View — clinical blue fixtures</span><span class="mode">dark</span></div>
+      <div class="panel" style="--paper:#16202C;--def:#0E1620;--tp:#E7EEF5;--ts:#A3B3C2;--div:#26333F;--pri:#7FB6E8;--onpri:#0E1620;--ok:#6FD1AC;--err:#F19B94;--warn:#E3B457">
+        <div class="approw"><span class="apptitle">Mastery by Topic</span><span class="appmeta">Noah &middot; last 30 days</span></div>
+        <div class="card tight">
+          <div class="topic">
+            <div class="toprow"><span class="topname">Equivalent fractions</span><span class="pct ok">90%</span></div>
+            <div class="bar"><span style="width:90%;background:#6FD1AC"></span></div>
+          </div>
+          <div class="topic" style="margin-bottom:0">
+            <div class="toprow"><span class="topname">Division with remainders</span><span class="pct weak">40%</span></div>
+            <div class="bar"><span style="width:40%;background:#E3B457"></span></div>
+            <span class="weakflag">&#9650; Weak area &middot; below 60%</span>
+          </div>
+        </div>
+        <p class="secttl">Practice tests</p>
+        <div class="summary">
+          <div class="scell"><span class="snum2">1</span><span class="slab">Not started</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Completed 11/15</span></div>
+          <div class="scell"><span class="snum2">1</span><span class="slab">Draft</span></div>
+        </div>
+        <div style="margin-top:10px"><button class="btn solid">Review &amp; release draft</button></div>
+      </div>
+      <div class="meta">
+        <p class="ratio">body text <span style="font-family:var(--mono)">#E7EEF5</span> on paper <span style="font-family:var(--mono)">#16202C</span> = <b>14.05:1</b> &nbsp;|&nbsp; on default <b>15.55:1</b> &nbsp;|&nbsp; secondary <b>7.66:1</b> &nbsp;|&nbsp; primary <b>7.64:1</b> &nbsp;|&nbsp; weak-area <b>8.56:1</b> &mdash; all AA pass</p>
+        <div class="chips">
+          <span class="chip same"><span class="sw" style="background:#7FB6E8"></span>primary #7FB6E8 held</span>
+          <span class="chip same"><span class="sw" style="background:#16202C"></span>paper held</span>
+          <span class="chip same"><span class="sw" style="background:#0E1620"></span>default held</span>
+          <span class="chip same"><span class="sw" style="background:#26333F"></span>divider held</span>
+          <span class="chip same"><span class="sw" style="background:#E7EEF5"></span>text.pri held</span>
+          <span class="chip same"><span class="sw" style="background:#A3B3C2"></span>text.sec held</span>
+          <span class="chip same"><span class="sw" style="background:#6FD1AC"></span>success held</span>
+          <span class="chip same"><span class="sw" style="background:#E3B457"></span>warning held</span>
+        </div>
+        <p class="legend">Nothing diverges &mdash; Clear Room dark base as shipped.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="verdict"><b>Verdict &mdash; build cost &amp; payoff</b>
+    <span><b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Cost:</b> the cheapest by a wide margin. <b>One</b> MUI theme; Student Mode wraps its subtree in a <code>ThemeProvider</code> with a single <code>createTheme(base, {palette:{primary:{main:'#0F6E78'}}})</code> override per mode. No component overrides, no contrast re-audit beyond the two primary values, and every shared component keeps working untouched. <b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Buys:</b> a real but quiet signal &mdash; every button, link and "Explain this" changes color across the PIN. <b style="display:inline;font-size:inherit;letter-spacing:0;text-transform:none;color:#10202E">Risk:</b> Maria may not register it at all on a phone in the kitchen; the rooms look identical until you touch something. Likely needs a non-color cue (a Parent header band, denser row spacing) to carry the divergence.</span>
+  </div>
+</section>
+
+<p class="notes"><b>Accessibility notes applying to all twelve panels.</b> Every body-text pair listed above is &ge;4.5:1 against the surface it actually sits on (both paper and default measured). Correct / incorrect are triple-encoded: a check or cross glyph, the words "Correct" / "Not correct", and color; the left border weight repeats the signal a fourth time. Weak Area is encoded by caret glyph, the words "Weak area &middot; below 60%", the numeric percentage, and color. No streaks, badges, mascots, points, or exclamation marks appear anywhere &mdash; a wrong answer states the correct answer plainly and offers "Explain this" as the next action, never a penalty.</p>
+
+</div>
+</body>
+</html>

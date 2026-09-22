@@ -1,0 +1,1259 @@
+<meta charset="utf-8">
+<title>n-test-reviewer — Colour Themes</title>
+<style>
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:#EDEDEA;color:#1A1A1A;font-size:14px;line-height:1.45;
+  padding:32px 24px 80px;
+}
+.wrap{max-width:1760px;margin:0 auto}
+.pagehead{margin:0 0 40px;padding-bottom:20px;border-bottom:2px solid #C9C9C4}
+.pagehead h1{font-size:22px;margin:0 0 6px;letter-spacing:-.01em}
+.pagehead p{margin:0;max-width:900px;color:#4A4A46;font-size:13px}
+.legend{margin-top:14px;font-size:12px;color:#4A4A46}
+.legend b{color:#1A1A1A}
+
+.variation{margin:0 0 56px;background:#fff;border:1px solid #D6D6D1;border-radius:10px;overflow:hidden}
+.varhead{padding:18px 22px;border-bottom:1px solid #E3E3DE;background:#FBFBFA}
+.varhead h2{margin:0 0 4px;font-size:18px;letter-spacing:-.01em}
+.varhead .reg{margin:0;font-size:13px;color:#3E3E3A;max-width:1000px}
+.varhead .note{margin:8px 0 0;font-size:12px;color:#6A6A64;max-width:1000px;font-style:italic}
+.varnum{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;color:#7A7A74;margin-bottom:4px}
+
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.panel{border-right:1px solid #E3E3DE}
+.panel:last-child{border-right:0}
+.panelcap{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:8px 18px;background:#F1F1EE;color:#5A5A54;border-bottom:1px solid #E3E3DE}
+.panel.dark .panelcap{background:#2A2A2A;color:#C9C9C4;border-bottom-color:#3A3A3A}
+.panelbody{padding:18px;background:var(--bg);color:var(--t1)}
+
+.chips{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.chip{display:flex;align-items:center;gap:7px;padding:5px 7px;border:1px solid var(--div);border-radius:6px;background:var(--paper);min-width:0}
+.sw{width:22px;height:22px;border-radius:4px;flex:0 0 auto;border:1px solid rgba(128,128,128,.35)}
+.chiptxt{display:flex;flex-direction:column;min-width:0}
+.chiptxt b{font-size:10px;font-weight:600;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chiptxt code{font-size:10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--t1)}
+
+.cr{margin:12px 0 16px;font-size:11px;color:var(--t2);padding:7px 9px;border-left:3px solid var(--info);background:var(--paper)}
+.cr b{color:var(--t1)}
+
+.snips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.snip{min-width:0}
+.snipcap{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--t2);margin-bottom:6px}
+.surface{background:var(--paper);border:1px solid var(--div);border-radius:8px;padding:12px}
+
+.apphead{display:flex;flex-direction:column;gap:2px;padding-bottom:8px;margin-bottom:10px;border-bottom:1px solid var(--div)}
+.who{font-size:13px;font-weight:700;color:var(--t1)}
+.meta{font-size:11px;color:var(--t2)}
+.sectitle{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--t2);margin-bottom:8px}
+
+.card{border:1px solid var(--div);border-radius:7px;padding:10px;margin-bottom:9px;background:var(--paper)}
+.cardtop{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
+.cardname{font-size:13px;font-weight:650;color:var(--t1);line-height:1.25}
+.cardmeta{font-size:11px;color:var(--t2);margin:4px 0 8px}
+.pill{font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.pill-quiet{background:var(--bg);color:var(--t2);border:1px solid var(--div)}
+.pill-ok{background:var(--okBg);color:var(--ok);border:1px solid var(--ok)}
+
+.btn{display:block;text-align:center;font-size:12px;font-weight:600;padding:7px 10px;border-radius:6px;margin-top:4px}
+.btn-primary{background:var(--pri);color:var(--paper)}
+.panel.dark .btn-primary{color:var(--bg)}
+.btn-ghost{background:transparent;color:var(--pri);border:1px solid var(--pri)}
+.btn-sm{padding:5px 8px;font-size:11px;display:inline-block;margin-top:8px}
+
+.bar{height:6px;border-radius:4px;background:var(--div);overflow:hidden;margin:6px 0 4px}
+.bar i{display:block;height:100%;background:var(--pri)}
+.bar i.ok{background:var(--ok)}
+.bar i.warn{background:var(--warn)}
+
+.qrow{border:1px solid var(--div);border-radius:7px;padding:10px;margin-bottom:9px;background:var(--paper)}
+.qrow-ok{background:var(--okBg);border-color:var(--ok)}
+.qrow-err{background:var(--errBg);border-color:var(--err)}
+.qtop{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px}
+.qnum{font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.03em}
+.state{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
+.state-ok{color:var(--ok)}
+.state-err{color:var(--err)}
+.ic{font-size:12px;line-height:1}
+.qtext{font-size:12px;color:var(--t1);line-height:1.4}
+.ans{font-size:12px;color:var(--t1);margin-top:6px}
+.anslab{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--t2);margin-right:6px}
+.ans-key{font-weight:650}
+
+.mrow{padding:9px 0;border-bottom:1px solid var(--div)}
+.mrow-flag{background:var(--warnBg);margin:0 -12px;padding:9px 12px;border-bottom:1px solid var(--div)}
+.mtop{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.mname{font-size:12px;font-weight:600;color:var(--t1)}
+.mval{font-size:14px;font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums}
+.mval-warn{color:var(--warn)}
+.mnote{font-size:10px;color:var(--t2)}
+.flag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--warn);margin:2px 0 3px}
+
+.summary{display:flex;gap:8px;margin-top:12px}
+.sum{flex:1;border:1px solid var(--div);border-radius:6px;padding:7px 8px;background:var(--bg);min-width:0}
+.sum b{display:block;font-size:16px;font-weight:700;color:var(--t1);line-height:1.1}
+.sum span{font-size:10px;color:var(--t2);display:block;line-height:1.2}
+
+/* ==========================================================================
+   STUDY DESK — Warm paper, editorial ink — a quiet desk lamp and a printed workbook. Steady, unhurried, faintly old-fashioned.
+   MUI theme tokens — lift wholesale.
+
+   LIGHT (palette.mode: 'light')
+   primary                #1F3A5F
+   secondary              #7A6A58
+   success / correct      #2F6B45
+   error / incorrect      #9B2226
+   warning / weak area    #8A5A12
+   info                   #4A6E8A
+   background.default     #FAF7F2
+   background.paper       #FFFDF9
+   text.primary           #2B2622
+   text.secondary         #5F564E
+   divider                #E4DCD1
+   contrast text.primary/background.default = 14.01:1 (#2B2622 on #FAF7F2) (AA pass)
+   contrast text.secondary/background.default = 6.71:1 (AA pass)
+
+   DARK (preview — not yet decided)
+   primary                #9CC4E8
+   secondary              #C9B79E
+   success / correct      #8FD6AC
+   error / incorrect      #F2A0A0
+   warning / weak area    #E8B96A
+   info                   #A9C8DC
+   background.default     #181512
+   background.paper       #221E1A
+   text.primary           #F0EAE1
+   text.secondary         #B4A99C
+   divider                #332D27
+   contrast text.primary/background.default = 15.21:1 (#F0EAE1 on #181512) (AA pass)
+   contrast text.secondary/background.default = 7.88:1 (AA pass)
+
+   Correct/incorrect never by colour alone: check/cross glyph + literal word
+   ("Correct" / "Incorrect") + tinted row background, all three together.
+   ========================================================================== */
+
+/* ==========================================================================
+   CLEAR ROOM — Cool clinical daylight — a well-lit exam room with nothing on the walls. Neutral, precise, zero opinion about you.
+   MUI theme tokens — lift wholesale.
+
+   LIGHT (palette.mode: 'light')
+   primary                #0B5FA5
+   secondary              #4A6072
+   success / correct      #0F6B4F
+   error / incorrect      #B3261E
+   warning / weak area    #8A5A00
+   info                   #2E6E9E
+   background.default     #F6F8FA
+   background.paper       #FFFFFF
+   text.primary           #10202E
+   text.secondary         #4E6070
+   divider                #DCE3E9
+   contrast text.primary/background.default = 15.56:1 (#10202E on #F6F8FA) (AA pass)
+   contrast text.secondary/background.default = 6.11:1 (AA pass)
+
+   DARK (preview — not yet decided)
+   primary                #7FB6E8
+   secondary              #9DB2C4
+   success / correct      #6FD1AC
+   error / incorrect      #F19B94
+   warning / weak area    #E3B457
+   info                   #8CC0E4
+   background.default     #0E1620
+   background.paper       #16202C
+   text.primary           #E7EEF5
+   text.secondary         #A3B3C2
+   divider                #26333F
+   contrast text.primary/background.default = 15.55:1 (#E7EEF5 on #0E1620) (AA pass)
+   contrast text.secondary/background.default = 8.48:1 (AA pass)
+
+   Correct/incorrect never by colour alone: check/cross glyph + literal word
+   ("Correct" / "Incorrect") + tinted row background, all three together.
+   ========================================================================== */
+
+/* ==========================================================================
+   LATE STUDY — Deep and saturated — plum ink on lilac paper. Serious, a little grown-up, the palette of a reference book rather than a toy.
+   MUI theme tokens — lift wholesale.
+
+   LIGHT (palette.mode: 'light')
+   primary                #4C2A85
+   secondary              #6B5F8A
+   success / correct      #1F6F54
+   error / incorrect      #A32448
+   warning / weak area    #8A5300
+   info                   #2A5FA8
+   background.default     #F3F1F7
+   background.paper       #FFFFFF
+   text.primary           #1B1730
+   text.secondary         #4C4667
+   divider                #E0DAEE
+   contrast text.primary/background.default = 15.46:1 (#1B1730 on #F3F1F7) (AA pass)
+   contrast text.secondary/background.default = 7.87:1 (AA pass)
+
+   DARK (preview — not yet decided)
+   primary                #B79BE8
+   secondary              #A99CD0
+   success / correct      #6ECFAC
+   error / incorrect      #F09BB2
+   warning / weak area    #E0B25C
+   info                   #93B6EC
+   background.default     #100D1C
+   background.paper       #1A1630
+   text.primary           #EDE9F7
+   text.secondary         #ADA4C6
+   divider                #2C2648
+   contrast text.primary/background.default = 16.05:1 (#EDE9F7 on #100D1C) (AA pass)
+   contrast text.secondary/background.default = 8.12:1 (AA pass)
+
+   Correct/incorrect never by colour alone: check/cross glyph + literal word
+   ("Correct" / "Incorrect") + tinted row background, all three together.
+   ========================================================================== */
+
+/* ==========================================================================
+   PLAIN SHEET — High-contrast neutral with one burnt-amber accent. Almost monochrome — the interface disappears and only the questions are left.
+   MUI theme tokens — lift wholesale.
+
+   LIGHT (palette.mode: 'light')
+   primary                #A34500
+   secondary              #4A4A4A
+   success / correct      #1E6B3A
+   error / incorrect      #A31515
+   warning / weak area    #7A5200
+   info                   #33506E
+   background.default     #FFFFFF
+   background.paper       #F6F6F5
+   text.primary           #0A0A0A
+   text.secondary         #525252
+   divider                #E2E2E0
+   contrast text.primary/background.default = 19.80:1 (#0A0A0A on #FFFFFF) (AA pass)
+   contrast text.secondary/background.default = 7.81:1 (AA pass)
+
+   DARK (preview — not yet decided)
+   primary                #FF9B4D
+   secondary              #B9B9B5
+   success / correct      #66C98C
+   error / incorrect      #F08A80
+   warning / weak area    #DDB05A
+   info                   #9DB6D4
+   background.default     #0B0B0B
+   background.paper       #161616
+   text.primary           #F5F5F4
+   text.secondary         #A8A8A5
+   divider                #2A2A2A
+   contrast text.primary/background.default = 18.04:1 (#F5F5F4 on #0B0B0B) (AA pass)
+   contrast text.secondary/background.default = 8.26:1 (AA pass)
+
+   Correct/incorrect never by colour alone: check/cross glyph + literal word
+   ("Correct" / "Incorrect") + tinted row background, all three together.
+   ========================================================================== */
+
+/* ==========================================================================
+   FIELD NOTES — Muted natural — clay, sage and unbleached card. Soft-spoken and tactile; low arousal by construction.
+   MUI theme tokens — lift wholesale.
+
+   LIGHT (palette.mode: 'light')
+   primary                #6B4F3A
+   secondary              #5E6B5E
+   success / correct      #3E6B45
+   error / incorrect      #8F3A2C
+   warning / weak area    #7E6417
+   info                   #43647A
+   background.default     #F2F3EE
+   background.paper       #FBFBF7
+   text.primary           #24261F
+   text.secondary         #57594E
+   divider                #DCDDD3
+   contrast text.primary/background.default = 13.72:1 (#24261F on #F2F3EE) (AA pass)
+   contrast text.secondary/background.default = 6.40:1 (AA pass)
+
+   DARK (preview — not yet decided)
+   primary                #D3A98A
+   secondary              #A8B5A4
+   success / correct      #8CC896
+   error / incorrect      #EE9C8C
+   warning / weak area    #D8BC66
+   info                   #9CBDD0
+   background.default     #15170F
+   background.paper       #1E2118
+   text.primary           #EDEEE3
+   text.secondary         #AFB2A2
+   divider                #2C3025
+   contrast text.primary/background.default = 15.45:1 (#EDEEE3 on #15170F) (AA pass)
+   contrast text.secondary/background.default = 8.36:1 (AA pass)
+
+   Correct/incorrect never by colour alone: check/cross glyph + literal word
+   ("Correct" / "Incorrect") + tinted row background, all three together.
+   ========================================================================== */
+</style>
+<div class="wrap">
+  <div class="pagehead">
+    <h1>n-test-reviewer — colour theme directions</h1>
+    <p>Five palettes for a calm study tool: a parent photographs a returned school test, AI generates fresh Practice Tests, the student takes them in-app. Each direction is shown as MUI semantic tokens plus three real surfaces — Student Home, Student Results, Parent Analytics. Explicitly not gamified ed-tech: no streaks, badges, mascots, points or cheerleading.</p>
+    <p class="legend"><b>Accessibility floor:</b> WCAG 2.1 AA on student-facing surfaces. Every graded answer state pairs <b>colour + icon + text label</b> — never colour alone. Contrast ratios for text-on-background are stated per palette and in the <code>&lt;style&gt;</code> comments.</p>
+    <p class="legend"><b>Dark mode is an open decision</b> — the right-hand column of every variation is a preview only.</p>
+  </div>
+
+  <section class="variation">
+    <div class="varhead">
+      <div class="varnum">VARIATION 1</div>
+      <h2>Study Desk</h2>
+      <p class="reg">Warm paper, editorial ink — a quiet desk lamp and a printed workbook. Steady, unhurried, faintly old-fashioned.</p>
+      <p class="note">Warmth without sweetness. The cream ground keeps a wrong answer from feeling clinical; ink-blue primary keeps it from feeling babyish.</p>
+    </div>
+    <div class="panels">
+      <div class="panel light" style="--bg:#FAF7F2;--paper:#FFFDF9;--t1:#2B2622;--t2:#5F564E;--div:#E4DCD1;--pri:#1F3A5F;--sec:#7A6A58;--ok:#2F6B45;--err:#9B2226;--warn:#8A5A12;--info:#4A6E8A;--okBg:#EAF3ED;--errBg:#F8EDEC;--warnBg:#F7EFE1;--priBg:#EAEFF5">
+   <div class="panelcap">light</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#1F3A5F"></span><span class="chiptxt"><b>primary</b><code>#1F3A5F</code></span></div><div class="chip"><span class="sw" style="background:#7A6A58"></span><span class="chiptxt"><b>secondary</b><code>#7A6A58</code></span></div><div class="chip"><span class="sw" style="background:#2F6B45"></span><span class="chiptxt"><b>success / correct</b><code>#2F6B45</code></span></div><div class="chip"><span class="sw" style="background:#9B2226"></span><span class="chiptxt"><b>error / incorrect</b><code>#9B2226</code></span></div><div class="chip"><span class="sw" style="background:#8A5A12"></span><span class="chiptxt"><b>warning / weak area</b><code>#8A5A12</code></span></div><div class="chip"><span class="sw" style="background:#4A6E8A"></span><span class="chiptxt"><b>info</b><code>#4A6E8A</code></span></div><div class="chip"><span class="sw" style="background:#FAF7F2"></span><span class="chiptxt"><b>background.default</b><code>#FAF7F2</code></span></div><div class="chip"><span class="sw" style="background:#FFFDF9"></span><span class="chiptxt"><b>background.paper</b><code>#FFFDF9</code></span></div><div class="chip"><span class="sw" style="background:#2B2622"></span><span class="chiptxt"><b>text.primary</b><code>#2B2622</code></span></div><div class="chip"><span class="sw" style="background:#5F564E"></span><span class="chiptxt"><b>text.secondary</b><code>#5F564E</code></span></div><div class="chip"><span class="sw" style="background:#E4DCD1"></span><span class="chiptxt"><b>divider</b><code>#E4DCD1</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>14.01:1 (#2B2622 on #FAF7F2)</b> · text.secondary — <b>6.71:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+      <div class="panel dark" style="--bg:#181512;--paper:#221E1A;--t1:#F0EAE1;--t2:#B4A99C;--div:#332D27;--pri:#9CC4E8;--sec:#C9B79E;--ok:#8FD6AC;--err:#F2A0A0;--warn:#E8B96A;--info:#A9C8DC;--okBg:#1B2A22;--errBg:#2E1E1E;--warnBg:#2C2418;--priBg:#1C242D">
+   <div class="panelcap">dark (preview — not yet decided)</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#9CC4E8"></span><span class="chiptxt"><b>primary</b><code>#9CC4E8</code></span></div><div class="chip"><span class="sw" style="background:#C9B79E"></span><span class="chiptxt"><b>secondary</b><code>#C9B79E</code></span></div><div class="chip"><span class="sw" style="background:#8FD6AC"></span><span class="chiptxt"><b>success / correct</b><code>#8FD6AC</code></span></div><div class="chip"><span class="sw" style="background:#F2A0A0"></span><span class="chiptxt"><b>error / incorrect</b><code>#F2A0A0</code></span></div><div class="chip"><span class="sw" style="background:#E8B96A"></span><span class="chiptxt"><b>warning / weak area</b><code>#E8B96A</code></span></div><div class="chip"><span class="sw" style="background:#A9C8DC"></span><span class="chiptxt"><b>info</b><code>#A9C8DC</code></span></div><div class="chip"><span class="sw" style="background:#181512"></span><span class="chiptxt"><b>background.default</b><code>#181512</code></span></div><div class="chip"><span class="sw" style="background:#221E1A"></span><span class="chiptxt"><b>background.paper</b><code>#221E1A</code></span></div><div class="chip"><span class="sw" style="background:#F0EAE1"></span><span class="chiptxt"><b>text.primary</b><code>#F0EAE1</code></span></div><div class="chip"><span class="sw" style="background:#B4A99C"></span><span class="chiptxt"><b>text.secondary</b><code>#B4A99C</code></span></div><div class="chip"><span class="sw" style="background:#332D27"></span><span class="chiptxt"><b>divider</b><code>#332D27</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>15.21:1 (#F0EAE1 on #181512)</b> · text.secondary — <b>7.88:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+    </div>
+  </section>
+  <section class="variation">
+    <div class="varhead">
+      <div class="varnum">VARIATION 2</div>
+      <h2>Clear Room</h2>
+      <p class="reg">Cool clinical daylight — a well-lit exam room with nothing on the walls. Neutral, precise, zero opinion about you.</p>
+      <p class="note">The most legible under a parent 30-second scan. Risk: can read cold to a 10-year-old, so state colours are pulled slightly green/teal rather than alarm-red.</p>
+    </div>
+    <div class="panels">
+      <div class="panel light" style="--bg:#F6F8FA;--paper:#FFFFFF;--t1:#10202E;--t2:#4E6070;--div:#DCE3E9;--pri:#0B5FA5;--sec:#4A6072;--ok:#0F6B4F;--err:#B3261E;--warn:#8A5A00;--info:#2E6E9E;--okBg:#E6F3EE;--errBg:#FBECEA;--warnBg:#FAF1DF;--priBg:#E8F1F9">
+   <div class="panelcap">light</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#0B5FA5"></span><span class="chiptxt"><b>primary</b><code>#0B5FA5</code></span></div><div class="chip"><span class="sw" style="background:#4A6072"></span><span class="chiptxt"><b>secondary</b><code>#4A6072</code></span></div><div class="chip"><span class="sw" style="background:#0F6B4F"></span><span class="chiptxt"><b>success / correct</b><code>#0F6B4F</code></span></div><div class="chip"><span class="sw" style="background:#B3261E"></span><span class="chiptxt"><b>error / incorrect</b><code>#B3261E</code></span></div><div class="chip"><span class="sw" style="background:#8A5A00"></span><span class="chiptxt"><b>warning / weak area</b><code>#8A5A00</code></span></div><div class="chip"><span class="sw" style="background:#2E6E9E"></span><span class="chiptxt"><b>info</b><code>#2E6E9E</code></span></div><div class="chip"><span class="sw" style="background:#F6F8FA"></span><span class="chiptxt"><b>background.default</b><code>#F6F8FA</code></span></div><div class="chip"><span class="sw" style="background:#FFFFFF"></span><span class="chiptxt"><b>background.paper</b><code>#FFFFFF</code></span></div><div class="chip"><span class="sw" style="background:#10202E"></span><span class="chiptxt"><b>text.primary</b><code>#10202E</code></span></div><div class="chip"><span class="sw" style="background:#4E6070"></span><span class="chiptxt"><b>text.secondary</b><code>#4E6070</code></span></div><div class="chip"><span class="sw" style="background:#DCE3E9"></span><span class="chiptxt"><b>divider</b><code>#DCE3E9</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>15.56:1 (#10202E on #F6F8FA)</b> · text.secondary — <b>6.11:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+      <div class="panel dark" style="--bg:#0E1620;--paper:#16202C;--t1:#E7EEF5;--t2:#A3B3C2;--div:#26333F;--pri:#7FB6E8;--sec:#9DB2C4;--ok:#6FD1AC;--err:#F19B94;--warn:#E3B457;--info:#8CC0E4;--okBg:#11291F;--errBg:#2C1B1A;--warnBg:#2A2316;--priBg:#14202D">
+   <div class="panelcap">dark (preview — not yet decided)</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#7FB6E8"></span><span class="chiptxt"><b>primary</b><code>#7FB6E8</code></span></div><div class="chip"><span class="sw" style="background:#9DB2C4"></span><span class="chiptxt"><b>secondary</b><code>#9DB2C4</code></span></div><div class="chip"><span class="sw" style="background:#6FD1AC"></span><span class="chiptxt"><b>success / correct</b><code>#6FD1AC</code></span></div><div class="chip"><span class="sw" style="background:#F19B94"></span><span class="chiptxt"><b>error / incorrect</b><code>#F19B94</code></span></div><div class="chip"><span class="sw" style="background:#E3B457"></span><span class="chiptxt"><b>warning / weak area</b><code>#E3B457</code></span></div><div class="chip"><span class="sw" style="background:#8CC0E4"></span><span class="chiptxt"><b>info</b><code>#8CC0E4</code></span></div><div class="chip"><span class="sw" style="background:#0E1620"></span><span class="chiptxt"><b>background.default</b><code>#0E1620</code></span></div><div class="chip"><span class="sw" style="background:#16202C"></span><span class="chiptxt"><b>background.paper</b><code>#16202C</code></span></div><div class="chip"><span class="sw" style="background:#E7EEF5"></span><span class="chiptxt"><b>text.primary</b><code>#E7EEF5</code></span></div><div class="chip"><span class="sw" style="background:#A3B3C2"></span><span class="chiptxt"><b>text.secondary</b><code>#A3B3C2</code></span></div><div class="chip"><span class="sw" style="background:#26333F"></span><span class="chiptxt"><b>divider</b><code>#26333F</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>15.55:1 (#E7EEF5 on #0E1620)</b> · text.secondary — <b>8.48:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+    </div>
+  </section>
+  <section class="variation">
+    <div class="varhead">
+      <div class="varnum">VARIATION 3</div>
+      <h2>Late Study</h2>
+      <p class="reg">Deep and saturated — plum ink on lilac paper. Serious, a little grown-up, the palette of a reference book rather than a toy.</p>
+      <p class="note">The only palette where the primary carries real chroma. Reads as "this counts" without shouting. Strongest dark-mode candidate.</p>
+    </div>
+    <div class="panels">
+      <div class="panel light" style="--bg:#F3F1F7;--paper:#FFFFFF;--t1:#1B1730;--t2:#4C4667;--div:#E0DAEE;--pri:#4C2A85;--sec:#6B5F8A;--ok:#1F6F54;--err:#A32448;--warn:#8A5300;--info:#2A5FA8;--okBg:#E7F2EE;--errBg:#FAEBEF;--warnBg:#F9F0E0;--priBg:#EFEAF8">
+   <div class="panelcap">light</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#4C2A85"></span><span class="chiptxt"><b>primary</b><code>#4C2A85</code></span></div><div class="chip"><span class="sw" style="background:#6B5F8A"></span><span class="chiptxt"><b>secondary</b><code>#6B5F8A</code></span></div><div class="chip"><span class="sw" style="background:#1F6F54"></span><span class="chiptxt"><b>success / correct</b><code>#1F6F54</code></span></div><div class="chip"><span class="sw" style="background:#A32448"></span><span class="chiptxt"><b>error / incorrect</b><code>#A32448</code></span></div><div class="chip"><span class="sw" style="background:#8A5300"></span><span class="chiptxt"><b>warning / weak area</b><code>#8A5300</code></span></div><div class="chip"><span class="sw" style="background:#2A5FA8"></span><span class="chiptxt"><b>info</b><code>#2A5FA8</code></span></div><div class="chip"><span class="sw" style="background:#F3F1F7"></span><span class="chiptxt"><b>background.default</b><code>#F3F1F7</code></span></div><div class="chip"><span class="sw" style="background:#FFFFFF"></span><span class="chiptxt"><b>background.paper</b><code>#FFFFFF</code></span></div><div class="chip"><span class="sw" style="background:#1B1730"></span><span class="chiptxt"><b>text.primary</b><code>#1B1730</code></span></div><div class="chip"><span class="sw" style="background:#4C4667"></span><span class="chiptxt"><b>text.secondary</b><code>#4C4667</code></span></div><div class="chip"><span class="sw" style="background:#E0DAEE"></span><span class="chiptxt"><b>divider</b><code>#E0DAEE</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>15.46:1 (#1B1730 on #F3F1F7)</b> · text.secondary — <b>7.87:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+      <div class="panel dark" style="--bg:#100D1C;--paper:#1A1630;--t1:#EDE9F7;--t2:#ADA4C6;--div:#2C2648;--pri:#B79BE8;--sec:#A99CD0;--ok:#6ECFAC;--err:#F09BB2;--warn:#E0B25C;--info:#93B6EC;--okBg:#152B24;--errBg:#2E1A26;--warnBg:#2B2317;--priBg:#221B3D">
+   <div class="panelcap">dark (preview — not yet decided)</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#B79BE8"></span><span class="chiptxt"><b>primary</b><code>#B79BE8</code></span></div><div class="chip"><span class="sw" style="background:#A99CD0"></span><span class="chiptxt"><b>secondary</b><code>#A99CD0</code></span></div><div class="chip"><span class="sw" style="background:#6ECFAC"></span><span class="chiptxt"><b>success / correct</b><code>#6ECFAC</code></span></div><div class="chip"><span class="sw" style="background:#F09BB2"></span><span class="chiptxt"><b>error / incorrect</b><code>#F09BB2</code></span></div><div class="chip"><span class="sw" style="background:#E0B25C"></span><span class="chiptxt"><b>warning / weak area</b><code>#E0B25C</code></span></div><div class="chip"><span class="sw" style="background:#93B6EC"></span><span class="chiptxt"><b>info</b><code>#93B6EC</code></span></div><div class="chip"><span class="sw" style="background:#100D1C"></span><span class="chiptxt"><b>background.default</b><code>#100D1C</code></span></div><div class="chip"><span class="sw" style="background:#1A1630"></span><span class="chiptxt"><b>background.paper</b><code>#1A1630</code></span></div><div class="chip"><span class="sw" style="background:#EDE9F7"></span><span class="chiptxt"><b>text.primary</b><code>#EDE9F7</code></span></div><div class="chip"><span class="sw" style="background:#ADA4C6"></span><span class="chiptxt"><b>text.secondary</b><code>#ADA4C6</code></span></div><div class="chip"><span class="sw" style="background:#2C2648"></span><span class="chiptxt"><b>divider</b><code>#2C2648</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>16.05:1 (#EDE9F7 on #100D1C)</b> · text.secondary — <b>8.12:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+    </div>
+  </section>
+  <section class="variation">
+    <div class="varhead">
+      <div class="varnum">VARIATION 4</div>
+      <h2>Plain Sheet</h2>
+      <p class="reg">High-contrast neutral with one burnt-amber accent. Almost monochrome — the interface disappears and only the questions are left.</p>
+      <p class="note">Colour is spent only where it carries meaning. Every state still pairs icon + word, so the near-greyscale ground costs nothing in comprehension.</p>
+    </div>
+    <div class="panels">
+      <div class="panel light" style="--bg:#FFFFFF;--paper:#F6F6F5;--t1:#0A0A0A;--t2:#525252;--div:#E2E2E0;--pri:#A34500;--sec:#4A4A4A;--ok:#1E6B3A;--err:#A31515;--warn:#7A5200;--info:#33506E;--okBg:#EBF2ED;--errBg:#F7EAEA;--warnBg:#F5EEE0;--priBg:#F7EEE6">
+   <div class="panelcap">light</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#A34500"></span><span class="chiptxt"><b>primary</b><code>#A34500</code></span></div><div class="chip"><span class="sw" style="background:#4A4A4A"></span><span class="chiptxt"><b>secondary</b><code>#4A4A4A</code></span></div><div class="chip"><span class="sw" style="background:#1E6B3A"></span><span class="chiptxt"><b>success / correct</b><code>#1E6B3A</code></span></div><div class="chip"><span class="sw" style="background:#A31515"></span><span class="chiptxt"><b>error / incorrect</b><code>#A31515</code></span></div><div class="chip"><span class="sw" style="background:#7A5200"></span><span class="chiptxt"><b>warning / weak area</b><code>#7A5200</code></span></div><div class="chip"><span class="sw" style="background:#33506E"></span><span class="chiptxt"><b>info</b><code>#33506E</code></span></div><div class="chip"><span class="sw" style="background:#FFFFFF"></span><span class="chiptxt"><b>background.default</b><code>#FFFFFF</code></span></div><div class="chip"><span class="sw" style="background:#F6F6F5"></span><span class="chiptxt"><b>background.paper</b><code>#F6F6F5</code></span></div><div class="chip"><span class="sw" style="background:#0A0A0A"></span><span class="chiptxt"><b>text.primary</b><code>#0A0A0A</code></span></div><div class="chip"><span class="sw" style="background:#525252"></span><span class="chiptxt"><b>text.secondary</b><code>#525252</code></span></div><div class="chip"><span class="sw" style="background:#E2E2E0"></span><span class="chiptxt"><b>divider</b><code>#E2E2E0</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>19.80:1 (#0A0A0A on #FFFFFF)</b> · text.secondary — <b>7.81:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+      <div class="panel dark" style="--bg:#0B0B0B;--paper:#161616;--t1:#F5F5F4;--t2:#A8A8A5;--div:#2A2A2A;--pri:#FF9B4D;--sec:#B9B9B5;--ok:#66C98C;--err:#F08A80;--warn:#DDB05A;--info:#9DB6D4;--okBg:#14241A;--errBg:#261717;--warnBg:#241E13;--priBg:#2A1D11">
+   <div class="panelcap">dark (preview — not yet decided)</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#FF9B4D"></span><span class="chiptxt"><b>primary</b><code>#FF9B4D</code></span></div><div class="chip"><span class="sw" style="background:#B9B9B5"></span><span class="chiptxt"><b>secondary</b><code>#B9B9B5</code></span></div><div class="chip"><span class="sw" style="background:#66C98C"></span><span class="chiptxt"><b>success / correct</b><code>#66C98C</code></span></div><div class="chip"><span class="sw" style="background:#F08A80"></span><span class="chiptxt"><b>error / incorrect</b><code>#F08A80</code></span></div><div class="chip"><span class="sw" style="background:#DDB05A"></span><span class="chiptxt"><b>warning / weak area</b><code>#DDB05A</code></span></div><div class="chip"><span class="sw" style="background:#9DB6D4"></span><span class="chiptxt"><b>info</b><code>#9DB6D4</code></span></div><div class="chip"><span class="sw" style="background:#0B0B0B"></span><span class="chiptxt"><b>background.default</b><code>#0B0B0B</code></span></div><div class="chip"><span class="sw" style="background:#161616"></span><span class="chiptxt"><b>background.paper</b><code>#161616</code></span></div><div class="chip"><span class="sw" style="background:#F5F5F4"></span><span class="chiptxt"><b>text.primary</b><code>#F5F5F4</code></span></div><div class="chip"><span class="sw" style="background:#A8A8A5"></span><span class="chiptxt"><b>text.secondary</b><code>#A8A8A5</code></span></div><div class="chip"><span class="sw" style="background:#2A2A2A"></span><span class="chiptxt"><b>divider</b><code>#2A2A2A</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>18.04:1 (#F5F5F4 on #0B0B0B)</b> · text.secondary — <b>8.26:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+    </div>
+  </section>
+  <section class="variation">
+    <div class="varhead">
+      <div class="varnum">VARIATION 5</div>
+      <h2>Field Notes</h2>
+      <p class="reg">Muted natural — clay, sage and unbleached card. Soft-spoken and tactile; low arousal by construction.</p>
+      <p class="note">Lowest-arousal option. Deliberately desaturated so a red incorrect marker never spikes; the icon and the word do the work.</p>
+    </div>
+    <div class="panels">
+      <div class="panel light" style="--bg:#F2F3EE;--paper:#FBFBF7;--t1:#24261F;--t2:#57594E;--div:#DCDDD3;--pri:#6B4F3A;--sec:#5E6B5E;--ok:#3E6B45;--err:#8F3A2C;--warn:#7E6417;--info:#43647A;--okBg:#EAF1EA;--errBg:#F6EBE8;--warnBg:#F4EFDF;--priBg:#F2EBE4">
+   <div class="panelcap">light</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#6B4F3A"></span><span class="chiptxt"><b>primary</b><code>#6B4F3A</code></span></div><div class="chip"><span class="sw" style="background:#5E6B5E"></span><span class="chiptxt"><b>secondary</b><code>#5E6B5E</code></span></div><div class="chip"><span class="sw" style="background:#3E6B45"></span><span class="chiptxt"><b>success / correct</b><code>#3E6B45</code></span></div><div class="chip"><span class="sw" style="background:#8F3A2C"></span><span class="chiptxt"><b>error / incorrect</b><code>#8F3A2C</code></span></div><div class="chip"><span class="sw" style="background:#7E6417"></span><span class="chiptxt"><b>warning / weak area</b><code>#7E6417</code></span></div><div class="chip"><span class="sw" style="background:#43647A"></span><span class="chiptxt"><b>info</b><code>#43647A</code></span></div><div class="chip"><span class="sw" style="background:#F2F3EE"></span><span class="chiptxt"><b>background.default</b><code>#F2F3EE</code></span></div><div class="chip"><span class="sw" style="background:#FBFBF7"></span><span class="chiptxt"><b>background.paper</b><code>#FBFBF7</code></span></div><div class="chip"><span class="sw" style="background:#24261F"></span><span class="chiptxt"><b>text.primary</b><code>#24261F</code></span></div><div class="chip"><span class="sw" style="background:#57594E"></span><span class="chiptxt"><b>text.secondary</b><code>#57594E</code></span></div><div class="chip"><span class="sw" style="background:#DCDDD3"></span><span class="chiptxt"><b>divider</b><code>#DCDDD3</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>13.72:1 (#24261F on #F2F3EE)</b> · text.secondary — <b>6.40:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+      <div class="panel dark" style="--bg:#15170F;--paper:#1E2118;--t1:#EDEEE3;--t2:#AFB2A2;--div:#2C3025;--pri:#D3A98A;--sec:#A8B5A4;--ok:#8CC896;--err:#EE9C8C;--warn:#D8BC66;--info:#9CBDD0;--okBg:#1A2A1D;--errBg:#2A1B16;--warnBg:#282213;--priBg:#2A2118">
+   <div class="panelcap">dark (preview — not yet decided)</div>
+   <div class="panelbody">
+     <div class="chips"><div class="chip"><span class="sw" style="background:#D3A98A"></span><span class="chiptxt"><b>primary</b><code>#D3A98A</code></span></div><div class="chip"><span class="sw" style="background:#A8B5A4"></span><span class="chiptxt"><b>secondary</b><code>#A8B5A4</code></span></div><div class="chip"><span class="sw" style="background:#8CC896"></span><span class="chiptxt"><b>success / correct</b><code>#8CC896</code></span></div><div class="chip"><span class="sw" style="background:#EE9C8C"></span><span class="chiptxt"><b>error / incorrect</b><code>#EE9C8C</code></span></div><div class="chip"><span class="sw" style="background:#D8BC66"></span><span class="chiptxt"><b>warning / weak area</b><code>#D8BC66</code></span></div><div class="chip"><span class="sw" style="background:#9CBDD0"></span><span class="chiptxt"><b>info</b><code>#9CBDD0</code></span></div><div class="chip"><span class="sw" style="background:#15170F"></span><span class="chiptxt"><b>background.default</b><code>#15170F</code></span></div><div class="chip"><span class="sw" style="background:#1E2118"></span><span class="chiptxt"><b>background.paper</b><code>#1E2118</code></span></div><div class="chip"><span class="sw" style="background:#EDEEE3"></span><span class="chiptxt"><b>text.primary</b><code>#EDEEE3</code></span></div><div class="chip"><span class="sw" style="background:#AFB2A2"></span><span class="chiptxt"><b>text.secondary</b><code>#AFB2A2</code></span></div><div class="chip"><span class="sw" style="background:#2C3025"></span><span class="chiptxt"><b>divider</b><code>#2C3025</code></span></div></div>
+     <div class="cr">text.primary on background.default — <b>15.45:1 (#EDEEE3 on #15170F)</b> · text.secondary — <b>8.36:1</b> · both exceed WCAG 2.1 AA (4.5:1)</div>
+     
+<div class="snips">
+
+  <div class="snip">
+    <div class="snipcap">Student Home</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah</span><span class="meta">Math · Grade 5</span></div>
+      <div class="sectitle">Practice Tests</div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Division with Remainders</div>
+          <span class="pill pill-quiet">Not started</span>
+        </div>
+        <div class="cardmeta">15 questions · Multiple Choice, Fill-in-the-Blank</div>
+        <div class="btn btn-primary">Start test</div>
+      </div>
+
+      <div class="card">
+        <div class="cardtop">
+          <div class="cardname">Equivalent Fractions</div>
+          <span class="pill pill-ok"><span class="ic">&#10003;</span> Completed</span>
+        </div>
+        <div class="cardmeta">11 of 15 correct · Released 24 Aug</div>
+        <div class="bar"><i style="width:73%"></i></div>
+        <div class="btn btn-ghost">Review answers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Student Results row</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Results</span><span class="meta">11 / 15 · Equivalent Fractions</span></div>
+
+      <div class="qrow qrow-ok">
+        <div class="qtop">
+          <span class="qnum">Question 6</span>
+          <span class="state state-ok"><span class="ic">&#10003;</span> Correct</span>
+        </div>
+        <div class="qtext">Which fraction is equivalent to 3/4?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 9/12</div>
+      </div>
+
+      <div class="qrow qrow-err">
+        <div class="qtop">
+          <span class="qnum">Question 7</span>
+          <span class="state state-err"><span class="ic">&#10005;</span> Incorrect</span>
+        </div>
+        <div class="qtext">A class of 47 students is put into teams of 6. How many students are left over?</div>
+        <div class="ans"><span class="anslab">Your answer</span> 7</div>
+        <div class="ans ans-key"><span class="anslab">Answer key</span> 5</div>
+        <div class="btn btn-ghost btn-sm">Explain this</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="snip">
+    <div class="snipcap">Parent Analytics</div>
+    <div class="surface">
+      <div class="apphead"><span class="who">Noah — Mastery by Topic</span><span class="meta">Math · Grade 5 · last 30 days</span></div>
+
+      <div class="mrow">
+        <div class="mtop"><span class="mname">Equivalent fractions</span><span class="mval">90%</span></div>
+        <div class="bar"><i class="ok" style="width:90%"></i></div>
+        <div class="mnote">Up 12 pts · 3 tests completed</div>
+      </div>
+
+      <div class="mrow mrow-flag">
+        <div class="mtop"><span class="mname">Division with remainders</span><span class="mval mval-warn">40%</span></div>
+        <div class="bar"><i class="warn" style="width:40%"></i></div>
+        <div class="flag"><span class="ic">&#9888;</span> Weak Area — below 60% threshold</div>
+        <div class="mnote">Down 5 pts · 2 tests completed</div>
+      </div>
+
+      <div class="summary">
+        <div class="sum"><b>1</b><span>Not started</span></div>
+        <div class="sum"><b>3</b><span>Completed</span></div>
+        <div class="sum"><b>1</b><span>Draft awaiting release</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+   </div>
+ </div>
+    </div>
+  </section>
+</div>

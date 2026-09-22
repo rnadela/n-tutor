@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX Design Validation: n-test-reviewer</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .blocking {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--sev-critical);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 14px;
+  }
+  .blocking h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  .blocking .lede { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; }
+  .blocking ol { margin: 0; padding-left: 22px; }
+  .blocking ol li { margin-bottom: 12px; }
+  .blocking .why { color: var(--muted); font-size: 14px; display: block; margin-top: 2px; }
+  .deferred {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--sev-low);
+    border-radius: 8px;
+    padding: 16px 22px;
+    margin-bottom: 24px;
+    font-size: 14px;
+  }
+  .deferred h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .deferred ul { margin: 0; padding-left: 20px; }
+  .deferred li { margin-bottom: 4px; }
+
+  .counts { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
+  .count-chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+  }
+  .count-chip strong { display: block; font-size: 20px; font-weight: 600; line-height: 1.2; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+  .lenses { font-size: 12px; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; margin-top: 6px; }
+  .disagree { margin-top: 6px; font-size: 14px; border-left: 2px solid var(--sev-medium); padding-left: 10px; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>n-test-reviewer — UX Design Validation Report</h1>
+        <div class="subtitle">_bmad-output/planning-artifacts/ux-designs/ux-n-test-reviewer-2026-08-29/{DESIGN.md, EXPERIENCE.md}</div>
+      </div>
+    </header>
+
+    <div class="synthesis">
+      <p><code>DESIGN.md</code> is close to handoff-ready: the token layer is complete and dark-paired, the sections are canonical and in order, and the accent-split / paper-vs-control / flat-bordered rules are stated tightly enough to be enforced in code review. <code>EXPERIENCE.md</code> is not. It is excellent on the four PRD journeys and on every decision the coaching session interrogated directly, and materially incomplete on everything the session never reached: the FR-25 grade dispute, FR-24a parent-side Explanation review, FR-15 timer configuration, FR-33 deletion, and profile management have surfaces named in the IA (or not named at all) with no behaviour, no states, and no components behind them. Separately, the single most concrete accessibility decision in the memlog — the four-carrier grade-state encoding — was dropped in distillation and two of its four literal labels were silently changed.</p>
+      <p>Three further lenses move the picture, and not in the spines' favour. <strong>PRD fidelity</strong> finds that two of the six self-declared "deliberate departures" are mis-classified as gap closures when the PRD states the opposite — one of them, FR-15 timer expiry, is a live contradiction producing two incompatible scoring and Mastery rules that no document flags as an override. <strong>Coherence</strong> finds the Generation Allowance denominated in two different units across the artifacts, with each mock picking a different one, so the mock an implementer copies decides the product's economics. <strong>Accessibility</strong> finds the flat-with-borders decision produced a system whose only two separation devices both sit below 3:1, making every control boundary in the product an SC 1.4.11 failure, and finds the timed test — hard case 2, the product's core surface — entirely unresolved: no exemption argued, no pre-expiry warning, no timer announcement, work destroyed silently. All three lenses independently found the grade-state encoding broken, which is signal, not noise. The blocking set below is what genuinely stops architecture; everything under it can be absorbed into an Update pass.</p>
+    </div>
+
+    <div class="blocking">
+      <h2>Blocking set — do not hand off to architecture until these are closed</h2>
+      <p class="lede">Eight items. Each either commits architecture to a stored computation, an economic model, or a conformance claim that cannot be reversed cheaply, or names an entire feature area a story workflow would have to invent.</p>
+      <ol>
+        <li><strong>FR-15 timer expiry: two incompatible scoring rules.</strong>
+          <span class="why">FR-15 says unanswered Questions are graded incorrect; the spines say they stay unanswered and are excluded from the Mastery denominator. Filed as a gap closure on the false premise that the PRD is silent, so it does not appear in <em>PRD overrides</em> where it belongs. Architecture reading the PRD and architecture reading the spines produce different scores, different Mastery, and different Weak Area calls on the same Attempt. <em>Blocking</em> — this is a stored-computation fork, not a copy fix.</span></li>
+        <li><strong>Generation Allowance is denominated in two incompatible units.</strong>
+          <span class="why"><code>key-capture.html</code> counts Practice Tests ("0 of 2 practice tests this month"); <code>key-analytics.html</code> counts requests ("Generations left this month 2 of 2"). Under capture's rule a Free parent can never exceed 2 tests a month, which collides directly with FR-10's up-to-5-per-request and empties the "draft 2 of 5" review-progress requirement. Under analytics' rule the same parent gets 10. <em>Blocking</em> — it is the tier economics and the allowance data model, and a PRD-facing decision against FR-31.</span></li>
+        <li><strong>FR-25 has no Parent View destination and no parent grade override.</strong>
+          <span class="why">The raising end is buildable and the receiving end does not exist: no IA row, no override control, no score-and-Mastery recompute, no state for what the student sees after an override lands. A score-mutating action is entirely absent from the UX contract, and UJ-2 asserts a destination the IA does not contain. <em>Blocking</em> — an entire feature area with PRD-specified consequences a story workflow cannot invent.</span></li>
+        <li><strong>The Mastery formula drops FR-26's rolling window and first-Attempt-only rule.</strong>
+          <span class="why">The spine states <code>correct / (correct + incorrect)</code> per Topic as the whole rule. FR-26 computes it over the 5 most recent qualifying Attempts, where only the first Attempt on a Practice Test qualifies. This is the most implementable-looking sentence in the document and the one an engineer will copy. SM-C3 exists specifically to catch the retake loop this omission enables. <em>Blocking</em> — same class as item 1.</span></li>
+        <li><strong>The grade-state encoding is broken on all three axes at once.</strong>
+          <span class="why">The four decided non-colour carriers were never carried into either spine, so "never colour alone" is an assertion a builder cannot implement; two of four labels drifted from the decided strings, in opposite directions across the two mocks; and the colour assignment is inverted in <code>key-results.html</code>, pulling <code>info</code> into duty as a grade state and putting <code>warning</code> on double duty as both "you ran out of time" and "this is a weak area" over shared components. Found independently by rubric, coherence, and accessibility. <em>Blocking</em> — it is the visual contract for the four-valued state the entire parent-facing value chain reads.</span></li>
+        <li><strong><code>divider</code> at 1.30:1 light / 1.27:1 dark is the sole boundary of every control.</strong>
+          <span class="why">A direct SC 1.4.11 failure, created by the flat-with-borders decision: shadows are banned and the paper→default step is 1.06:1, so quiet buttons, page thumbnails, question-map cells and text inputs have nothing else defining their edge. <code>DESIGN.md</code> names exactly two separation devices and both are below 3:1. Rated <em>high</em> by accessibility, not critical — but blocking anyway, because the fix is one token added now versus every bordered component revisited later.</span></li>
+        <li><strong>SC 2.2.1 on the timed test: exemption named but never argued, and no configuration surface to argue it from.</strong>
+          <span class="why">The design diagnosed the hard case and left it open. There is no pre-expiry warning, no <code>role="timer"</code>, no threshold announcement, and two of three timer instances have no <code>aria-label</code> — a blind student's first notice of expiry is that the results screen has replaced their test. The natural "the duration is adjustable" argument cannot be made, because FR-15's parent-side configuration control appears on no screen while the Practice Test card confidently displays "timer presence and duration when set". <em>Blocking</em> — a conformance claim on the product's core surface, and the missing surface is the same one item 1 turns on.</span></li>
+        <li><strong>FR-1 sign-up / sign-in / consent and FR-33 deletion have no surface.</strong>
+          <span class="why">Of the nine FRs with no UX at all, these two are the blocking subset. Authentication is the first screen every real user sees, carries the PRD's one security-relevant message rule (duplicate-email wording that must not leak account existence), and §5.2 makes the child-data consent notice a launch gate blocking public registration. FR-33 specifies password re-authentication — <em>not</em> the Parent PIN — for profile and account deletion, which is the one place the PIN-only model of Parent View is deliberately insufficient, and it exists nowhere. §4.9's preamble says these were written as FRs precisely so downstream story creation could not drop them. <em>Blocking</em>. The rest of the nine (FR-3 profile management, FR-24a parent-side Explanation review, FR-13 last-Question deletion, FR-31 at-limit block) are not — see below.</span></li>
+      </ol>
+    </div>
+
+    <div class="deferred">
+      <h3>Assessed and not blocking</h3>
+      <ul>
+        <li><strong>FR-32's missing Source Test / Page Image surface</strong> — blocking-adjacent. It is a new Parent View destination, so it has IA consequences, but the expired-state rule is one row and the surface can be specified in an Update without changing the architecture's shape.</li>
+        <li><strong>FR-3 profile management, FR-24a parent-side Explanation review, FR-13 last-Question deletion, FR-31 profile at-limit state</strong> — real gaps, all closeable as State Pattern and Component Pattern rows against requirements the PRD already states precisely.</li>
+        <li><strong>Mock-level accessibility semantics</strong> (zero <code>&lt;button&gt;</code> on the capture and results screens, missing <code>prefers-reduced-motion</code>, tap targets under the stated floor) — these are defects in the reference artifacts, not in the contract. They must be fixed before the mocks are used as an implementation reference, which is not the same gate.</li>
+        <li><strong>Token hygiene, contrast-table inconsistency, copy drift, memlog citation errors</strong> — absorb into the Update pass.</li>
+      </ul>
+    </div>
+
+    <div class="counts">
+      <div class="count-chip"><strong>7</strong>critical</div>
+      <div class="count-chip"><strong>20</strong>high</div>
+      <div class="count-chip"><strong>40</strong>medium</div>
+      <div class="count-chip"><strong>16</strong>low</div>
+      <div class="count-chip"><strong>83</strong>total after dedup (from 121 raw across 4 lenses)</div>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card"><div class="dim-name">1. Flow coverage</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">2. Token completeness</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">3. Component coverage</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">4. State coverage</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">5. Visual reference coverage</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">6. Bloat &amp; overspecification</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">7. Inheritance discipline</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">8. Shape fit</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+    </div>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>1. Flow coverage</h2>
+          <span class="verdict-pill verdict-thin">thin</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>All four PRD journeys are present, named verbatim, with a named protagonist, numbered steps, an explicit <strong>Climax</strong> beat, and a failure path where the PRD gives one. That part is strong. The verdict is thin because whole requirement clusters have no flow and, in most cases, no surface either — and PRD fidelity confirms the count independently: nine FRs reach no UX at all.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">FR-25 grade dispute: mis-cited as FR-23, no Parent View home, no grade override</h3><span class="finding-location">EXPERIENCE.md § Component Patterns, § IA, UJ-2</span></header>
+            <div class="finding-note">FR-25's testable consequences require flagged Questions to appear in Parent View with the student's answer, the recorded grade, and the grading rationale, and require the parent to be able to <em>override the grade, recomputing the Attempt score and the affected Topic's Mastery</em>. Neither spine contains a grade-override affordance and the IA has no Parent View screen that could hold one. The Explanation panel calls it "the FR-23 grade-dispute flag"; FR-23 is <em>Answer reveal</em>, so a downstream workflow tracing FR coverage by number marks FR-23 covered and FR-25 unreferenced. The memlog found this gap exactly (line 67, gap 2) and it did not survive distillation into Open Questions or Decisions That Travel Upstream. UJ-2's closing line asserts "the flag surfaces to Maria in Parent View" — a destination the IA does not contain, so <code>EXPERIENCE.md</code> contradicts itself. FR-22's grading rationale has no display surface either, which strands the override's evidence.</div>
+            <div class="finding-fix"><strong>Fix:</strong> correct the citation to FR-25; add a Parent View flagged-answers destination (or fold it into a per-Attempt results view / Topic drill-down); add a Component Patterns row for the four required data elements plus the override control; add a State Pattern for what the student sees after an override lands — the same "must not read as the app changing its mind" problem already solved for ungraded resolution, and the answer must be consistent.</div>
+            <div class="lenses">Found by: rubric (critical) · coherence H3 (high) · prd-fidelity C-6 (high) + B-13 (low, citation) + B-8 (medium, rationale)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">FR-15 timer: no configuration surface, and no accessible expiry treatment</h3><span class="finding-location">EXPERIENCE.md § IA, § Component Patterns, § Accessibility Floor; key-take-test.html</span></header>
+            <div class="finding-note">Two distinct aspects of the same absent feature. <strong>(a) No configuration surface.</strong> The optional per-Practice-Test countdown is load-bearing in <code>DESIGN.md</code> (<code>timer-display</code>, <code>{typography.timer}</code>), in Component Patterns, State Patterns, Accessibility Floor hard case 2, and in UJ-1 step 9 and UJ-2 step 2 — but nothing says where a parent turns it on or sets a duration. The Accessibility Floor asserts the timer is "optional, parent-controlled, and default off" with no control to point at, and the Practice Test card displays "timer presence and duration when set". A feature is displayed that nothing in the spine lets the parent enable. <strong>(b) No accessible expiry treatment.</strong> No pre-expiry warning is specified anywhere; the timer is a static <code>&lt;span&gt;</code> with no <code>role="timer"</code>, no <code>aria-live</code>, no threshold behaviour, and only one of three instances carries an <code>aria-label</code> (States 2 and 3 announce as bare digits). A sighted student paces themselves against a falling number; a screen-reader user's first notice of expiry is that the results screen has replaced their test. Aspect (b) is the only place in the product where an accessibility gap directly destroys student work, and it compounds aspect (a): the SC 2.2.1 "adjust" argument requires a duration the parent can genuinely change, which requires the control that does not exist.</div>
+            <div class="finding-fix"><strong>Fix:</strong> name the surface that owns timer configuration (Draft review is the natural home — it is the last parent gate before release) with default off, per-Practice-Test, duration entry, and post-release editability stated. Then: <code>role="timer"</code> with <code>aria-live="off"</code> in steady state; polite announcements at 5 minutes, 1 minute and 20 seconds with a matching visible label change carried by text, not motion or colour; <code>role="alert"</code> at expiry fired before the route change, with focus landing on the results heading; restore <code>aria-label</code> on every timer instance.</div>
+            <div class="lenses">Found by: rubric (critical, aspect a) · prd-fidelity C-8 (medium, aspect a) · accessibility C1 + C2 (critical ×2, aspect b)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-1: sign-up, sign-in, password reset and the child-data consent notice have no surface</h3><span class="finding-location">EXPERIENCE.md § IA</span></header>
+            <div class="finding-note">The IA enumerates fourteen screens including Admin sign-in and none of them is authentication. Both UJ-1 and UJ-3 open "already signed in", so no journey forces them. FR-1 carries four testable consequences that all need surfaces: verified-format email and stated minimum password strength, a duplicate-email message that does not leak account existence, session persistence until explicit sign-out, and password reset via emailed link. Separately, FR-1 requires acceptance of the terms and the child-data consent notice, and §5.2 makes parent-provided consent at sign-up the build posture with legal review of that posture a <em>launch gate blocking public registration</em>. The one interaction the entire privacy posture rests on has no wording, no placement, and no record-of-consent state.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add the auth rows to the IA with the duplicate-email message rule stated, and give the consent notice a named surface even in a v0 with closed registration. If auth is genuinely inherited from the <code>n-electric</code> stack, say so explicitly — but the consent notice and the duplicate-email wording are product decisions and cannot be inherited.</div>
+            <div class="lenses">Found by: prd-fidelity C-1 + C-2 (high ×2) · rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-33: parent-initiated deletion is a word in a nav list</h3><span class="finding-location">EXPERIENCE.md § IA → Settings; no State or Component Patterns row</span></header>
+            <div class="finding-note">Settings is described as "PIN, account, data deletion, allowance visibility". FR-33 specifies three distinct destructive operations with binding requirements the spine states nowhere: every deletion requires explicit confirmation <em>naming what will be destroyed</em> and stating it cannot be undone; Student Profile and Parent Account deletion require <em>the account password, not the Parent PIN</em> (the PRD is emphatic — "the PIN gates a mode, not a destructive action"), which is a re-authentication surface inside Parent View that exists nowhere; and early Page Image deletion is per Source Test, invoked from a Source Test surface that does not exist. <code>DESIGN.md</code> names <code>error</code> as the "destructive confirm" colour, so the token anticipates a pattern <code>EXPERIENCE.md</code> never specifies. This is a product holding photographs of children's schoolwork and a longitudinal record of a named child's performance; §4.9's preamble says these were written as FRs precisely so downstream story creation could not drop them.</div>
+            <div class="finding-fix"><strong>Fix:</strong> a State Patterns row for destructive confirmation (what is named, password re-auth, non-undoable statement) and a Component Patterns row for the confirm dialog — <code>dialog</code> already has a visual spec.</div>
+            <div class="lenses">Found by: rubric (high) · prd-fidelity C-4 (high)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-3: Student Profile management has a screen name and nothing behind it</h3><span class="finding-location">EXPERIENCE.md § IA → Students, § IA → Settings</span></header>
+            <div class="finding-note">Both <code>Parent View → Students</code> and <code>Parent View → Settings</code> are IA rows with zero downstream content: no component rows, no states, no empty states, no copy rules, and no Key Flow reaching either. No states exist for any of FR-3's four operations. Specifically missing: the at-limit state when profile creation is blocked by Account Tier, which FR-3 and FR-31 jointly require to name the tier and its limit; the <em>archive</em> action and its distinction from deletion, which FR-33 explicitly calls out as different ("archiving preserves history"); and Grade Level change, whose stated consequence — existing Practice Tests unaffected — collides with the spine pitching Explanation language to the Student Profile's Grade Level rather than the Practice Test's.</div>
+            <div class="finding-fix"><strong>Fix:</strong> give both screens minimal Component Pattern and State Pattern rows (archive vs delete, at-limit block, PIN change, allowance visibility, data deletion), or state deliberately that they inherit default MUI form treatment with no bespoke spec — but say which.</div>
+            <div class="lenses">Found by: prd-fidelity C-3 (high) · rubric (medium) · coherence L7 (low, as a dropped memlog gap)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-24a: the parent-side Explanation reading surface and flag control do not exist</h3><span class="finding-location">EXPERIENCE.md § Component Patterns → Explanation panel; § IA</span></header>
+            <div class="finding-note">FR-24a's first testable consequence is a <em>parent</em> capability: read every Explanation shown to their student, and flag one as bad. The spine puts the bad-Explanation flag inside the Explanation panel, which is a Student Mode results component, and puts the received flags in an Admin queue. Missing in between is the Parent View surface where a parent reads retained Explanations and raises the flag. As written, either the student is flagging their own Explanations (not what FR-24a says) or the parent's path runs through Student Mode, which FR-4 forbids from carrying parent functionality. Same class of gap as the grade dispute, and not self-reported.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add the parent-side read/flag path — most cheaply as an expandable Explanation on the Parent View per-Attempt results or Topic drill-down rows, which already render Question content in Literata as paper role.</div>
+            <div class="lenses">Found by: rubric (high) · prd-fidelity C-7 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-32: no Source Test or Page Image surface, so the expired state has nowhere to live</h3><span class="finding-location">EXPERIENCE.md § IA; § Component Patterns → Capture strip</span></header>
+            <div class="finding-note">FR-32 requires that surfaces which would otherwise display a Page Image show an expired state rather than a broken image or an error. The IA contains no Source Tests list and no Page Image viewer — Page Images appear only transiently in the Capture strip during upload. Four consequences: the expired state has no home; the parent cannot see what she uploaded 30 days ago; there is no entry point for FR-33's early per-Source-Test image deletion; and FR-11's "the originating Source Test is reused" is not legible to her anywhere. A Source Test list is the missing Parent View destination that several FRs quietly assume.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add the Source Test list to the IA and a State Patterns row for the expired Page Image.</div>
+            <div class="lenses">Found by: prd-fidelity C-5 (high) · rubric (medium, expired state only)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-4: the multi-profile binding prompt is replaced by an unexplained "correct Student Profile"</h3><span class="finding-location">EXPERIENCE.md § State Patterns → PIN idle timeout, Deliberate handover</span></header>
+            <div class="finding-note">FR-4 requires that on a device with more than one Student Profile, exiting Parent View <em>prompts which Student Profile the device should bind to</em>. The spine says the idle timeout "returns to Student Mode on the correct Student Profile" with no binding prompt on either path and no definition of what makes a profile correct on a Family-tier account with five profiles and one tablet. The spine assumes a single-child device and silently drops the prompt. The silent-timeout path is the one where this is worst: a parent who walked away cannot answer a prompt, so the rule needs an explicit answer — last-bound profile? the profile whose Analytics she was viewing? — not an adjective. Nothing says how a device becomes bound in the first place.</div>
+            <div class="finding-fix"><strong>Fix:</strong> state the binding rule for the silent path explicitly, restore the prompt on the deliberate path, and name where initial binding is set (IA or the Students row).</div>
+            <div class="lenses">Found by: prd-fidelity B-3 (high) · rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">FR-13: deleting the last Question discards the Practice Test — no state specified</h3><span class="finding-location">EXPERIENCE.md § Component Patterns → Draft review</span></header>
+            <div class="finding-note">FR-13 allows deletion down to one remaining Question and specifies that deleting the last one discards the Practice Test. Draft review says per-Question delete acts in place; it does not describe the floor, the block, or the transition when a parent deletes her way to zero — a destructive outcome reached by repeating an ordinary action, producing a <em>discarded</em> state that FR-14 says removes the test from all student-facing surfaces and from Analytics.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one State Patterns row covering the floor, the warning, and the discard transition.</div>
+            <div class="lenses">Found by: prd-fidelity C-9 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">FR-31 / FR-3: the Student Profile at-limit block has no state</h3><span class="finding-location">EXPERIENCE.md § Allowances &amp; Limits</span></header>
+            <div class="finding-note">FR-31 requires that reaching an allowance hard-blocks with a message naming tier, usage, and reset date; FR-3 requires the same shape for the profile limit. The Allowances table covers Upload, Generation and Explanation at-cap behaviour thoroughly. The profile limit is the fourth cap in the product and is not covered at all.</div>
+            <div class="finding-fix"><strong>Fix:</strong> a fourth row in Allowances &amp; Limits, or a State Patterns row on the Students screen.</div>
+            <div class="lenses">Found by: prd-fidelity C-10 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">FR-9a's retake path is missing from the IA</h3><span class="finding-location">EXPERIENCE.md § IA → Generate</span></header>
+            <div class="finding-note">FR-9a lets a parent warned about thin Extraction choose to retake the pages rather than proceed. The path from Generate back to Capture pages appears nowhere in the IA.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one IA edge.</div>
+            <div class="lenses">Found by: prd-fidelity B-7 (medium)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>2. Token completeness</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>All 22 colour tokens, 10 typography roles, 3 radii, the spacing scale, both density sets, both tap-target floors and 12 component objects extracted; every <code>{path.to.token}</code> cross-reference resolves, every colour has a light/dark pair, no token is referenced-but-undefined or defined-but-unused, and no hex or px value is restated in <code>EXPERIENCE.md</code>. The accessibility lens recomputed every declared pair from the hex values and confirms all of them pass, most comfortably — including <code>DESIGN.md</code>'s one published claim (16.56:1 light / 14.05:1 dark), which it verifies to the digit. What the token set is missing is not colours but <em>mechanisms</em>: focus, hover and tint all have prose commitments and no values, and the accessibility lens escalates one of those absences to a straight SC 1.4.11 failure.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title"><code>divider</code> at 1.30:1 / 1.27:1 is the sole boundary of every control</h3><span class="finding-location">DESIGN.md § Elevation &amp; Depth; divider #DCE3E9 / #26333F</span></header>
+            <div class="finding-note">Recomputed: <code>#DCE3E9</code> on <code>#FFFFFF</code> = <strong>1.30:1</strong>; on <code>#F6F8FA</code> = <strong>1.22:1</strong>; <code>#26333F</code> on <code>#16202C</code> = <strong>1.27:1</strong>. Required by SC 1.4.11: 3:1. Applied as the sole component boundary on <code>question-map-cell</code>, <code>page-thumbnail</code>, <code>practice-test-card</code>, <code>dialog</code>, <code>snackbar</code>, the quiet and danger-quiet buttons, every icon button, and the Parent PIN field. The mocks defend this with "divider is decorative only — it never carries state", which is sound for a rule between two rows of text and not sound for a component whose entire boundary <em>is</em> that border. The flat-with-borders decision is the direct cause: shadows are banned and the paper→default step is 1.06:1, so <code>DESIGN.md</code> names exactly two separation devices and both are below 3:1. The design already gets this right in one place — the focused answer field uses <code>2px solid var(--primary)</code> at 5.96:1 — and nowhere else.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a third token, <code>divider-strong</code>, at ≥3:1 in both modes, mandatory on any element that is a control boundary. Suggested (verify before adopting): light <code>#767F89</code> ≈ 3.5:1 on white and 3.3:1 on default; dark <code>#6E7C89</code> ≈ 3.3:1 on paper-dark. Keep the existing values for decorative rules and table separators only, and add a Do/Don't row saying which is which.</div>
+            <div class="lenses">Found by: accessibility C3 (high) — sole finder</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Focus has no token, no width, no offset, and is rendered on one mock of four</h3><span class="finding-location">DESIGN.md § Elevation &amp; Depth; key-take-test.html only</span></header>
+            <div class="finding-note"><code>DESIGN.md</code> commits every interactive surface in the product to "a visible outline in the surface's <code>primary</code>" for focus and "a subtle background tint toward <code>background-default</code>" for hover, with no outline width, no offset, no tint value and no opacity. This is the one place downstream code cannot mirror the spine, and it applies to every control on every screen. The flat-with-borders decision removes shadow as a focus carrier, which makes the focus specification load-bearing rather than incidental. In the artifacts, <code>key-take-test.html</code> carries the only two <code>:focus-visible</code> rules in the set; <code>key-results.html</code>, <code>key-analytics.html</code> and <code>key-capture.html</code> have zero. The strategy itself passes — accessibility recomputed all five ring-on-surface pairs at 5.60:1 to 8.14:1 — but one hazard is uncovered: a <code>primary</code>-coloured ring drawn on a <code>primary</code>-filled button is 1:1 against the fill. <code>key-take-test.html</code> avoids this by accident, via a 2px offset that puts paper between fill and ring. That mechanism needs stating, not inheriting.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add <code>focus-ring: { width: 2px, offset: 2px, color: '{colors.primary}' }</code> to the frontmatter with the 3:1 non-text check stated, add <code>colors.hover-tint</code> / <code>-dark</code> as hex (or an explicit alpha over <code>background-paper</code>), state that the ring is always evaluated against the surface <em>behind</em> the control and never against a filled ground, and render it on all four key screens.</div>
+            <div class="lenses">Found by: rubric (high) · accessibility C12 (high)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Tinted surfaces carry state in the mocks, are banned by DESIGN.md, and have no dark values</h3><span class="finding-location">DESIGN.md § Colors; all four mocks</span></header>
+            <div class="finding-note"><code>DESIGN.md</code> § Colors: "Not used: gradients, <strong>tinted surfaces</strong>, brand color as decoration, <strong>any hue outside this table</strong>." Twelve-plus undeclared colours are doing real work: <code>--primary-tint:#E8F1F2</code> (key-take-test) and <code>--primary-tint:#E8F1F8</code> (key-analytics) — one named role, two values; <code>--track:#E6ECF1</code> where <code>DESIGN.md</code> specifies <code>barTrack: {colors.divider}</code>; <code>--warn-wash</code>, <code>--info-wash</code>, <code>--primary-wash</code> in key-capture; four hard-coded tinted borders; four hard-coded on-dark chrome values. § Elevation &amp; Depth simultaneously <em>requires</em> a tint mechanism the palette does not provide. This is an accessibility matter and not only token hygiene: <code>--primary-tint</code> is the state fill for an answered question-map cell and <code>--warn-wash</code> is the ground of the legibility-failure panel — both carry state, both are undeclared, and neither has a dark counterpart, so the claim that "every pair above is verified in both modes" is unverified for precisely the surfaces that convey state. In dark mode the answered-cell fill would need to be a tint of <code>#71C3CE</code> on <code>#16202C</code> still reading as a distinct state at ≥3:1; no such value exists.</div>
+            <div class="finding-fix"><strong>Fix:</strong> promote the three washes and the bar track to real light+dark tokens, compute both modes, narrow the § Colors prohibition to "tinted surfaces outside the declared tint tokens", and either reconcile the two <code>primary-tint</code> values or state that the tint derives from the surface's <code>primary</code> and is therefore two values by design.</div>
+            <div class="lenses">Found by: coherence M3 (medium) · accessibility C13 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">One contrast pair published; the measured values were dropped and the mock tables disagree with each other</h3><span class="finding-location">DESIGN.md § Colors; COMPUTED CONTRAST RATIOS blocks in all four mocks</span></header>
+            <div class="finding-note"><code>DESIGN.md</code> states question-body-on-paper and asserts "every pair above is verified in both modes" without numbers — yet the memlog records measured values from the rendered mocks for exactly the load-bearing pairs (6.50:1 secondary, 6.53:1 error, 5.93:1 warning, 5.96:1 student teal, 6.52:1 parent primary, lowest 5.47:1 overall). That data exists and was dropped. Independently, accessibility recomputed every published figure: three artifacts give three different answers for the same pair, and <code>key-capture.html</code> is the only file whose numbers are right throughout. <strong>No pair fails AA</strong> — every value, claimed or actual, clears 4.5:1 — so the defect is credibility, not conformance: the tables cannot serve as a gate, and a future revision moving a colour closer to the line would not be caught.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one computed contrast table in <code>DESIGN.md</code> § Colors, generated rather than hand-written, carrying on-primary/primary, error/paper, warning/paper and text-secondary/paper in both modes. Delete the per-mock tables or generate them from the same source.</div>
+            <div class="lenses">Found by: rubric (medium) · accessibility C14 (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Two frontmatter shapes deviate from design-md-spec.md</h3><span class="finding-location">DESIGN.md frontmatter</span></header>
+            <div class="finding-note"><code>typography.timer.fontVariantNumeric</code> is outside the spec's permitted subset; <code>typography.measure.questionMaxWidth</code> is not a typography object at all; <code>spacing.density</code> / <code>spacing.tap-target</code> nest below the spec's flat scale. All three read cleanly and a resolver flattens them, so this is a defect only against the letter of the spec.</div>
+            <div class="finding-fix"><strong>Fix:</strong> optional — accept and note the deliberate extension, or move <code>measure</code> to a sibling <code>layout</code> key.</div>
+            <div class="lenses">Found by: rubric (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title"><code>dialog.scrim</code> / <code>scrimDark</code> are raw rgba literals, and the mock drifts from the value</h3><span class="finding-location">DESIGN.md components.dialog; key-take-test.html</span></header>
+            <div class="finding-note">Every other colour in the system is a named token; these two are <code>rgba()</code> literals inside the components block. Separately the mock uses <code>rgba(16,32,46,0.48)</code> against the spec's <code>0.55</code>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> promote to <code>colors.scrim</code> / <code>colors.scrim-dark</code> and reference them; align the mock to 0.55.</div>
+            <div class="lenses">Found by: rubric (low) · coherence L4 (low)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>3. Component coverage</h2>
+          <span class="verdict-pill verdict-thin">thin</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Eight components have both halves and both halves are real rules: Practice Test card, Question container, Explanation panel, Answer-key row, Question map cell, Mastery row, Page thumbnail, Timer display. Naming is byte-identical across all sections of both files. Everything below that line is where the spine stops being a contract. Three lenses independently found the grade-state encoding broken, in three different ways that compound: the carriers were dropped, the labels drifted, and the colours are inverted in the reference mock.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">The four non-colour carriers were decided, marked "to be carried into the spines", and never carried</h3><span class="finding-location">memlog Q66; DESIGN.md § Components → Answer-key row; EXPERIENCE.md § Grade States, § Accessibility Floor #4</span></header>
+            <div class="finding-note">The memlog resolves this concretely as the canonical pattern: <strong>three redundant non-colour carriers plus hue</strong> — (a) icon frame shape and border style (solid circle / solid circle / dashed circle / dotted square), (b) glyph (check / cross / dash / ellipsis), (c) literal text label, (d) row left-rule texture (solid / 45° hatch / dashed / dotted) — with correct and incorrect deliberately <em>sharing</em> a frame shape and separated on every other axis. Neither spine carries any of it. <code>DESIGN.md</code> says "icon + text label + color"; <code>EXPERIENCE.md</code> says "Icon + [label]" with no icon named anywhere in the product. <strong>No icon set, glyph, or shape is specified in either file</strong>, so "never colour alone" is an assertion a builder cannot implement, and Accessibility Floor hard case 4 rests on it. An implementer reading only the spines builds four differently-coloured circles with four glyphs and believes the requirement is met, while the mock they are asked to match encodes state in border style and row-rule texture the spines never mention. The 45° hatch left-rule for incorrect exists only inside one HTML file. Accessibility separately verified all four states are mutually distinguishable without hue on three independent carriers <em>as rendered</em> — which is the point: the mock over-delivers and the contract under-delivers.</div>
+            <div class="finding-fix"><strong>Fix:</strong> restore the four-carrier table into <code>DESIGN.md</code> § Components under answer-key row (icon-frame and left-rule specs are visual) and into <code>EXPERIENCE.md</code> § Grade States as the normative encoding.</div>
+            <div class="lenses">Found by: rubric (critical) · coherence H2 (high) · accessibility (hard case 4 "partially resolved" + R6)</div>
+            <div class="disagree"><strong>Lenses disagree:</strong> coherence reads the shared correct/incorrect frame as deliberate (Q66 says so explicitly); accessibility R6 reads the mock's own comment claiming "four visually distinct icon frames" as an overclaim by one, and warns it must not survive into implementation as a justification for dropping a carrier. Both are right about different objects — the decision is deliberate, the mock's self-description of it is false.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">Grade-state labels drift three ways, and the drift lost the one label that was reasoned about</h3><span class="finding-location">memlog Q66; EXPERIENCE.md § Grade States; key-results.html; key-analytics.html; UJ-2 step 6</span></header>
+            <div class="finding-note">The memlog decided <code>'Correct' / 'Not correct' / 'Unanswered' / 'Not graded yet'</code> and states explicitly that the incorrect label is "Not correct", not "Wrong", "consistent with the requirement that a wrong answer never read as punishment". <code>EXPERIENCE.md</code> ships <code>'Correct' / 'Incorrect' / 'Not answered' / 'Not graded yet'</code>, contradicting the decision on two of four. <code>key-results.html</code> matches the memlog (6 occurrences of "Not correct", 0 of "Incorrect"); <code>key-analytics.html</code> matches <code>EXPERIENCE.md</code>, including in its own accessibility note. UJ-2 step 6 propagates "Not answered". Q17a's load-bearing rule is that grade-state strings are shared, parameterised components rendered in both rooms — two label sets means either two components or one rendering different words per surface, a distinction Q17a reserves for <em>address</em>, not state vocabulary. The label is also one of the required non-colour carriers <em>and</em> the screen-reader announcement, so two strings means two announcements for one state.</div>
+            <div class="finding-fix"><strong>Fix:</strong> adopt the memlog's set verbatim in <code>EXPERIENCE.md</code> § Grade States, <code>DESIGN.md</code> § Components → Answer-key row, and UJ-2 step 6; correct <code>key-analytics.html</code>'s drill-down labels and its accessibility note; record all four announcement strings as normative. If the labels were changed deliberately, record that as a decision — as it stands it reads as distillation drift.</div>
+            <div class="lenses">Found by: rubric (critical) · coherence H1 (high) · accessibility C7 (low)</div>
+            <div class="disagree"><strong>Lenses disagree on severity, by a three-band spread:</strong> rubric treats it as critical because the decided value was silently reverted and the reversion touches three files; coherence rates it high on the shared-component consequence; accessibility rates it low because both strings are legible and neither fails a criterion. The spread is the finding — it is cheap to fix and expensive to leave, since every downstream consumer sees a different answer depending on which artifact they open.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">Grade-state colour assignment is inverted between key-results.html and both spines, with <code>warning</code> on double duty</h3><span class="finding-location">key-results.html chip/legend-rule styles vs DESIGN.md answer-key-row and EXPERIENCE.md § Grade States</span></header>
+            <div class="finding-note">Both spines assign <code>unansweredColor: {colors.text-secondary}</code> and <code>ungradedColor: {colors.warning}</code>, and § Colors' meaning table says <code>warning</code> = "Weak Area flag, <strong>ungraded</strong> grade state, legibility warning". The mock assigns <code>warning</code> to <em>unanswered</em> and <code>info</code> to <em>ungraded</em> — exactly swapping the two and pulling <code>info</code>, specified as "neutral informational notices" and not a grade colour at all, into duty as a grade state. Worse: <code>warning</code> is simultaneously the Weak Area colour throughout <code>key-analytics.html</code>, so under the mock's mapping the same hue means "you ran out of time" on the student screen and "this is a weak area" on the parent screen, over the same underlying Attempt data that Q17a says is rendered in both rooms by shared components. An implementer building the answer-key row from the mock and the Mastery row from the spine ships both meanings. This is the reference artifact for the hard case the design claims to have resolved, disagreeing with the specification of that hard case.</div>
+            <div class="finding-fix"><strong>Fix:</strong> the spine's mapping wins — unanswered is explicitly <em>not</em> a failure (the whole Mastery model depends on that), so <code>text-secondary</code> is semantically correct and <code>warning</code> is not. Repaint <code>key-results.html</code>'s unanswered and ungraded chips and left rules, verify the resulting text-secondary-on-paper and warning-on-paper pairs, and put the four-state colour mapping in one normative table both documents reference.</div>
+            <div class="lenses">Found by: coherence C2 (critical) · accessibility C6 (medium)</div>
+            <div class="disagree"><strong>Lenses disagree on severity:</strong> coherence rates it critical on the <code>warning</code> double-duty consequence across shared components; accessibility rates it medium because no mapping fails a contrast criterion and the semantic argument, while clear, is not a conformance failure. Coherence's reading is the one that matters for handoff — the defect is that two artifacts give opposite answers, not that either is illegible.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">The smart fraction field is not a field</h3><span class="finding-location">key-take-test.html .fitb-field; EXPERIENCE.md § Component Patterns, § Open Questions #1</span></header>
+            <div class="finding-note">The rendered field is a <code>&lt;div&gt;</code> containing a <code>role="img"</code> span, an <code>.sr-only</code> duplicate, and a CSS caret. There is no <code>&lt;input&gt;</code>, no <code>&lt;label&gt;</code>, no accessible name, and no programmatic value — the whole mock set contains zero <code>&lt;input&gt;</code> elements. A screen-reader or switch user cannot focus it, cannot enter text, and cannot read back what they entered. The deeper problem is that the <em>mechanism</em> is unspecified: <code>EXPERIENCE.md</code> commits to live render in place, never moving the caret, and "the raw typed string is what is submitted", without saying how the raw string stays the programmatic value while a stack of non-text glyphs occupies the visible field. The three obvious implementations (contenteditable, overlay, canvas) each break the caret, the value, or AT text-editing. This is the most constrained new component in the product and it has no visual spec anywhere either.</div>
+            <div class="finding-fix"><strong>Fix:</strong> a real <code>&lt;input type="text"&gt;</code> whose value is always the raw typed string, never rewritten, with a real <code>&lt;label&gt;</code>; the typographic fraction renders in a <em>sibling</em> element, <code>aria-hidden="true"</code>, adjacent rather than overlaid; <code>aria-describedby</code> pointing at a polite live region that announces once on pattern recognition; non-fraction input never blocked or transformed. Record the answer to Open Question 1: <strong>for the input, the raw typed string IS the text alternative</strong> — authored math markup is only required for generated content.</div>
+            <div class="lenses">Found by: accessibility C4 (high) · coherence M4 (medium, as an unclassified component with no visual spec)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Ten components carry behaviour or render in a mock with no visual spec and no paper/control classification</h3><span class="finding-location">DESIGN.md § Components, § Shapes</span></header>
+            <div class="finding-note">§ Shapes states the rule as total — "every new component must be classified paper or control before it gets a radius" — and the following carry no classification and no spec: <strong>Score header</strong> (the most emotionally loaded element in the product, no type role assigned), <strong>Trend sparkline</strong> (a chart in a system with no chart language: no stroke, fill, size, colour, or window), <strong>Profile switcher</strong> (persistent chrome in every Parent View screen and in UJ-3), <strong>smart fraction field</strong>, <strong>state chip</strong>, the tablet <strong>question-map rail</strong>, <strong>Legibility result</strong>, <strong>generation progress</strong>, <strong>Draft review list</strong>, the <strong>cost block</strong> the weighted-regenerate control is gated behind, and the <strong>Parent PIN entry</strong> (which § Elevation names but § Components does not). Additionally <code>mastery-row</code> carries <code>role: control</code> and <em>no radius key at all</em> — classified, then not given the thing classification exists to determine.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add rows with an explicit role each, at minimum for Score header, Trend sparkline, Profile switcher and the smart fraction field; give <code>mastery-row</code> a radius; state explicitly if the remainder inherit paper/control roles.</div>
+            <div class="lenses">Found by: rubric (medium) · coherence M4 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">"No third radius, no pill shape" is binding and is violated by required affordances</h3><span class="finding-location">DESIGN.md § Shapes, § Do's and Don'ts; key-results.html, key-take-test.html, key-analytics.html</span></header>
+            <div class="finding-note">§ Shapes states "There is no third radius and no pill shape" as a total classification, yet circular icon frames are load-bearing for the grade-state encoding (Q66), circles are the conventional radio affordance on multiple-choice marks, and status dots render at 50%. As written, a reviewer applying the rule literally would reject the mocks.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a third named class — e.g. <code>glyph-frame: 50%</code>, restricted to state icons and radio marks and explicitly <em>not</em> a surface radius — so the rule stays total and enforceable.</div>
+            <div class="lenses">Found by: coherence M2 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The Score header spec is narrower than the decision and than the mock</h3><span class="finding-location">EXPERIENCE.md § Component Patterns → Score header; key-results.html</span></header>
+            <div class="finding-note">Q8c surfaces the skipped count "wherever unanswered questions exist… including the per-Attempt results summary". The spine's Score header row says only "Score appears; it does not perform… Names any ungraded gap" — no unanswered count. The mock resolved the composition — "You answered 12 of 15 correctly" plus a sub-line "2 not correct · 1 unanswered · Finished in 23:11" — including an elapsed-time element that appears in no decision and no spine, and none of it came back. An implementer building from <code>EXPERIENCE.md</code> ships a bare "12 of 15" header: the exact bare-number failure Q8c forbids on the parent side, and arguably worse on the student side where the skip is the student's own. Related phrasing drift: § Voice and Tone says "You answered 11 of 15" where the mock says "…correctly" — the adverb is load-bearing, since with unanswered questions in the set the spine's version is literally false.</div>
+            <div class="finding-fix"><strong>Fix:</strong> extend the Score header row to specify the sub-line composition (not-correct count, unanswered count where any exist, ungraded gap where any exist); either specify or drop the elapsed-time element; adopt the mock's phrasing in § Voice and Tone.</div>
+            <div class="lenses">Found by: coherence M6 (medium) + L8 (low) · prd-fidelity A-5 (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The trend sparkline has no window, no visual spec, and no stated membership rule</h3><span class="finding-location">EXPERIENCE.md § Component Patterns, § Open Questions #3; key-analytics.html</span></header>
+            <div class="finding-note">The spine says "across recent Practice Tests" and Open Question 3 honestly acknowledges the missing window. The gap is wider than reported on three counts: the sparkline has no visual spec at all (no role, colour, stroke or density in <code>DESIGN.md</code>); nothing states what renders when fewer than a window's worth of Attempts exist, which is the Free-tier default case the empty-state work went to lengths to handle; and nothing states whether retake Attempts are <em>members</em>. If they are, the chart plots exactly the number SM-C3 warns against optimising. The mock quietly answers the window question at 5 attempts without saying so.</div>
+            <div class="finding-fix"><strong>Fix:</strong> fix the window at five recent Practice Tests (matching the mock and FR-26's window), state membership explicitly, say what renders below the count, and add a <code>trend-sparkline</code> component to <code>DESIGN.md</code>.</div>
+            <div class="lenses">Found by: rubric (medium) · prd-fidelity B-6 (high, membership) · coherence L1 (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title"><code>dialog</code> and <code>snackbar</code> have visual spec and no behaviour</h3><span class="finding-location">DESIGN.md § Components; EXPERIENCE.md § Component Patterns</span></header>
+            <div class="finding-note">Neither has an <code>EXPERIENCE.md</code> row. Snackbar is undefined on duration, dismissal, stacking, and live-region announcement — and § Accessibility Floor requires that "every state change that matters (grade resolution, save, submit confirmation) [is] announced via a live region", which is presumably the snackbar's job.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add behavioural rows for both, or drop <code>snackbar</code> from <code>DESIGN.md</code> if nothing uses it.</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The FR-28 activity summary is three words in an IA row</h3><span class="finding-location">EXPERIENCE.md § IA → Analytics dashboard</span></header>
+            <div class="finding-note">"Unstarted vs completed" is the v0 answer to "did my child do it" (PRD §9.2), it leads the dashboard per FR-28, and the rendered mock leads with it — but it has no Component Patterns row, no visual spec, and no appearance in UJ-3's steps.</div>
+            <div class="finding-fix"><strong>Fix:</strong> a Component Patterns row, and put it in UJ-3 step 2 or 3.</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Fractions announce twice, the two alternatives disagree, and the spine and mocks use different rendering mechanisms</h3><span class="finding-location">key-take-test.html; key-results.html; DESIGN.md § Typography</span></header>
+            <div class="finding-note">The input carries both <code>role="img" aria-label="3 over 4"</code> and a sibling <code>.sr-only</code> "You typed 3 slash 4, shown as the fraction three quarters" — the student hears the value three times in three forms. The convention also drifts across artifacts: numeric-and-explicit in the input, word-form in results ("three fifths", "two thirds"). Word forms break for improper and mixed fractions and entirely for algebraic ones; a maths product needs one convention that scales. Separately, <code>DESIGN.md</code> specifies Literata's native OpenType <code>frac</code> as the mechanism while every mock composes fractions from stacked spans with a <code>border-top</code> — different rendering paths with different accessibility characteristics. The spine and the reference implementation disagree about the mechanism for the hard case they are trying to resolve.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one carrier, one convention, product-wide — <code>aria-label="3 over 4"</code>, numeric and explicit. Remove the <code>.sr-only</code> duplicate. Add the convention to <code>DESIGN.md</code> § Typography beside the <code>frac</code> rule, since generation must emit the structured form that produces it, and pick one rendering mechanism.</div>
+            <div class="lenses">Found by: accessibility C5 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Parent View tap targets below the stated 44px floor, with a false claim in the artifact</h3><span class="finding-location">key-capture.html lines 133, 267, 281, 491</span></header>
+            <div class="finding-note">Measured against the product's own floor, which is stricter than WCAG 2.1 AA (2.5.5 is AAA; 2.5.8 arrived in 2.2): the reorder icon buttons render 44 × <strong>21px</strong>, the page-row thumbnail <strong>40</strong> × 52px, the bar-row back control <strong>32 × 32px</strong>. Line 491 of the same file states "Every thumbnail, reorder pair, retake and delete control meets the 44px Parent View tap-target floor" — false for two of the three, and contradicted by the CSS immediately below it. The Student Mode 48px floor holds throughout and was verified clean.</div>
+            <div class="finding-fix"><strong>Fix:</strong> bring all three to a 44px hit area — the reorder pair can keep its 21px visual height via padding or a pseudo-element provided the two do not overlap. Then correct or delete the claim at line 491.</div>
+            <div class="lenses">Found by: accessibility C10 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Page-thumbnail tap target: the memlog says 48px, every artifact says 44px</h3><span class="finding-location">memlog Q10a vs Q5, DESIGN.md § Layout &amp; Spacing, key-capture.html</span></header>
+            <div class="finding-note">Q10a specifies "min 48px targets" for thumbnails; the Parent View floor is 44px and every downstream artifact uses it. 44 is correct and Q10a's 48 looks like an inherited-by-mistake Student number, but it is an unreconciled contradiction in the canonical log with no entry recording the change.</div>
+            <div class="finding-fix"><strong>Fix:</strong> a one-line memlog correction noting Q10a's 48px is superseded by the Q5 parent floor of 44px.</div>
+            <div class="lenses">Found by: coherence M1 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title"><code>answer-key-row</code> is the only paper-role component with no <code>background</code> key</h3><span class="finding-location">DESIGN.md frontmatter components</span></header>
+            <div class="finding-note"><code>question-container</code> and <code>explanation-panel</code> both declare it.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add <code>background: '{colors.background-paper}'</code>.</div>
+            <div class="lenses">Found by: rubric (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Question-map cells announce their number twice, and State 3 degrades the markup</h3><span class="finding-location">key-take-test.html .map-cell</span></header>
+            <div class="finding-note">The visible <code>7</code> is not hidden, so the cell announces "7 Question 7, not answered, you are here" — fifteen times, on the most-used affordance on the screen. <code>.map-cell{cursor:default}</code> on a real <code>&lt;button&gt;</code> is wrong. In State 3 the rail cells degrade to <code>&lt;span class="map-cell"&gt;</code> with the visually-hidden text removed entirely, inconsistent with the same component two states earlier.</div>
+            <div class="finding-fix"><strong>Fix:</strong> <code>aria-hidden="true"</code> on the number; <code>cursor:pointer</code>; make State 3 use the same markup as States 1 and 2.</div>
+            <div class="lenses">Found by: accessibility C16 (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title"><code>role="img"</code> fractions are opaque to braille and character navigation</h3><span class="finding-location">every .frac element in key-take-test.html and key-results.html</span></header>
+            <div class="finding-note">Satisfies SC 1.1.1 and is the right call for AA. The cost is that the fraction becomes a single opaque node: a student on a braille display cannot inspect it digit by digit and gets the label as prose rather than as Nemeth or UEB maths. A real limitation for a maths product, not a conformance failure at the committed level.</div>
+            <div class="finding-fix"><strong>Fix:</strong> record as an accepted v0 limitation with a named upgrade path — MathML with <code>alttext</code>, sourced from the structured fraction output § Typography already requires generation to emit. The prerequisite is already committed, so the upgrade is cheap later, provided nobody "simplifies" generation back to free-text fractions in the meantime.</div>
+            <div class="lenses">Found by: accessibility C17 (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">The unanswered glyph is low-salience for a 10-year-old</h3><span class="finding-location">key-results.html .chip--unanswered</span></header>
+            <div class="finding-note">An em-dash inside a 2px dashed circle at 14px. Against a check, a cross and an ellipsis, a short horizontal rule is the least legible of the four at a glance for a young reader, and the dashed frame reduces it further. Cognitive and legibility, not WCAG.</div>
+            <div class="finding-fix"><strong>Fix:</strong> consider a hollow circle or a slash. Test with an actual 10-year-old if any usability session happens.</div>
+            <div class="lenses">Found by: accessibility R7 (low)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>4. State coverage</h2>
+          <span class="verdict-pill verdict-thin">thin</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>What is covered is covered exceptionally well: submit-with-gaps, timer expiry, interrupted Attempt, Explanation loading / failure / at-cap, degraded grading, late grade resolution, generation in flight and failure, durable drafts, silent PIN timeout with uncommitted-input persistence, four distinct empty states, PIN cooldown, thin Extraction. Each states the rejected alternative and the reason. Fifteen rows is a lot of real behaviour. The gaps are systematic rather than random — they are the states nobody asked a question about, plus one state that was specified with unusual care and then never rendered.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">No camera-permission-denied state anywhere</h3><span class="finding-location">EXPERIENCE.md § State Patterns; § Foundation; UJ-1 steps 3–4</span></header>
+            <div class="finding-note">§ Foundation commits to camera access through the browser and the entire capture flow assumes the viewfinder opens. A browser permission denial or an unavailable camera is the single most likely hard failure in the parent's five-minute kitchen path — and camera-roll upload, the UX-originated addition in this very session, is the ready-made fallback.</div>
+            <div class="finding-fix"><strong>Fix:</strong> a State Patterns row — permission denied or camera unavailable falls back to camera-roll selection with a plain statement, never a dead end.</div>
+            <div class="lenses">Found by: rubric (high)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">No offline / network-loss state, in a product where every grade, Explanation and generation is a server call</h3><span class="finding-location">EXPERIENCE.md § State Patterns; PRD §9.2, FR-18, FR-15</span></header>
+            <div class="finding-note">The closest coverage is "Interrupted Attempt survives interruption", which addresses app-backgrounding, not connectivity. A tablet dropping wifi mid-Attempt is the realistic case. PRD fidelity sharpens this into an unexamined dependency the spine's own decisions create: FR-18 requires an in-progress Attempt to survive backgrounding, refresh and sleep, and the spine adds auto-submit at expiry — while §9.2 states network is required. What happens when the timer expires on a sleeping or offline tablet is unspecified, and submission triggers AI grading, which needs the network.</div>
+            <div class="finding-fix"><strong>Fix:</strong> a State Patterns row covering submit-while-offline (FR-18 persistence is the mechanism), Explanation request while offline — which must be distinguishable from the FR-24 failure state <em>and</em> from the at-cap state, since the copy rules differ — and generation while offline. Answer the expiry-while-offline case explicitly.</div>
+            <div class="lenses">Found by: rubric (high) · prd-fidelity B-14 (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">The Explanation at-cap state is the override's own flagged consequence and is the one state no mock renders</h3><span class="finding-location">memlog untagged override entry, Q13b; key-results.html (four states, none at-cap)</span></header>
+            <div class="finding-note">The override entry itself names it: "a NEW at-cap state is required in Student Mode, which is the first allowance wall the PRD's design ever places in front of a child… its copy and behaviour must be specified with unusual care." The results screen is the only place the cap can be met, and it is the screen where the constraint list is longest: plain statement, no counter, blame the plan not the child, and the answer key, previously-read Explanations, the grade-dispute flag and Retake must all keep working. Every <em>other</em> Explanation state was proven in the mock — canonical, loading, failed, degraded grading. The one carrying the binding copy constraint was not. Untested copy plus an untested "everything stays live" contract is where the child-facing failure lands.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a fifth state to <code>key-results.html</code> rendering the at-cap expanded region, or record explicitly in § Open Questions that this state is specified-but-unrendered so the implementer knows there is no reference.</div>
+            <div class="lenses">Found by: coherence H4 (high)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">No live region for the state changes the spine itself requires be announced</h3><span class="finding-location">EXPERIENCE.md § Accessibility Floor vs key-results.html score div, State 4</span></header>
+            <div class="finding-note">The Accessibility Floor requires "every state change that matters — grade resolution, save, submit confirmation — announced via a live region". The score header is a plain <code>&lt;div&gt;</code> with no <code>role="status"</code>, and the degraded-grading state has no announcement mechanism at all. The ungraded→graded resolution is the sharp case: § State Patterns is explicit that a score "can legitimately change between two viewings and that must never read as the app changing its mind", and that a resolved Question "must be <em>visibly</em> a newly graded item, not a silently altered one". <em>Visibly</em> is the operative word — the requirement is stated in visual terms only, and for a user who cannot see it the score silently differs from last time, which is exactly the reading the design set out to prevent.</div>
+            <div class="finding-fix"><strong>Fix:</strong> <code>role="status"</code> on the score header populated only on the degraded→resolved transition, never on first render; newly graded rows carry a visually-hidden "Newly graded" prefix ahead of the grade-state label, which satisfies SC 4.1.3 and the spine's own rule with one mechanism; same treatment for submit confirmation and for uncommitted-edit persistence in Parent View.</div>
+            <div class="lenses">Found by: accessibility C15 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">No cold-load / first-paint state for any surface</h3><span class="finding-location">EXPERIENCE.md § State Patterns</span></header>
+            <div class="finding-note">Student Home, the Analytics dashboard, the Mastery table and Pending drafts all render server data; only the Explanation panel and Generation progress specify a loading treatment. Given the ban on motion outside four named cases, whether a skeleton is permitted is a real open question a builder will resolve by guessing.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one rule — what the product shows while a list or dashboard loads, and whether it is exempt from the motion ban.</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">No error state for Upload / Classify, and the FR-5 page ceiling has no at-limit behaviour</h3><span class="finding-location">EXPERIENCE.md § State Patterns; § Component Patterns → Capture strip</span></header>
+            <div class="finding-note">Legibility failure, thin Extraction and generation failure are all covered. An upload that fails outright, a Page Image over a size limit, and an 11th page against the 1–10 ceiling are not. The ceiling is mentioned in the Capture strip row with no behaviour attached.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one row covering the capture ceiling and upload failure.</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Admin's three surfaces have no states at all</h3><span class="finding-location">EXPERIENCE.md § IA → Admin; UJ-4</span></header>
+            <div class="finding-note">"Same tokens, no craft" is a defensible decided posture for polish, but the Flagged Explanations queue is named in UJ-4 as the one Admin screen with a claim on real attention, and an empty queue — the normal case — has no treatment. Related: FR-30a specifies Admin consumption as two counters (uploads, generations); the Explanation-cap override adds a third, and the Admin Parent Accounts screen is still described with the two-counter shape. The operator is the person who acts on tiers, and if the Explanation cap is the wall that generates support contacts, this is where it must be visible.</div>
+            <div class="finding-fix"><strong>Fix:</strong> either state explicitly "Admin inherits default states and receives no designed empty states" — which is what the memlog decided — or give the flagged queue its empty and worked states. Add the third counter to the Admin consumption view.</div>
+            <div class="lenses">Found by: rubric (medium) · prd-fidelity B-12 (medium, third counter)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Ungraded resolution can retroactively create a Weak Area, and no rule covers it</h3><span class="finding-location">EXPERIENCE.md § State Patterns → late grade resolution; § Component Patterns → Mastery table</span></header>
+            <div class="finding-note">The spine handles the <em>score</em> changing between viewings with care. It does not handle the same transition in Analytics, where a resolved batch of ungraded Questions can push a Topic across the five-question floor and produce a Weak Area flag that was not there an hour ago. The rule for the results screen exists; the parallel rule for the dashboard does not — and the same problem recurs for a parent grade override, which mutates the score and the Topic's Mastery by design.</div>
+            <div class="finding-fix"><strong>Fix:</strong> extend the "newly resolved, not silently altered" rule to the Analytics surfaces, and reuse it as the answer for the FR-25 override.</div>
+            <div class="lenses">Found by: prd-fidelity A-4c (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title"><code>prefers-reduced-motion</code> is absent from the screen with the most motion, and the fallbacks are unspecified</h3><span class="finding-location">key-take-test.html (no block anywhere); EXPERIENCE.md § Interaction Primitives</span></header>
+            <div class="finding-note">The test-taking screen is where two of the five permitted motions live — question-to-question transitions and question-map open/close — and it is the only key screen with no <code>prefers-reduced-motion</code> block. <code>DESIGN.md</code> § Do's and Don'ts is unambiguous: "Honour <code>prefers-reduced-motion</code> everywhere / Treat reduced motion as optional polish." Beyond the missing query, no artifact says <em>what the fallback is</em> for each permitted motion. "Honour it" is a policy, not a specification.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add the block, and specify the fallback per motion — question→question: instant swap with focus to the new question heading; map open/close: instant; Explanation expand/collapse: instant, region appears in place; generation progress: determinate bar updates in steps, no indeterminate sweep (<code>key-capture.html</code> already does this correctly); route transitions: instant.</div>
+            <div class="lenses">Found by: accessibility C11 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Focus management is unspecified for every navigation event</h3><span class="finding-location">EXPERIENCE.md § Interaction Primitives, § Component Patterns; no mock demonstrates it</span></header>
+            <div class="finding-note">"Focus order follows reading order" is a static property. Nothing says where focus <em>goes</em> after Next/Back between questions, a question-map jump, closing the map, opening or closing the submit dialog, or expanding an Explanation. Without a specification, focus resets to document start on each question change and a keyboard user tabs past the app bar, the timer and the counter fifteen times. The Explanation expand is the subtler one: <code>role="region"</code> with a label does not announce on expansion — nothing fires, so a student taps "Explain this", the wait resolves, and unless focus or a live region carries it, nothing is spoken.</div>
+            <div class="finding-fix"><strong>Fix:</strong> specify the focus target for each in § Component Patterns — Next/Back and map-jump → the question heading with <code>tabindex="-1"</code>; map close → the trigger; dialog open → the dialog heading, close → the trigger; Explanation expand → focus stays on the toggle while a polite live region inside the expanded area announces the loaded body.</div>
+            <div class="lenses">Found by: accessibility R2 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The question-map panel is a dialog without modal semantics</h3><span class="finding-location">key-take-test.html State 2</span></header>
+            <div class="finding-note"><code>role="dialog" aria-label="Your questions"</code> over an <code>aria-hidden</code> surface and a scrim, with no <code>aria-modal</code>, no stated focus trap, no Esc-to-close and no focus restoration. It is modal in every respect except the one that tells assistive technology it is. The submit confirmation two states later gets this exactly right.</div>
+            <div class="finding-fix"><strong>Fix:</strong> match the submit dialog — <code>aria-modal="true"</code>, focus trap, Esc closes, focus restores to the trigger.</div>
+            <div class="lenses">Found by: accessibility R3 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The silent PIN idle timeout is defensible, but not for the reason given, and screen-reader reading may not register as activity</h3><span class="finding-location">EXPERIENCE.md § State Patterns → PIN idle timeout; memlog Q14a–c</span></header>
+            <div class="finding-note">Accessibility accepts the no-warning decision and strengthens the argument: SC 2.2.1 governs time limits on <em>completing an activity</em>, and because Q14c makes durability a hard requirement — uncommitted edits, review position, partial uploads all survive exactly — the timeout is a re-authentication event, not a limit on completing an activity. That is the strongest available answer. It is <em>not</em> a security exception; SC 2.2.1 has none. Which means <strong>the no-loss guarantee is load-bearing for conformance and cannot be traded away later as a scope cut</strong>, and nothing records that. The open hazard: a user navigating with a virtual cursor generates no scroll, pointer or key events on several common stacks, so a parent using a screen reader to read a 75-question draft — precisely the workload the 15-minute window was sized around, and precisely the user who reads slowest — can be actively working and still trip a timer that Q14a promises "never interrupts an actively working parent". The window was chosen against sighted reading speed. Users with motor or cognitive disabilities also pay the most to re-enter a PIN and re-orient after an unannounced context change, even with nothing lost.</div>
+            <div class="finding-fix"><strong>Fix:</strong> define activity to include assistive-technology reading (focus changes, <code>aria-activedescendant</code> movement, virtual-cursor events where detectable) or fall back to a heartbeat that does not depend on pointer and key events — this is the near-defect. Then: make the duration configurable in Settings, which converts the whole question into an unambiguous SC 2.2.1 <em>adjust</em> pass for one setting; and announce the transition on arrival with <code>role="alert"</code> ("Parent View closed. Your work is saved.") — silent <em>before</em> the timeout is the decision and is not challenged, but silent <em>after</em> leaves a non-visual user with no idea why the content changed. Record the no-loss guarantee as accessibility-load-bearing.</div>
+            <div class="lenses">Found by: accessibility R1 (medium-high) · prd-fidelity B-4 (high, as an unlogged PRD addition)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The FR-27 five-question floor interaction is gestured at, not specified</h3><span class="finding-location">EXPERIENCE.md § Grade States; § Component Patterns → Mastery table</span></header>
+            <div class="finding-note">The spine says only that a heavy skipper "takes longer to reach the five-question Weak Area floor", which implies unanswered Questions do not count toward it. Three things remain unstated: whether <em>ungraded</em> Questions count (excluded from the denominator, so presumably not — but they resolve later, so the floor can be crossed retroactively); whether the floor counts Questions inside FR-26's rolling 5-Attempt window or across the profile's lifetime, which FR-27 does not say either; and what the empty-state copy's "He's answered 3 so far" counts, since under the four-state model "answered" must mean correct+incorrect only — worth making explicit because the number is shown to a parent.</div>
+            <div class="finding-fix"><strong>Fix:</strong> state all three in § Grade States alongside the Mastery formula.</div>
+            <div class="lenses">Found by: prd-fidelity A-4b (medium)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>5. Visual reference coverage</h2>
+          <span class="verdict-pill verdict-thin">thin</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p><code>mockups/</code> and <code>wireframes/</code> do not exist; <code>imports/</code> exists and is empty. On the letter of the check there is nothing to orphan. In substance there is: <code>.working/</code> holds seven rendered HTML explorations, and the memlog treats four of them as the canonical resolution of specific decisions. Neither spine links to any of them, and — as the coherence and accessibility lenses establish across a dozen findings — the mocks and the spines already disagree in several places, with no rule saying which wins.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Seven rendered references, zero links</h3><span class="finding-location">.working/; DESIGN.md; EXPERIENCE.md</span></header>
+            <div class="finding-note">Four of the seven are not exploration but resolution: <code>key-take-test.html</code> resolved the tablet question-map rail, <code>key-analytics.html</code> resolved the drill-down cost block and the empty-state meters, <code>key-results.html</code> resolved the grade-state encoding and the fraction text alternative, <code>key-capture.html</code> resolved the generation-progress copy. Anyone consuming the spines cannot find the pictures that settled the arguments.</div>
+            <div class="finding-fix"><strong>Fix:</strong> inline-link the four key-screen renders at the relevant sections — <code>key-take-test</code> at § Responsive → Take Test, <code>key-analytics</code> at the Mastery table, <code>key-results</code> at Answer-key row / Grade States, <code>key-capture</code> at the Capture strip — naming what each shows; link the two theme explorations and the type pairing from <code>DESIGN.md</code> § Colors and § Typography.</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The spines-win-on-conflict rule is never stated, and the artifacts already conflict</h3><span class="finding-location">EXPERIENCE.md § Foundation</span></header>
+            <div class="finding-note">§ Foundation states the DESIGN/EXPERIENCE precedence rule and says nothing about precedence over the rendered mocks. Across this review the mocks and spines disagree on: grade-state labels, grade-state colour roles, the allowance reset date, the scrim value, the parent accent in light mode, tint tokens, the score-header composition, the fraction rendering mechanism, and the sparkline window. Without a precedence rule each of those is resolved by whichever artifact the implementer opened first.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one sentence in § Foundation. Note that it cuts both ways — several of the conflicts above are cases where the <em>mock</em> is right and the spine is stale, so the rule needs to be "the spines win, and where a mock is right the spine gets corrected first".</div>
+            <div class="lenses">Found by: rubric (medium) · coherence (implicated across C2, H1, M7, M8, L4)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title"><code>key-capture.html</code> paints a light-mode screen with the dark-mode parent accent</h3><span class="finding-location">key-capture.html shutter ring, Done button border</span></header>
+            <div class="finding-note">The file declares <code>--primary:#0B5FA5</code> correctly, then hardcodes <code>#7FB6E8</code> — the <em>dark</em> value — as the shutter ring border and the Done button border on a <code>#F6F8FA</code> light ground. It reads as a fifth accent no token defines, it is well below AA as a meaningful border on white, and the shutter is the most important control on the screen. It also breaks the one-token-diverges discipline the mock exists to demonstrate.</div>
+            <div class="finding-fix"><strong>Fix:</strong> replace both occurrences with <code>var(--primary)</code>.</div>
+            <div class="lenses">Found by: coherence M7 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The allowance reset date differs across the two mocks and the spine</h3><span class="finding-location">key-capture.html; key-analytics.html; EXPERIENCE.md § Voice and Tone / § State Patterns</span></header>
+            <div class="finding-note">"Resets 1 October" in capture and in the spine; "Your allowance resets on 1 September" in analytics. All artifacts are dated 2026-08-29, so the next calendar-month boundary is 1 September. Example copy, so low blast radius alone — but it sits directly on Open Question 5, the unfixed month-boundary definition, and two mocks demonstrating two boundaries is how that open question turns into a bug.</div>
+            <div class="finding-fix"><strong>Fix:</strong> make all three read 1 September, and resolve Open Question 5.</div>
+            <div class="lenses">Found by: coherence M8 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Dark mode is unrendered; the declared pairs hold but the state-bearing washes have no dark values</h3><span class="finding-location">all four mocks (light only)</span></header>
+            <div class="finding-note">Accessibility computed every declared dark pair and all pass, most comfortably — 7.64:1 to 15.55:1 — and <code>DESIGN.md</code>'s specific claim of 14.05:1 for question body on paper-dark is exactly right. The residual dark-mode risk is entirely the divider at 1.27:1 and the undeclared washes that carry state and have no dark counterparts. Fix those two and dark mode is genuinely clean.</div>
+            <div class="finding-fix"><strong>Fix:</strong> render one key screen in dark before dark mode is treated as verified — the results screen, since it carries all four grade states plus the tinted row grounds.</div>
+            <div class="lenses">Found by: accessibility R4 (low-medium)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>6. Bloat &amp; overspecification</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>No pixel specs where a token covers it — <code>EXPERIENCE.md</code> contains no hex and no px, and every dimension in <code>DESIGN.md</code> is a token definition rather than a per-component override. No persona restatement, no FR restatement, no scope recap. Tables carry the load; prose is reserved for rules that need a reason. § Brand &amp; Style earns its editorial voice and stays inside <code>DESIGN.md</code>, where the rubric allows it. "Decisions That Travel Upstream" and "Open Questions" are exactly the kind of invented section that earns its place — they are what stops architecture inheriting a contradiction.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The responsive rule is stated twice, near-verbatim, in both spines</h3><span class="finding-location">DESIGN.md § Layout &amp; Spacing ¶5–6; EXPERIENCE.md § Responsive &amp; Platform</span></header>
+            <div class="finding-note">Both carry "Breakpoint-specific layouts only where the device changes the task", both name the same two screens, and both carry "Density is split by surface; breakpoint is independent". Duplication across a spine pair is a drift surface.</div>
+            <div class="finding-fix"><strong>Fix:</strong> keep the density-vs-breakpoint invariant in <code>DESIGN.md</code> (it is a spacing-token rule) and the per-screen layout table in <code>EXPERIENCE.md</code>, with a pointer rather than a restatement.</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Rejected-option archaeology in several State Patterns cells</h3><span class="finding-location">EXPERIENCE.md § State Patterns</span></header>
+            <div class="finding-note">"Blocking was rejected (it traps a student…); silent submission was rejected (it punishes a mis-tap)", "Auto-retry was rejected: it can silently double a wait". This is memlog content. It is defensible here as a guard-rail against relitigation and is genuinely short, so this is a preference, not a defect.</div>
+            <div class="finding-fix"><strong>Fix:</strong> if trimmed, keep the <em>rule</em> and drop the <em>rejected</em> clause.</div>
+            <div class="lenses">Found by: rubric (low, preference)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">§ Open Questions runs 17 rows doing two jobs</h3><span class="finding-location">EXPERIENCE.md § Open Questions</span></header>
+            <div class="finding-note">Eleven of the seventeen are post-launch revisit triggers rather than open questions. They are valuable and correctly labelled, but they read as one list doing two jobs — and the list is also where three genuinely open items are currently buried (the SC 2.2.1 exemption, the fraction mechanism, the Q13a interpretation).</div>
+            <div class="finding-fix"><strong>Fix:</strong> split into "Open" (1–5, 17) and "Revisit conditions" (6–16).</div>
+            <div class="lenses">Found by: rubric (low, preference)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>7. Inheritance discipline</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p><code>sources</code> frontmatter resolves in both files. All four UJ names are verbatim from PRD §2.3. Glossary usage is exact throughout both spines with no coined synonyms and no drift. Component names are byte-identical across all sections. Every token reference resolves. Where inheritance breaks is not naming but <em>content</em>: three PRD rules are inherited with a load-bearing clause missing, and the PRD-fidelity lens finds two more that are inherited backwards — described as closing gaps the PRD leaves open when the PRD states the opposite.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">Timer expiry contradicts FR-15 and is filed as a gap closure, so no override exists</h3><span class="finding-location">EXPERIENCE.md § State Patterns → Timer expiry; § Decisions That Travel Upstream → PRD gaps closed here; memlog Q8b(3)</span></header>
+            <div class="finding-note">FR-15 states plainly: "On timer expiry the Attempt auto-submits <strong>with unanswered Questions graded incorrect</strong>." <code>EXPERIENCE.md</code> asserts the opposite premise and the opposite outcome: "The PRD… <strong>never states what expiry does</strong>" and "Unanswered Questions at expiry are recorded as <strong>unanswered, not wrong</strong>." Two consequences. First, the auto-submit half is not a UX-originated gap closure at all — it is compliance with FR-15, and filing it as a gap invites a PRD update that "adds" a requirement already present. Second, the unanswered-not-wrong half is a genuine contradiction and is therefore missing from <em>PRD overrides</em>, where it belongs alongside the Explanation-cap override. Architecture reading FR-15 implements <code>graded incorrect</code>; architecture reading <code>EXPERIENCE.md</code> implements a distinct <code>unanswered</code> state excluded from the Mastery denominator. These produce different Mastery numbers, different Weak Area calls, and different scores on the same Attempt. It also silently invalidates the memlog Q8b reasoning chain, which builds the whole distinct-unanswered-state decision on the premise that the PRD is silent here.</div>
+            <div class="finding-fix"><strong>Fix:</strong> move it to <em>PRD overrides</em>, state it against FR-15 explicitly, and note that FR-15's third consequence must be rewritten in the PRD. Correct the false premise in both the spine and the memlog.</div>
+            <div class="lenses">Found by: prd-fidelity B-1 / A-3 (critical) — sole finder, and the only lens positioned to catch it</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">The Mastery formula drops FR-26's rolling window and first-Attempt-only rule</h3><span class="finding-location">EXPERIENCE.md § Grade States; § Decisions That Travel Upstream</span></header>
+            <div class="finding-note">The spine states "<strong>Mastery = correct / (correct + incorrect) per Topic</strong>" as the whole rule. FR-26 adds two constraints the spine never carries: Mastery is computed over a <strong>rolling window of the 5 most recent qualifying Attempts</strong> that included that Topic, and <strong>only the first Attempt on a given Practice Test qualifies</strong>. The rolling window appears in this spine only as a passing rationale for not drawing per-Topic trend lines; the retake exclusion appears nowhere at all. The refinements section says "FR-26 and FR-27 must be read with these refinements", but the spine's own formula read literally <em>replaces</em> FR-26 rather than refining it. This is the most implementable-looking sentence in the section and the one an engineer will copy.</div>
+            <div class="finding-fix"><strong>Fix:</strong> state the full rule — <code>correct / (correct + incorrect)</code> computed over the qualifying Attempts inside FR-26's rolling 5-Attempt window — in § Grade States.</div>
+            <div class="lenses">Found by: rubric (high) · prd-fidelity B-5 / A-4a (high)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Retake Attempts are one tap from everywhere and marked non-qualifying nowhere</h3><span class="finding-location">EXPERIENCE.md § Component Patterns → Practice Test card, Trend sparkline; UJ-2 step 8</span></header>
+            <div class="finding-note">FR-20 and FR-26 are explicit that retake Attempts are scored and shown but do not contribute to Mastery, and SM-C3 exists specifically to catch the product being used as a memorisation loop. The spines put <strong>Retake</strong> one tap from every completed test and show completed scores on the Student Home card, and no surface — card, results header, parent drill-down, Attempt history — distinguishes a qualifying first Attempt from a non-qualifying retake. Two questions fall straight out: which score does a completed Practice Test card show after three retakes, and does the trend sparkline include retake Attempts? If it does, it plots exactly the number SM-C3 warns against optimising; if it does not, that is a rule nobody has written down. UJ-2 ends on "He taps Retake" with no indication that retaking moves nothing on his mother's dashboard — a user-visible consequence with no UX answer.</div>
+            <div class="finding-fix"><strong>Fix:</strong> state the card's post-retake score rule and the sparkline's membership rule, and decide whether the parent-facing Analytics or the student-facing Retake surfaces the fact that retakes do not count.</div>
+            <div class="lenses">Found by: prd-fidelity B-6 (high) · rubric (high, within the Mastery finding)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-28's "filterable by Subject" is dropped from the Mastery table</h3><span class="finding-location">EXPERIENCE.md § Component Patterns → Mastery table</span></header>
+            <div class="finding-note">The table is specified in full — ranked, weakest-first, inline bars, answered count, skipped count, Weak Area marker, row tap — with no Subject filter, while PRD UJ-3 additionally describes "a list of his most-missed topics across subjects". With one Subject this is invisible; the moment a family uploads Math and Science the ranked list interleaves two Subjects whose Topics are, per FR-26a, deliberately scoped per Subject.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add the filter, or record dropping it as a deliberate v0 decision with its rationale.</div>
+            <div class="lenses">Found by: rubric (high) · prd-fidelity B-9 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-16's Subject grouping is contradicted by the flat Student Home, and the contradiction is never named</h3><span class="finding-location">EXPERIENCE.md § Component Patterns → Student Home list; memlog Q7b</span></header>
+            <div class="finding-note">FR-16: "A student can see their released and completed Practice Tests, <strong>grouped</strong> and labeled by Subject and state." The spine: "Flat list, <strong>no Subject grouping</strong>." Q7b reasons the choice through on its merits and is a defensible call, but never mentions FR-16, and the departure does not reach <em>Decisions That Travel Upstream</em>. Labelling by Subject is honoured; grouping is dropped. A small requirement to break and an easy one to defend — but as it stands, a workflow deriving acceptance criteria from FR-16 writes a grouping requirement the UX has deliberately rejected.</div>
+            <div class="finding-fix"><strong>Fix:</strong> log it as a departure against FR-16 in <em>Decisions That Travel Upstream</em>.</div>
+            <div class="lenses">Found by: prd-fidelity B-2 (high)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Camera-roll upload is mis-classified as a gap closure — FR-5 already mandates it</h3><span class="finding-location">EXPERIENCE.md § Decisions That Travel Upstream → PRD gaps closed here; memlog Q10a</span></header>
+            <div class="finding-note">The spine says the PRD "never rules out the camera roll". FR-5 is titled <em>Multi-page capture <strong>and library selection</strong></em> and states that a parent adds Page Images "using the device camera <strong>or the device photo library</strong>", with "library multi-select available on mobile web". The PRD does not fail to rule it out — it requires it. Rated <strong>high on the accuracy of the log</strong> (a PRD update executed from this entry adds a duplicate requirement) and <strong>low on the design</strong>, which is correct and well-specified. The behavioural additions the spine genuinely contributes — mixed freely in one Source Test, source never surfaced as a distinction, identical ceiling and legibility treatment — are real elaborations of FR-5 and worth keeping. One sub-finding at medium: FR-5 requires library <em>multi-select</em> while also saying pages are "captured or selected one at a time and appended in order", so the PRD is itself ambiguous — and the spine inherits the ambiguity rather than resolving it, which is the opposite of what a spine is for.</div>
+            <div class="finding-fix"><strong>Fix:</strong> drop the gap framing, keep the elaborations, and resolve the multi-select-vs-one-at-a-time question in the Capture strip row.</div>
+            <div class="lenses">Found by: prd-fidelity A-2 (high on log accuracy, low on design; sub-finding medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">Open Question #1 records a question the memlog closed — and the accessibility lens says it did not</h3><span class="finding-location">EXPERIENCE.md § Open Questions #1; memlog final entry; key-take-test.html</span></header>
+            <div class="finding-note">The rubric lens reads the memlog's final entry as closing this concretely: "typographic fractions are marked <code>role='img'</code> with a spoken text alternative… <strong>closing the Q18 hard case</strong>", with <code>key-take-test.html</code> applying the same treatment to the typed input as it live-renders — so a resolved accessibility decision is recorded as open and will be re-decided, probably differently.</div>
+            <div class="disagree"><strong>Lenses disagree, and this one is substantive.</strong> Accessibility examined the same artifact and found <code>role="img"</code> applied to a <code>&lt;div&gt;</code> that is not an input at all — no <code>&lt;input&gt;</code>, no label, no programmatic value — and holds that Open Question 1 asks precisely the unresolved question: how the raw typed string stays the programmatic value while non-text glyphs occupy the visible field. On that reading the memlog closed the <em>generated-content</em> half of the hard case and left the <em>input</em> half open, and the mock does not demonstrate a resolution because the mock has no input. Reconcile by splitting the question: close it for generated content with the <code>role="img"</code> + spoken-alternative rule moved into § Accessibility Floor hard case 1, and keep it open for the input until the mechanism in the accessibility fix is adopted.</div>
+            <div class="finding-fix"><strong>Fix:</strong> move the generated-content rule into § Accessibility Floor and § Component Patterns; rewrite Open Question 1 to name only the input mechanism, then close it with the real-<code>&lt;input&gt;</code>-plus-sibling-render answer.</div>
+            <div class="lenses">Found by: rubric (high) · accessibility C4 (high) — <strong>disagreeing on whether it is closed</strong></div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The Weak Area threshold is stated in neither spine</h3><span class="finding-location">EXPERIENCE.md § Component Patterns → Mastery table; DESIGN.md § Components → Mastery row</span></header>
+            <div class="finding-note">FR-27 sets it at <strong>below 60% Mastery</strong> with the five-question floor. <code>EXPERIENCE.md</code> names the five-question floor four times and the 60% threshold zero times; <code>DESIGN.md</code> gives <code>mastery-row</code> a <code>barFillOk</code> and a <code>barFillWeak</code> with nothing saying which fires when. The rendered mock even has an explicit threshold divider row. A builder cannot render the Mastery table without inventing a number.</div>
+            <div class="finding-fix"><strong>Fix:</strong> state 60% in both places.</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The tablet question-map rail lost its binding no-mid-test-feedback qualifier</h3><span class="finding-location">EXPERIENCE.md § Responsive &amp; Platform → Take Test</span></header>
+            <div class="finding-note">The spine allocates the tablet surplus to "a persistently visible question map beside the Question" and drops the memlog's explicit qualifier: the rail shows <strong>answered/not-answered state only — no score, no correctness hint, nothing that would constitute mid-test feedback</strong>. PRD §9.1 requires no mid-test feedback, so this is the constraint that keeps a persistent rail legal.</div>
+            <div class="finding-fix"><strong>Fix:</strong> restore the qualifier to the Take Test row.</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The Q13a generation-progress reading is an unconfirmed interpretation presented as settled</h3><span class="finding-location">EXPERIENCE.md § State Patterns → Generation in flight; § Voice and Tone constraint 3; UJ-1 step 6; § Open Questions #17</span></header>
+            <div class="finding-note">The memlog is explicit that the user answered "A" among three A-variants and that "generation continues server-side and no work is lost" is the reviewer's <em>interpretation</em>, to be corrected if wrong. § Open Questions 17 flags this honestly, but the State Patterns row, the Voice and Tone constraint and UJ-1 step 6 all state it as decided fact with no hedge, and the copy constraint is written as binding. The risk is asymmetric: if the interpretation is wrong, the shipped copy tells a parent something false.</div>
+            <div class="disagree"><strong>Lenses disagree:</strong> coherence L3 verifies this as <em>properly handled</em> — the interpretation is flagged in the memlog, carried forward in Open Question 17, and implemented consistently in the mock, so nothing is hidden. Rubric and PRD fidelity both hold that honest flagging seventeen rows later does not offset three binding statements made without a hedge. The reconciliation is procedural: it is one question to the user, and until it lands the State Patterns row should be marked provisional.</div>
+            <div class="finding-fix"><strong>Fix:</strong> get the confirmation before handoff; until it lands, mark the State Patterns row provisional rather than only footnoting it.</div>
+            <div class="lenses">Found by: rubric (medium) · prd-fidelity A-6a (medium) · coherence L3 (low, "verified as properly handled")</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Open Question #4 — the profile switcher's outstanding-work signal — has a mitigation with no mechanism</h3><span class="finding-location">EXPERIENCE.md § Information Architecture</span></header>
+            <div class="finding-note">§ IA commits to it "where that is cheap" — an escape hatch that will be read at build time as "skip it", quietly removing the mitigation that made the one-child-at-a-time Analytics scope acceptable for Family tier.</div>
+            <div class="finding-fix"><strong>Fix:</strong> decide it. The FR-28 unstarted count is already computed for the dashboard, so "cheap" probably resolves to "yes".</div>
+            <div class="lenses">Found by: rubric (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">FR-9a's warning content is specified in the PRD and dropped in the spine</h3><span class="finding-location">EXPERIENCE.md § State Patterns → Thin Extraction</span></header>
+            <div class="finding-note">FR-9a requires the parent to be shown <strong>the count of usable questions and the count of pages submitted</strong>, and requires that choosing to retake rather than proceed <strong>consumes no Generation Allowance</strong>. The spine reduces this to "Warned before generation fires, with proceeding allowed" — neither the counts nor the no-charge guarantee. The counts are the whole basis on which the parent decides. The no-charge point matters structurally: everywhere else in the spine a cost is stated before it is spent, and this is the one place the correct statement is "this costs you nothing".</div>
+            <div class="finding-fix"><strong>Fix:</strong> name the counts and the no-charge guarantee in the State Patterns row.</div>
+            <div class="lenses">Found by: prd-fidelity B-7 (medium) · rubric (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Explanation grade-level source diverges from FR-24</h3><span class="finding-location">EXPERIENCE.md § Voice and Tone constraint 4; § Decisions That Travel Upstream</span></header>
+            <div class="finding-note">FR-24: "Explanation language is pitched to the <strong>Practice Test's</strong> Grade Level." The spine consistently says the <strong>Student Profile's</strong> Grade Level. These are not the same value — FR-7 lets a parent override Grade Level per upload, and FR-3 lets a profile's Grade Level change without altering existing Practice Tests. A Grade 5 profile promoted to Grade 6 mid-term would get Grade 6 language on explanations for a Grade 5 test. The spine's choice may well be better; it is not flagged as a choice.</div>
+            <div class="finding-fix"><strong>Fix:</strong> pick one and log the departure if it is the spine's.</div>
+            <div class="lenses">Found by: prd-fidelity B-10 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The Explanation-cap override names only FR-31; three other PRD locations carry the same claim</h3><span class="finding-location">EXPERIENCE.md § Decisions That Travel Upstream → PRD overrides</span></header>
+            <div class="finding-note">FR-24's final consequence reads "Explanation generation is never blocked by an Account Tier allowance (FR-31)"; §5.1 justifies ungated Explanations partly because a review gate "would put a wall in front of a child mid-study-session"; §9.1's MVP bullet describes Explanations without qualification. The override text targets FR-31 alone, so a PRD update executed literally would leave FR-24 stating the opposite of FR-31. Everything else about this override is verified complete and internally consistent across eight required consequences — this is the one crack in the best-traced decision in the document.</div>
+            <div class="finding-fix"><strong>Fix:</strong> name all four sites in the override.</div>
+            <div class="lenses">Found by: prd-fidelity A-1a (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The Explanation cap's interaction with Retake is unexamined</h3><span class="finding-location">EXPERIENCE.md § Allowances &amp; Limits; UJ-2 step 8</span></header>
+            <div class="finding-note">FR-24 caches an Explanation against "the same Question <strong>and answer</strong>". A retake producing a different wrong answer is a cache miss and therefore a <strong>new</strong> Explanation, charged against the 10/month. The product's own student journey ends on Retake — the behaviour the cap most directly penalises, on the tier where it applies. Nothing in either spine acknowledges this.</div>
+            <div class="finding-fix"><strong>Fix:</strong> state the interaction in § Allowances &amp; Limits and accept or mitigate it.</div>
+            <div class="lenses">Found by: prd-fidelity A-1b (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Dark mode is added to v0 scope without appearing in the PRD's MVP list</h3><span class="finding-location">DESIGN.md (full dark palette); memlog line 9; PRD §9.1, §6</span></header>
+            <div class="finding-note">The memlog records honestly that the PRD states no dark-mode requirement, then decides dark mode ships in v0 — doubling the token surface and adding a contrast-verification obligation to every component. Defensible and cheap to build alongside, but it is v0 build scope §9.1 does not list, and it does not reach <em>Decisions That Travel Upstream</em>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one row in <em>Decisions That Travel Upstream</em> recording the scope addition.</div>
+            <div class="lenses">Found by: prd-fidelity B-11 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Three respected non-goals interact to produce a dead end</h3><span class="finding-location">EXPERIENCE.md § Allowances &amp; Limits; § Open Questions 11, 12</span></header>
+            <div class="finding-note">Non-goal discipline is the strongest category in this review — the anti-gamification posture is enforced structurally rather than by exhortation, and the refusal to name the Free tier as the cause of an empty dashboard <em>because there is no upgrade path</em> is a genuinely principled call. But the Free-tier Explanation cap creates the product's only wall landing on a person who cannot act on it, and the combination of <em>a limit a child meets</em> + <em>no notifications</em> + <em>no self-serve upgrade</em> means the resolution path is: the child stops asking, and the parent finds out only if she opens Analytics and thinks to look at a counter in Settings. Three respected non-goals producing a dead end.</div>
+            <div class="finding-fix"><strong>Fix:</strong> state it as an accepted cost of the override rather than leaving it to be discovered.</div>
+            <div class="lenses">Found by: prd-fidelity D-1 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">The density chain's stated premise is false, and DESIGN.md contradicts itself about it</h3><span class="finding-location">DESIGN.md § Layout &amp; Spacing vs § Brand &amp; Style</span></header>
+            <div class="finding-note">§ Layout &amp; Spacing: "Spacing is the <strong>only</strong> remaining differentiator between the two rooms". § Brand &amp; Style: the split is "carried by <strong>accent hue and spacing density only</strong>". Two sentences in one document disagree on how many differentiators exist, and the count is wrong in both — accent hue, spacing density, tap-target floor (48/44, pinned in the same section) and voice/address (Q17a) all differ by surface. The <em>conclusion</em> — two named density token sets — survives on its independent rationale, because components reading a named density token is enforceable in code review where per-surface judgment is not. The premise as written is what an implementer will quote back when arguing that some other token may diverge "since spacing is the only split anyway".</div>
+            <div class="finding-fix"><strong>Fix:</strong> rewrite to "Spacing is the only <em>dimensional</em> differentiator" and cross-reference the full list of surface-divergent things once, in § Brand &amp; Style.</div>
+            <div class="lenses">Found by: coherence M5 (medium)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Two of the three memlog coverage gaps did not survive distillation</h3><span class="finding-location">memlog line 67 vs EXPERIENCE.md § Open Questions</span></header>
+            <div class="finding-note">The memlog records three gaps found during distillation: (1) Students and Settings appear in the IA but no Key Flow reaches them, (2) the grade-dispute flag has no Parent View home, (3) the sparkline window is unspecified. Only (3) reached Open Questions. Gaps (1) and (2) exist nowhere a downstream workflow will look — and (2) is the FR-25 critical above, currently invisible to every downstream reader and compounded by the FR-23 mis-citation. The instinct to surface rather than invent was correct; the surfacing did not complete.</div>
+            <div class="finding-fix"><strong>Fix:</strong> restore both to § Open Questions, noting (1) is inherited from the PRD's journey coverage rather than introduced here.</div>
+            <div class="lenses">Found by: coherence L7 (low) · prd-fidelity C-11 (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">UJ-2 contradicts itself on how many questions Noah skipped</h3><span class="finding-location">EXPERIENCE.md § Key Flows UJ-2 steps 4–6</span></header>
+            <div class="finding-note">Step 4: "He skips one and uses the question map to jump back to it" — i.e. answers it. Step 5: "<strong>Two</strong> Questions are unanswered." Step 6: "the <strong>two</strong> he skipped read Not answered."</div>
+            <div class="finding-fix"><strong>Fix:</strong> make step 4 say he skips two and returns to one of them.</div>
+            <div class="lenses">Found by: coherence L6 (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">SM-4 is not reconciled with the Free-tier cap</h3><span class="finding-location">PRD §11 SM-4; EXPERIENCE.md § Allowances &amp; Limits</span></header>
+            <div class="finding-note">SM-4 targets an Explanation request in ≥40% of completed Attempts. A Free-tier cap suppresses the metric that validates the product's stated differentiator, on the tier most new accounts sit in.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one line saying the metric is measured on uncapped tiers, or is expected to read low on Free.</div>
+            <div class="lenses">Found by: prd-fidelity A-1c (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Pending drafts is a new Parent View surface not in PRD §6</h3><span class="finding-location">EXPERIENCE.md § IA; PRD §6</span></header>
+            <div class="finding-note">§6 lists the Parent View chain as Upload → Classify → Capture pages → Generate → Review draft → Release. Pending drafts as a persistent destination is an addition — a good one, load-bearing for durable drafts and for the generation-progress reconciliation — that does not reach <em>Decisions That Travel Upstream</em>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> log it.</div>
+            <div class="lenses">Found by: prd-fidelity A-6b (low)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">The two rooms would become colour-distinguished only if the text marker ever moved</h3><span class="finding-location">DESIGN.md § Colors; key-analytics.html app bar</span></header>
+            <div class="finding-note">SC 1.4.1 is not engaged today: Parent View carries a persistent "Back to Student Mode" text control in every state, the copy register differs structurally (second person vs naming the student in third person), and no safety or authorisation consequence attaches to the distinction. But that control is currently the <em>only</em> non-colour signal of which room you are in, and <code>DESIGN.md</code> does not identify it as accessibility-load-bearing — it reads as a convenience affordance. If a future revision moves it into a menu, the rooms become colour-only.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one line in <code>DESIGN.md</code> § Colors — the accent split may never be the only differentiator; Parent View chrome must always carry a persistent text marker.</div>
+            <div class="lenses">Found by: accessibility R5 (low)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>8. Shape fit</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p><code>DESIGN.md</code> carries all eight canonical body sections in locked order — nothing omitted, nothing reordered, nothing interleaved. <code>EXPERIENCE.md</code> carries all eight required defaults, plus <strong>Responsive</strong>, correctly triggered. Four invented sections each earn their place: Grade States and Allowances &amp; Limits are the product's two hardest cross-cutting models and would otherwise scatter across five sections, and <em>Decisions That Travel Upstream</em> is the only thing preventing architecture inheriting the FR-31 contradiction. The FR-31 override is documented precisely, with its scope, its exclusions, and an explicit "this belongs in a PRD update". The defects found elsewhere in this report are content defects inside a shape that is right.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">No Inspiration section, though the trigger arguably fires</h3><span class="finding-location">DESIGN.md</span></header>
+            <div class="finding-note">The memlog carries four rejected palettes, four rejected type pairings, PT Serif rejected on a named filter, and an explicit anti-reference (gamified ed-tech). The anti-reference is handled well inline in § Brand &amp; Style and the rejects are exploration rather than reference products, so the omission is defensible. Raised only so the call is visible.</div>
+            <div class="finding-fix"><strong>Fix:</strong> none required; if added, a three-line section pointing at the two theme renders.</div>
+            <div class="lenses">Found by: rubric (low, preference)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details>
+        <summary>
+          <h2>Coherence review</h2>
+          <span class="reviewer-source">review-coherence.md · 22 findings raw (2 critical · 4 high · 8 medium · 8 low)</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Scope: all 67 memlog entries, both spines, and the four rendered mocks, ranked by how much damage the contradiction does if it reaches implementation. This lens also verified nine load-bearing decision chains end to end — <strong>eight hold</strong>. Serif-by-content-not-by-surface holds in all four mocks, including <code>key-capture.html</code> loading no serif at all and stating why. Flat-with-borders holds: zero <code>box-shadow</code> declarations anywhere. The accent split holds: every neutral and semantic hex is byte-identical across all four files, Admin correctly takes the parent value, and the single break is one mock hardcoding a dark value. Motion discipline holds: no results-reveal animation, a static timer, <code>prefers-reduced-motion</code> present where motion exists. The unanswered→excluded-from-denominator→surface-the-skipped-count chain is "the best-propagated chain in the set". The one chain that fails is a premise, not a conclusion (M5, filed under Inheritance discipline). Findings merged upward into the rubric categories above: grade-state labels, the four carriers, the grade-dispute home, the density premise, the radius rule, the tint ban, the score header, the capture accent, the reset date, the thumbnail target, the sparkline, the scrim, UJ-2's skip count, the dropped memlog gaps, and the score-header phrasing.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">The Generation Allowance is denominated in two different units, and the two mocks each pick a different one</h3><span class="finding-location">key-capture.html State 4; key-analytics.html cost block; EXPERIENCE.md § Allowances, § Voice and Tone; memlog Q12c, Q13c</span></header>
+            <div class="finding-note">Capture: "You've used <strong>0 of 2 practice tests</strong> this month on the Free tier… Generating 2 leaves 0 for this month. 3 to 5 are above the Free tier limit." Analytics: "Practice tests this will generate <strong>1</strong> · <strong>Generations left this month 2 of 2</strong> · Left after this one <strong>1 of 2</strong>." The spine is itself ambiguous — "Generation Allowance is charged when <strong>a generation</strong> successfully produces Practice Tests" against copy reading "Generating 2 practice tests. This uses 2 of your 2 remaining generations", which reads as per-test. The memlog says both ("2 per month on Free" and "the Free tier's 2-tests-per-month").<br><br><strong>These are not two wordings of one rule, they are two different counters.</strong> Under capture's rule a Free parent can never produce more than 2 Practice Tests in a month, contradicting FR-10's up-to-5-per-request and emptying Q11a's "draft 2 of 5" review-progress requirement of meaning on the Free tier. Under analytics' rule the same parent produces up to 10 tests from 2 generations. The cost statement Q12c makes a <em>hard guard</em> — "a one-tap generate without a cost statement is a defect" — is unimplementable until the unit is fixed, and the mock the implementer copies decides the product's economics.</div>
+            <div class="finding-fix"><strong>Fix:</strong> decide the unit once and state it in § Allowances as the normative sentence — "one generation request = one Generation Allowance, regardless of how many Practice Tests it produces" <em>or</em> "one Practice Test = one unit". Then correct whichever mock disagrees and align the capture-step selector bound to the chosen unit. This is a PRD-facing decision against FR-31, not a copy fix.</div>
+            <div class="lenses">Found by: coherence C1 (critical) — sole finder</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">DESIGN.md's motion allow-list omits the question map</h3><span class="finding-location">DESIGN.md § Do's and Don'ts vs EXPERIENCE.md § Interaction Primitives</span></header>
+            <div class="finding-note"><code>DESIGN.md</code> permits motion "only for question transitions, expand/collapse, route changes, and the generation wait". Q8a and § Interaction Primitives both name question-map open/close as permitted. Defensible as covered by "expand/collapse", but the two lists should read identically.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add it to the <code>DESIGN.md</code> line.</div>
+            <div class="lenses">Found by: coherence L5 (low)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details>
+        <summary>
+          <h2>PRD fidelity review</h2>
+          <span class="reviewer-source">review-prd-fidelity.md · 38 findings raw (1 critical · 13 high · 16 medium · 8 low)</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The question this lens asks is not "is the UX good" — it is "can a downstream architecture workflow read the PRD and the spines together without inheriting a contradiction". The spines are unusually disciplined about logging: the memlog is 68 entries deep and <em>Decisions That Travel Upstream</em> is exactly the right instrument. But <strong>two of the six known deliberate departures are mis-classified</strong> — described as closing gaps the PRD leaves open when the PRD states the opposite. One (timer expiry) is a live contradiction with FR-15 that no document flags; the other (camera roll) would produce a PRD update adding a requirement FR-5 already carries. Separately the distillation dropped two of the three coverage gaps the memlog itself discovered, so they exist nowhere a downstream reader will look. Every finding is merged into the rubric categories above.</p>
+            <p><strong>Non-goal discipline is the strongest category in this review and is worth naming as such.</strong> No notifications is <em>used</em> as a premise rather than merely respected. No gamification is enforced structurally — a specific banned list (streaks, badges, mascots, points, confetti, score count-up, reveal sweep), "the score appears; it does not perform" in both Do's and Don'ts and the Motion primitives, and the deliberate choice of "Not correct" over "Wrong". No conversational follow-up: the Explanation panel holds states and flags, no input, no chat. No self-serve upgrade is respected <em>under pressure</em> — Q13c explicitly refuses to name the Free tier as the cause of an empty dashboard <em>because</em> there is no upgrade path ("telling a parent her plan is the reason while giving her no way to change it is a frustration with no exit") and files the reversal as an open question gated on the path existing, while the at-cap copy carries a binding "no upsell language aimed at the child" constraint. Not a grading system of record, not a curriculum, no localization, no co-parent accounts, no PDF scanner: all clean. The one non-goal under real pressure is filed above as the three-way dead end.</p>
+            <p><strong>Strongest work, and worth protecting through the fix pass:</strong> the Explanation-cap override's consequence tracing — eight required consequences, all verified present and internally consistent; the generation-progress reconciliation, which is genuine rather than verbal, because durable Pending drafts is what lets the copy advise staying <em>without</em> claiming loss; and the skipped-count addition, applied consistently to the three surfaces it claims, stated as a binding copy rule, demonstrated in UJ-3, and correctly reused as the strongest argument for the exclusion decision it depends on.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details>
+        <summary>
+          <h2>Accessibility review</h2>
+          <span class="reviewer-source">review-accessibility.md · 24 findings raw (2 critical · 5 high + 1 risk · 6 medium + 2 risks · 4 low + 4 risks)</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p><strong>The primary user is a 10-year-old, so this lens is not a compliance formality here:</strong> the product's core surface is a timed test, its core content is mathematics rendered as glyphs, and its core output is a four-valued state the whole parent-facing value chain depends on. All three are places where an accessibility miss produces a <em>wrong answer</em>, not merely an awkward experience. Every contrast ratio was recomputed from the hex values using the WCAG 2.x sRGB formula; the claims in the mocks were not trusted, and several are wrong.</p>
+            <p><strong>Verdict on the four hard cases.</strong> (1) Typographic fractions — <em>partially resolved</em>: alternatives exist on Question text, answer key and the input, but the input is not an input, raw-string preservation is unspecified, and the two alternatives double-announce and disagree in wording. (2) The timed test — <em>unresolved</em>: the exemption is named as required but never taken or argued; no warning, no announcement, no live region on the timer. (3) The question map — <em>resolved</em>, genuinely, and it is the best-executed component in the set. (4) Four grade states — <em>partially resolved</em>: the encoding over-delivers in the mock, but two of four colour tokens contradict both spines and one label string diverges.</p>
+            <p><strong>Single most serious defect: the timed test.</strong> A blind or low-vision 10-year-old is given no warning and no announcement before the countdown auto-submits their work, and the exemption that would justify the time limit at all has never been taken. The Essential exception is also not as clean as the design assumes — it reads naturally for an invigilated exam, but this is a <em>practice</em> test taken at home on a timer a parent chose, defaulting to off, which is closer to a preference than to something essential. That weakens the exemption argument and simultaneously supplies a better one: argue the parent-set duration as the SC 2.2.1 <em>adjust</em> mechanism, which holds only if the duration is genuinely adjustable at any time including after release — so confirm FR-15 permits it, and record that the default-off state means the unmodified product ships with no time limit at all and the untimed path's conformance claim is unconditional. <strong>Most widespread defect:</strong> every interactive boundary in the product sits at 1.30:1 light / 1.27:1 dark, a straight SC 1.4.11 failure following directly from the flat-with-borders decision.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">The capture screen has no accessibility layer at all</h3><span class="finding-location">key-capture.html, all five states</span></header>
+            <div class="finding-note">Measured across the whole file: <strong>0</strong> <code>&lt;button&gt;</code>, <strong>0</strong> <code>&lt;a&gt;</code>, <strong>0</strong> <code>&lt;input&gt;</code>, <strong>0</strong> <code>role=</code>, <strong>0</strong> <code>aria-label</code>. Every action is a <code>&lt;div&gt;</code>: 12 icon buttons (reorder up/down, retake, delete) and 7 text buttons (Add page, Check pages, Retake page 2, Continue with all 3 pages, Generate 2 practice tests, Leave and check Pending drafts later). The shutter is a bare <code>&lt;div&gt;</code>. The reorder controls are icon-only with no text and no label. Nothing on this screen is reachable by keyboard and nothing announces. The live viewfinder, the "2 of 10" page counter and the ordered thumbnail strip carry no accessible text — a parent using a screen reader has no way to know how many pages have been captured or in what order, which is the entire point of the strip. The generation-progress state also has no <code>role="status"</code> on its step list, despite being an asynchronous operation the parent is explicitly advised to wait on.</div>
+            <div class="finding-fix"><strong>Fix:</strong> semantic elements throughout; <code>aria-label</code> on every icon-only control <em>including the page ordinal it acts on</em> ("Move page 2 up", "Retake page 2", "Delete page 2"); the thumbnail strip as an ordered list with each item naming its ordinal and legibility state; a <code>role="status"</code> region on the generation progress step list.</div>
+            <div class="lenses">Found by: accessibility C8 (high)</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">The results screen has no interactive elements either</h3><span class="finding-location">key-results.html, all four states</span></header>
+            <div class="finding-note">Measured: <strong>0</strong> <code>&lt;button&gt;</code>, <strong>0</strong> <code>&lt;a&gt;</code>, <strong>31</strong> <code>&lt;span class="btn…"&gt;</code> — including "Explain this", "Hide explanation", both flag controls, and Retake. The expand toggle carries <code>aria-expanded="true"</code> on a <code>&lt;span&gt;</code>, where the attribute has no host role and is not exposed. The back control is <code>&lt;span role="img" aria-label="Back to home"&gt;</code>, announced as an <em>image</em>. The product-specific consequence: the grade-dispute flag and the bad-Explanation flag are the only accountability mechanism for child-facing AI content that ships without a parent gate, and as specified a screen-reader or keyboard user cannot operate either one.</div>
+            <div class="finding-fix"><strong>Fix:</strong> <code>&lt;button&gt;</code> for every control; <code>aria-expanded</code> on the real toggle; the back control as a <code>&lt;button&gt;</code> or <code>&lt;a&gt;</code> with a text-equivalent name.</div>
+            <div class="lenses">Found by: accessibility C9 (high)</div>
+          </article>
+        </div>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p><strong>Stronger than required — preserve through revision.</strong> Each of these exceeds the committed AA floor and each is cheap to lose in a later pass by someone optimising for consistency, so the loss should be a decision rather than an accident. (1) Grade states carry <em>four</em> redundant non-colour carriers where AA requires one — keep the row-rule texture in particular, it is the carrier that still works when scanning a long answer key at a distance and the one most likely to be pruned as decorative. (2) The question map is the best-executed component in the set — real buttons, per-cell hidden state strings, <code>aria-current</code>, 48×48 minimum, a focus ring, an on-screen legend; do not let a later "simplify to a grid of divs" refactor undo it. (3) Question body contrast at 16.56:1 / 14.05:1 is AAA, kept because it fell out for free. (4) The sparkline has a complete text alternative with every data point spoken — charts with genuine alternatives are rare — and the empty-state meters do the same. (5) No inline bar is ever the sole carrier of its value; the numeric percentage is always adjacent and the unanswered count always spoken alongside it, which was decided as a data-integrity rule and discharges SC 1.4.1 for the Mastery table for free. (6) One type scale, sized for the harder case: the parent dashboard is forbidden from shrinking text to earn density, which is a standing protection against the most common regression in dense admin views. (7) Tap-target floors are pinned separately from the density token precisely so <code>density.compact</code> can never reduce them — the mechanism is right even where execution slipped. (8) Every result and analytics string is required to be parameterised, never a literal, which is what makes distinct per-state, per-surface announcements possible at all. (9) The Explanation wait is correctly instrumented — <code>aria-busy</code>, <code>role="status"</code>, <code>role="alert"</code> on failure, wait bar stilled under reduced motion — and is the pattern the other three screens should copy. (10) <code>EXPERIENCE.md</code> names its own open accessibility questions rather than papering over them, which is why these gaps are fixable now rather than at audit.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li><strong>Frontmatter.</strong> Both files carry <code>title</code>, <code>status: draft</code>, <code>created</code>, <code>updated</code>, <code>sources</code>, all present and consistent; <code>DESIGN.md</code> additionally carries the full spec frontmatter. All <code>sources</code> paths resolve from the document workspace.</li>
+        <li><strong>Cross-references.</strong> One broken FR citation: <code>EXPERIENCE.md</code> line 94, "the FR-23 grade-dispute flag" → <strong>FR-25</strong>. The error originates in the memlog (Q9b) and propagated cleanly, so it is wrong anywhere else that entry was consumed. All <code>{token}</code> cross-references resolve in both directions.</li>
+        <li><strong>Memlog hygiene.</strong> Q13b cites "the Q10 override", which does not exist — the Explanation-cap override is an untagged <code>(override)</code> entry between Q9c and Q10a, and Q10a/Q10b are the capture decisions. Tag the override entry and correct the citation. No downstream artifact repeats the bad reference.</li>
+        <li><strong>Memlog contradiction.</strong> Q10a specifies 48px page-thumbnail targets; the Q5 Parent View floor is 44px and every artifact uses it, with no entry recording the change.</li>
+        <li><strong>Name consistency.</strong> Component names are byte-identical across <code>DESIGN.md</code> frontmatter, <code>DESIGN.md</code> § Components and <code>EXPERIENCE.md</code> § Component Patterns, allowing for the kebab-case / Title Case convention split. No drift found.</li>
+        <li><strong>Literal-copy drift.</strong> Two grade-state labels differ from the decided values ("Incorrect" vs "Not correct"; "Not answered" vs "Unanswered"). Both appear in more than one place, so a fix must touch § Grade States, <code>DESIGN.md</code> § Components → Answer-key row, UJ-2 step 6, and <code>key-analytics.html</code> including its accessibility note.</li>
+        <li><strong>Mermaid.</strong> No diagrams in either file. The IA is a table, which is the right call at 15 screens.</li>
+        <li><strong>Numbers.</strong> All figures traceable: 34rem measure, 15-minute timeout, 48/44px targets, 1–10 pages, 10 Explanations/month, 5-question floor, 8px base. The numbers that should exist and do not: the 60% Weak Area threshold, the sparkline window, the focus-ring width and offset, the hover-tint value, and a settled Generation Allowance unit.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Lenses: review-rubric.md · review-coherence.md · review-prd-fidelity.md · review-accessibility.md</span>
+        <span>Generated: 2026-08-29</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

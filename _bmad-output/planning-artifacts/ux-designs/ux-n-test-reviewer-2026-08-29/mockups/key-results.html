@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key Screen — Student Mode Results (n-test-reviewer)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   KEY SCREEN — STUDENT MODE : RESULTS, EXPLANATION EXPANDED
+   n-test-reviewer · UX session ux-n-test-reviewer-2026-08-29
+
+   SPINE SECTIONS THIS SCREEN IS GOVERNED BY
+   -------------------------------------------------------------------------
+   DESIGN.md
+     · Color — Clear Room base + accent split (Q1). Student Mode primary
+       #0F6E78. Semantic roles byte-identical to Parent View.
+     · Typography — Literata (question + Explanation content) / Source Sans 3
+       (chrome); one shared scale; tabular figures selectively (Q2e/Q2f).
+     · Shapes — paper vs control radius rule (Q3). Question rows, answer key
+       and the expanded Explanation region are PAPER (0–2px). Buttons, chips,
+       flags, retake are CONTROL (8px).
+     · Elevation and Depth — flat with borders (Q4). No shadows anywhere;
+       separation is 1px divider + the bg.default/bg.paper step.
+     · Density — density.comfortable (Q5): row 56, card-pad 20, gap 16,
+       section-margin 32, tap target ≥48px.
+     · Motion — functional plus progress only (Q6). Expand/collapse permitted;
+       the Explanation wait may animate; THE SCORE MAY NOT. No count-up, no
+       reveal, no celebration. prefers-reduced-motion honoured.
+
+   EXPERIENCE.md
+     · Component Patterns — score header; question row (paper); answer key;
+       grade-state chip; inline Explanation region; typographic fraction;
+       flag controls; retake control.
+     · State Patterns — Explanation first-tap FOREGROUND WAIT inside the
+       expanded region (Q9b); Explanation failure = inline error + manual
+       retry, no auto-retry (Q9c); degraded grading header scores only the
+       gradable questions and names the gap (Q13d); ungraded rows retry on
+       next view (Q13e) and never block the rest of the screen.
+     · Grade States — FOUR states (Q8b + Q13d, as amended by BLOCKER 1):
+       correct · incorrect · unanswered · ungraded. Each is icon + TEXT LABEL
+       + colour. Never colour alone. Each announced distinctly (Q18 case 4).
+       TIMER-EXPIRY RULE (BLOCKER 1, supersedes the Q8b gap framing):
+       unanswered Questions are graded INCORRECT when a timed Attempt reaches
+       expiry, per FR-15. 'Unanswered' survives only on an untimed Attempt or
+       one the student submitted manually before the timer ran out. The
+       Attempt rendered here was submitted MANUALLY at 23:11 of a 30-minute
+       timer, so question 9 is legitimately 'Unanswered'; a timed Attempt that
+       reached expiry would show that same row as 'Not correct'.
+     · Allowance — Explanation Allowance is 10 NEW Explanations per calendar
+       month on Free (Q10 override). Reading an already-generated Explanation
+       is never capped. Reset date 1 October, matching key-capture.html and
+       key-analytics.html. At-cap state rendered as State 5 (Q13b).
+     · Voice and Tone — Student Mode is SECOND PERSON (Q17a). Calm,
+       low-stakes. A wrong answer never reads as punishment. Failure copy is
+       never the student's fault: "Couldn't load that explanation." No error
+       codes, no apology paragraph, no exclamation marks.
+     · Accessibility Floor — WCAG 2.1 AA (Q18). Typographic fractions carry a
+       text alternative; grade states are non-colour-distinguishable; tap
+       targets ≥48px.
+     · Key Flow UJ-2, steps 3–5 — Noah submits the timed Practice Test →
+       results screen (step 3) → taps "Explain this" on question 7 (step 4)
+       → retake available (step 5).
+
+   ── GRADE-STATE COLOUR ASSIGNMENT (canonical; spines to be reconciled) ────
+   Settled here and applied identically in key-analytics.html:
+     correct        → success        #0F6B4F  (light) / #6FD1AC (dark)
+     not correct    → error          #B3261E  (light) / #F19B94 (dark)
+     unanswered     → text.secondary #4E6070  (light) / #A3B3C2 (dark)
+     not graded yet → info           #2E6E9E  (light) / #8CC0E4 (dark)
+   warning #8A5A00 / #E3B457 is RESERVED EXCLUSIVELY for the Parent View Weak
+   Area marker and carries no grade state anywhere. This resolves the double
+   duty the coherence review flagged: previously key-results.html painted
+   unanswered with warning, the same hue key-analytics.html uses for Weak
+   Area, so one colour meant two unrelated things across the two rooms.
+   Neutral is also the more truthful hue for unanswered — an absence of an
+   answer is not a warning about the student, and after the BLOCKER 1 rule it
+   can only arise from a deliberate skip on an untimed or manually submitted
+   Attempt. Colour is never the sole carrier: every state additionally has an
+   icon frame shape, a glyph, a literal text label, and a row-rule texture.
+
+   ── DIVIDER (recomputed; replaces #DCE3E9 / #26333F) ─────────────────────
+   #DCE3E9 measured 1.30:1 against paper — an SC 1.4.11 failure, because with
+   shadows banned (Q4) the divider is the SOLE boundary of every control.
+   New values, computed to clear 3:1 non-text contrast against BOTH surfaces
+   in BOTH modes:
+     light  divider #7C8894  on paper   #FFFFFF ....... 3.62:1  ✓ SC 1.4.11
+                             on default #F6F8FA ....... 3.40:1  ✓
+     dark   divider #6A747E  on paper   #16202C ....... 3.45:1  ✓
+                             on default #0E1620 ....... 3.82:1  ✓
+   Applied identically in all four mocks. The spines should adopt these two
+   hex values for the divider token.
+
+   COMPUTED CONTRAST RATIOS (sRGB, WCAG 2.1 relative luminance; every value
+   below recomputed for this pass — the previously published table was wrong
+   by up to 0.14 and disagreed with the other three mocks)
+   -------------------------------------------------------------------------
+     text.primary   #10202E on paper  #FFFFFF ....... 16.56:1  AAA
+     text.primary   #10202E on default#F6F8FA ....... 15.56:1  AAA
+     text.secondary #4E6070 on paper  #FFFFFF .......  6.50:1  AA
+     text.secondary #4E6070 on default#F6F8FA .......  6.11:1  AA
+     success        #0F6B4F on paper  #FFFFFF .......  6.49:1  AA
+     error          #B3261E on paper  #FFFFFF .......  6.54:1  AA
+     info           #2E6E9E on paper  #FFFFFF .......  5.47:1  AA
+     info           #2E6E9E on default#F6F8FA .......  5.14:1  AA
+     student primary#0F6E78 on paper  #FFFFFF .......  5.96:1  AA
+     #FFFFFF on student primary #0F6E78 ............   5.96:1  AA (filled btn)
+     divider        #7C8894 on paper  #FFFFFF .......  3.62:1  AA non-text
+     divider        #7C8894 on default#F6F8FA .......  3.40:1  AA non-text
+   All body text ≥16px and ≥4.5:1. All non-text state indicators (chip
+   borders, row rules) are ≥3:1 against their adjacent surface, and none of
+   them is the sole carrier of meaning — a text label always accompanies.
+
+   MOTION — the only animation in this file is the indeterminate Explanation
+   wait bar; it is stilled under prefers-reduced-motion. No other rule
+   animates or transitions, so the reduced-motion contract holds file-wide.
+   ============================================================================ */
+
+/* ---- tokens (Clear Room, light. Student Mode accent.) -------------------- */
+:root{
+  --bg-default:#F6F8FA;
+  --bg-paper:#FFFFFF;
+  --text-primary:#10202E;
+  --text-secondary:#4E6070;
+  --divider:#7C8894;          /* recomputed for SC 1.4.11 — 3.62:1 on paper, 3.40:1 on default */
+  --success:#0F6B4F;
+  --error:#B3261E;
+  --warning:#8A5A00;
+  --info:#2E6E9E;
+  --primary:#0F6E78;          /* Student Mode ONLY. Parent blue #0B5FA5 is never used here. */
+
+  --serif:"Literata",Georgia,"Times New Roman",serif;
+  --sans:"Source Sans 3","Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+
+  /* density.comfortable */
+  --row:56px;
+  --card-pad:20px;
+  --gap:16px;
+  --section:32px;
+  --tap:48px;
+
+  --r-control:8px;
+  --r-paper:2px;
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:#E8ECF0;
+  color:var(--text-primary);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ---- page scaffolding (annotation layer, not product UI) ---------------- */
+.sheet{max-width:1100px;margin:0 auto;padding:40px 24px 96px;}
+.sheet-head{margin-bottom:var(--section);}
+.sheet-head h1{
+  font-family:var(--sans);font-size:20px;line-height:1.35;font-weight:600;margin:0 0 4px;
+}
+.sheet-head p{margin:0;font-size:13px;line-height:1.40;color:var(--text-secondary);max-width:70ch;}
+.state-block{margin-top:56px;}
+.state-tag{
+  display:inline-block;font-size:14px;line-height:1.40;font-weight:600;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;
+}
+.state-title{font-size:20px;line-height:1.35;font-weight:600;margin:0 0 6px;}
+.state-note{font-size:13px;line-height:1.40;color:var(--text-secondary);margin:0 0 16px;max-width:78ch;}
+
+/* ---- tablet device frame ------------------------------------------------ */
+.device{
+  width:900px;max-width:100%;margin:0;
+  background:#1B2733;
+  border-radius:30px;
+  padding:16px;
+  border:1px solid #0C141C;
+}
+.device-inner{
+  background:var(--bg-default);
+  border-radius:16px;
+  overflow:hidden;
+}
+.device-status{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 20px;font-size:13px;line-height:1.40;color:var(--text-secondary);
+  font-variant-numeric:tabular-nums;background:var(--bg-default);
+}
+.device-status .right{display:flex;gap:10px;align-items:center;}
+.device-chin{height:6px;margin:12px auto 0;width:180px;border-radius:3px;background:#3A4854;}
+.device-cam{width:8px;height:8px;border-radius:50%;background:#3A4854;margin:0 auto 10px;}
+
+/* ---- app chrome --------------------------------------------------------- */
+.appbar{
+  display:flex;align-items:center;gap:var(--gap);
+  min-height:var(--row);padding:10px 24px;
+  background:var(--bg-paper);border-bottom:1px solid var(--divider);
+}
+.iconbtn{
+  min-width:var(--tap);min-height:var(--tap);
+  display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--divider);border-radius:var(--r-control);
+  background:var(--bg-paper);color:var(--text-primary);
+  font-family:var(--sans);font-size:18px;line-height:1;cursor:default;
+}
+.appbar-title{font-size:20px;line-height:1.35;font-weight:600;margin:0;}
+.appbar-sub{font-size:13px;line-height:1.40;color:var(--text-secondary);margin:2px 0 0;}
+
+.screen{padding:24px;display:flex;flex-direction:column;gap:var(--section);}
+
+/* ---- score header (CONTROL card; static — the score does not perform) ---- */
+.score{
+  background:var(--bg-paper);
+  border:1px solid var(--divider);
+  border-radius:var(--r-control);
+  padding:var(--card-pad);
+}
+.score-label{
+  font-size:14px;line-height:1.40;font-weight:600;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--text-secondary);margin:0 0 8px;
+}
+.score-figure{
+  font-family:var(--serif);font-feature-settings:"tnum" 1;font-variant-numeric:tabular-nums;
+  font-size:34px;line-height:1.25;font-weight:600;margin:0;color:var(--text-primary);
+}
+.score-figure .of{font-weight:400;color:var(--text-secondary);}
+.score-meta{
+  margin:10px 0 0;font-size:16px;line-height:1.45;color:var(--text-secondary);
+  font-variant-numeric:tabular-nums;
+}
+/* separator is a text glyph, so it takes a TEXT colour, not the divider token */
+.score-meta .sep{padding:0 8px;color:var(--text-secondary);}
+.score-gap{
+  margin:12px 0 0;padding:12px 14px;
+  border:1px solid var(--divider);border-radius:var(--r-control);
+  background:var(--bg-default);
+  font-size:16px;line-height:1.45;color:var(--text-primary);
+  display:flex;gap:10px;align-items:flex-start;
+}
+.score-gap .g-ico{
+  flex:none;width:24px;height:24px;border:2px dotted var(--info);
+  display:inline-flex;align-items:center;justify-content:center;
+  color:var(--info);font-size:13px;font-weight:700;line-height:1;
+}
+
+/* ---- question list ------------------------------------------------------ */
+.qlist-head{
+  font-size:14px;line-height:1.40;font-weight:600;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--text-secondary);margin:0 0 12px;
+}
+.qlist{display:flex;flex-direction:column;gap:0;border:1px solid var(--divider);background:var(--bg-paper);border-radius:var(--r-paper);}
+
+/* PAPER role: square. Left rule TEXTURE is a second non-colour carrier. */
+.qrow{
+  padding:var(--card-pad);
+  border-bottom:1px solid var(--divider);
+  border-left:6px solid transparent;
+  background:var(--bg-paper);
+}
+.qrow:last-child{border-bottom:0;}
+.qrow--correct   {border-left-color:var(--success);}
+.qrow--incorrect {
+  border-left-color:transparent;
+  background-image:repeating-linear-gradient(45deg,var(--error) 0 3px,#FFFFFF 3px 7px);
+  background-size:6px 100%;background-repeat:no-repeat;background-position:left top;
+  padding-left:var(--card-pad);
+}
+/* unanswered = text.secondary, NOT warning. warning is the Weak Area hue only. */
+.qrow--unanswered{border-left-style:dashed;border-left-color:var(--text-secondary);}
+.qrow--ungraded  {border-left-style:dotted;border-left-color:var(--info);}
+
+.qrow-top{
+  display:flex;align-items:center;justify-content:space-between;gap:var(--gap);
+  min-height:32px;margin-bottom:12px;flex-wrap:wrap;
+}
+.qnum{
+  font-size:14px;line-height:1.40;font-weight:600;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--text-secondary);
+  font-variant-numeric:tabular-nums;
+}
+
+/* ---- grade-state chip: icon SHAPE + GLYPH + TEXT LABEL + colour ---------- */
+.chip{
+  display:inline-flex;align-items:center;gap:8px;
+  border:1px solid var(--divider);border-radius:var(--r-control);
+  padding:6px 12px 6px 8px;background:var(--bg-paper);
+  font-family:var(--sans);font-size:14px;line-height:1.40;font-weight:600;letter-spacing:.02em;
+}
+.chip .ico{
+  flex:none;width:22px;height:22px;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;line-height:1;
+}
+/* four visually distinct icon frames, independent of hue:
+   solid circle ✓ | solid circle ✕ | dashed circle – | dotted square ⋯      */
+.chip--correct    {color:var(--success);}
+.chip--correct .ico   {border:2px solid var(--success);border-radius:50%;}
+.chip--incorrect  {color:var(--error);}
+.chip--incorrect .ico {border:2px solid var(--error);border-radius:50%;}
+.chip--unanswered {color:var(--text-secondary);}
+.chip--unanswered .ico{border:2px dashed var(--text-secondary);border-radius:50%;}
+.chip--ungraded   {color:var(--info);}
+.chip--ungraded .ico  {border:2px dotted var(--info);border-radius:2px;}
+
+/* ---- question content (Literata, 22px/1.60, measure 34rem) --------------- */
+.qtext{
+  font-family:var(--serif);
+  font-size:22px;line-height:1.60;
+  max-width:34rem;margin:0 0 var(--gap);
+  color:var(--text-primary);
+}
+
+/* ---- answer key (PAPER, square) ----------------------------------------- */
+.akey{
+  border:1px solid var(--divider);border-radius:var(--r-paper);
+  background:var(--bg-default);
+  padding:14px 16px;max-width:34rem;
+  display:flex;flex-direction:column;gap:8px;
+}
+.akey-line{display:flex;gap:12px;align-items:baseline;font-size:16px;line-height:1.45;}
+.akey-k{
+  flex:none;min-width:9.5rem;
+  font-size:14px;line-height:1.45;font-weight:600;letter-spacing:.02em;
+  color:var(--text-secondary);
+}
+.akey-v{font-family:var(--serif);font-size:16px;line-height:1.45;color:var(--text-primary);}
+.akey-v.blank{font-family:var(--sans);font-style:italic;color:var(--text-secondary);}
+.akey-v.pending{font-family:var(--sans);color:var(--text-secondary);}
+
+.qactions{display:flex;gap:12px;align-items:center;margin-top:var(--gap);flex-wrap:wrap;}
+
+/* ---- controls (CONTROL role: 8px) --------------------------------------- */
+.btn{
+  min-height:var(--tap);
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:0 20px;border-radius:var(--r-control);
+  font-family:var(--sans);font-size:16px;line-height:1.45;font-weight:600;
+  border:1px solid transparent;cursor:default;
+}
+.btn--primary{background:var(--primary);color:#FFFFFF;border-color:var(--primary);}
+.btn--outline{background:var(--bg-paper);color:var(--text-primary);border-color:var(--divider);}
+.btn--quiet{
+  background:transparent;color:var(--text-secondary);border-color:transparent;
+  padding:0 12px;font-weight:600;text-decoration:underline;text-underline-offset:3px;
+}
+.btn--focus{outline:3px solid var(--primary);outline-offset:2px;}
+
+/* ---- inline Explanation region (PAPER, square, flat, bordered) ---------- */
+.explain{
+  margin-top:var(--gap);
+  border:1px solid var(--divider);border-left:3px solid var(--primary);
+  border-radius:var(--r-paper);
+  background:var(--bg-default);
+  padding:var(--card-pad);
+  max-width:38rem;
+}
+.explain-head{
+  display:flex;align-items:center;justify-content:space-between;gap:var(--gap);
+  margin-bottom:12px;flex-wrap:wrap;
+}
+.explain-title{
+  font-family:var(--sans);font-size:14px;line-height:1.40;font-weight:600;
+  letter-spacing:.02em;text-transform:uppercase;color:var(--primary);margin:0;
+}
+.explain-body{
+  font-family:var(--serif);
+  font-size:19px;line-height:1.65;      /* 1.1875rem */
+  max-width:34rem;color:var(--text-primary);
+}
+.explain-body p{margin:0 0 1em;}
+.explain-body p:last-child{margin-bottom:0;}
+.explain-foot{
+  margin-top:var(--gap);padding-top:var(--gap);
+  border-top:1px solid var(--divider);
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+}
+.flagbtn{
+  min-height:var(--tap);
+  display:inline-flex;align-items:center;gap:8px;
+  padding:0 14px;border:1px solid var(--divider);border-radius:var(--r-control);
+  background:var(--bg-paper);color:var(--text-secondary);
+  font-family:var(--sans);font-size:14px;line-height:1.40;font-weight:600;letter-spacing:.02em;
+  cursor:default;
+}
+.flagbtn .fi{font-size:14px;line-height:1;}
+
+/* ---- Explanation: loading ----------------------------------------------- */
+.wait{display:flex;flex-direction:column;gap:12px;}
+.wait-text{
+  font-family:var(--sans);font-size:16px;line-height:1.45;color:var(--text-secondary);margin:0;
+}
+.wait-bar{
+  height:6px;border-radius:3px;background:var(--divider);overflow:hidden;max-width:34rem;
+}
+.wait-bar i{
+  display:block;height:100%;width:38%;border-radius:3px;background:var(--primary);
+  animation:slide 1.4s ease-in-out infinite;
+}
+@keyframes slide{
+  0%{transform:translateX(-100%);}
+  100%{transform:translateX(300%);}
+}
+@media (prefers-reduced-motion: reduce){
+  .wait-bar i{animation:none;width:100%;opacity:.5;}
+}
+
+/* ---- Explanation: failed ------------------------------------------------ */
+.failure{display:flex;flex-direction:column;gap:12px;}
+.failure-line{
+  display:flex;gap:10px;align-items:flex-start;
+  font-family:var(--sans);font-size:17px;line-height:1.55;color:var(--text-primary);
+}
+.failure-ico{
+  flex:none;width:24px;height:24px;border:2px solid var(--error);border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  color:var(--error);font-size:14px;font-weight:700;line-height:1;
+}
+.failure-note{
+  font-family:var(--sans);font-size:14px;line-height:1.40;color:var(--text-secondary);margin:0;max-width:34rem;
+}
+
+/* ---- Explanation: at cap (Q13b + the Q10 override) ----------------------- */
+/* Deliberately NOT painted error, warning or info. This is not a fault, not a
+   warning and not a system status — it is a plan limit the student cannot act
+   on. It is set in the same neutral text colours as the rest of the screen so
+   it reads as a statement of fact rather than as something going wrong.       */
+.cap{display:flex;flex-direction:column;gap:12px;}
+.cap-line{
+  font-family:var(--sans);font-size:17px;line-height:1.55;color:var(--text-primary);
+  margin:0;max-width:34rem;
+}
+.cap-note{
+  font-family:var(--sans);font-size:16px;line-height:1.45;color:var(--text-secondary);
+  margin:0;max-width:34rem;
+}
+.btn--disabled{
+  background:var(--bg-default);color:var(--text-secondary);
+  border-color:var(--divider);border-style:dashed;
+}
+
+/* ---- retake ------------------------------------------------------------- */
+.footer-actions{
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+  padding:var(--card-pad);background:var(--bg-paper);
+  border:1px solid var(--divider);border-radius:var(--r-control);
+}
+.footer-actions p{margin:0;font-size:16px;line-height:1.45;color:var(--text-secondary);flex:1 1 18rem;}
+
+/* ---- typographic fraction (Q2c) ----------------------------------------- */
+.frac{
+  display:inline-flex;flex-direction:column;align-items:center;
+  vertical-align:-0.45em;line-height:1;margin:0 .12em;
+  font-feature-settings:"tnum" 1;
+}
+.frac .n{font-size:.62em;line-height:1;padding:0 .18em .06em;}
+.frac .d{font-size:.62em;line-height:1;padding:.06em .18em 0;border-top:1px solid currentColor;}
+
+.sr-only{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;
+}
+
+/* ---- legend (annotation, not product UI) -------------------------------- */
+.legend{
+  background:var(--bg-paper);border:1px solid var(--divider);border-radius:var(--r-control);
+  padding:var(--card-pad);margin-top:var(--gap);display:flex;gap:24px;flex-wrap:wrap;
+}
+.legend h3{font-size:14px;line-height:1.40;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--text-secondary);margin:0 0 10px;width:100%;}
+.legend-item{display:flex;flex-direction:column;gap:8px;min-width:180px;}
+.legend-rule{height:0;border-top:6px solid transparent;width:100%;}
+.legend-rule.c{border-top-color:var(--success);border-top-style:solid;}
+.legend-rule.i{border:0;height:6px;background-image:repeating-linear-gradient(45deg,var(--error) 0 3px,#FFFFFF 3px 7px);}
+.legend-rule.u{border-top-color:var(--text-secondary);border-top-style:dashed;}
+.legend-rule.g{border-top-color:var(--info);border-top-style:dotted;}
+.legend-item small{font-size:13px;line-height:1.40;color:var(--text-secondary);}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <header class="sheet-head">
+    <h1>Key screen — Student Mode: results, with an Explanation expanded</h1>
+    <p>UJ-2, steps 3–5. Noah, 10, Grade 5, has just submitted a 15-question Math Practice Test on the family tablet.
+       Five states are rendered below. Everything outside the tablet frames is annotation, not product UI.</p>
+  </header>
+
+  <!-- ==================================================================== -->
+  <!-- STATE 1 — CANONICAL                                                  -->
+  <!-- ==================================================================== -->
+  <section class="state-block">
+    <span class="state-tag">State 1 of 5</span>
+    <h2 class="state-title">Canonical — score header, full question list in original order, question 7 expanded</h2>
+    <p class="state-note">Score is static: it appears, it does not perform. Questions are in original order, correct and
+      incorrect alike. Three of the four grade states are visible here (correct on 1, incorrect on 7, unanswered on 9);
+      the fourth, <em>ungraded</em>, appears in state 4.
+      <strong>Why an unanswered row is valid here:</strong> Noah submitted this Attempt <em>manually</em> at 23:11 of the
+      30-minute timer, before expiry. Under the FR-15 rule confirmed in this session, unanswered Questions are graded
+      <em>Not correct</em> only when a timed Attempt actually reaches expiry; a deliberate skip on an untimed test or on a
+      manual submission stays a distinct <em>Unanswered</em> state, which is what preserves the parent-facing
+      &ldquo;ran out of time&rdquo; versus &ldquo;doesn&rsquo;t understand&rdquo; distinction.</p>
+
+    <div class="device">
+      <div class="device-cam" aria-hidden="true"></div>
+      <div class="device-inner">
+        <div class="device-status"><span>9:41</span><span class="right"><span>Wi-Fi</span><span>84%</span></span></div>
+
+        <div class="appbar">
+          <span class="iconbtn" role="img" aria-label="Back to home">&#8592;</span>
+          <div>
+            <h2 class="appbar-title">Math Practice Test</h2>
+            <p class="appbar-sub">Grade 5 &middot; 15 questions &middot; 30-minute timer</p>
+          </div>
+        </div>
+
+        <div class="screen">
+
+          <!-- score header -->
+          <div class="score">
+            <p class="score-label">Your results</p>
+            <p class="score-figure">You answered <span>12</span> <span class="of">of</span> <span>15</span> correctly.</p>
+            <p class="score-meta">2 not correct <span class="sep">&middot;</span> 1 unanswered <span class="sep">&middot;</span> Finished in 23:11</p>
+          </div>
+
+          <!-- question list -->
+          <div>
+            <p class="qlist-head">Every question, in order</p>
+            <div class="qlist">
+
+              <!-- Q1 correct -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 1</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is 348 + 276?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">624</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">624</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q2 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 2</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">Round 4,713 to the nearest hundred.</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">4,700</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">4,700</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q3 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 3</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is 6 &times; 47?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">282</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">282</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q4 fraction -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 4</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">Which is larger,
+                  <span class="frac" role="img" aria-label="three fifths"><span class="n" aria-hidden="true">3</span><span class="d" aria-hidden="true">5</span></span>
+                  or
+                  <span class="frac" role="img" aria-label="two thirds"><span class="n" aria-hidden="true">2</span><span class="d" aria-hidden="true">3</span></span>?
+                </p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v"><span class="frac" role="img" aria-label="two thirds"><span class="n" aria-hidden="true">2</span><span class="d" aria-hidden="true">3</span></span></span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v"><span class="frac" role="img" aria-label="two thirds"><span class="n" aria-hidden="true">2</span><span class="d" aria-hidden="true">3</span></span></span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q5 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 5</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">A rectangle is 9 cm wide and 12 cm long. What is its area?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">108 square cm</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">108 square cm</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q6 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 6</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is 1,000 &minus; 645?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">355</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">355</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q7 INCORRECT + EXPLANATION EXPANDED -->
+              <div class="qrow qrow--incorrect">
+                <div class="qrow-top">
+                  <span class="qnum">Question 7</span>
+                  <span class="chip chip--incorrect"><span class="ico" aria-hidden="true">&#10007;</span>Not correct</span>
+                </div>
+                <p class="qtext">A baker has 47 cookies. She packs them into boxes that hold 6 cookies each.
+                  How many boxes does she fill, and how many cookies are left over?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">8 boxes, 1 left over</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">7 boxes, 5 left over</span></div>
+                </div>
+                <div class="qactions">
+                  <span class="btn btn--primary btn--focus" aria-expanded="true">Hide explanation</span>
+                </div>
+
+                <!-- inline expanded Explanation region: PAPER, square, flat, bordered -->
+                <div class="explain" role="region" aria-label="Explanation for question 7">
+                  <div class="explain-head">
+                    <p class="explain-title">Explanation</p>
+                  </div>
+                  <div class="explain-body">
+                    <p>You said 8 boxes with 1 cookie left over. Here is what happens when 47 cookies go into boxes of 6.</p>
+                    <p>Each full box uses 6 cookies. 6 &times; 7 = 42, and 6 &times; 8 = 48. Since 48 is more than 47,
+                       there are not enough cookies for 8 full boxes.</p>
+                    <p>So 7 boxes get filled. That uses 42 cookies, and 47 &minus; 42 = 5 cookies stay on the table.
+                       Five is fewer than six, so they only fill
+                       <span class="frac" role="img" aria-label="five sixths"><span class="n" aria-hidden="true">5</span><span class="d" aria-hidden="true">6</span></span>
+                       of another box &mdash; not a whole one.</p>
+                    <p>The answer is 7 full boxes with 5 cookies left over. When you divide and something is left over,
+                       the leftover part is called the remainder.</p>
+                  </div>
+                  <div class="explain-foot">
+                    <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This grade looks wrong</span>
+                    <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This explanation didn&rsquo;t help</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Q8 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 8</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is
+                  <span class="frac" role="img" aria-label="three quarters"><span class="n" aria-hidden="true">3</span><span class="d" aria-hidden="true">4</span></span>
+                  +
+                  <span class="frac" role="img" aria-label="one eighth"><span class="n" aria-hidden="true">1</span><span class="d" aria-hidden="true">8</span></span>?
+                </p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v"><span class="frac" role="img" aria-label="seven eighths"><span class="n" aria-hidden="true">7</span><span class="d" aria-hidden="true">8</span></span></span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v"><span class="frac" role="img" aria-label="seven eighths"><span class="n" aria-hidden="true">7</span><span class="d" aria-hidden="true">8</span></span></span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q9 UNANSWERED -->
+              <div class="qrow qrow--unanswered">
+                <div class="qrow-top">
+                  <span class="qnum">Question 9</span>
+                  <span class="chip chip--unanswered"><span class="ico" aria-hidden="true">&#8212;</span>Unanswered</span>
+                </div>
+                <p class="qtext">A train leaves at 2:45 pm and arrives at 5:20 pm. How long is the journey?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v blank">You didn&rsquo;t answer this one.</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">2 hours 35 minutes</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q10 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 10</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is 25% of 80?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">20</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">20</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q11 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 11</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is 9.6 &divide; 3?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">3.2</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">3.2</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q12 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 12</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">A square has sides of 14 cm. What is its perimeter?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">56 cm</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">56 cm</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q13 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 13</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is the value of the 7 in 5,472?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">70</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">70</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q14 INCORRECT -->
+              <div class="qrow qrow--incorrect">
+                <div class="qrow-top">
+                  <span class="qnum">Question 14</span>
+                  <span class="chip chip--incorrect"><span class="ico" aria-hidden="true">&#10007;</span>Not correct</span>
+                </div>
+                <p class="qtext">Put these numbers in order from least to greatest: 0.5, 0.45, 0.55</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">0.45, 0.55, 0.5</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">0.45, 0.5, 0.55</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- Q15 -->
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 15</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is 12 &times; 11?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">132</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">132</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- retake -->
+          <div class="footer-actions">
+            <p>You can take this test again whenever you want. Your first attempt is kept either way.</p>
+            <span class="btn btn--outline">Retake this test</span>
+          </div>
+
+        </div>
+      </div>
+      <div class="device-chin" aria-hidden="true"></div>
+    </div>
+
+    <div class="legend">
+      <h3>Grade states — each carries icon shape + glyph + text label + row rule texture, so none depends on colour</h3>
+      <div class="legend-item">
+        <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+        <div class="legend-rule c"></div><small>Solid circle, check glyph, solid row rule.</small>
+      </div>
+      <div class="legend-item">
+        <span class="chip chip--incorrect"><span class="ico" aria-hidden="true">&#10007;</span>Not correct</span>
+        <div class="legend-rule i"></div><small>Solid circle, cross glyph, hatched row rule.</small>
+      </div>
+      <div class="legend-item">
+        <span class="chip chip--unanswered"><span class="ico" aria-hidden="true">&#8212;</span>Unanswered</span>
+        <div class="legend-rule u"></div><small>Dashed circle, dash glyph, dashed row rule.</small>
+      </div>
+      <div class="legend-item">
+        <span class="chip chip--ungraded"><span class="ico" aria-hidden="true">&#8943;</span>Not graded yet</span>
+        <div class="legend-rule g"></div><small>Dotted square, ellipsis glyph, dotted row rule.</small>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================================================================== -->
+  <!-- STATE 2 — EXPLANATION LOADING                                         -->
+  <!-- ==================================================================== -->
+  <section class="state-block">
+    <span class="state-tag">State 2 of 5</span>
+    <h2 class="state-title">Explanation loading — the foreground wait on first tap</h2>
+    <p class="state-note">The wait lives <em>inside</em> the expanded region, so the question stays visible and nothing else
+      on the screen is blocked. This is the one place progress motion is permitted; it is disabled under
+      <code>prefers-reduced-motion</code>. Cached after the first tap, so only the first tap waits.</p>
+
+    <div class="device">
+      <div class="device-cam" aria-hidden="true"></div>
+      <div class="device-inner">
+        <div class="device-status"><span>9:41</span><span class="right"><span>Wi-Fi</span><span>84%</span></span></div>
+        <div class="screen">
+          <div class="qlist">
+            <div class="qrow qrow--incorrect">
+              <div class="qrow-top">
+                <span class="qnum">Question 7</span>
+                <span class="chip chip--incorrect"><span class="ico" aria-hidden="true">&#10007;</span>Not correct</span>
+              </div>
+              <p class="qtext">A baker has 47 cookies. She packs them into boxes that hold 6 cookies each.
+                How many boxes does she fill, and how many cookies are left over?</p>
+              <div class="akey">
+                <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">8 boxes, 1 left over</span></div>
+                <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">7 boxes, 5 left over</span></div>
+              </div>
+              <div class="qactions"><span class="btn btn--primary btn--focus" aria-expanded="true">Hide explanation</span></div>
+
+              <div class="explain" role="region" aria-label="Explanation for question 7" aria-busy="true">
+                <div class="explain-head"><p class="explain-title">Explanation</p></div>
+                <div class="wait" role="status" aria-live="polite">
+                  <p class="wait-text">Writing your explanation&hellip;</p>
+                  <div class="wait-bar" aria-hidden="true"><i></i></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="qrow qrow--correct">
+              <div class="qrow-top">
+                <span class="qnum">Question 8</span>
+                <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+              </div>
+              <p class="qtext">What is
+                <span class="frac" role="img" aria-label="three quarters"><span class="n" aria-hidden="true">3</span><span class="d" aria-hidden="true">4</span></span>
+                +
+                <span class="frac" role="img" aria-label="one eighth"><span class="n" aria-hidden="true">1</span><span class="d" aria-hidden="true">8</span></span>?
+              </p>
+              <div class="akey">
+                <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v"><span class="frac" role="img" aria-label="seven eighths"><span class="n" aria-hidden="true">7</span><span class="d" aria-hidden="true">8</span></span></span></div>
+                <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v"><span class="frac" role="img" aria-label="seven eighths"><span class="n" aria-hidden="true">7</span><span class="d" aria-hidden="true">8</span></span></span></div>
+              </div>
+              <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="device-chin" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- ==================================================================== -->
+  <!-- STATE 3 — EXPLANATION FAILED                                          -->
+  <!-- ==================================================================== -->
+  <section class="state-block">
+    <span class="state-tag">State 3 of 5</span>
+    <h2 class="state-title">Explanation failed — inline error with a manual retry</h2>
+    <p class="state-note">Exact decided copy: &ldquo;Couldn&rsquo;t load that explanation.&rdquo; No auto-retry, no error code,
+      no apology paragraph, no exclamation mark, and never framed as the student&rsquo;s fault. The answer key, the flags,
+      the other questions and retake all stay usable.</p>
+
+    <div class="device">
+      <div class="device-cam" aria-hidden="true"></div>
+      <div class="device-inner">
+        <div class="device-status"><span>9:41</span><span class="right"><span>Wi-Fi</span><span>84%</span></span></div>
+        <div class="screen">
+          <div class="qlist">
+            <div class="qrow qrow--incorrect">
+              <div class="qrow-top">
+                <span class="qnum">Question 7</span>
+                <span class="chip chip--incorrect"><span class="ico" aria-hidden="true">&#10007;</span>Not correct</span>
+              </div>
+              <p class="qtext">A baker has 47 cookies. She packs them into boxes that hold 6 cookies each.
+                How many boxes does she fill, and how many cookies are left over?</p>
+              <div class="akey">
+                <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">8 boxes, 1 left over</span></div>
+                <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">7 boxes, 5 left over</span></div>
+              </div>
+              <div class="qactions"><span class="btn btn--primary btn--focus" aria-expanded="true">Hide explanation</span></div>
+
+              <div class="explain" role="region" aria-label="Explanation for question 7">
+                <div class="explain-head"><p class="explain-title">Explanation</p></div>
+                <div class="failure" role="alert">
+                  <p class="failure-line"><span class="failure-ico" aria-hidden="true">&#10007;</span>
+                     <span>Couldn&rsquo;t load that explanation.</span></p>
+                  <div><span class="btn btn--primary">Try again</span></div>
+                  <p class="failure-note">The answer to this question is above, and the rest of your results still work.</p>
+                </div>
+                <div class="explain-foot">
+                  <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This grade looks wrong</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="qrow qrow--unanswered">
+              <div class="qrow-top">
+                <span class="qnum">Question 9</span>
+                <span class="chip chip--unanswered"><span class="ico" aria-hidden="true">&#8212;</span>Unanswered</span>
+              </div>
+              <p class="qtext">A train leaves at 2:45 pm and arrives at 5:20 pm. How long is the journey?</p>
+              <div class="akey">
+                <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v blank">You didn&rsquo;t answer this one.</span></div>
+                <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">2 hours 35 minutes</span></div>
+              </div>
+              <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+            </div>
+          </div>
+
+          <div class="footer-actions">
+            <p>You can take this test again whenever you want.</p>
+            <span class="btn btn--outline">Retake this test</span>
+          </div>
+        </div>
+      </div>
+      <div class="device-chin" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- ==================================================================== -->
+  <!-- STATE 4 — DEGRADED GRADING                                            -->
+  <!-- ==================================================================== -->
+  <section class="state-block">
+    <span class="state-tag">State 4 of 5</span>
+    <h2 class="state-title">Degraded grading — gradable-only score, the gap named, Short Answer rows ungraded</h2>
+    <p class="state-note">AI grading was unavailable for the four Short Answer questions. The header scores only what could
+      be graded and names the gap; it never shows a false denominator. Ungraded is the fourth grade state: dotted square,
+      ellipsis glyph, dotted row rule, and the words &ldquo;Not graded yet&rdquo;. Per Q13e, grading <em>retries
+      automatically the next time these results are opened</em>, by either the student or the parent — there is no
+      background job and no action for anyone to take. The consequence that has to be designed for rather than hidden:
+      the total can legitimately be different on the next viewing. It is stated in advance, in the score header and again
+      on every ungraded row, so a changed number reads as the app finishing a job it told you it still had to do — not as
+      the app changing its mind about the student&rsquo;s work. The retry never blocks rendering: the answer key,
+      Explanations and retake stay live throughout.</p>
+
+    <div class="device">
+      <div class="device-cam" aria-hidden="true"></div>
+      <div class="device-inner">
+        <div class="device-status"><span>9:41</span><span class="right"><span>Wi-Fi</span><span>84%</span></span></div>
+
+        <div class="appbar">
+          <span class="iconbtn" role="img" aria-label="Back to home">&#8592;</span>
+          <div>
+            <h2 class="appbar-title">Math Practice Test</h2>
+            <p class="appbar-sub">Grade 5 &middot; 15 questions &middot; 30-minute timer</p>
+          </div>
+        </div>
+
+        <div class="screen">
+
+          <div class="score">
+            <p class="score-label">Your results</p>
+            <p class="score-figure">You answered <span>11</span> <span class="of">of</span> <span>11</span> graded questions correctly.</p>
+            <p class="score-meta">11 of 11 graded <span class="sep">&middot;</span> 4 not graded yet</p>
+            <div class="score-gap">
+              <span class="g-ico" aria-hidden="true">&#8943;</span>
+              <span>4 Short Answer questions haven&rsquo;t been graded yet. They aren&rsquo;t counted in the 11 above.
+                We&rsquo;ll try to grade them again the next time you open these results, so your total will most likely
+                go up then. That is the grading finishing, not your work changing.</span>
+            </div>
+          </div>
+
+          <div>
+            <p class="qlist-head">Every question, in order</p>
+            <div class="qlist">
+
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 1</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is 348 + 276?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">624</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">624</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <!-- UNGRADED -->
+              <div class="qrow qrow--ungraded">
+                <div class="qrow-top">
+                  <span class="qnum">Question 2 &middot; Short Answer</span>
+                  <span class="chip chip--ungraded"><span class="ico" aria-hidden="true">&#8943;</span>Not graded yet</span>
+                </div>
+                <p class="qtext">Explain in your own words why 4,713 rounds to 4,700 and not to 4,800.</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">Because 13 is less than 50 so it goes down to 700.</span></div>
+                  <div class="akey-line"><span class="akey-k">Grade</span><span class="akey-v pending">Not graded yet &mdash; we&rsquo;ll try again next time you open your results. Your total may go up when it&rsquo;s graded.</span></div>
+                </div>
+                <div class="qactions">
+                  <span class="btn btn--outline">Explain this</span>
+                  <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This grade looks wrong</span>
+                </div>
+              </div>
+
+              <div class="qrow qrow--ungraded">
+                <div class="qrow-top">
+                  <span class="qnum">Question 5 &middot; Short Answer</span>
+                  <span class="chip chip--ungraded"><span class="ico" aria-hidden="true">&#8943;</span>Not graded yet</span>
+                </div>
+                <p class="qtext">A rectangle is 9 cm wide and 12 cm long. Describe how you would work out its area.</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">Times the two sides together, 9 times 12 is 108.</span></div>
+                  <div class="akey-line"><span class="akey-k">Grade</span><span class="akey-v pending">Not graded yet &mdash; we&rsquo;ll try again next time you open your results. Your total may go up when it&rsquo;s graded.</span></div>
+                </div>
+                <div class="qactions">
+                  <span class="btn btn--outline">Explain this</span>
+                  <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This grade looks wrong</span>
+                </div>
+              </div>
+
+              <div class="qrow qrow--incorrect">
+                <div class="qrow-top">
+                  <span class="qnum">Question 7</span>
+                  <span class="chip chip--incorrect"><span class="ico" aria-hidden="true">&#10007;</span>Not correct</span>
+                </div>
+                <p class="qtext">A baker has 47 cookies. She packs them into boxes that hold 6 cookies each.
+                  How many boxes does she fill, and how many cookies are left over?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">8 boxes, 1 left over</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">7 boxes, 5 left over</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <div class="qrow qrow--unanswered">
+                <div class="qrow-top">
+                  <span class="qnum">Question 9</span>
+                  <span class="chip chip--unanswered"><span class="ico" aria-hidden="true">&#8212;</span>Unanswered</span>
+                </div>
+                <p class="qtext">A train leaves at 2:45 pm and arrives at 5:20 pm. How long is the journey?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v blank">You didn&rsquo;t answer this one.</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">2 hours 35 minutes</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+              <div class="qrow qrow--ungraded">
+                <div class="qrow-top">
+                  <span class="qnum">Question 12 &middot; Short Answer</span>
+                  <span class="chip chip--ungraded"><span class="ico" aria-hidden="true">&#8943;</span>Not graded yet</span>
+                </div>
+                <p class="qtext">A square has sides of 14 cm. Explain how the perimeter is different from the area.</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">Perimeter is all the way round the outside and area is the space inside.</span></div>
+                  <div class="akey-line"><span class="akey-k">Grade</span><span class="akey-v pending">Not graded yet &mdash; we&rsquo;ll try again next time you open your results. Your total may go up when it&rsquo;s graded.</span></div>
+                </div>
+                <div class="qactions">
+                  <span class="btn btn--outline">Explain this</span>
+                  <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This grade looks wrong</span>
+                </div>
+              </div>
+
+              <div class="qrow qrow--ungraded">
+                <div class="qrow-top">
+                  <span class="qnum">Question 14 &middot; Short Answer</span>
+                  <span class="chip chip--ungraded"><span class="ico" aria-hidden="true">&#8943;</span>Not graded yet</span>
+                </div>
+                <p class="qtext">Why is 0.45 smaller than 0.5, even though 45 is bigger than 5?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">Because the 4 is in the tenths and 5 tenths is more than 4 tenths.</span></div>
+                  <div class="akey-line"><span class="akey-k">Grade</span><span class="akey-v pending">Not graded yet &mdash; we&rsquo;ll try again next time you open your results. Your total may go up when it&rsquo;s graded.</span></div>
+                </div>
+                <div class="qactions">
+                  <span class="btn btn--outline">Explain this</span>
+                  <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This grade looks wrong</span>
+                </div>
+              </div>
+
+              <div class="qrow qrow--correct">
+                <div class="qrow-top">
+                  <span class="qnum">Question 15</span>
+                  <span class="chip chip--correct"><span class="ico" aria-hidden="true">&#10003;</span>Correct</span>
+                </div>
+                <p class="qtext">What is 12 &times; 11?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">132</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">132</span></div>
+                </div>
+                <div class="qactions"><span class="btn btn--outline">Explain this</span></div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="footer-actions">
+            <p>You can take this test again whenever you want.</p>
+            <span class="btn btn--outline">Retake this test</span>
+          </div>
+
+        </div>
+      </div>
+      <div class="device-chin" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- ==================================================================== -->
+  <!-- STATE 5 — EXPLANATION AT CAP (Student Mode)                          -->
+  <!-- ==================================================================== -->
+  <section class="state-block">
+    <span class="state-tag">State 5 of 5</span>
+    <h2 class="state-title">Explanation at cap — the Free tier&rsquo;s 10 new explanations for the month are used up</h2>
+    <p class="state-note">The only allowance wall in the product that lands on a person who cannot act on it. Noah cannot
+      upgrade, cannot request more, and did not know a limit existed &mdash; there is no running counter in Student Mode by
+      design, because a visible &ldquo;6 of 10 left&rdquo; would teach a child to ration the one feature the product wants
+      him to use. So the wall must be a plain statement of the plan&rsquo;s limit and its reset date, and nothing else.
+      <strong>Copy rules honoured here:</strong> it blames the plan, never the child; it never implies he asked too many
+      questions or did anything wrong; no exclamation marks; no apology; no upsell aimed at a 10-year-old (the parent is
+      the only person who can change the tier, and she sees the counter in Parent View).
+      <strong>Everything else stays functional:</strong> the full answer key is intact, every previously generated
+      Explanation is still open and readable &mdash; reading is never capped, only generating &mdash; the grade-dispute
+      flag still works, and retake is unaffected. The &ldquo;Explain this&rdquo; control on questions with no explanation
+      yet is shown disabled and labelled rather than hidden, so nothing silently disappears.</p>
+
+    <div class="device">
+      <div class="device-cam" aria-hidden="true"></div>
+      <div class="device-inner">
+        <div class="device-status"><span>9:41</span><span class="right"><span>Wi-Fi</span><span>84%</span></span></div>
+
+        <div class="appbar">
+          <span class="iconbtn" role="img" aria-label="Back to home">&#8592;</span>
+          <div>
+            <h2 class="appbar-title">Math Practice Test</h2>
+            <p class="appbar-sub">Grade 5 &middot; 15 questions &middot; 30-minute timer</p>
+          </div>
+        </div>
+
+        <div class="screen">
+
+          <div class="score">
+            <p class="score-label">Your results</p>
+            <p class="score-figure">You answered <span>12</span> <span class="of">of</span> <span>15</span> correctly.</p>
+            <p class="score-meta">2 not correct <span class="sep">&middot;</span> 1 unanswered <span class="sep">&middot;</span> Finished in 23:11</p>
+          </div>
+
+          <div>
+            <p class="qlist-head">Every question, in order</p>
+            <div class="qlist">
+
+              <!-- Q7 — new Explanation requested, allowance is used up -->
+              <div class="qrow qrow--incorrect">
+                <div class="qrow-top">
+                  <span class="qnum">Question 7</span>
+                  <span class="chip chip--incorrect"><span class="ico" aria-hidden="true">&#10007;</span>Not correct</span>
+                </div>
+                <p class="qtext">A baker has 47 cookies. She packs them into boxes that hold 6 cookies each.
+                  How many boxes does she fill, and how many cookies are left over?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">8 boxes, 1 left over</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">7 boxes, 5 left over</span></div>
+                </div>
+                <div class="qactions">
+                  <span class="btn btn--outline btn--focus" aria-expanded="true">Hide explanation</span>
+                </div>
+
+                <div class="explain" role="region" aria-label="Explanation for question 7">
+                  <div class="explain-head"><p class="explain-title">Explanation</p></div>
+                  <div class="cap" role="status" aria-live="polite">
+                    <p class="cap-line">You&rsquo;ve used all 10 explanations this month. They reset on 1&nbsp;October.</p>
+                    <p class="cap-note">The answer to this question is above, and any explanation you already opened is
+                      still here to read.</p>
+                  </div>
+                  <div class="explain-foot">
+                    <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This grade looks wrong</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Q9 — Explain this is disabled, and says why in one short line -->
+              <div class="qrow qrow--unanswered">
+                <div class="qrow-top">
+                  <span class="qnum">Question 9</span>
+                  <span class="chip chip--unanswered"><span class="ico" aria-hidden="true">&#8212;</span>Unanswered</span>
+                </div>
+                <p class="qtext">A train leaves at 2:45 pm and arrives at 5:20 pm. How long is the journey?</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v blank">You didn&rsquo;t answer this one.</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">2 hours 35 minutes</span></div>
+                </div>
+                <div class="qactions">
+                  <span class="btn btn--disabled" aria-disabled="true">Explain this</span>
+                  <span class="cap-note">New explanations start again on 1&nbsp;October.</span>
+                </div>
+              </div>
+
+              <!-- Q14 — an Explanation generated EARLIER in the month, still fully readable -->
+              <div class="qrow qrow--incorrect">
+                <div class="qrow-top">
+                  <span class="qnum">Question 14</span>
+                  <span class="chip chip--incorrect"><span class="ico" aria-hidden="true">&#10007;</span>Not correct</span>
+                </div>
+                <p class="qtext">Put these numbers in order from least to greatest: 0.5, 0.45, 0.55</p>
+                <div class="akey">
+                  <div class="akey-line"><span class="akey-k">You answered</span><span class="akey-v">0.45, 0.55, 0.5</span></div>
+                  <div class="akey-line"><span class="akey-k">Correct answer</span><span class="akey-v">0.45, 0.5, 0.55</span></div>
+                </div>
+                <div class="qactions">
+                  <span class="btn btn--primary" aria-expanded="true">Hide explanation</span>
+                </div>
+
+                <div class="explain" role="region" aria-label="Explanation for question 14">
+                  <div class="explain-head"><p class="explain-title">Explanation</p></div>
+                  <div class="explain-body">
+                    <p>Line the three numbers up by their decimal points and give them all the same number of places:
+                       0.50, 0.45, 0.55.</p>
+                    <p>Now compare the tenths first. 0.45 has 4 tenths, 0.50 has 5 tenths, 0.55 has 5 tenths. So 0.45 is
+                       the smallest, and it comes first.</p>
+                    <p>0.50 and 0.55 both have 5 tenths, so look at the hundredths: 0 against 5. That makes 0.50 smaller
+                       than 0.55.</p>
+                    <p>In order from least to greatest: 0.45, 0.5, 0.55.</p>
+                  </div>
+                  <div class="explain-foot">
+                    <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This grade looks wrong</span>
+                    <span class="flagbtn"><span class="fi" aria-hidden="true">&#9873;</span>This explanation didn&rsquo;t help</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="footer-actions">
+            <p>You can take this test again whenever you want. Your first attempt is kept either way.</p>
+            <span class="btn btn--outline">Retake this test</span>
+          </div>
+
+        </div>
+      </div>
+      <div class="device-chin" aria-hidden="true"></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

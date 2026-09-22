@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key Screen — Student Mode: Taking a Practice Test (tablet)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   KEY SCREEN MOCK — Student Mode, taking a Practice Test. TABLET-FIRST.
+   n-test-reviewer · ux-n-test-reviewer-2026-08-29 · .working/key-take-test.html
+   Every visible string and layout choice traces to .memlog.md (canonical log).
+
+   ---------------------------------------------------------------------------
+   SPINE SECTIONS THAT GOVERN THIS SCREEN
+   ---------------------------------------------------------------------------
+   DESIGN.md
+     · Colour — Accent split (Q1): Student Mode primary #0F6E78. Neutrals and
+       semantics byte-identical with Parent View. Parent blue #0B5FA5 appears
+       NOWHERE on this screen.
+     · Typography (Q2b/Q2e/Q2f) — Literata for Question content, Source Sans 3
+       for all chrome; one shared scale; tabular figures on the timer and the
+       "7 of 15" counter (Literata needs tnum explicitly, Source Sans 3 is
+       monowidth by default).
+     · Shapes (Q3) — paper vs control. PAPER (0–2px): the test surface, the
+       question container, the question body + option rows. CONTROL (8px):
+       buttons, question-map cells, the Fill-in-the-Blank input, the submit
+       dialog.
+     · Elevation and Depth (Q4) — flat with borders. No shadow anywhere.
+       Separation is 1px #7C8894 dividers plus the #F6F8FA / #FFFFFF step.
+       The submit confirmation separates by SCRIM + BORDER, never a lift.
+     · Density (Q5) — density.comfortable: row-height 56, card-padding 20,
+       gap 16, section-margin 32, min tap target 48 (map cells hit 48×48).
+     · Motion (Q6) — none rendered; the timer changes value in place and never
+       animates per tick. Map open/close is the permitted expand/collapse.
+       This file declares NO animation and NO transition of its own, and it
+       additionally carries a blanket prefers-reduced-motion guard at the foot
+       of the stylesheet, so the reduced-motion contract holds even after the
+       expand/collapse transition is added in code.
+     · Responsive (Q16) — this is one of only two screens with a genuine
+       second layout, because a 34rem measure on a 10-inch tablet leaves real
+       unused width. See RESOLUTION below.
+
+   EXPERIENCE.md
+     · Component Patterns — Question container (paper); Multiple Choice option
+       row; Fill-in-the-Blank smart fraction input (Q2d); question map (Q8a);
+       persistent counter; optional countdown timer (FR-15).
+     · State Patterns — unanswered as a distinct state (Q8b.2); submit-with-
+       gaps confirmation (Q8b.1); timer running (expiry auto-submits, Q8b.3).
+     · Voice and Tone (Q17a) — Student Mode is SECOND PERSON throughout.
+     · Accessibility Floor (Q18) — hard cases 1 (typographic fractions need a
+       text alternative), 2 (timed test / SC 2.2.1), 3 (map cells keyboard
+       navigable and individually announced with state).
+
+   Key Flow UJ-2, steps covered: [2] open the released Practice Test →
+   [3] answer questions one per screen with Back/Next → [3a] jump via the
+   question map → [4] submit (confirmation when gaps exist). Steps [5] results,
+   [6] "Explain this" and [7] retake are OUT of this mock's scope.
+
+   ---------------------------------------------------------------------------
+   RESOLUTION OF THE TABLET UNUSED-WIDTH QUESTION (Q16 item 1)
+   ---------------------------------------------------------------------------
+   The unused width becomes a PERSISTENT QUESTION-MAP RAIL, not empty space.
+   Reasoning traced to the log: Q8a already requires the map to exist and to
+   make the Q8b submit warning actionable in one tap; making it always-visible
+   on a wide viewport costs the student nothing, removes an open/close step
+   from the most-used affordance on the screen, and keeps the 34rem measure
+   untouched (the question column does NOT widen — the rail takes the surplus,
+   the measure is never traded for it). Deliberate empty space was rejected:
+   it would leave ~40% of a 10-inch tablet doing no work while the only
+   navigation aid stayed hidden behind a tap. Guard, from the anti-reference:
+   the rail shows STATE ONLY (answered / not answered) — no score, no running
+   tally, no per-question feedback, nothing that hints at correctness (Q6/Q9a
+   "no mid-test feedback of any kind").
+   The rail collapses below the tablet breakpoint and the map reverts to the
+   openable panel form — that panel form is what STATE 2 renders, so both
+   layouts of the same component are shown.
+
+   ---------------------------------------------------------------------------
+   TIMER ACCESSIBILITY (SC 2.2.1 / SC 4.1.3) — was the worst defect in the set
+   ---------------------------------------------------------------------------
+   The SC 2.2.1 exemption is ARGUED, not assumed: the time limit is part of
+   what the Practice Test simulates, the timer is optional and defaults off
+   per FR-15, and it is parent-configured rather than system-imposed — that is
+   the essential-exception basis. The exemption does NOT excuse silence, so
+   every timer instance in this file now carries:
+     · role="timer"                on the timer group
+     · aria-label                  a spoken, unit-bearing value ("12 minutes
+                                   47 seconds left") — previously present on
+                                   ONE of three instances
+     · aria-live="off" while running, so a screen reader is not interrupted
+       every second; the value is still readable on demand
+     · aria-live="assertive" ONLY on the pre-expiry warning and on the
+       auto-submit announcement, which are the two moments a user must be
+       told about without asking
+   PRE-EXPIRY WARNINGS (States 4a-4c): THREE staged warnings, at 5 MINUTES,
+   1 MINUTE and 20 SECONDS remaining. Five minutes is genuinely actionable on
+   a 20-minute test — it is enough time to go back to skipped questions via
+   the map — and 20 seconds is the final submit-now signal. Each warning is
+   INFORMATION, NOT ALARM: the treatment is IDENTICAL at all three thresholds
+   and never escalates — no escalating colour, no urgency styling, no
+   exclamation marks, no motion. It is not colour alone either: a warning
+   glyph, the literal words ("5 minutes left"), a solid rule under the timer
+   and the warning hue together. The timer still does not animate per tick
+   (Q6), and aria-live goes assertive AT THE THRESHOLDS ONLY, never
+   continuously.
+   AUTO-SUBMIT ANNOUNCEMENT (State 4d): an assertive live region states what
+   happened and what it did to the blank questions, so a blind or low-vision
+   student is never silently submitted.
+   TIMER-EXPIRY GRADING (BLOCKER 1, FR-15): at expiry, blank questions are
+   graded NOT CORRECT — they do not stay "unanswered". "Unanswered" survives
+   only for an untimed Practice Test or a manual submission before expiry,
+   which is what State 3 renders (submitted at 03:08 remaining). Both rules
+   are stated in the submit dialog so the student is never surprised.
+
+   ---------------------------------------------------------------------------
+   TINT TOKENS USED HERE — UNDECLARED IN THE SPINES, ADOPTION REQUIRED
+   ---------------------------------------------------------------------------
+   DESIGN.md bans tinted surfaces yet requires a hover tint, and this mock
+   carries state on a tint (the answered map cell). Rather than smuggle it,
+   the two hues are declared as explicit new tokens for the spines to adopt:
+     state.tintSelected  #E8F1F2 light / #0D2A33 dark   (answered map cell)
+     state.tintHover     #EEF3F5 light / #1C2836 dark   (hover on any control)
+   BINDING RULE that goes with them: a tint may REINFORCE state, never CARRY
+   it. The answered map cell is already distinguished by a filled ● versus a
+   hollow ○ glyph, by a visually-hidden literal word, and by a 3:1 border
+   colour change, so it survives greyscale and survives the tint being
+   removed. Any component that would depend on the tint alone must instead
+   take a border or texture treatment.
+
+   ---------------------------------------------------------------------------
+   DIVIDER — RECOMPUTED (replaces #DCE3E9 / #26333F)
+   ---------------------------------------------------------------------------
+   #DCE3E9 measured 1.30:1 on paper. With shadows banned (Q4) the divider is
+   the SOLE boundary of every control on this screen — every map cell, every
+   button, the question paper, the dialog — so 1.30:1 is a direct SC 1.4.11
+   failure, not a decorative choice. It was previously excused here as
+   "decorative only"; that excuse does not survive, because a control whose
+   only boundary is invisible is an invisible control. New values, computed to
+   clear 3:1 against BOTH surfaces in BOTH modes:
+     light  #7C8894  on paper #FFFFFF 3.62:1 · on default #F6F8FA 3.40:1
+     dark   #6A747E  on paper #16202C 3.45:1 · on default #0E1620 3.82:1
+   Applied identically across all four mocks; the spines should adopt these.
+
+   ---------------------------------------------------------------------------
+   COMPUTED CONTRAST RATIOS (WCAG 2.1, sRGB relative luminance)
+   Every value recomputed for this pass. The previous table was wrong — it
+   published 16.20:1 and 15.22:1 for pairs that measure 16.56:1 and 15.56:1,
+   and disagreed with the other three mocks on the same pairs.
+   ---------------------------------------------------------------------------
+   text.primary  #10202E on paper   #FFFFFF ....... 16.56:1  AAA
+   text.primary  #10202E on default #F6F8FA ....... 15.56:1  AAA
+   text.secondary#4E6070 on paper   #FFFFFF .......  6.50:1  AA  (AAA at 22px)
+   text.secondary#4E6070 on default #F6F8FA .......  6.11:1  AA
+   Student teal  #0F6E78 on paper   #FFFFFF .......  5.96:1  AA + AA non-text
+   Student teal  #0F6E78 on default #F6F8FA .......  5.60:1  AA
+   #FFFFFF on Student teal #0F6E78 ................  5.96:1  AA (primary button)
+   error         #B3261E on paper   #FFFFFF .......  6.54:1  AA
+   warning       #8A5A00 on paper   #FFFFFF .......  5.93:1  AA (pre-expiry
+     warning only — warning is NOT a grade-state hue; see key-results.html)
+   Timer #10202E 28px w600 on #FFFFFF ............. 16.56:1  AAA
+   divider       #7C8894 on paper   #FFFFFF .......  3.62:1  AA non-text
+   divider       #7C8894 on default #F6F8FA .......  3.40:1  AA non-text
+   Focus ring: 2px #0F6E78 + 2px offset — 5.96:1 against paper, clears the
+     3:1 non-text floor with room to spare.
+   ============================================================================ */
+
+:root{
+  /* colour — light, Student Mode accent */
+  --bg-default:#F6F8FA; --bg-paper:#FFFFFF;
+  --text-primary:#10202E; --text-secondary:#4E6070;
+  --divider:#7C8894;              /* recomputed for SC 1.4.11 — 3.62:1 / 3.40:1 */
+  --success:#0F6B4F; --error:#B3261E; --warning:#8A5A00; --info:#2E6E9E;
+  --primary:#0F6E78;              /* Student Mode accent (Q1) */
+  /* NEW TOKENS awaiting spine adoption — see TINT TOKENS above.
+     A tint may reinforce state; it may never carry it. */
+  --tint-selected:#E8F1F2;        /* state.tintSelected — answered map cell   */
+  --tint-hover:#EEF3F5;           /* state.tintHover    — hover on a control  */
+  --scrim:rgba(16,32,46,0.48);    /* Q4 overlay = scrim + border, no shadow */
+
+  /* type */
+  --serif:'Literata', Georgia, 'Times New Roman', serif;
+  --sans:'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+  /* density.comfortable (Q5) */
+  --row-h:56px; --card-pad:20px; --gap:16px; --section:32px; --tap:48px;
+
+  /* shape (Q3) */
+  --r-paper:2px; --r-control:8px;
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg-default); color:var(--text-primary);
+  font-family:var(--sans); font-size:16px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ---------- mock scaffolding (not part of the product UI) ---------- */
+.sheet{max-width:1180px;margin:0 auto;padding:40px 24px 72px;}
+.sheet-head{border-bottom:1px solid var(--divider);padding-bottom:20px;margin-bottom:var(--section);}
+.sheet-head h1{font-size:22px;line-height:1.3;font-weight:600;margin:0 0 6px;}
+.sheet-head p{margin:0;font-size:14px;color:var(--text-secondary);max-width:62ch;}
+.state-block{margin-bottom:56px;}
+.state-label{
+  display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  border-left:3px solid var(--primary);padding-left:12px;margin-bottom:var(--gap);
+}
+.state-label .num{
+  font-size:13px;line-height:1.4;font-weight:600;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--primary);
+}
+.state-label .name{font-size:17px;font-weight:600;}
+.state-label .note{font-size:13px;line-height:1.4;color:var(--text-secondary);}
+
+/* ---------- realistic tablet device frame ---------- */
+.tablet{
+  width:100%;max-width:1024px;margin:0 auto;
+  background:#1B242E;border-radius:22px;padding:14px 46px;
+  border:1px solid #0B1219;
+}
+.tablet.narrow{max-width:560px;padding:14px 34px;}
+.tablet-bezel{
+  position:relative;background:var(--bg-default);
+  border-radius:4px;overflow:hidden;border:1px solid #0B1219;
+}
+.tablet-cam{
+  position:absolute;top:-9px;left:50%;transform:translateX(-50%);
+  width:7px;height:7px;border-radius:50%;background:#3A4753;
+}
+.tablet::after{
+  content:"";display:block;width:88px;height:4px;border-radius:2px;
+  background:#3A4753;margin:11px auto 0;
+}
+.tablet-lip{height:11px;}
+
+/* ---------- app chrome ---------- */
+.appbar{
+  display:flex;align-items:center;justify-content:space-between;gap:var(--gap);
+  min-height:var(--row-h);padding:0 var(--card-pad);
+  background:var(--bg-paper);border-bottom:1px solid var(--divider);
+}
+.appbar-left{display:flex;align-items:center;gap:var(--gap);min-width:0;}
+.test-name{font-size:14px;line-height:1.4;font-weight:600;letter-spacing:.02em;}
+.test-meta{font-size:13px;line-height:1.4;color:var(--text-secondary);}
+.appbar-right{display:flex;align-items:center;gap:var(--gap);}
+.timer{
+  display:flex;flex-direction:column;align-items:flex-end;line-height:1;
+}
+.timer-value{
+  font-family:var(--sans);font-size:28px;line-height:1.2;font-weight:600;
+  font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
+  color:var(--text-primary);
+}
+.timer-label{
+  font-size:13px;line-height:1.4;color:var(--text-secondary);
+  letter-spacing:.02em;
+}
+
+/* ---------- test surface (PAPER) + rail ---------- */
+.surface{
+  display:flex;align-items:stretch;min-height:560px;background:var(--bg-default);
+}
+.qcolumn{
+  flex:1 1 auto;min-width:0;display:flex;flex-direction:column;
+  padding:var(--section) var(--card-pad);
+}
+.qpaper{
+  width:100%;max-width:34rem;margin:0 auto;           /* Q2f measure, never traded */
+  background:var(--bg-paper);border:1px solid var(--divider);
+  border-radius:var(--r-paper);                        /* PAPER role */
+  padding:var(--card-pad);
+}
+.counter{
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding-bottom:12px;margin-bottom:var(--gap);
+  border-bottom:1px solid var(--divider);
+}
+.counter-main{
+  font-size:14px;line-height:1.4;font-weight:600;letter-spacing:.02em;
+  font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
+  color:var(--text-primary);
+}
+.counter-kind{font-size:13px;line-height:1.4;color:var(--text-secondary);}
+.qbody{
+  font-family:var(--serif);font-size:22px;line-height:1.60;font-weight:400;
+  color:var(--text-primary);margin:0 0 var(--gap);
+  font-feature-settings:"tnum" 1;                      /* Literata needs tnum */
+}
+
+/* ---------- multiple choice option rows (PAPER) ---------- */
+.options{list-style:none;margin:0;padding:0;
+  border-top:1px solid var(--divider);}
+.option{
+  display:flex;align-items:center;gap:var(--gap);
+  min-height:var(--tap);padding:14px 8px;
+  border-bottom:1px solid var(--divider);
+  border-radius:var(--r-paper);
+  cursor:default;
+}
+.option .mark{
+  flex:0 0 auto;width:26px;height:26px;border-radius:50%;
+  border:2px solid var(--text-secondary);background:var(--bg-paper);
+}
+.option .letter{
+  flex:0 0 auto;font-size:14px;line-height:1.4;font-weight:600;
+  letter-spacing:.02em;color:var(--text-secondary);width:1.2em;
+}
+.option .text{
+  font-family:var(--serif);font-size:22px;line-height:1.60;
+  font-feature-settings:"tnum" 1;
+}
+.option.is-focus{outline:2px solid var(--primary);outline-offset:2px;}
+
+/* ---------- nav (CONTROL) ---------- */
+.qnav{
+  display:flex;align-items:center;justify-content:space-between;gap:var(--gap);
+  width:100%;max-width:34rem;margin:var(--gap) auto 0;
+}
+.btn{
+  font-family:var(--sans);font-size:16px;font-weight:600;letter-spacing:.01em;
+  min-height:var(--tap);padding:0 20px;border-radius:var(--r-control);
+  border:1px solid var(--divider);background:var(--bg-paper);
+  color:var(--text-primary);display:inline-flex;align-items:center;
+  justify-content:center;gap:8px;cursor:default;
+}
+.btn-primary{background:var(--primary);border-color:var(--primary);color:#FFFFFF;}
+.btn-quiet{border-color:var(--primary);color:var(--primary);background:var(--bg-paper);}
+.btn-danger-quiet{border-color:var(--divider);color:var(--text-primary);}
+.btn:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+
+/* ---------- persistent question-map rail (tablet resolution) ---------- */
+.rail{
+  flex:0 0 268px;background:var(--bg-paper);
+  border-left:1px solid var(--divider);
+  padding:var(--section) var(--card-pad);
+}
+.rail-head{
+  font-size:14px;line-height:1.4;font-weight:600;letter-spacing:.02em;
+  margin:0 0 4px;
+}
+.rail-sub{
+  font-size:13px;line-height:1.4;color:var(--text-secondary);margin:0 0 var(--gap);
+  font-variant-numeric:tabular-nums;
+}
+.map-grid{
+  display:grid;grid-template-columns:repeat(4,minmax(var(--tap),1fr));
+  gap:12px;margin:0 0 var(--gap);padding:0;list-style:none;
+}
+.map-cell{
+  min-width:var(--tap);min-height:var(--tap);                 /* Q5 floor */
+  border:1px solid var(--divider);border-radius:var(--r-control); /* CONTROL */
+  background:var(--bg-paper);color:var(--text-primary);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1px;font-family:var(--sans);cursor:default;padding:0;
+}
+.map-cell .n{
+  font-size:16px;line-height:1.2;font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+.map-cell .glyph{font-size:11px;line-height:1;color:var(--text-secondary);}
+.map-cell.answered{
+  background:var(--tint-selected);border-color:var(--primary);
+}
+.map-cell.answered .glyph{color:var(--primary);}
+.map-cell.current{
+  outline:2px solid var(--primary);outline-offset:2px;
+  border-color:var(--primary);
+}
+.map-cell:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.map-legend{
+  border-top:1px solid var(--divider);padding-top:12px;margin:0;
+  font-size:13px;line-height:1.4;color:var(--text-secondary);
+}
+.map-legend div{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.map-legend .swatch{
+  width:22px;height:22px;border-radius:var(--r-control);
+  border:1px solid var(--divider);background:var(--bg-paper);
+  display:flex;align-items:center;justify-content:center;font-size:11px;
+  color:var(--text-secondary);
+}
+.map-legend .swatch.answered{
+  background:var(--tint-selected);border-color:var(--primary);color:var(--primary);
+}
+.rail-submit{margin-top:var(--gap);width:100%;}
+.sr-only{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0;
+}
+
+/* ---------- fill-in-the-blank smart fraction input (inset) ---------- */
+.inset{
+  width:100%;max-width:34rem;margin:var(--section) auto 0;
+  border:1px solid var(--divider);border-radius:var(--r-paper);
+  background:var(--bg-paper);padding:var(--card-pad);
+}
+.inset-tag{
+  font-size:13px;line-height:1.4;letter-spacing:.02em;font-weight:600;
+  color:var(--text-secondary);text-transform:uppercase;margin:0 0 12px;
+}
+.fitb-label{
+  display:block;font-size:14px;line-height:1.4;font-weight:600;letter-spacing:.02em;
+  color:var(--text-primary);margin:0 0 8px;
+}
+/* The field is a real <input> carrying the RAW TYPED STRING. The stacked
+   fraction is a presentational layer painted underneath it and marked
+   aria-hidden, so the answer is announced ONCE, from the input's own value —
+   not twice in two disagreeing forms as it was before ("3 over 4" from the
+   fraction plus "three quarters" from a second alternative). */
+.fitb-field{
+  position:relative;
+  display:flex;align-items:center;gap:12px;min-height:var(--tap);
+  border:2px solid var(--primary);border-radius:var(--r-control); /* CONTROL */
+  background:var(--bg-paper);padding:8px 14px;max-width:22rem;
+}
+.fitb-field:focus-within{outline:2px solid var(--primary);outline-offset:2px;}
+.fitb-field .rendered{
+  font-family:var(--serif);font-size:22px;line-height:1.2;
+  display:inline-flex;align-items:center;gap:2px;
+}
+.fitb-input{
+  position:absolute;inset:0;width:100%;height:100%;
+  margin:0;padding:8px 14px;border:0;border-radius:var(--r-control);
+  background:transparent;
+  font-family:var(--serif);font-size:22px;line-height:1.2;
+  color:transparent;                 /* the stacked render beneath is the visible form */
+  caret-color:var(--text-primary);   /* Q2d: the caret must never be lost or moved */
+}
+.fitb-input:focus{outline:none;}
+.caret{
+  display:inline-block;width:2px;height:26px;background:var(--text-primary);
+}
+.frac{
+  display:inline-flex;flex-direction:column;align-items:center;
+  line-height:1;vertical-align:middle;
+}
+.frac .num{font-size:15px;padding:0 3px;font-feature-settings:"tnum" 1;}
+.frac .den{
+  font-size:15px;padding:0 3px;border-top:1px solid var(--text-primary);
+  font-feature-settings:"tnum" 1;
+}
+.fitb-help{
+  font-size:13px;line-height:1.4;color:var(--text-secondary);margin:12px 0 0;
+}
+
+/* ---------- map panel form (narrow / collapsed rail) — STATE 2 ---------- */
+.panel-wrap{position:relative;}
+.panel-scrim{position:absolute;inset:0;background:var(--scrim);}
+.map-panel{
+  position:absolute;left:var(--card-pad);right:var(--card-pad);
+  top:var(--card-pad);
+  background:var(--bg-paper);
+  border:1px solid var(--divider);border-radius:var(--r-control); /* CONTROL */
+  padding:var(--card-pad);
+}
+.panel-head{
+  display:flex;align-items:center;justify-content:space-between;gap:var(--gap);
+  border-bottom:1px solid var(--divider);padding-bottom:12px;margin-bottom:var(--gap);
+}
+.panel-title{font-size:20px;line-height:1.35;font-weight:600;margin:0;}
+.map-grid.panel{grid-template-columns:repeat(5,minmax(var(--tap),1fr));}
+
+/* ---------- submit confirmation — STATE 3 ---------- */
+.dialog{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(30rem,calc(100% - 48px));
+  background:var(--bg-paper);
+  border:1px solid var(--divider);border-radius:var(--r-control); /* CONTROL */
+  padding:var(--card-pad);
+}
+.dialog h2{font-size:20px;line-height:1.35;font-weight:600;margin:0 0 8px;}
+.dialog p{font-size:17px;line-height:1.55;color:var(--text-primary);margin:0 0 var(--gap);}
+.gap-list{
+  list-style:none;margin:0 0 var(--gap);padding:0;
+  border-top:1px solid var(--divider);
+}
+.gap-list li{
+  display:flex;align-items:center;gap:12px;min-height:var(--tap);
+  border-bottom:1px solid var(--divider);
+}
+.gap-list .jump{
+  display:flex;align-items:center;gap:12px;
+  min-height:var(--tap);width:100%;padding:0 8px;
+  border:0;background:transparent;border-radius:var(--r-control);
+  font-family:var(--sans);font-size:16px;color:var(--primary);font-weight:600;
+  cursor:default;
+}
+.gap-list .jump .chip{
+  flex:0 0 auto;min-width:var(--tap);min-height:var(--tap);
+  border:1px solid var(--divider);border-radius:var(--r-control);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:var(--text-primary);font-variant-numeric:tabular-nums;
+}
+.gap-list .jump .chip .n{font-size:16px;font-weight:600;line-height:1.2;}
+.gap-list .jump .chip .glyph{font-size:11px;color:var(--text-secondary);line-height:1;}
+.dialog-actions{display:flex;gap:12px;flex-wrap:wrap;}
+.dialog-actions .btn{flex:1 1 auto;}
+.dialog-note{
+  font-size:13px;line-height:1.4;color:var(--text-secondary);
+  margin:var(--gap) 0 0;
+}
+.dim{filter:saturate(.9);}
+
+/* ---------- timer: pre-expiry warning + auto-submit — STATE 4 ---------- */
+/* Not colour alone: warning glyph + the literal words + a 3px solid rule under
+   the timer + the warning hue. Still no per-tick animation (Q6).            */
+.timer.is-warning{
+  border-bottom:3px solid var(--warning);padding-bottom:4px;
+}
+.timer.is-warning .timer-value{color:var(--warning);}
+.timer.is-warning .timer-label{
+  color:var(--warning);font-weight:600;display:flex;align-items:center;gap:6px;
+}
+.expiry-note{
+  display:flex;align-items:flex-start;gap:12px;
+  width:100%;max-width:34rem;margin:var(--gap) auto 0;
+  border:1px solid var(--warning);border-left:6px solid var(--warning);
+  border-radius:var(--r-control);background:var(--bg-paper);
+  padding:14px var(--card-pad);
+}
+.expiry-note .wglyph{
+  flex:0 0 auto;width:26px;height:26px;border:2px solid var(--warning);
+  border-radius:50%;display:flex;align-items:center;justify-content:center;
+  color:var(--warning);font-size:15px;font-weight:600;line-height:1;
+}
+.expiry-note p{margin:0;font-size:17px;line-height:1.55;}
+.expiry-note strong{color:var(--warning);}
+
+.autosubmit{
+  width:100%;max-width:34rem;margin:0 auto;
+  border:1px solid var(--divider);border-radius:var(--r-paper); /* PAPER */
+  background:var(--bg-paper);padding:var(--card-pad);
+}
+.autosubmit h2{font-size:20px;line-height:1.35;font-weight:600;margin:0 0 8px;}
+.autosubmit p{font-size:17px;line-height:1.55;margin:0 0 12px;}
+.autosubmit p:last-of-type{margin-bottom:var(--gap);}
+.autosubmit .quiet{font-size:16px;color:var(--text-secondary);}
+
+/* ---------- reduced motion (Q6 rider, product-wide) ---------- */
+/* Nothing in this file animates today, but the expand/collapse of the map and
+   any future progress treatment must be covered, so the guard is blanket. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <header class="sheet-head">
+    <h1>Key screen — Student Mode: taking a Practice Test</h1>
+    <p>Noah, 10, Grade 5, on the family tablet. Tablet-first: the 34rem question measure is fixed, so the surplus width is a decision, not a scaling problem. Five states plus the Fill-in-the-Blank fraction input. Light theme, Student accent #0F6E78. Flat, bordered, no shadows.</p>
+  </header>
+
+  <!-- ===================== STATE 1 ===================== -->
+  <section class="state-block">
+    <div class="state-label">
+      <span class="num">State 1</span>
+      <span class="name">At rest, mid-test — question 7 of 15, unanswered, timer running</span>
+      <span class="note">Tablet layout: question column at 34rem, persistent question-map rail on the right.</span>
+    </div>
+
+    <div class="tablet">
+      <div class="tablet-lip"></div>
+      <div class="tablet-bezel">
+        <span class="tablet-cam"></span>
+
+        <div class="appbar">
+          <div class="appbar-left">
+            <span class="test-name">Math · Grade 5 · Practice Test 2</span>
+            <span class="test-meta">15 questions</span>
+          </div>
+          <div class="appbar-right">
+            <!-- timer: role, label and an explicit live policy on EVERY instance -->
+            <div class="timer" role="timer" aria-live="off"
+                 aria-label="Time left: 12 minutes 47 seconds">
+              <span class="timer-value">12:47</span>
+              <span class="timer-label">Time left</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="surface">
+          <div class="qcolumn">
+
+            <div class="qpaper">
+              <div class="counter">
+                <span class="counter-main">Question 7 of 15</span>
+                <span class="counter-kind">Multiple choice</span>
+              </div>
+
+              <p class="qbody">A baker has 87 cookies. She packs them into boxes of 6, and every box must be full. How many full boxes can she pack, and how many cookies are left over?</p>
+
+              <ul class="options">
+                <li class="option is-focus">
+                  <span class="mark"></span>
+                  <span class="letter">A</span>
+                  <span class="text">13 boxes, 9 left over</span>
+                </li>
+                <li class="option">
+                  <span class="mark"></span>
+                  <span class="letter">B</span>
+                  <span class="text">14 boxes, 3 left over</span>
+                </li>
+                <li class="option">
+                  <span class="mark"></span>
+                  <span class="letter">C</span>
+                  <span class="text">14 boxes, 5 left over</span>
+                </li>
+                <li class="option">
+                  <span class="mark"></span>
+                  <span class="letter">D</span>
+                  <span class="text">15 boxes, 2 left over</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="qnav">
+              <button class="btn" type="button">← Back</button>
+              <button class="btn btn-primary" type="button">Next →</button>
+            </div>
+
+            <!-- inset: Fill-in-the-Blank smart fraction input (Q2d) -->
+            <div class="inset">
+              <p class="inset-tag">Inset · another question in this test · Fill in the blank</p>
+              <p class="qbody" style="font-size:22px;margin-bottom:12px;">Three friends share 9 cookies equally. Write the part of a whole box each friend gets if a box holds 12 cookies.</p>
+              <label class="fitb-label" for="fitb-answer">Your answer</label>
+              <div class="fitb-field">
+                <!-- PRESENTATION ONLY. aria-hidden, so it is never announced.
+                     If this render fails it degrades to the plain input text
+                     beneath, per Q2d. -->
+                <span class="rendered" aria-hidden="true">
+                  <span class="frac">
+                    <span class="num">3</span>
+                    <span class="den">4</span>
+                  </span>
+                </span>
+                <!-- THE REAL CONTROL. Its value IS the raw typed string, and the
+                     raw string is exactly what is submitted for AI semantic
+                     grading — the grader already accepts "3/4", "three quarters"
+                     and "0.75" as equivalent, so nothing is normalised here and
+                     no answer shape is locked in. One name, one value, one
+                     announcement: "Your answer, edit text, 3/4". -->
+                <input class="fitb-input" id="fitb-answer" name="fitb-answer"
+                       type="text" inputmode="text" autocomplete="off"
+                       spellcheck="false" value="3/4"
+                       aria-describedby="fitb-help">
+              </div>
+              <p class="fitb-help" id="fitb-help">Type any answer — words, a decimal, or a fraction.
+                Typing a fraction like 3/4 shows it stacked, and what gets sent for marking is exactly what you typed.</p>
+            </div>
+
+          </div>
+
+          <!-- RESOLUTION: the surplus tablet width is the map rail -->
+          <aside class="rail" aria-label="Question map">
+            <p class="rail-head">Your questions</p>
+            <p class="rail-sub">6 answered · 9 not answered</p>
+
+            <ul class="map-grid">
+              <li><button class="map-cell answered" type="button"><span class="n">1</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 1, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">2</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 2, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">3</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 3, answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">4</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 4, not answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">5</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 5, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">6</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 6, answered</span></button></li>
+              <li><button class="map-cell current" type="button" aria-current="true"><span class="n">7</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 7, not answered, you are here</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">8</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 8, answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">9</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 9, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">10</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 10, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">11</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 11, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">12</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 12, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">13</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 13, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">14</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 14, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">15</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 15, not answered</span></button></li>
+            </ul>
+
+            <div class="map-legend">
+              <div><span class="swatch answered" aria-hidden="true">●</span> Answered</div>
+              <div><span class="swatch" aria-hidden="true">○</span> Not answered</div>
+            </div>
+
+            <button class="btn btn-quiet rail-submit" type="button">Submit test</button>
+          </aside>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STATE 2 ===================== -->
+  <section class="state-block">
+    <div class="state-label">
+      <span class="num">State 2</span>
+      <span class="name">Question map open</span>
+      <span class="note">Same moment as State 1. The openable panel form — what a phone gets, and what the tablet falls back to when the rail is collapsed. Every cell is a 48px tap target that jumps straight to its question.</span>
+    </div>
+
+    <div class="tablet narrow">
+      <div class="tablet-lip"></div>
+      <div class="tablet-bezel">
+        <span class="tablet-cam"></span>
+
+        <div class="appbar">
+          <div class="appbar-left">
+            <span class="test-name">Math · Grade 5 · Practice Test 2</span>
+          </div>
+          <div class="appbar-right">
+            <div class="timer" role="timer" aria-live="off"
+                 aria-label="Time left: 12 minutes 31 seconds">
+              <span class="timer-value">12:31</span>
+              <span class="timer-label">Time left</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-wrap">
+          <div class="surface dim" aria-hidden="true">
+            <div class="qcolumn">
+              <div class="qpaper">
+                <div class="counter">
+                  <span class="counter-main">Question 7 of 15</span>
+                  <span class="counter-kind">Multiple choice</span>
+                </div>
+                <p class="qbody">A baker has 87 cookies. She packs them into boxes of 6, and every box must be full. How many full boxes can she pack, and how many cookies are left over?</p>
+                <ul class="options">
+                  <li class="option"><span class="mark"></span><span class="letter">A</span><span class="text">13 boxes, 9 left over</span></li>
+                  <li class="option"><span class="mark"></span><span class="letter">B</span><span class="text">14 boxes, 3 left over</span></li>
+                  <li class="option"><span class="mark"></span><span class="letter">C</span><span class="text">14 boxes, 5 left over</span></li>
+                  <li class="option"><span class="mark"></span><span class="letter">D</span><span class="text">15 boxes, 2 left over</span></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-scrim"></div>
+
+          <!-- aria-modal was missing: the scrim makes the rest of the screen
+               inert visually, so it must be inert to assistive tech too -->
+          <div class="map-panel" role="dialog" aria-modal="true" aria-label="Your questions">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">Your questions</h2>
+                <p class="rail-sub" style="margin:2px 0 0;">6 answered · 9 not answered</p>
+              </div>
+              <button class="btn" type="button">Close</button>
+            </div>
+
+            <ul class="map-grid panel">
+              <li><button class="map-cell answered" type="button"><span class="n">1</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 1, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">2</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 2, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">3</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 3, answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">4</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 4, not answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">5</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 5, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">6</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 6, answered</span></button></li>
+              <li><button class="map-cell current" type="button" aria-current="true"><span class="n">7</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 7, not answered, you are here</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">8</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 8, answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">9</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 9, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">10</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 10, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">11</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 11, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">12</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 12, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">13</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 13, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">14</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 14, not answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">15</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 15, not answered</span></button></li>
+            </ul>
+
+            <div class="map-legend">
+              <div><span class="swatch answered" aria-hidden="true">●</span> Answered</div>
+              <div><span class="swatch" aria-hidden="true">○</span> Not answered</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STATE 3 ===================== -->
+  <section class="state-block">
+    <div class="state-label">
+      <span class="num">State 3</span>
+      <span class="name">Submit confirmation with unanswered questions</span>
+      <span class="note">A later moment: Noah has reached the end with questions 4 and 12 still blank, with 3:08 still on the clock. Counted, named, one tap back to each — and submitting anyway is never blocked. Because this is a MANUAL submission before expiry, those two questions stay in the distinct <em>unanswered</em> grade state; the note under the buttons says plainly what happens instead if the timer runs out first.</span>
+    </div>
+
+    <div class="tablet">
+      <div class="tablet-lip"></div>
+      <div class="tablet-bezel">
+        <span class="tablet-cam"></span>
+
+        <div class="appbar">
+          <div class="appbar-left">
+            <span class="test-name">Math · Grade 5 · Practice Test 2</span>
+            <span class="test-meta">15 questions</span>
+          </div>
+          <div class="appbar-right">
+            <div class="timer" role="timer" aria-live="off"
+                 aria-label="Time left: 3 minutes 8 seconds">
+              <span class="timer-value">03:08</span>
+              <span class="timer-label">Time left</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-wrap">
+          <div class="surface dim" aria-hidden="true">
+            <div class="qcolumn">
+              <div class="qpaper">
+                <div class="counter">
+                  <span class="counter-main">Question 15 of 15</span>
+                  <span class="counter-kind">Multiple choice</span>
+                </div>
+                <p class="qbody">A gardener plants 74 bulbs in rows of 8. Every row must be full. How many full rows are there, and how many bulbs are left over?</p>
+                <ul class="options">
+                  <li class="option"><span class="mark"></span><span class="letter">A</span><span class="text">8 rows, 10 left over</span></li>
+                  <li class="option"><span class="mark"></span><span class="letter">B</span><span class="text">9 rows, 2 left over</span></li>
+                  <li class="option"><span class="mark"></span><span class="letter">C</span><span class="text">9 rows, 4 left over</span></li>
+                  <li class="option"><span class="mark"></span><span class="letter">D</span><span class="text">10 rows, 6 left over</span></li>
+                </ul>
+              </div>
+            </div>
+            <aside class="rail">
+              <p class="rail-head">Your questions</p>
+              <p class="rail-sub">13 answered · 2 not answered</p>
+              <ul class="map-grid">
+                <li><span class="map-cell answered"><span class="n">1</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">2</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">3</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell"><span class="n">4</span><span class="glyph">○</span></span></li>
+                <li><span class="map-cell answered"><span class="n">5</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">6</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">7</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">8</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">9</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">10</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">11</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell"><span class="n">12</span><span class="glyph">○</span></span></li>
+                <li><span class="map-cell answered"><span class="n">13</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered"><span class="n">14</span><span class="glyph">●</span></span></li>
+                <li><span class="map-cell answered current"><span class="n">15</span><span class="glyph">●</span></span></li>
+              </ul>
+            </aside>
+          </div>
+
+          <div class="panel-scrim"></div>
+
+          <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="submit-title">
+            <h2 id="submit-title">You haven't answered 2 questions</h2>
+            <p>You can go back to them, or submit the test as it is.</p>
+
+            <ul class="gap-list">
+              <li>
+                <button class="jump" type="button">
+                  <span class="chip"><span class="n">4</span><span class="glyph" aria-hidden="true">○</span></span>
+                  Go to question 4
+                </button>
+              </li>
+              <li>
+                <button class="jump" type="button">
+                  <span class="chip"><span class="n">12</span><span class="glyph" aria-hidden="true">○</span></span>
+                  Go to question 12
+                </button>
+              </li>
+            </ul>
+
+            <div class="dialog-actions">
+              <button class="btn btn-danger-quiet" type="button">Keep working</button>
+              <button class="btn btn-primary" type="button">Submit test</button>
+            </div>
+
+            <p class="dialog-note">Questions you leave blank are recorded as not answered.
+              If the timer runs out before you submit, blank questions are marked not correct instead.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STATE 4a ===================== -->
+  <section class="state-block">
+    <div class="state-label">
+      <span class="num">State 4a</span>
+      <span class="name">Pre-expiry warning 1 of 3 — 5 minutes left</span>
+      <span class="note">The SC 2.2.1 gap that the accessibility lens rated most serious: previously the countdown reached zero and auto-submitted with no warning and no announcement. Three staged warnings now fire, at 5 minutes, 1 minute and 20 seconds. Five minutes is the one with room to act — enough time to go back to skipped questions through the map. Each warning is carried by a glyph, a literal sentence, a solid rule under the timer and the warning hue together, never by colour alone, and the timer still changes value in place without animating.</span>
+    </div>
+
+    <div class="tablet">
+      <div class="tablet-lip"></div>
+      <div class="tablet-bezel">
+        <span class="tablet-cam"></span>
+
+        <div class="appbar">
+          <div class="appbar-left">
+            <span class="test-name">Math · Grade 5 · Practice Test 2</span>
+            <span class="test-meta">15 questions</span>
+          </div>
+          <div class="appbar-right">
+            <!-- assertive ONLY at this threshold; back to aria-live="off" after -->
+            <div class="timer is-warning" role="timer" aria-live="assertive"
+                 aria-label="5 minutes left. The test will be submitted for you when the time runs out.">
+              <span class="timer-value">05:00</span>
+              <span class="timer-label"><span aria-hidden="true">&#9650;</span> 5 minutes left</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="surface">
+          <div class="qcolumn">
+
+            <div class="expiry-note" role="alert">
+              <span class="wglyph" aria-hidden="true">&#9650;</span>
+              <p><strong>5 minutes left.</strong> There is still time to go back to any question you
+                have not answered — the list on the right shows which ones. When the time runs out the
+                test is submitted for you, and any question you left blank is marked not correct.</p>
+            </div>
+
+            <div class="qpaper" style="margin-top:var(--gap);">
+              <div class="counter">
+                <span class="counter-main">Question 12 of 15</span>
+                <span class="counter-kind">Multiple choice</span>
+              </div>
+              <p class="qbody">A gardener plants 74 bulbs in rows of 8. Every row must be full. How many full rows are there, and how many bulbs are left over?</p>
+              <ul class="options">
+                <li class="option"><span class="mark"></span><span class="letter">A</span><span class="text">8 rows, 10 left over</span></li>
+                <li class="option"><span class="mark"></span><span class="letter">B</span><span class="text">9 rows, 2 left over</span></li>
+                <li class="option"><span class="mark"></span><span class="letter">C</span><span class="text">9 rows, 4 left over</span></li>
+                <li class="option"><span class="mark"></span><span class="letter">D</span><span class="text">10 rows, 6 left over</span></li>
+              </ul>
+            </div>
+
+            <div class="qnav">
+              <button class="btn" type="button">← Back</button>
+              <button class="btn btn-primary" type="button">Next →</button>
+            </div>
+          </div>
+
+          <aside class="rail" aria-label="Question map">
+            <p class="rail-head">Your questions</p>
+            <p class="rail-sub">13 answered · 2 not answered</p>
+            <ul class="map-grid">
+              <li><button class="map-cell answered" type="button"><span class="n">1</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 1, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">2</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 2, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">3</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 3, answered</span></button></li>
+              <li><button class="map-cell" type="button"><span class="n">4</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 4, not answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">5</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 5, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">6</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 6, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">7</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 7, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">8</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 8, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">9</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 9, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">10</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 10, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">11</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 11, answered</span></button></li>
+              <li><button class="map-cell current" type="button" aria-current="true"><span class="n">12</span><span class="glyph" aria-hidden="true">○</span><span class="sr-only">Question 12, not answered, you are here</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">13</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 13, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">14</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 14, answered</span></button></li>
+              <li><button class="map-cell answered" type="button"><span class="n">15</span><span class="glyph" aria-hidden="true">●</span><span class="sr-only">Question 15, answered</span></button></li>
+            </ul>
+            <div class="map-legend">
+              <div><span class="swatch answered" aria-hidden="true">●</span> Answered</div>
+              <div><span class="swatch" aria-hidden="true">○</span> Not answered</div>
+            </div>
+            <button class="btn btn-quiet rail-submit" type="button">Submit test</button>
+          </aside>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STATE 4b ===================== -->
+  <section class="state-block">
+    <div class="state-label">
+      <span class="num">State 4b</span>
+      <span class="name">Pre-expiry warning 2 of 3 &mdash; 1 minute left</span>
+      <span class="note">The second warning. Note what has <em>not</em> changed: same hue, same glyph, same rule, same type size, same absence of motion. Only the number and the sentence differ. Escalating the styling would turn three interruptions into three shocks on a surface deliberately kept calm, so the treatment is deliberately flat across all three thresholds.</span>
+    </div>
+
+    <div class="tablet narrow">
+      <div class="tablet-lip"></div>
+      <div class="tablet-bezel">
+        <span class="tablet-cam"></span>
+
+        <div class="appbar">
+          <div class="appbar-left">
+            <span class="test-name">Math &middot; Grade 5 &middot; Practice Test 2</span>
+            <span class="test-meta">15 questions</span>
+          </div>
+          <div class="appbar-right">
+            <!-- assertive ONLY at this threshold; back to aria-live="off" after -->
+            <div class="timer is-warning" role="timer" aria-live="assertive"
+                 aria-label="1 minute left. The test will be submitted for you when the time runs out.">
+              <span class="timer-value">01:00</span>
+              <span class="timer-label"><span aria-hidden="true">&#9650;</span> 1 minute left</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="surface">
+          <div class="qcolumn">
+
+            <div class="expiry-note" role="alert">
+              <span class="wglyph" aria-hidden="true">&#9650;</span>
+              <p><strong>1 minute left.</strong> When the time runs out the test is submitted for you, and any question you left blank is marked not correct.</p>
+            </div>
+
+            <div class="qnav">
+              <button class="btn" type="button">&larr; Back</button>
+              <button class="btn btn-primary" type="button">Next &rarr;</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STATE 4c ===================== -->
+  <section class="state-block">
+    <div class="state-label">
+      <span class="num">State 4c</span>
+      <span class="name">Pre-expiry warning 3 of 3 &mdash; 20 seconds left</span>
+      <span class="note">The final submit-now signal, and still the same treatment. No exclamation mark, no red, no pulse, no countdown animation &mdash; the value changes in place as it always has. The sentence says what is about to happen and nothing more, because at 20 seconds there is nothing useful left to ask the student to do beyond finishing the line they are on.</span>
+    </div>
+
+    <div class="tablet narrow">
+      <div class="tablet-lip"></div>
+      <div class="tablet-bezel">
+        <span class="tablet-cam"></span>
+
+        <div class="appbar">
+          <div class="appbar-left">
+            <span class="test-name">Math &middot; Grade 5 &middot; Practice Test 2</span>
+            <span class="test-meta">15 questions</span>
+          </div>
+          <div class="appbar-right">
+            <!-- assertive ONLY at this threshold; back to aria-live="off" after -->
+            <div class="timer is-warning" role="timer" aria-live="assertive"
+                 aria-label="20 seconds left. The test will be submitted for you in a moment.">
+              <span class="timer-value">00:20</span>
+              <span class="timer-label"><span aria-hidden="true">&#9650;</span> 20 seconds left</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="surface">
+          <div class="qcolumn">
+
+            <div class="expiry-note" role="alert">
+              <span class="wglyph" aria-hidden="true">&#9650;</span>
+              <p><strong>20 seconds left.</strong> The test will be submitted for you in a moment. Anything you left blank is marked not correct.</p>
+            </div>
+
+            <div class="qnav">
+              <button class="btn" type="button">&larr; Back</button>
+              <button class="btn btn-primary" type="button">Next &rarr;</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STATE 4d ===================== -->
+  <section class="state-block">
+    <div class="state-label">
+      <span class="num">State 4d</span>
+      <span class="name">Timer expired — auto-submitted, and said so</span>
+      <span class="note">Auto-submit is never silent. An assertive live region states that the time ran out, that the work was submitted rather than lost, and what happened to the blank question — the FR-15 rule that blanks at expiry are marked <em>not correct</em>, not left unanswered. Second person, no exclamation marks, no blame; the student did not do anything wrong by running out of time.</span>
+    </div>
+
+    <div class="tablet narrow">
+      <div class="tablet-lip"></div>
+      <div class="tablet-bezel">
+        <span class="tablet-cam"></span>
+
+        <div class="appbar">
+          <div class="appbar-left">
+            <span class="test-name">Math · Grade 5 · Practice Test 2</span>
+          </div>
+          <div class="appbar-right">
+            <div class="timer is-warning" role="timer" aria-live="off"
+                 aria-label="Time is up">
+              <span class="timer-value">00:00</span>
+              <span class="timer-label"><span aria-hidden="true">&#9650;</span> Time is up</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="surface">
+          <div class="qcolumn">
+            <div class="autosubmit" role="alert" aria-live="assertive">
+              <h2>Time is up. Your test has been submitted.</h2>
+              <p>Everything you answered was saved. Question 4 was still blank when the time ran out,
+                so it is marked not correct.</p>
+              <p class="quiet">Your results are ready now, and you can take this test again whenever you want.</p>
+              <div class="qnav" style="margin:0;max-width:none;">
+                <button class="btn btn-primary" type="button">See your results</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

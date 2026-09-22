@@ -1,0 +1,112 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 09-22-2026 23:03
+last_updated: 09-22-2026 23:03
+project: n-test-reviewer
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: backlog
+  1-1-parent-account-sign-up-sign-in: backlog
+  1-2-parent-pin-for-parent-view: backlog
+  1-3-student-profile-management: backlog
+  1-4-student-mode-parent-view-switching: backlog
+  1-5-parent-view-idle-expiry: backlog
+  1-6-uncommitted-parent-input-survives-expiry-mechanism: backlog
+  1-7-design-system-foundation: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-subject-grade-level-taxonomy: backlog
+  2-2-parent-account-tier-assignment-consumption-view: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-multi-page-capture-camera-library: backlog
+  3-2-page-management-before-submit: backlog
+  3-3-subject-grade-level-assignment: backlog
+  3-4-legibility-check-upload-commit: backlog
+  3-5-structured-extraction: backlog
+  3-6-thin-extraction-warning: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-practice-test-generation-bounded-priced-async: backlog
+  4-2-topic-weighted-regeneration: backlog
+  4-3-draft-review: backlog
+  4-4-draft-editing: backlog
+  4-5-release-or-discard: backlog
+  4-6-optional-timer-configuration: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-student-s-test-list: backlog
+  5-2-answering-a-question: backlog
+  5-3-attempt-resilience-interruption-offline: backlog
+  5-4-submitting-an-attempt: backlog
+  5-5-grading-engine-four-grade-states: backlog
+  5-6-results-answer-key: backlog
+  5-7-retaking-a-practice-test: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-on-demand-explanations: backlog
+  6-2-parent-review-of-explanations: backlog
+  6-3-student-explanation-flagging: backlog
+  6-4-explanation-suppression-free-regeneration: backlog
+  6-5-grade-dispute-override: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-topic-canonicalization: backlog
+  7-2-mastery-computation: backlog
+  7-3-weak-area-identification: backlog
+  7-4-analytics-dashboard: backlog
+  7-5-weak-area-drill-down-targeted-regeneration: backlog
+  7-6-admin-topic-curation: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-automatic-page-image-expiry: backlog
+  8-2-early-image-deletion: backlog
+  8-3-student-profile-deletion: backlog
+  8-4-parent-account-deletion: backlog
+  epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-account-tier-assignment-data-model-effect: backlog
+  9-2-student-profile-limit-enforcement: backlog
+  9-3-upload-allowance-enforcement: backlog
+  9-4-generation-allowance-enforcement: backlog
+  9-5-explanation-allowance-enforcement: backlog
+  9-6-allowances-surface-atomic-monthly-reset: backlog
+  epic-9-retrospective: optional

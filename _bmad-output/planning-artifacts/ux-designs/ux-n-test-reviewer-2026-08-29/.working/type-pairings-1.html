@@ -1,0 +1,1211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>n-test-reviewer — Type Pairings, Round 1</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&family=Charis+SIL:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Literata:ital,wght@0,400;0,600;0,700;1,400&family=Newsreader:ital,wght@0,400;0,600;0,700;1,400&family=Petrona:ital,wght@0,400;0,600;0,700;1,400&family=Public+Sans:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+/* =====================================================================
+   n-test-reviewer — TYPE PAIRINGS, ROUND 1
+   ---------------------------------------------------------------------
+   Locked decisions this page is built on:
+     - SERIF = content a student reads carefully (question stem, options,
+       explanations) — including inside Parent View wherever a generated
+       Question is shown (draft review, weak-area drill-down).
+     - SANS  = chrome (nav, buttons, labels, dashboard tables, admin).
+     - ONE type scale across Student + Parent. Density is carried by
+       SPACING, not by type size. Scale is sized for the hard case:
+       a 10-year-old reading a question on a family tablet at arm's length.
+     - tabular-nums applied SELECTIVELY: countdown timer, Mastery %
+       column, scores (11/15), consumption counts. Proportional elsewhere.
+     - Palette: "Clear Room" (fixed).
+   =====================================================================
+
+   ---------------------------------------------------------------------
+   TABULAR-NUMERAL VERIFICATION METHOD (hard filter)
+   ---------------------------------------------------------------------
+   Every family below was verified by downloading the actual Google Fonts
+   woff2 (latin subset) and inspecting it with fontTools:
+     (a) GSUB/GPOS FeatureList scanned for the 'tnum' feature tag;
+     (b) hmtx advance widths of U+0030..U+0039 compared — if all ten
+         digits share one advance, the font's DEFAULT figures are already
+         tabular and 'tnum' is unnecessary.
+   A family passes if EITHER (a) or (b) is true. Results are printed in
+   each pairing header. Raw findings:
+
+     FAMILY                       'tnum' feat   default digit widths    verdict
+     Literata                     YES           proportional            PASS (needs tnum)
+     Source Serif 4               YES           already monowidth       PASS (tabular by default)
+     Charis SIL                   no            already monowidth       PASS (tabular by default)
+     Newsreader                   YES           already monowidth       PASS (belt + braces)
+     Petrona                      YES           proportional            PASS (needs tnum)
+     Source Sans 3                no            already monowidth       PASS (tabular by default)
+     IBM Plex Sans                no            already monowidth       PASS (tabular by default)
+     Atkinson Hyperlegible Next   YES           proportional            PASS (needs tnum)
+     Inter                        YES           proportional            PASS (needs tnum)
+     Work Sans                    YES           proportional            PASS (needs tnum)
+
+   Rejected on this filter / on other grounds:
+     PT Serif        — no 'tnum', proportional default figures. REJECTED.
+     Atkinson Hyperlegible (v1) — passes tnum, but superseded by
+                       "Atkinson Hyperlegible Next"; use Next.
+     Bitter, Spectral, Public Sans — all pass tnum, held in reserve;
+                       cut only to keep the five pairings distinct.
+
+   Because we set `font-variant-numeric: tabular-nums` on the tnum classes
+   regardless, the "tabular by default" families are unaffected (the
+   property is simply a no-op for them) — the CSS is identical across all
+   five pairings and safe to lift into one shared MUI theme.
+
+   ---------------------------------------------------------------------
+   SHARED TYPE SCALE — IDENTICAL ACROSS ALL FIVE PAIRINGS
+   ---------------------------------------------------------------------
+   Root = 16px. One ramp serves Student and Parent.
+
+     ROLE                px      rem        line-height    weight   family
+     question body       22px    1.375rem   1.60 (35.2px)  400      SERIF
+     explanation body    19px    1.1875rem  1.65 (31.4px)  400      SERIF
+     card title          20px    1.25rem    1.35 (27px)    600      SANS
+     dashboard body      17px    1.0625rem  1.55 (26.4px)  400      SANS
+     table cell          16px    1rem       1.45 (23.2px)  400      SANS
+     label               14px    0.875rem   1.40 (19.6px)  600      SANS  (+0.02em tracking, uppercase)
+     caption             13px    0.8125rem  1.40 (18.2px)  400      SANS
+     timer               28px    1.75rem    1.20 (33.6px)  600      SANS  (tabular-nums)
+
+   Measure for question body: max-width 34rem (544px) — ~62 characters at
+   22px. That is the tablet-in-hand measure, NOT full viewport width.
+   ===================================================================== */
+
+
+/* =====================================================================
+   MUI theme.typography — LIFTABLE CONFIG (shared ramp, swap the stacks)
+   ---------------------------------------------------------------------
+   // theme/typography.ts
+   const SERIF = "<see per-pairing stack below>";
+   const SANS  = "<see per-pairing stack below>";
+
+   export const typography = {
+     fontFamily: SANS,               // chrome default
+     htmlFontSize: 16,
+
+     // --- CONTENT (serif) ---
+     questionBody: {
+       fontFamily: SERIF, fontSize: '1.375rem', lineHeight: 1.6,
+       fontWeight: 400, letterSpacing: 0, maxWidth: '34rem',
+     },
+     explanationBody: {
+       fontFamily: SERIF, fontSize: '1.1875rem', lineHeight: 1.65,
+       fontWeight: 400, letterSpacing: 0, maxWidth: '34rem',
+     },
+
+     // --- CHROME (sans) ---
+     cardTitle:     { fontFamily: SANS, fontSize: '1.25rem',   lineHeight: 1.35, fontWeight: 600 },
+     dashboardBody: { fontFamily: SANS, fontSize: '1.0625rem', lineHeight: 1.55, fontWeight: 400 },
+     tableCell:     { fontFamily: SANS, fontSize: '1rem',      lineHeight: 1.45, fontWeight: 400 },
+     label:         { fontFamily: SANS, fontSize: '0.875rem',  lineHeight: 1.4,  fontWeight: 600,
+                      letterSpacing: '0.02em', textTransform: 'uppercase' },
+     caption:       { fontFamily: SANS, fontSize: '0.8125rem', lineHeight: 1.4,  fontWeight: 400 },
+     timer:         { fontFamily: SANS, fontSize: '1.75rem',   lineHeight: 1.2,  fontWeight: 600,
+                      fontVariantNumeric: 'tabular-nums' },
+   };
+
+   // Numerals — apply ONLY to: countdown timer, Mastery % column,
+   // scores (11/15), consumption counts.
+   // MuiCssBaseline styleOverrides:
+   //   '.tnum': { fontVariantNumeric: 'tabular-nums' }
+   ===================================================================== */
+
+
+/* ---------- Clear Room palette, as panel-scoped tokens ---------- */
+.panel.light{
+  --bg:#FFFFFF; --bg-default:#F6F8FA;
+  --text:#10202E; --text2:#4E6070; --divider:#DCE3E9;
+  --student:#0F6E78; --parent:#0B5FA5;
+  --success:#0F6B4F; --error:#B3261E; --warning:#8A5A00;
+  --student-soft:#E6F2F3; --parent-soft:#E6EFF8;
+  --success-soft:#E4F1EB; --error-soft:#FBE9E7; --warning-soft:#F7EEDC;
+  --btn-text:#FFFFFF;
+}
+.panel.dark{
+  --bg:#16202C; --bg-default:#0E1620;
+  --text:#E7EEF5; --text2:#A3B3C2; --divider:#26333F;
+  --student:#71C3CE; --parent:#7FB6E8;
+  --success:#6FD1AC; --error:#F19B94; --warning:#E3B457;
+  --student-soft:#173038; --parent-soft:#15293C;
+  --success-soft:#14302A; --error-soft:#331F1E; --warning-soft:#32291A;
+  --btn-text:#0E1620;
+}
+
+/* ---------- page frame (deliberately neutral; not part of the design) ---------- */
+*{box-sizing:border-box;}
+html{font-size:16px;}
+body{
+  margin:0; padding:32px 24px 96px;
+  background:#EDF1F5; color:#10202E;
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1320px;margin:0 auto;}
+.page-head{max-width:760px;margin:0 auto 48px;}
+.page-head h1{font-size:1.75rem;line-height:1.25;margin:0 0 12px;font-weight:700;letter-spacing:-0.01em;}
+.page-head p{font-size:1rem;line-height:1.6;margin:0 0 10px;color:#31465A;}
+.page-head code{font-size:0.85em;background:#DDE5EC;padding:1px 5px;border-radius:3px;}
+.page-head ul{font-size:0.9375rem;line-height:1.6;color:#31465A;padding-left:20px;margin:10px 0 0;}
+
+/* ---------- pairing shell ---------- */
+.pair{
+  background:#FFFFFF; border:1px solid #D3DCE4; border-radius:10px;
+  padding:28px 28px 32px; margin:0 0 40px;
+  box-shadow:0 1px 2px rgba(16,32,46,.06);
+}
+.pair-head{border-bottom:2px solid #10202E;padding-bottom:16px;margin-bottom:24px;}
+.pair-num{font-size:0.75rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#4E6070;}
+.pair-title{font-size:1.5rem;line-height:1.25;font-weight:700;margin:6px 0 8px;letter-spacing:-0.01em;}
+.pair-char{font-size:1rem;line-height:1.55;color:#31465A;margin:0 0 14px;max-width:70ch;}
+.facts{display:flex;flex-wrap:wrap;gap:8px;}
+.fact{
+  font-size:0.8125rem;line-height:1.35;font-weight:500;
+  border:1px solid #C6D2DC;border-radius:5px;padding:5px 9px;background:#F6F8FA;color:#31465A;
+}
+.fact strong{font-weight:700;color:#10202E;}
+.fact.pass{background:#E4F1EB;border-color:#B7D8C9;}
+.fact.warn{background:#F7EEDC;border-color:#E0C88E;}
+
+/* ---------- layout ---------- */
+.row{margin:0 0 22px;}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+.trio{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+.sec-label{
+  font-size:0.6875rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:#4E6070;margin:0 0 8px;
+}
+.panel{
+  background:var(--bg); color:var(--text);
+  border:1px solid var(--divider); border-radius:8px; padding:22px;
+}
+.panel.dark{border-color:#26333F;}
+.mode-tag{
+  font-family:'Inter',sans-serif;
+  font-size:0.625rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text2);margin:0 0 14px;
+}
+
+/* ---------- specimen type roles (driven by --serif / --sans on .pair) ---------- */
+.q-body{
+  font-family:var(--serif);
+  font-size:1.375rem; line-height:1.6; font-weight:400;
+  max-width:34rem; margin:0; color:var(--text);
+}
+.q-body + .q-body{margin-top:14px;}
+.expl{
+  font-family:var(--serif);
+  font-size:1.1875rem; line-height:1.65; font-weight:400;
+  max-width:34rem; margin:0; color:var(--text);
+}
+.expl + .expl{margin-top:14px;}
+.card-title{font-family:var(--sans);font-size:1.25rem;line-height:1.35;font-weight:600;margin:0;}
+.dash-body{font-family:var(--sans);font-size:1.0625rem;line-height:1.55;font-weight:400;margin:0;}
+.tbl-cell{font-family:var(--sans);font-size:1rem;line-height:1.45;font-weight:400;}
+.lbl{
+  font-family:var(--sans);font-size:0.875rem;line-height:1.4;font-weight:600;
+  letter-spacing:.02em;text-transform:uppercase;
+}
+.cap{font-family:var(--sans);font-size:0.8125rem;line-height:1.4;color:var(--text2);}
+.timer{
+  font-family:var(--sans);font-size:1.75rem;line-height:1.2;font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+.tnum{font-variant-numeric:tabular-nums;}
+.pnum{font-variant-numeric:proportional-nums;}
+
+/* ---------- fractions ----------
+   Two renderings shown per pairing so the face can be judged:
+   .frac-native uses the font's own 'frac' OpenType feature (real glyph
+   substitution). .frac-css composes numerator / fraction-slash /
+   denominator manually and works in every face. */
+.frac-native{font-feature-settings:'frac' 1;font-variant-numeric:diagonal-fractions;}
+.frac-css{white-space:nowrap;}
+.frac-css .n{font-size:.62em;vertical-align:.42em;line-height:1;}
+.frac-css .d{font-size:.62em;vertical-align:-.06em;line-height:1;}
+.frac-css .s{margin:0 -.04em;}
+.frac-stack{
+  display:inline-flex;flex-direction:column;align-items:center;
+  vertical-align:-0.42em;line-height:1;margin:0 .1em;
+}
+.frac-stack .n{font-size:.58em;padding:0 .1em;}
+.frac-stack .bar{display:block;width:100%;height:1px;background:currentColor;margin:.1em 0;}
+.frac-stack .d{font-size:.58em;padding:0 .1em;}
+.frac-demo{
+  display:flex;gap:28px;flex-wrap:wrap;margin-top:14px;
+  padding-top:14px;border-top:1px dashed var(--divider);
+}
+.frac-demo div{min-width:150px;}
+.frac-big{font-family:var(--serif);font-size:2rem;line-height:1.4;}
+
+/* ---------- practice test cards (chrome, sans) ---------- */
+.card{
+  border:1px solid var(--divider);border-radius:8px;padding:16px 18px;background:var(--bg);
+  display:flex;flex-direction:column;gap:10px;
+}
+.card + .card{margin-top:12px;}
+.card-meta{font-family:var(--sans);font-size:0.875rem;line-height:1.4;color:var(--text2);}
+.status-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:2px;}
+.btn{
+  font-family:var(--sans);font-size:0.9375rem;line-height:1;font-weight:600;
+  padding:11px 18px;border-radius:6px;border:1px solid transparent;cursor:default;
+}
+.btn-primary{background:var(--student);color:var(--btn-text);}
+.btn-primary.parent{background:var(--parent);}
+.btn-outline{background:transparent;color:var(--student);border-color:var(--student);}
+.btn-outline.parent{color:var(--parent);border-color:var(--parent);}
+.btn-text{background:transparent;color:var(--text2);border-color:transparent;padding-left:6px;padding-right:6px;}
+.nav{
+  display:flex;gap:22px;padding:0 0 14px;margin:0 0 16px;border-bottom:1px solid var(--divider);
+}
+.nav span{
+  font-family:var(--sans);font-size:0.875rem;font-weight:600;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--text2);
+}
+.nav span.on{color:var(--student);border-bottom:2px solid var(--student);padding-bottom:12px;margin-bottom:-14px;}
+
+/* ---------- status chips: colour + icon + text label, never colour alone ---------- */
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--sans);font-size:0.8125rem;line-height:1.3;font-weight:600;
+  padding:4px 9px;border-radius:5px;border:1px solid;
+}
+.chip .ic{font-size:0.95em;line-height:1;}
+.chip.neutral{background:transparent;color:var(--text2);border-color:var(--divider);}
+.chip.ok{background:var(--success-soft);color:var(--success);border-color:var(--success);}
+.chip.bad{background:var(--error-soft);color:var(--error);border-color:var(--error);}
+.chip.weak{background:var(--warning-soft);color:var(--warning);border-color:var(--warning);}
+
+/* ---------- parent mastery table ---------- */
+table.mastery{width:100%;border-collapse:collapse;font-family:var(--sans);}
+table.mastery caption{
+  text-align:left;font-family:var(--sans);font-size:0.875rem;font-weight:600;
+  letter-spacing:.02em;text-transform:uppercase;color:var(--text2);padding-bottom:10px;
+}
+table.mastery th{
+  font-size:0.8125rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;
+  color:var(--text2);text-align:left;padding:0 10px 8px 0;border-bottom:1px solid var(--divider);
+}
+table.mastery th.num{text-align:right;padding-right:0;}
+table.mastery td{
+  font-size:1rem;line-height:1.45;padding:11px 10px 11px 0;
+  border-bottom:1px solid var(--divider);vertical-align:middle;color:var(--text);
+}
+table.mastery td.num{
+  text-align:right;padding-right:0;font-variant-numeric:tabular-nums;
+  font-weight:600;white-space:nowrap;
+}
+table.mastery tr:last-child td{border-bottom:none;}
+
+/* ---------- timer jitter test ---------- */
+.jitter{display:flex;gap:36px;flex-wrap:wrap;}
+.jitter .col{border-left:2px solid var(--divider);padding-left:14px;}
+.jitter .col .cap{margin-bottom:8px;display:block;}
+.jitter .stack > div{margin-bottom:2px;}
+.jitter .bad-demo{font-variant-numeric:proportional-nums;}
+
+/* ---------- scale ramp ---------- */
+table.ramp{width:100%;border-collapse:collapse;margin-top:4px;}
+table.ramp th{
+  font-family:'Inter',sans-serif;font-size:0.6875rem;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:#4E6070;text-align:left;
+  padding:0 12px 8px 0;border-bottom:1px solid #DCE3E9;
+}
+table.ramp td{
+  padding:12px 12px 12px 0;border-bottom:1px solid #E7ECF1;vertical-align:baseline;color:#10202E;
+}
+table.ramp td.meta{
+  font-family:'Inter',sans-serif;font-size:0.8125rem;color:#4E6070;white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+table.ramp td.role{font-family:'Inter',sans-serif;font-size:0.8125rem;font-weight:600;color:#10202E;white-space:nowrap;}
+table.ramp tr:last-child td{border-bottom:none;}
+
+/* ---------- contrast note ---------- */
+.contrast{
+  display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;
+}
+.contrast .c{
+  font-family:'Inter',sans-serif;font-size:0.8125rem;line-height:1.4;font-weight:500;
+  border:1px solid #B7D8C9;background:#E4F1EB;color:#0B4B38;
+  border-radius:5px;padding:6px 10px;font-variant-numeric:tabular-nums;
+}
+.contrast .c strong{font-weight:700;}
+
+@media (max-width:940px){
+  .duo,.trio{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page-head">
+  <h1>Type pairings — round 1</h1>
+  <p>Five serif + sans duos for n-test-reviewer. In every pairing the <strong>serif carries content a student reads carefully</strong> (question stem, fractions, explanations — including inside Parent View when a generated question is shown) and the <strong>sans carries chrome</strong> (nav, buttons, labels, dashboard tables, admin).</p>
+  <p>One shared type scale runs across both surfaces; the ramp is identical in all five pairings so the only variable being judged here is the typefaces. Density between Student and Parent is carried by spacing, never by type size.</p>
+  <ul>
+    <li>Every family passed the tabular-numeral hard filter — verified by downloading the real Google Fonts <code>woff2</code> and inspecting <code>GSUB</code> for <code>tnum</code> plus <code>hmtx</code> digit advance widths. Method and raw results are in the <code>&lt;style&gt;</code> comment at the top of this file.</li>
+    <li><code>font-variant-numeric: tabular-nums</code> is applied only to the countdown timer, the Mastery % column, scores (11/15) and consumption counts. Everything else stays proportional.</li>
+    <li>All specimen text is real product content. Correct/incorrect states always pair colour + icon + text label.</li>
+  </ul>
+</header>
+
+
+<!-- ===================================================================
+     PAIRING 1 — Literata + Source Sans 3
+     ---------------------------------------------------------------
+     MUI stacks:
+       const SERIF = "'Literata', Georgia, 'Iowan Old Style', 'Times New Roman', serif";
+       const SANS  = "'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+     Tabular: Literata — 'tnum' feature present (default figures are
+       proportional, so tnum is REQUIRED on the tnum class).
+       Source Sans 3 — no 'tnum' feature, but all ten digits already
+       share one 497/1000 advance: tabular BY DEFAULT.
+     Fractions: Literata ships 'frac' + numr/dnom — native glyphs.
+     Scale: the shared ramp (see top-of-file comment). No deviation.
+     =================================================================== -->
+<section class="pair" style="--serif:'Literata', Georgia, 'Iowan Old Style', 'Times New Roman', serif; --sans:'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+
+  <div class="pair-head">
+    <div class="pair-num">Pairing 01 · reading-first</div>
+    <h2 class="pair-title" style="font-family:var(--serif);">Literata <span style="font-family:var(--sans);font-weight:400;color:#4E6070;">+</span> <span style="font-family:var(--sans);">Source Sans 3</span></h2>
+    <p class="pair-char">Drawn for the job. Literata was commissioned for long-form reading on screens (Google Play Books) and is widely used in school reading products — generous x-height, sturdy serifs, low contrast, forgiving at small sizes and on a mid-quality tablet panel. Source Sans 3 is deliberately quiet chrome that never competes with the question.</p>
+    <div class="facts">
+      <span class="fact pass"><strong>Literata:</strong> tabular numerals ✓ — real <code>tnum</code> feature (default figures proportional, so <code>tnum</code> must be switched on)</span>
+      <span class="fact pass"><strong>Source Sans 3:</strong> tabular numerals ✓ — digits are monowidth by default (no feature needed)</span>
+      <span class="fact"><strong>Fractions:</strong> Literata has native <code>frac</code></span>
+    </div>
+  </div>
+
+  <!-- Question specimen: light | dark -->
+  <div class="row">
+    <div class="sec-label">Question specimen — serif, 22px / 1.6, 34rem measure</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c">Question body on paper: <strong>16.56:1</strong> — #10202E on #FFFFFF — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c" style="border-color:#26333F;background:#14302A;color:#6FD1AC;">Question body on paper: <strong>14.05:1</strong> — #E7EEF5 on #16202C — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fractions + explanation -->
+  <div class="row">
+    <div class="sec-label">Fraction rendering &amp; explanation — serif</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · fraction in running text</div>
+        <p class="q-body">Maya finished <span class="frac-native">3/4</span> of her practice test before lunch and then <span class="frac-native">1/2</span> of what was left afterwards. What fraction of the test is still unfinished?</p>
+        <div class="frac-demo">
+          <div>
+            <span class="cap">Native <code>frac</code> glyphs</span>
+            <div class="frac-big frac-native">3/4 &nbsp; 1/2 &nbsp; 2/3 &nbsp; 7/12</div>
+          </div>
+          <div>
+            <span class="cap">CSS-composed (fallback)</span>
+            <div class="frac-big"><span class="frac-css"><span class="n">3</span><span class="s">&frasl;</span><span class="d">4</span></span> &nbsp; <span class="frac-css"><span class="n">1</span><span class="s">&frasl;</span><span class="d">2</span></span> &nbsp; <span class="frac-stack"><span class="n">7</span><span class="bar"></span><span class="d">12</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel light">
+        <div class="mode-tag">Light · explanation</div>
+        <div class="status-row" style="margin-bottom:12px;">
+          <span class="chip bad"><span class="ic">✕</span> Incorrect — your answer: 15.58</span>
+          <span class="chip ok"><span class="ic">✓</span> Correct answer: 15 boxes, 7 left over</span>
+        </div>
+        <p class="expl">There are 187 workbooks and each box holds 12. Twelve goes into 187 fifteen times, because 15 × 12 = 180. Those 180 workbooks fill 15 boxes completely and leave 7 behind.</p>
+        <p class="expl">The 7 remaining workbooks are not enough to fill another box, so they stay as a remainder rather than turning into part of a box. When a question asks how many boxes are <em>completely full</em>, the leftover is reported separately: 15 boxes, with 7 workbooks left over.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chrome -->
+  <div class="row">
+    <div class="sec-label">Chrome specimen — sans (student home)</div>
+    <div class="panel light">
+      <div class="nav"><span class="on">Practice tests</span><span>My progress</span><span>Settings</span></div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 4</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip neutral"><span class="ic">○</span> Not started</span></p>
+        <div class="btn-row"><button class="btn btn-primary">Start test</button><button class="btn btn-text">View topics</button></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 3</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip ok"><span class="ic">✓</span> Completed <span class="tnum">11/15</span></span></p>
+        <div class="btn-row"><button class="btn btn-outline">Review answers</button><button class="btn btn-text">Retake</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Parent table: light | dark -->
+  <div class="row">
+    <div class="sec-label">Parent dashboard — dense table, sans + tabular numerals</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timer -->
+  <div class="row">
+    <div class="sec-label">Countdown timer — sans, tabular numerals (jitter test)</div>
+    <div class="panel light">
+      <div class="jitter">
+        <div class="col">
+          <span class="cap"><code>tabular-nums</code> — shipping</span>
+          <div class="stack"><div class="timer">19:58</div><div class="timer">19:57</div><div class="timer">19:56</div></div>
+        </div>
+        <div class="col">
+          <span class="cap">Proportional — for contrast only</span>
+          <div class="stack"><div class="timer bad-demo">19:58</div><div class="timer bad-demo">19:57</div><div class="timer bad-demo">19:56</div></div>
+        </div>
+        <div class="col" style="border-color:transparent;">
+          <span class="cap">Score &amp; counts</span>
+          <div class="stack"><div class="timer tnum">11/15</div><div class="cap">Questions answered <span class="tnum">11</span> of <span class="tnum">15</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scale ramp -->
+  <div class="row">
+    <div class="sec-label">Type scale — one ramp, both surfaces</div>
+    <div class="panel light">
+      <table class="ramp">
+        <thead><tr><th style="width:170px;">Role</th><th style="width:210px;">Size / line-height</th><th>Specimen</th></tr></thead>
+        <tbody>
+          <tr><td class="role">Question body</td><td class="meta">22px · 1.375rem · lh 1.60 · serif</td><td><span style="font-family:var(--serif);font-size:1.375rem;line-height:1.6;">Divide 187 by 12</span></td></tr>
+          <tr><td class="role">Explanation body</td><td class="meta">19px · 1.1875rem · lh 1.65 · serif</td><td><span style="font-family:var(--serif);font-size:1.1875rem;line-height:1.65;">Twelve goes into 187 fifteen times</span></td></tr>
+          <tr><td class="role">Card title</td><td class="meta">20px · 1.25rem · lh 1.35 · sans 600</td><td><span style="font-family:var(--sans);font-size:1.25rem;font-weight:600;">Practice Test 4</span></td></tr>
+          <tr><td class="role">Dashboard body</td><td class="meta">17px · 1.0625rem · lh 1.55 · sans</td><td><span style="font-family:var(--sans);font-size:1.0625rem;">Weak area: division with remainders</span></td></tr>
+          <tr><td class="role">Table cell</td><td class="meta">16px · 1rem · lh 1.45 · sans</td><td><span style="font-family:var(--sans);font-size:1rem;">Multi-digit multiplication</span></td></tr>
+          <tr><td class="role">Label</td><td class="meta">14px · 0.875rem · lh 1.40 · sans 600 · +0.02em</td><td><span class="lbl">Practice tests</span></td></tr>
+          <tr><td class="role">Caption</td><td class="meta">13px · 0.8125rem · lh 1.40 · sans</td><td><span class="cap">Based on 3 completed tests</span></td></tr>
+          <tr><td class="role">Timer</td><td class="meta">28px · 1.75rem · lh 1.20 · sans 600 · tnum</td><td><span class="timer">19:58</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ===================================================================
+     PAIRING 2 — Source Serif 4 + IBM Plex Sans
+     ---------------------------------------------------------------
+     MUI stacks:
+       const SERIF = "'Source Serif 4', 'Iowan Old Style', Georgia, 'Times New Roman', serif";
+       const SANS  = "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+     Tabular: Source Serif 4 — 'tnum' feature present AND digits are
+       already monowidth (529/1000): passes twice over.
+       IBM Plex Sans — no 'tnum' feature needed; every digit is 600/1000.
+     Fractions: Source Serif 4 ships 'frac' + numr/dnom — native glyphs.
+     Scale: the shared ramp. No deviation.
+     =================================================================== -->
+<section class="pair" style="--serif:'Source Serif 4', 'Iowan Old Style', Georgia, 'Times New Roman', serif; --sans:'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+
+  <div class="pair-head">
+    <div class="pair-num">Pairing 02 · neutral-modern</div>
+    <h2 class="pair-title" style="font-family:var(--serif);">Source Serif 4 <span style="font-family:var(--sans);font-weight:400;color:#4E6070;">+</span> <span style="font-family:var(--sans);">IBM Plex Sans</span></h2>
+    <p class="pair-char">Institutional calm. Source Serif is a low-drama transitional serif that reads as a document rather than a storybook; IBM Plex Sans is slightly narrow and engineered, with unmistakable digits. Together they read serious and school-issued — the least "kids' product" of the five, which is either the point or the problem.</p>
+    <div class="facts">
+      <span class="fact pass"><strong>Source Serif 4:</strong> tabular numerals ✓ — <code>tnum</code> feature present <em>and</em> digits monowidth by default</span>
+      <span class="fact pass"><strong>IBM Plex Sans:</strong> tabular numerals ✓ — all digits share a 600/1000 advance by default</span>
+      <span class="fact"><strong>Fractions:</strong> Source Serif 4 has native <code>frac</code></span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Question specimen — serif, 22px / 1.6, 34rem measure</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c">Question body on paper: <strong>16.56:1</strong> — #10202E on #FFFFFF — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c" style="border-color:#26333F;background:#14302A;color:#6FD1AC;">Question body on paper: <strong>14.05:1</strong> — #E7EEF5 on #16202C — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Fraction rendering &amp; explanation — serif</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · fraction in running text</div>
+        <p class="q-body">Maya finished <span class="frac-native">3/4</span> of her practice test before lunch and then <span class="frac-native">1/2</span> of what was left afterwards. What fraction of the test is still unfinished?</p>
+        <div class="frac-demo">
+          <div>
+            <span class="cap">Native <code>frac</code> glyphs</span>
+            <div class="frac-big frac-native">3/4 &nbsp; 1/2 &nbsp; 2/3 &nbsp; 7/12</div>
+          </div>
+          <div>
+            <span class="cap">CSS-composed (fallback)</span>
+            <div class="frac-big"><span class="frac-css"><span class="n">3</span><span class="s">&frasl;</span><span class="d">4</span></span> &nbsp; <span class="frac-css"><span class="n">1</span><span class="s">&frasl;</span><span class="d">2</span></span> &nbsp; <span class="frac-stack"><span class="n">7</span><span class="bar"></span><span class="d">12</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel light">
+        <div class="mode-tag">Light · explanation</div>
+        <div class="status-row" style="margin-bottom:12px;">
+          <span class="chip bad"><span class="ic">✕</span> Incorrect — your answer: 15.58</span>
+          <span class="chip ok"><span class="ic">✓</span> Correct answer: 15 boxes, 7 left over</span>
+        </div>
+        <p class="expl">There are 187 workbooks and each box holds 12. Twelve goes into 187 fifteen times, because 15 × 12 = 180. Those 180 workbooks fill 15 boxes completely and leave 7 behind.</p>
+        <p class="expl">The 7 remaining workbooks are not enough to fill another box, so they stay as a remainder rather than turning into part of a box. When a question asks how many boxes are <em>completely full</em>, the leftover is reported separately: 15 boxes, with 7 workbooks left over.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Chrome specimen — sans (student home)</div>
+    <div class="panel light">
+      <div class="nav"><span class="on">Practice tests</span><span>My progress</span><span>Settings</span></div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 4</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip neutral"><span class="ic">○</span> Not started</span></p>
+        <div class="btn-row"><button class="btn btn-primary">Start test</button><button class="btn btn-text">View topics</button></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 3</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip ok"><span class="ic">✓</span> Completed <span class="tnum">11/15</span></span></p>
+        <div class="btn-row"><button class="btn btn-outline">Review answers</button><button class="btn btn-text">Retake</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Parent dashboard — dense table, sans + tabular numerals</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Countdown timer — sans, tabular numerals (jitter test)</div>
+    <div class="panel light">
+      <div class="jitter">
+        <div class="col">
+          <span class="cap"><code>tabular-nums</code> — shipping</span>
+          <div class="stack"><div class="timer">19:58</div><div class="timer">19:57</div><div class="timer">19:56</div></div>
+        </div>
+        <div class="col">
+          <span class="cap">Proportional — for contrast only</span>
+          <div class="stack"><div class="timer bad-demo">19:58</div><div class="timer bad-demo">19:57</div><div class="timer bad-demo">19:56</div></div>
+        </div>
+        <div class="col" style="border-color:transparent;">
+          <span class="cap">Score &amp; counts</span>
+          <div class="stack"><div class="timer tnum">11/15</div><div class="cap">Questions answered <span class="tnum">11</span> of <span class="tnum">15</span></div></div>
+        </div>
+      </div>
+      <p class="cap" style="margin:14px 0 0;">Note: IBM Plex Sans digits are monowidth by default, so both columns above should look identical — that is the expected result, not a bug.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Type scale — one ramp, both surfaces</div>
+    <div class="panel light">
+      <table class="ramp">
+        <thead><tr><th style="width:170px;">Role</th><th style="width:210px;">Size / line-height</th><th>Specimen</th></tr></thead>
+        <tbody>
+          <tr><td class="role">Question body</td><td class="meta">22px · 1.375rem · lh 1.60 · serif</td><td><span style="font-family:var(--serif);font-size:1.375rem;line-height:1.6;">Divide 187 by 12</span></td></tr>
+          <tr><td class="role">Explanation body</td><td class="meta">19px · 1.1875rem · lh 1.65 · serif</td><td><span style="font-family:var(--serif);font-size:1.1875rem;line-height:1.65;">Twelve goes into 187 fifteen times</span></td></tr>
+          <tr><td class="role">Card title</td><td class="meta">20px · 1.25rem · lh 1.35 · sans 600</td><td><span style="font-family:var(--sans);font-size:1.25rem;font-weight:600;">Practice Test 4</span></td></tr>
+          <tr><td class="role">Dashboard body</td><td class="meta">17px · 1.0625rem · lh 1.55 · sans</td><td><span style="font-family:var(--sans);font-size:1.0625rem;">Weak area: division with remainders</span></td></tr>
+          <tr><td class="role">Table cell</td><td class="meta">16px · 1rem · lh 1.45 · sans</td><td><span style="font-family:var(--sans);font-size:1rem;">Multi-digit multiplication</span></td></tr>
+          <tr><td class="role">Label</td><td class="meta">14px · 0.875rem · lh 1.40 · sans 600 · +0.02em</td><td><span class="lbl">Practice tests</span></td></tr>
+          <tr><td class="role">Caption</td><td class="meta">13px · 0.8125rem · lh 1.40 · sans</td><td><span class="cap">Based on 3 completed tests</span></td></tr>
+          <tr><td class="role">Timer</td><td class="meta">28px · 1.75rem · lh 1.20 · sans 600 · tnum</td><td><span class="timer">19:58</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ===================================================================
+     PAIRING 3 — Charis SIL + Atkinson Hyperlegible Next
+     ---------------------------------------------------------------
+     MUI stacks:
+       const SERIF = "'Charis SIL', 'Charter', 'Bitstream Charter', Georgia, serif";
+       const SANS  = "'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+     Tabular: Charis SIL — no 'tnum' feature, but digits are monowidth by
+       default (1153/2048 across all ten): tabular BY DEFAULT.
+       Atkinson Hyperlegible Next — 'tnum' feature present; default
+       figures are proportional, so tnum is REQUIRED on the tnum class.
+     Fractions: NEITHER family ships 'frac'. Fractions MUST be composed
+       in CSS (or via a small <Fraction> React component). This is a real
+       engineering cost of choosing this pairing — flagged in-panel.
+     Scale: the shared ramp. Charis has a large x-height, so 22px reads
+       optically larger here than in pairings 4 and 5.
+     =================================================================== -->
+<section class="pair" style="--serif:'Charis SIL', 'Charter', 'Bitstream Charter', Georgia, serif; --sans:'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+
+  <div class="pair-head">
+    <div class="pair-num">Pairing 03 · accessibility-forward</div>
+    <h2 class="pair-title" style="font-family:var(--serif);">Charis SIL <span style="font-family:var(--sans);font-weight:400;color:#4E6070;">+</span> <span style="font-family:var(--sans);">Atkinson Hyperlegible Next</span></h2>
+    <p class="pair-char">Legibility as the brief. Charis is SIL's literacy typeface — heavy slab-like serifs, very large x-height, drawn to survive poor rendering and low-quality print in reading programmes. Atkinson Hyperlegible Next was commissioned by the Braille Institute to maximise letterform distinctiveness for low-vision readers. The most defensible pairing on paper; also the least stylish.</p>
+    <div class="facts">
+      <span class="fact pass"><strong>Charis SIL:</strong> tabular numerals ✓ — all ten digits share one 1153/2048 advance by default</span>
+      <span class="fact pass"><strong>Atkinson Hyperlegible Next:</strong> tabular numerals ✓ — real <code>tnum</code> feature (default figures proportional)</span>
+      <span class="fact warn"><strong>Fractions:</strong> ⚠ no native <code>frac</code> in either family — must be composed in CSS / a component</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Question specimen — serif, 22px / 1.6, 34rem measure</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c">Question body on paper: <strong>16.56:1</strong> — #10202E on #FFFFFF — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c" style="border-color:#26333F;background:#14302A;color:#6FD1AC;">Question body on paper: <strong>14.05:1</strong> — #E7EEF5 on #16202C — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Fraction rendering &amp; explanation — serif</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · fraction in running text</div>
+        <p class="q-body">Maya finished <span class="frac-css"><span class="n">3</span><span class="s">&frasl;</span><span class="d">4</span></span> of her practice test before lunch and then <span class="frac-css"><span class="n">1</span><span class="s">&frasl;</span><span class="d">2</span></span> of what was left afterwards. What fraction of the test is still unfinished?</p>
+        <div class="frac-demo">
+          <div>
+            <span class="cap">Native <code>frac</code> — <strong>unsupported</strong>, falls back to plain digits</span>
+            <div class="frac-big frac-native">3/4 &nbsp; 1/2 &nbsp; 2/3</div>
+          </div>
+          <div>
+            <span class="cap">CSS-composed diagonal — required here</span>
+            <div class="frac-big"><span class="frac-css"><span class="n">3</span><span class="s">&frasl;</span><span class="d">4</span></span> &nbsp; <span class="frac-css"><span class="n">1</span><span class="s">&frasl;</span><span class="d">2</span></span></div>
+          </div>
+          <div>
+            <span class="cap">CSS-composed stacked</span>
+            <div class="frac-big"><span class="frac-stack"><span class="n">3</span><span class="bar"></span><span class="d">4</span></span> &nbsp; <span class="frac-stack"><span class="n">7</span><span class="bar"></span><span class="d">12</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel light">
+        <div class="mode-tag">Light · explanation</div>
+        <div class="status-row" style="margin-bottom:12px;">
+          <span class="chip bad"><span class="ic">✕</span> Incorrect — your answer: 15.58</span>
+          <span class="chip ok"><span class="ic">✓</span> Correct answer: 15 boxes, 7 left over</span>
+        </div>
+        <p class="expl">There are 187 workbooks and each box holds 12. Twelve goes into 187 fifteen times, because 15 × 12 = 180. Those 180 workbooks fill 15 boxes completely and leave 7 behind.</p>
+        <p class="expl">The 7 remaining workbooks are not enough to fill another box, so they stay as a remainder rather than turning into part of a box. When a question asks how many boxes are <em>completely full</em>, the leftover is reported separately: 15 boxes, with 7 workbooks left over.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Chrome specimen — sans (student home)</div>
+    <div class="panel light">
+      <div class="nav"><span class="on">Practice tests</span><span>My progress</span><span>Settings</span></div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 4</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip neutral"><span class="ic">○</span> Not started</span></p>
+        <div class="btn-row"><button class="btn btn-primary">Start test</button><button class="btn btn-text">View topics</button></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 3</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip ok"><span class="ic">✓</span> Completed <span class="tnum">11/15</span></span></p>
+        <div class="btn-row"><button class="btn btn-outline">Review answers</button><button class="btn btn-text">Retake</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Parent dashboard — dense table, sans + tabular numerals</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Countdown timer — sans, tabular numerals (jitter test)</div>
+    <div class="panel light">
+      <div class="jitter">
+        <div class="col">
+          <span class="cap"><code>tabular-nums</code> — shipping</span>
+          <div class="stack"><div class="timer">19:58</div><div class="timer">19:57</div><div class="timer">19:56</div></div>
+        </div>
+        <div class="col">
+          <span class="cap">Proportional — for contrast only</span>
+          <div class="stack"><div class="timer bad-demo">19:58</div><div class="timer bad-demo">19:57</div><div class="timer bad-demo">19:56</div></div>
+        </div>
+        <div class="col" style="border-color:transparent;">
+          <span class="cap">Score &amp; counts</span>
+          <div class="stack"><div class="timer tnum">11/15</div><div class="cap">Questions answered <span class="tnum">11</span> of <span class="tnum">15</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Type scale — one ramp, both surfaces</div>
+    <div class="panel light">
+      <table class="ramp">
+        <thead><tr><th style="width:170px;">Role</th><th style="width:210px;">Size / line-height</th><th>Specimen</th></tr></thead>
+        <tbody>
+          <tr><td class="role">Question body</td><td class="meta">22px · 1.375rem · lh 1.60 · serif</td><td><span style="font-family:var(--serif);font-size:1.375rem;line-height:1.6;">Divide 187 by 12</span></td></tr>
+          <tr><td class="role">Explanation body</td><td class="meta">19px · 1.1875rem · lh 1.65 · serif</td><td><span style="font-family:var(--serif);font-size:1.1875rem;line-height:1.65;">Twelve goes into 187 fifteen times</span></td></tr>
+          <tr><td class="role">Card title</td><td class="meta">20px · 1.25rem · lh 1.35 · sans 600</td><td><span style="font-family:var(--sans);font-size:1.25rem;font-weight:600;">Practice Test 4</span></td></tr>
+          <tr><td class="role">Dashboard body</td><td class="meta">17px · 1.0625rem · lh 1.55 · sans</td><td><span style="font-family:var(--sans);font-size:1.0625rem;">Weak area: division with remainders</span></td></tr>
+          <tr><td class="role">Table cell</td><td class="meta">16px · 1rem · lh 1.45 · sans</td><td><span style="font-family:var(--sans);font-size:1rem;">Multi-digit multiplication</span></td></tr>
+          <tr><td class="role">Label</td><td class="meta">14px · 0.875rem · lh 1.40 · sans 600 · +0.02em</td><td><span class="lbl">Practice tests</span></td></tr>
+          <tr><td class="role">Caption</td><td class="meta">13px · 0.8125rem · lh 1.40 · sans</td><td><span class="cap">Based on 3 completed tests</span></td></tr>
+          <tr><td class="role">Timer</td><td class="meta">28px · 1.75rem · lh 1.20 · sans 600 · tnum</td><td><span class="timer">19:58</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ===================================================================
+     PAIRING 4 — Newsreader + Inter
+     ---------------------------------------------------------------
+     MUI stacks:
+       const SERIF = "'Newsreader', 'Iowan Old Style', Georgia, 'Times New Roman', serif";
+       const SANS  = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+     Tabular: Newsreader — 'tnum' feature present AND digits already
+       monowidth (1133/2000). Inter — 'tnum' feature present; default
+       figures are proportional, so tnum is REQUIRED on the tnum class.
+     Fractions: Newsreader has NO 'frac' feature — compose in CSS.
+     Scale: the shared ramp. Newsreader runs slightly smaller on the body
+       at a given px; 22px is close to its floor for a 10-year-old, so if
+       this pairing wins, revisit the question step at 23–24px.
+     =================================================================== -->
+<section class="pair" style="--serif:'Newsreader', 'Iowan Old Style', Georgia, 'Times New Roman', serif; --sans:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+
+  <div class="pair-head">
+    <div class="pair-num">Pairing 04 · editorial</div>
+    <h2 class="pair-title" style="font-family:var(--serif);">Newsreader <span style="font-family:var(--sans);font-weight:400;color:#4E6070;">+</span> <span style="font-family:var(--sans);">Inter</span></h2>
+    <p class="pair-char">Magazine voice. Newsreader carries higher stroke contrast and sharper, more literary detail than the others — question text feels authored rather than generated, which is a useful signal for an AI-generated product. Inter behind it is the most neutral UI sans in wide use, so all the personality stays on the content side.</p>
+    <div class="facts">
+      <span class="fact pass"><strong>Newsreader:</strong> tabular numerals ✓ — <code>tnum</code> feature present <em>and</em> digits monowidth by default</span>
+      <span class="fact pass"><strong>Inter:</strong> tabular numerals ✓ — real <code>tnum</code> feature (default figures proportional)</span>
+      <span class="fact warn"><strong>Fractions:</strong> ⚠ Newsreader has no native <code>frac</code> — compose in CSS</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Question specimen — serif, 22px / 1.6, 34rem measure</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c">Question body on paper: <strong>16.56:1</strong> — #10202E on #FFFFFF — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c" style="border-color:#26333F;background:#14302A;color:#6FD1AC;">Question body on paper: <strong>14.05:1</strong> — #E7EEF5 on #16202C — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Fraction rendering &amp; explanation — serif</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · fraction in running text</div>
+        <p class="q-body">Maya finished <span class="frac-css"><span class="n">3</span><span class="s">&frasl;</span><span class="d">4</span></span> of her practice test before lunch and then <span class="frac-css"><span class="n">1</span><span class="s">&frasl;</span><span class="d">2</span></span> of what was left afterwards. What fraction of the test is still unfinished?</p>
+        <div class="frac-demo">
+          <div>
+            <span class="cap">Native <code>frac</code> — <strong>unsupported</strong>, falls back to plain digits</span>
+            <div class="frac-big frac-native">3/4 &nbsp; 1/2 &nbsp; 2/3</div>
+          </div>
+          <div>
+            <span class="cap">CSS-composed diagonal — required here</span>
+            <div class="frac-big"><span class="frac-css"><span class="n">3</span><span class="s">&frasl;</span><span class="d">4</span></span> &nbsp; <span class="frac-css"><span class="n">1</span><span class="s">&frasl;</span><span class="d">2</span></span></div>
+          </div>
+          <div>
+            <span class="cap">CSS-composed stacked</span>
+            <div class="frac-big"><span class="frac-stack"><span class="n">3</span><span class="bar"></span><span class="d">4</span></span> &nbsp; <span class="frac-stack"><span class="n">7</span><span class="bar"></span><span class="d">12</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel light">
+        <div class="mode-tag">Light · explanation</div>
+        <div class="status-row" style="margin-bottom:12px;">
+          <span class="chip bad"><span class="ic">✕</span> Incorrect — your answer: 15.58</span>
+          <span class="chip ok"><span class="ic">✓</span> Correct answer: 15 boxes, 7 left over</span>
+        </div>
+        <p class="expl">There are 187 workbooks and each box holds 12. Twelve goes into 187 fifteen times, because 15 × 12 = 180. Those 180 workbooks fill 15 boxes completely and leave 7 behind.</p>
+        <p class="expl">The 7 remaining workbooks are not enough to fill another box, so they stay as a remainder rather than turning into part of a box. When a question asks how many boxes are <em>completely full</em>, the leftover is reported separately: 15 boxes, with 7 workbooks left over.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Chrome specimen — sans (student home)</div>
+    <div class="panel light">
+      <div class="nav"><span class="on">Practice tests</span><span>My progress</span><span>Settings</span></div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 4</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip neutral"><span class="ic">○</span> Not started</span></p>
+        <div class="btn-row"><button class="btn btn-primary">Start test</button><button class="btn btn-text">View topics</button></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 3</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip ok"><span class="ic">✓</span> Completed <span class="tnum">11/15</span></span></p>
+        <div class="btn-row"><button class="btn btn-outline">Review answers</button><button class="btn btn-text">Retake</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Parent dashboard — dense table, sans + tabular numerals</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Countdown timer — sans, tabular numerals (jitter test)</div>
+    <div class="panel light">
+      <div class="jitter">
+        <div class="col">
+          <span class="cap"><code>tabular-nums</code> — shipping</span>
+          <div class="stack"><div class="timer">19:58</div><div class="timer">19:57</div><div class="timer">19:56</div></div>
+        </div>
+        <div class="col">
+          <span class="cap">Proportional — for contrast only</span>
+          <div class="stack"><div class="timer bad-demo">19:58</div><div class="timer bad-demo">19:57</div><div class="timer bad-demo">19:56</div></div>
+        </div>
+        <div class="col" style="border-color:transparent;">
+          <span class="cap">Score &amp; counts</span>
+          <div class="stack"><div class="timer tnum">11/15</div><div class="cap">Questions answered <span class="tnum">11</span> of <span class="tnum">15</span></div></div>
+        </div>
+      </div>
+      <p class="cap" style="margin:14px 0 0;">Inter's default figures are proportional — the right-hand column should visibly drift. That drift is exactly what <code>tnum</code> removes.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Type scale — one ramp, both surfaces</div>
+    <div class="panel light">
+      <table class="ramp">
+        <thead><tr><th style="width:170px;">Role</th><th style="width:210px;">Size / line-height</th><th>Specimen</th></tr></thead>
+        <tbody>
+          <tr><td class="role">Question body</td><td class="meta">22px · 1.375rem · lh 1.60 · serif</td><td><span style="font-family:var(--serif);font-size:1.375rem;line-height:1.6;">Divide 187 by 12</span></td></tr>
+          <tr><td class="role">Explanation body</td><td class="meta">19px · 1.1875rem · lh 1.65 · serif</td><td><span style="font-family:var(--serif);font-size:1.1875rem;line-height:1.65;">Twelve goes into 187 fifteen times</span></td></tr>
+          <tr><td class="role">Card title</td><td class="meta">20px · 1.25rem · lh 1.35 · sans 600</td><td><span style="font-family:var(--sans);font-size:1.25rem;font-weight:600;">Practice Test 4</span></td></tr>
+          <tr><td class="role">Dashboard body</td><td class="meta">17px · 1.0625rem · lh 1.55 · sans</td><td><span style="font-family:var(--sans);font-size:1.0625rem;">Weak area: division with remainders</span></td></tr>
+          <tr><td class="role">Table cell</td><td class="meta">16px · 1rem · lh 1.45 · sans</td><td><span style="font-family:var(--sans);font-size:1rem;">Multi-digit multiplication</span></td></tr>
+          <tr><td class="role">Label</td><td class="meta">14px · 0.875rem · lh 1.40 · sans 600 · +0.02em</td><td><span class="lbl">Practice tests</span></td></tr>
+          <tr><td class="role">Caption</td><td class="meta">13px · 0.8125rem · lh 1.40 · sans</td><td><span class="cap">Based on 3 completed tests</span></td></tr>
+          <tr><td class="role">Timer</td><td class="meta">28px · 1.75rem · lh 1.20 · sans 600 · tnum</td><td><span class="timer">19:58</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<!-- ===================================================================
+     PAIRING 5 — Petrona + Work Sans
+     ---------------------------------------------------------------
+     MUI stacks:
+       const SERIF = "'Petrona', Georgia, 'Iowan Old Style', 'Times New Roman', serif";
+       const SANS  = "'Work Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+     Tabular: Petrona — 'tnum' feature present; default figures are
+       proportional, so tnum is REQUIRED. Work Sans — 'tnum' feature
+       present; default figures proportional, tnum REQUIRED.
+       (This is the pairing where forgetting the tnum class is most
+       visible — both families drift without it.)
+     Fractions: BOTH families ship 'frac' + numr/dnom — native glyphs.
+     Scale: the shared ramp. No deviation.
+     WARNING: this is the pairing closest to the gamified ed-tech
+       anti-reference. Keep chrome sober if it wins.
+     =================================================================== -->
+<section class="pair" style="--serif:'Petrona', Georgia, 'Iowan Old Style', 'Times New Roman', serif; --sans:'Work Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+
+  <div class="pair-head">
+    <div class="pair-num">Pairing 05 · most character</div>
+    <h2 class="pair-title" style="font-family:var(--serif);">Petrona <span style="font-family:var(--sans);font-weight:400;color:#4E6070;">+</span> <span style="font-family:var(--sans);">Work Sans</span></h2>
+    <p class="pair-char">The warm one. Petrona has a humanist, slightly irregular pen quality — question text reads like something a person wrote for a child rather than a system output. Work Sans is friendly and a shade geometric. Highest personality of the five and the closest to the gamified line we are avoiding; it earns its place only if the chrome stays sober.</p>
+    <div class="facts">
+      <span class="fact pass"><strong>Petrona:</strong> tabular numerals ✓ — real <code>tnum</code> feature (default figures proportional)</span>
+      <span class="fact pass"><strong>Work Sans:</strong> tabular numerals ✓ — real <code>tnum</code> feature (default figures proportional)</span>
+      <span class="fact"><strong>Fractions:</strong> both families ship native <code>frac</code></span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Question specimen — serif, 22px / 1.6, 34rem measure</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c">Question body on paper: <strong>16.56:1</strong> — #10202E on #FFFFFF — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · student</div>
+        <p class="lbl" style="color:var(--student);margin:0 0 12px;">Question 7 of 15</p>
+        <p class="q-body">A school is packing 187 reading workbooks into boxes for the new term. Each box holds exactly 12 workbooks. How many boxes will be completely full, and how many workbooks will be left over?</p>
+        <div class="contrast"><span class="c" style="border-color:#26333F;background:#14302A;color:#6FD1AC;">Question body on paper: <strong>14.05:1</strong> — #E7EEF5 on #16202C — WCAG AA ✓ (AAA ✓)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Fraction rendering &amp; explanation — serif</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · fraction in running text</div>
+        <p class="q-body">Maya finished <span class="frac-native">3/4</span> of her practice test before lunch and then <span class="frac-native">1/2</span> of what was left afterwards. What fraction of the test is still unfinished?</p>
+        <div class="frac-demo">
+          <div>
+            <span class="cap">Native <code>frac</code> glyphs</span>
+            <div class="frac-big frac-native">3/4 &nbsp; 1/2 &nbsp; 2/3 &nbsp; 7/12</div>
+          </div>
+          <div>
+            <span class="cap">CSS-composed (fallback)</span>
+            <div class="frac-big"><span class="frac-css"><span class="n">3</span><span class="s">&frasl;</span><span class="d">4</span></span> &nbsp; <span class="frac-stack"><span class="n">7</span><span class="bar"></span><span class="d">12</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel light">
+        <div class="mode-tag">Light · explanation</div>
+        <div class="status-row" style="margin-bottom:12px;">
+          <span class="chip bad"><span class="ic">✕</span> Incorrect — your answer: 15.58</span>
+          <span class="chip ok"><span class="ic">✓</span> Correct answer: 15 boxes, 7 left over</span>
+        </div>
+        <p class="expl">There are 187 workbooks and each box holds 12. Twelve goes into 187 fifteen times, because 15 × 12 = 180. Those 180 workbooks fill 15 boxes completely and leave 7 behind.</p>
+        <p class="expl">The 7 remaining workbooks are not enough to fill another box, so they stay as a remainder rather than turning into part of a box. When a question asks how many boxes are <em>completely full</em>, the leftover is reported separately: 15 boxes, with 7 workbooks left over.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Chrome specimen — sans (student home)</div>
+    <div class="panel light">
+      <div class="nav"><span class="on">Practice tests</span><span>My progress</span><span>Settings</span></div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 4</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip neutral"><span class="ic">○</span> Not started</span></p>
+        <div class="btn-row"><button class="btn btn-primary">Start test</button><button class="btn btn-text">View topics</button></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Practice Test 3</h3>
+        <p class="card-meta">Math · Grade 5 · <span class="chip ok"><span class="ic">✓</span> Completed <span class="tnum">11/15</span></span></p>
+        <div class="btn-row"><button class="btn btn-outline">Review answers</button><button class="btn btn-text">Retake</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Parent dashboard — dense table, sans + tabular numerals</div>
+    <div class="duo">
+      <div class="panel light">
+        <div class="mode-tag">Light · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+      <div class="panel dark">
+        <div class="mode-tag">Dark · parent</div>
+        <table class="mastery">
+          <caption>Mastery by topic</caption>
+          <thead><tr><th>Topic</th><th>Status</th><th class="num">Mastery</th></tr></thead>
+          <tbody>
+            <tr><td>Equivalent fractions</td><td><span class="chip ok"><span class="ic">✓</span> On track</span></td><td class="num" style="color:var(--success);">90%</td></tr>
+            <tr><td>Division with remainders</td><td><span class="chip weak"><span class="ic">▲</span> Weak area</span></td><td class="num" style="color:var(--warning);">40%</td></tr>
+            <tr><td>Multi-digit multiplication</td><td><span class="chip neutral"><span class="ic">•</span> Developing</span></td><td class="num">72%</td></tr>
+          </tbody>
+        </table>
+        <p class="cap" style="margin:12px 0 0;">Based on <span class="tnum">3</span> completed tests · <span class="tnum">45</span> questions · <span class="tnum">12</span> of <span class="tnum">50</span> monthly generations used</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Countdown timer — sans, tabular numerals (jitter test)</div>
+    <div class="panel light">
+      <div class="jitter">
+        <div class="col">
+          <span class="cap"><code>tabular-nums</code> — shipping</span>
+          <div class="stack"><div class="timer">19:58</div><div class="timer">19:57</div><div class="timer">19:56</div></div>
+        </div>
+        <div class="col">
+          <span class="cap">Proportional — for contrast only</span>
+          <div class="stack"><div class="timer bad-demo">19:58</div><div class="timer bad-demo">19:57</div><div class="timer bad-demo">19:56</div></div>
+        </div>
+        <div class="col" style="border-color:transparent;">
+          <span class="cap">Score &amp; counts</span>
+          <div class="stack"><div class="timer tnum">11/15</div><div class="cap">Questions answered <span class="tnum">11</span> of <span class="tnum">15</span></div></div>
+        </div>
+      </div>
+      <p class="cap" style="margin:14px 0 0;">Work Sans has a notably narrow default <code>1</code> — the drift in the right-hand column is the widest of the five pairings, so the tnum class is non-optional here.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="sec-label">Type scale — one ramp, both surfaces</div>
+    <div class="panel light">
+      <table class="ramp">
+        <thead><tr><th style="width:170px;">Role</th><th style="width:210px;">Size / line-height</th><th>Specimen</th></tr></thead>
+        <tbody>
+          <tr><td class="role">Question body</td><td class="meta">22px · 1.375rem · lh 1.60 · serif</td><td><span style="font-family:var(--serif);font-size:1.375rem;line-height:1.6;">Divide 187 by 12</span></td></tr>
+          <tr><td class="role">Explanation body</td><td class="meta">19px · 1.1875rem · lh 1.65 · serif</td><td><span style="font-family:var(--serif);font-size:1.1875rem;line-height:1.65;">Twelve goes into 187 fifteen times</span></td></tr>
+          <tr><td class="role">Card title</td><td class="meta">20px · 1.25rem · lh 1.35 · sans 600</td><td><span style="font-family:var(--sans);font-size:1.25rem;font-weight:600;">Practice Test 4</span></td></tr>
+          <tr><td class="role">Dashboard body</td><td class="meta">17px · 1.0625rem · lh 1.55 · sans</td><td><span style="font-family:var(--sans);font-size:1.0625rem;">Weak area: division with remainders</span></td></tr>
+          <tr><td class="role">Table cell</td><td class="meta">16px · 1rem · lh 1.45 · sans</td><td><span style="font-family:var(--sans);font-size:1rem;">Multi-digit multiplication</span></td></tr>
+          <tr><td class="role">Label</td><td class="meta">14px · 0.875rem · lh 1.40 · sans 600 · +0.02em</td><td><span class="lbl">Practice tests</span></td></tr>
+          <tr><td class="role">Caption</td><td class="meta">13px · 0.8125rem · lh 1.40 · sans</td><td><span class="cap">Based on 3 completed tests</span></td></tr>
+          <tr><td class="role">Timer</td><td class="meta">28px · 1.75rem · lh 1.20 · sans 600 · tnum</td><td><span class="timer">19:58</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+<footer class="page-head" style="margin-top:8px;">
+  <h1 style="font-size:1.125rem;">Contrast, recorded</h1>
+  <p>Question body text on <code>bg.paper</code>: <strong>light 16.56:1</strong> (#10202E on #FFFFFF) · <strong>dark 14.05:1</strong> (#E7EEF5 on #16202C). Both clear WCAG 2.1 AA (4.5:1) and AAA (7:1) for normal text.</p>
+  <p>Supporting values in the same palette: secondary text 6.50:1 light / 7.66:1 dark; Student primary 5.96:1 light / 8.14:1 dark; Parent primary 6.57:1 light / 7.64:1 dark; error 6.54 / 7.72; success 6.49 / 8.92; warning 5.93 / 8.56. Status is never carried by colour alone — every state above pairs a colour, an icon and a text label.</p>
+</footer>
+
+</div>
+</body>
+</html>

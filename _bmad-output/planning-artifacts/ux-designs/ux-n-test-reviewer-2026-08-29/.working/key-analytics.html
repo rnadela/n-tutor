@@ -1,0 +1,1103 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Key Screen — Parent View Analytics &amp; Topic Drill-down</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+
+<style>
+/* =============================================================================
+   KEY SCREEN — PARENT VIEW: ANALYTICS DASHBOARD + TOPIC DRILL-DOWN
+   n-test-reviewer · UX session 2026-08-29 · four states in one file
+   -----------------------------------------------------------------------------
+   SPINE SECTIONS GOVERNING THIS SCREEN
+   -----------------------------------------------------------------------------
+   DESIGN.md
+     · Color — Clear Room base; ACCENT SPLIT (Q1). Parent View primary #0B5FA5.
+       Neutrals + all semantic state colors byte-identical to Student Mode.
+     · Typography — Q2b one shared scale; Q2f Literata (generated Question
+       content only) + Source Sans 3 (all chrome/tables/dashboard);
+       Q2e tabular-nums applied selectively (Mastery % column, allowance counts).
+     · Shape — Q3 paper-vs-control radius rule. Cards/buttons/chips = CONTROL 8px.
+       Generated Question content in the drill-down = PAPER 0–2px.
+     · Elevation and Depth — Q4 flat with borders. No shadows anywhere.
+     · Density and Spacing — Q5 density.compact (Parent View):
+       row-height 40, card-padding 12, gap 8, section-margin 20, tap target 44.
+     · Motion — Q6 functional plus progress; nothing on this screen animates.
+       (No hover flourish, no bar-fill animation, no count-up.)
+     · Breakpoints — Q16 the Analytics dashboard is one of only TWO screens
+       granted a breakpoint-specific layout. State 4 is that layout.
+   EXPERIENCE.md
+     · Component Patterns — profile switcher (persistent, Q12a); dashboard
+       summary band (FR-28 unstarted vs completed); dashboard-level sparkline
+       (Q12c.2); ranked Mastery-by-Topic table with inline bars (Q12b);
+       Weak Area marker (icon + text label + colour, never colour alone, Q12b/Q18.4);
+       Topic drill-down missed-Question list (PAPER + Literata, Q12c.1);
+       weighted-regenerate control with mandatory cost statement (Q12c.1);
+       'Back to Student Mode' explicit exit (Q14a.3).
+     · State Patterns — empty state = mechanism plus progress (Q13c);
+       unanswered surfaced beside Mastery, never a bare percentage (Q8c);
+       four grade states carried into the parent drill-down (Q13d).
+     · Voice and Tone — Q17a Parent View names the student in the THIRD PERSON;
+       dense and factual; Q13c empty state never names the tier, never upsells.
+     · Accessibility Floor — Q18 WCAG 2.1 AA; state never colour-alone.
+   KEY FLOW UJ-3 (PRD 2.3), steps rendered here
+     1. Maria PIN-gates into Parent View            → state 1 chrome
+     2. scans Analytics for Noah                    → state 1 summary + sparkline
+     3. identifies the Weak Area                    → state 1 ranked table, weakest first
+     4. drills into the Topic, reads missed Qs      → state 2
+     5. weighted regenerate, cost stated first      → state 2 control
+     (state 3 = the same flow before the FR-27 floor is met; state 4 = same
+      flow on the tablet she is actually sitting at)
+   -----------------------------------------------------------------------------
+   GRADE-STATE ENCODING — reconciled with key-results.html, which is canonical
+   -----------------------------------------------------------------------------
+   LABELS. This mock previously used 'Incorrect' and 'Not answered'. Both were
+   drift. The decided labels are:
+       Correct · Not correct · Unanswered · Not graded yet
+   'Not correct' rather than 'Wrong' is load-bearing, not a synonym: it is the
+   requirement that a wrong answer never reads as punishment, and it holds in
+   Parent View too because Maria reads these rows aloud to Noah.
+
+   COLOUR. Settled once and applied identically in both mocks:
+       correct        → success        #0F6B4F
+       not correct    → error          #B3261E
+       unanswered     → text.secondary #4E6070
+       not graded yet → info           #2E6E9E
+   warning #8A5A00 CARRIES NO GRADE STATE ANYWHERE in the product. On this
+   screen it means Weak Area, and it also marks the allowance-after figure in
+   the regenerate cost block, which is a parent-facing caution rather than a
+   judgement about a question. It is never applied to a grade state. Previously
+   warning did double duty — Weak Area here and 'unanswered' in key-results —
+   which meant one hue said two unrelated things across the two rooms, and on
+   THIS screen a single row could show both meanings at once. Unanswered is now
+   neutral, which is also more truthful: an absence of an answer is not a
+   warning about the student, and per the FR-15 rule it can only arise from an
+   untimed or manually submitted Attempt.
+
+   FOUR NON-COLOUR CARRIERS, applied here exactly as rendered in
+   key-results.html, so a row means the same thing in both rooms:
+     (a) icon frame shape and border style — solid circle / solid circle /
+         dashed circle / dotted square
+     (b) glyph — check / cross / dash / ellipsis
+     (c) literal text label — the four words above
+     (d) row left-rule texture — solid / 45° hatch / dashed / dotted
+   Correct and incorrect deliberately share a frame shape and differ on every
+   other axis.
+
+   -----------------------------------------------------------------------------
+   ALLOWANCE UNIT — Generation Allowance is denominated in PRACTICE TESTS
+   -----------------------------------------------------------------------------
+   This mock previously read 'Generations left 2 of 2', which denominated the
+   allowance in REQUESTS. That is wrong and it decides the product's economics:
+   FR-10 permits up to 5 Practice Tests per request, so counting requests would
+   have allowed a Free account up to 10 Practice Tests a month instead of 2.
+   Corrected to FR-31 as written — one unit = one Practice Test reaching draft
+   state. A request producing 1–5 Practice Tests consumes 1–5 units, and the
+   request is bounded at initiation by the remaining allowance. The weighted
+   regenerate below therefore states its cost in Practice Tests, matching
+   key-capture.html. Reset date is 1 OCTOBER, matching the other mocks — this
+   file previously said 1 September.
+
+   -----------------------------------------------------------------------------
+   TINT TOKENS USED HERE — UNDECLARED IN THE SPINES, ADOPTION REQUIRED
+   -----------------------------------------------------------------------------
+     state.tintPrimary  #E8F1F8   (avatar, lead summary stat)
+     state.trackNeutral #E6ECF1   (mastery bar and progress meter track)
+   BINDING RULE: a tint may REINFORCE state, never CARRY it. Every mastery bar
+   is accompanied by its numeric percentage, so the bar carries no value alone;
+   the lead summary stat repeats its figure as text. The pale border #C7DDEE
+   (1.3:1) that outlined the lead stat has been replaced by the full-strength
+   primary, since it was that block's sole boundary.
+
+   -----------------------------------------------------------------------------
+   DIVIDER — RECOMPUTED (replaces #DCE3E9)
+   -----------------------------------------------------------------------------
+   #DCE3E9 measured 1.30:1 on paper (this file previously published 1.24:1 —
+   also wrong). Shadows are banned (Q4), so the divider is the SOLE boundary of
+   every card, every table rule and every control here. That is a direct SC
+   1.4.11 failure, not decorative separation, and calling it decorative did not
+   make it so.
+     light  #7C8894  on paper #FFFFFF 3.62:1 · on default #F6F8FA 3.40:1
+     dark   #6A747E  on paper #16202C 3.45:1 · on default #0E1620 3.82:1
+   Applied identically across all four mocks; the spines should adopt these.
+
+   -----------------------------------------------------------------------------
+   WCAG 2.1 AA — COMPUTED CONTRAST RATIOS (sRGB, WCAG 2.x formula)
+   Every value recomputed for this pass. The four mocks previously published
+   three different numbers for the same pairs and most were slightly wrong;
+   this file was the furthest out (16.20 / 15.35 / 6.16 / 1.24 for pairs that
+   measure 16.56 / 15.56 / 6.11 / 1.30).
+   -----------------------------------------------------------------------------
+   text.primary  #10202E on paper   #FFFFFF ......... 16.56:1  AAA
+   text.primary  #10202E on default #F6F8FA ......... 15.56:1  AAA
+   text.secondary#4E6070 on paper   #FFFFFF .........  6.50:1  AA  (AAA at 17px+)
+   text.secondary#4E6070 on default #F6F8FA .........  6.11:1  AA
+   warning/WeakArea #8A5A00 on paper #FFFFFF ........  5.93:1  AA
+   warning/WeakArea #8A5A00 on default #F6F8FA ......  5.57:1  AA
+   error   #B3261E on paper #FFFFFF .................  6.54:1  AA
+   error   #B3261E on default #F6F8FA ...............  6.14:1  AA
+   success #0F6B4F on paper #FFFFFF .................  6.49:1  AA
+   info    #2E6E9E on paper #FFFFFF .................  5.47:1  AA
+   parent primary #0B5FA5 on paper #FFFFFF ..........  6.57:1  AA  (link/label text)
+   parent primary #0B5FA5 on default #F6F8FA ........  6.18:1  AA
+   #FFFFFF on parent primary #0B5FA5 ................  6.57:1  AA  (filled button)
+   divider #7C8894 on paper #FFFFFF .................  3.62:1  AA non-text
+   divider #7C8894 on default #F6F8FA ...............  3.40:1  AA non-text
+   Non-text contrast (SC 1.4.11): inline mastery bars are 3:1+ against their
+   track and are ALWAYS accompanied by the numeric percentage, so the bar is
+   never the sole carrier of the value.
+   COLOUR-INDEPENDENCE (SC 1.4.1): every Weak Area carries a triangle icon AND
+   the literal words 'Weak area' AND the colour. Every grade state in the
+   drill-down carries the four non-colour carriers listed above.
+   Removing all colour from this page loses no information.
+
+   MOTION: nothing on this screen animates — no bar fill, no count-up, no
+   hover flourish. A blanket prefers-reduced-motion guard sits at the foot of
+   the stylesheet so any transition added in code is covered.
+   ============================================================================= */
+
+/* ---- tokens: Clear Room light, Parent View accent -------------------------- */
+:root{
+  --bg-default:#F6F8FA;
+  --bg-paper:#FFFFFF;
+  --text-primary:#10202E;
+  --text-secondary:#4E6070;
+  --divider:#7C8894;   /* recomputed for SC 1.4.11 — 3.62:1 / 3.40:1 */
+  --success:#0F6B4F;   /* grade state: correct */
+  --error:#B3261E;     /* grade state: not correct */
+  --warning:#8A5A00;   /* WEAK AREA ONLY — never a grade state, anywhere */
+  --info:#2E6E9E;      /* grade state: not graded yet */
+  --primary:#0B5FA5;   /* PARENT accent — never the Student teal #0F6E78 */
+  /* grade state: unanswered is NEUTRAL, so warning is free to mean Weak Area */
+  --unanswered:#4E6070;
+  /* NEW TOKENS awaiting spine adoption — tints reinforce state, never carry it */
+  --primary-tint:#E8F1F8;
+  --track:#E6ECF1;
+
+  /* density.compact (Q5) */
+  --row-h:40px;
+  --card-pad:12px;
+  --gap:8px;
+  --section-margin:20px;
+  --tap:44px;
+
+  --radius-control:8px;  /* CONTROL role (Q3) */
+  --radius-paper:2px;    /* PAPER role  (Q3) */
+
+  --sans:"Source Sans 3","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --serif:"Literata",Georgia,"Iowan Old Style","Times New Roman",serif;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:#E9EDF1;
+  color:var(--text-primary);
+  font-family:var(--sans);
+  font-size:1rem;
+  line-height:1.45;
+}
+
+/* ---- spec-sheet chrome (not part of the product) --------------------------- */
+.sheet{max-width:1280px;margin:0 auto;padding:32px 20px 72px}
+.sheet-head{margin-bottom:28px}
+.sheet-head h1{font-size:1.375rem;line-height:1.3;margin:0 0 4px;font-weight:700}
+.sheet-head p{margin:0;color:var(--text-secondary);font-size:0.9375rem;max-width:64ch}
+.state{margin-top:40px}
+.state-label{
+  font-family:var(--sans);font-size:0.8125rem;line-height:1.4;font-weight:700;
+  letter-spacing:0.06em;text-transform:uppercase;color:var(--text-secondary);
+  margin:0 0 4px;
+}
+.state-title{font-size:1.0625rem;font-weight:600;margin:0 0 2px}
+.state-note{margin:0 0 16px;color:var(--text-secondary);font-size:0.875rem;max-width:72ch}
+.states-row{display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start}
+
+/* ---- device frames --------------------------------------------------------- */
+.phone{
+  width:390px;flex:0 0 390px;
+  background:#1B242D;border-radius:44px;padding:11px;
+}
+.phone .screen{
+  background:var(--bg-default);border-radius:34px;overflow:hidden;position:relative;
+}
+.phone .notch{
+  position:absolute;top:8px;left:50%;transform:translateX(-50%);
+  width:112px;height:26px;background:#1B242D;border-radius:14px;z-index:5;
+}
+.statusbar{
+  height:44px;display:flex;align-items:flex-end;justify-content:space-between;
+  padding:0 22px 6px;font-size:0.8125rem;font-weight:600;color:var(--text-primary);
+  font-variant-numeric:tabular-nums;background:var(--bg-paper);
+}
+.statusbar .sb-right{letter-spacing:0.06em}
+.homebar{height:22px;display:flex;align-items:center;justify-content:center;background:var(--bg-default)}
+.homebar i{display:block;width:132px;height:5px;border-radius:3px;background:#C2CCD5}
+
+.tablet{
+  width:1024px;max-width:100%;
+  background:#1B242D;border-radius:26px;padding:14px 14px 14px;
+}
+.tablet .screen{background:var(--bg-default);border-radius:12px;overflow:hidden}
+.tablet .cam{
+  height:12px;display:flex;align-items:center;justify-content:center;
+}
+.tablet .cam i{width:7px;height:7px;border-radius:50%;background:#3A4753;display:block;margin-bottom:6px}
+
+/* ---- app chrome ------------------------------------------------------------ */
+.appbar{
+  background:var(--bg-paper);
+  border-bottom:1px solid var(--divider);
+  padding:6px var(--card-pad) 10px;
+}
+.appbar-top{display:flex;align-items:center;justify-content:space-between;gap:var(--gap)}
+.room{
+  font-size:0.875rem;line-height:1.40;font-weight:600;letter-spacing:0.02em;
+  color:var(--primary);display:flex;align-items:center;gap:6px;
+}
+.exit{
+  font-family:var(--sans);font-size:0.875rem;line-height:1.40;font-weight:600;
+  letter-spacing:0.02em;color:var(--primary);background:transparent;
+  border:1px solid var(--divider);border-radius:var(--radius-control);
+  min-height:var(--tap);padding:0 10px;display:inline-flex;align-items:center;
+  cursor:pointer;white-space:nowrap;
+}
+/* persistent profile switcher — Q12a mitigation (1)+(2): reachable everywhere,
+   and it carries the per-child outstanding-work signal itself */
+.switcher{
+  margin-top:var(--gap);width:100%;
+  display:flex;align-items:center;justify-content:space-between;gap:var(--gap);
+  min-height:var(--tap);padding:6px 10px;
+  background:var(--bg-paper);border:1px solid var(--divider);
+  border-radius:var(--radius-control);cursor:pointer;text-align:left;
+  font-family:var(--sans);color:var(--text-primary);
+}
+.switcher .who{display:flex;align-items:center;gap:8px;min-width:0}
+.avatar{
+  flex:0 0 28px;width:28px;height:28px;border-radius:var(--radius-control);
+  background:var(--primary-tint);color:var(--primary);
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.8125rem;font-weight:700;
+}
+.who .name{font-size:1rem;font-weight:600;line-height:1.45}
+.who .grade{font-size:0.8125rem;line-height:1.40;color:var(--text-secondary)}
+.switcher .sig{
+  font-size:0.8125rem;line-height:1.40;color:var(--text-secondary);
+  display:flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.switcher .chev{color:var(--text-secondary);font-size:0.875rem}
+.dot{
+  display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:var(--info);flex:0 0 7px;
+}
+
+.body{padding:var(--section-margin) var(--card-pad) 24px;display:flex;flex-direction:column;gap:var(--section-margin)}
+.card{
+  background:var(--bg-paper);
+  border:1px solid var(--divider);
+  border-radius:var(--radius-control);   /* CONTROL role */
+  padding:var(--card-pad);
+}
+.card.flush{padding:var(--card-pad) 0 0}
+.sec-label{
+  font-size:0.875rem;line-height:1.40;font-weight:600;letter-spacing:0.02em;
+  color:var(--text-secondary);margin:0 0 var(--gap);
+}
+.sec-label.inset{padding:0 var(--card-pad)}
+
+/* ---- FR-28 summary: the v0 answer to 'did my child do it' ------------------ */
+.summary{display:flex;gap:var(--gap)}
+.summary .stat{
+  flex:1 1 0;min-width:0;
+  border:1px solid var(--divider);border-radius:var(--radius-control);
+  padding:10px;
+}
+.summary .stat.lead{background:var(--primary-tint);border-color:var(--primary)}
+.stat .n{
+  font-size:1.75rem;line-height:1.20;font-weight:700;
+  font-variant-numeric:tabular-nums;letter-spacing:-0.01em;
+}
+.stat.lead .n{color:var(--primary)}
+.stat .k{font-size:0.8125rem;line-height:1.40;color:var(--text-secondary);display:block}
+.summary-line{
+  margin:var(--gap) 0 0;font-size:1.0625rem;line-height:1.55;color:var(--text-primary);
+}
+.summary-sub{margin:2px 0 0;font-size:0.8125rem;line-height:1.40;color:var(--text-secondary)}
+
+/* ---- dashboard-level sparkline (Q12c.2) ------------------------------------ */
+.spark-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--gap)}
+.spark-now{font-size:1.0625rem;line-height:1.55;font-weight:600;font-variant-numeric:tabular-nums}
+.spark-wrap{margin-top:var(--gap)}
+.spark-wrap svg{display:block;width:100%;height:64px}
+.spark-axis{
+  display:flex;justify-content:space-between;
+  font-size:0.8125rem;line-height:1.40;color:var(--text-secondary);
+  font-variant-numeric:tabular-nums;margin-top:4px;
+}
+.spark-caption{margin:6px 0 0;font-size:0.8125rem;line-height:1.40;color:var(--text-secondary)}
+
+/* ---- ranked mastery table (Q12b) ------------------------------------------- */
+.mtable{width:100%;border-collapse:collapse;table-layout:fixed}
+.mtable caption{
+  caption-side:top;text-align:left;
+  font-size:0.875rem;line-height:1.40;font-weight:600;letter-spacing:0.02em;
+  color:var(--text-secondary);padding:0 var(--card-pad) var(--gap);
+}
+.mtable th{
+  font-size:0.8125rem;line-height:1.40;font-weight:600;letter-spacing:0.02em;
+  color:var(--text-secondary);text-align:left;
+  padding:0 var(--card-pad) 6px;border-bottom:1px solid var(--divider);
+}
+.mtable th.num{text-align:right}
+.mtable td{
+  padding:6px var(--card-pad);border-bottom:1px solid var(--divider);
+  vertical-align:middle;font-size:1rem;line-height:1.45;   /* table cell 16px */
+}
+.mtable tbody tr{height:var(--row-h)}      /* density.compact row-height 40 */
+.mtable tbody tr:last-child td{border-bottom:0}
+.topic{
+  display:block;font-size:1rem;line-height:1.45;font-weight:600;
+  color:var(--text-primary);
+}
+.meta{
+  display:block;font-size:0.8125rem;line-height:1.40;color:var(--text-secondary);
+  margin-top:1px;
+}
+.meta .skip{color:var(--unanswered);font-weight:600}   /* unanswered, not Weak Area */
+.pct{
+  text-align:right;font-variant-numeric:tabular-nums;   /* Q2e */
+  font-weight:600;white-space:nowrap;width:62px;
+}
+.pct.weak{color:var(--warning)}
+.barcell{width:76px;padding-left:0}
+.bar{height:8px;background:var(--track);border-radius:2px;overflow:hidden}
+.bar > i{display:block;height:100%;background:var(--primary);border-radius:2px}
+.bar > i.weak{background:var(--warning)}
+/* the row is a 44px tap target even though the visual row-height is 40 */
+.rowlink{display:block;min-height:var(--tap);padding:2px 0;text-decoration:none;color:inherit}
+
+/* Weak Area marker — icon + TEXT + colour (never colour alone) */
+.weakflag{
+  display:inline-flex;align-items:center;gap:5px;
+  color:var(--warning);font-size:0.8125rem;line-height:1.40;font-weight:600;
+  letter-spacing:0.02em;
+}
+.weakflag svg{flex:0 0 13px;display:block}
+.mtable .threshold td{
+  border-bottom:1px solid var(--divider);
+  background:var(--bg-default);
+  font-size:0.8125rem;line-height:1.40;color:var(--text-secondary);
+  padding:5px var(--card-pad);
+}
+.tablefoot{
+  padding:10px var(--card-pad);font-size:0.8125rem;line-height:1.40;
+  color:var(--text-secondary);border-top:1px solid var(--divider);
+}
+
+/* ---- drill-down ------------------------------------------------------------ */
+.backbar{
+  background:var(--bg-paper);border-bottom:1px solid var(--divider);
+  padding:0 var(--card-pad);min-height:var(--tap);
+  display:flex;align-items:center;gap:8px;
+}
+.backbar a{
+  color:var(--primary);text-decoration:none;font-size:0.875rem;font-weight:600;
+  letter-spacing:0.02em;display:inline-flex;align-items:center;gap:6px;
+  min-height:var(--tap);
+}
+.topic-h{font-size:1.25rem;line-height:1.35;font-weight:600;margin:0}
+.topic-stats{
+  margin:6px 0 0;font-size:1.0625rem;line-height:1.55;color:var(--text-primary);
+  font-variant-numeric:tabular-nums;
+}
+.topic-stats .sep{color:var(--text-secondary);padding:0 2px}
+.topic-stats .skip{color:var(--unanswered);font-weight:600}   /* unanswered, not Weak Area */
+.topic-weak{margin-top:var(--gap)}
+
+/* generated Question content — PAPER role (Q3) + Literata (Q2f) */
+.qlist{display:flex;flex-direction:column;gap:var(--gap);margin-top:var(--gap)}
+.qitem{
+  background:var(--bg-paper);
+  border:1px solid var(--divider);
+  border-radius:var(--radius-paper);      /* PAPER — square */
+  padding:var(--card-pad);
+}
+.qnum{
+  font-family:var(--sans);font-size:0.8125rem;line-height:1.40;
+  color:var(--text-secondary);letter-spacing:0.02em;font-weight:600;
+  display:flex;align-items:center;justify-content:space-between;gap:var(--gap);
+}
+.qbody{
+  font-family:var(--serif);                /* Literata — generated content only */
+  font-size:1.375rem;line-height:1.60;     /* question body 22px lh1.60 */
+  font-feature-settings:"frac" 1;
+  margin:6px 0 10px;max-width:34rem;
+}
+.answers{
+  border-top:1px solid var(--divider);padding-top:8px;
+  display:flex;flex-direction:column;gap:4px;
+}
+.arow{
+  display:flex;gap:8px;align-items:baseline;
+  font-family:var(--sans);font-size:1rem;line-height:1.45;
+}
+.arow .lab{
+  flex:0 0 108px;font-size:0.875rem;line-height:1.40;font-weight:600;
+  letter-spacing:0.02em;color:var(--text-secondary);
+}
+.arow .val{font-weight:600;font-variant-numeric:tabular-nums}
+.arow .val.given{color:var(--error)}
+.arow .val.given.none{color:var(--unanswered);font-style:italic}
+.arow .val.right{color:var(--success)}
+/* ---- grade-state chip — the same four carriers as key-results.html ---------
+   (a) icon FRAME shape + border style  (b) glyph  (c) literal label
+   (d) row left-rule texture on .qitem (below)                               */
+.gradechip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:0.8125rem;line-height:1.40;font-weight:600;letter-spacing:0.02em;
+  border:1px solid var(--divider);border-radius:var(--radius-control);
+  background:var(--bg-paper);
+  padding:2px 8px 2px 5px;white-space:nowrap;
+}
+.gradechip .ico{
+  flex:0 0 18px;width:18px;height:18px;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.gradechip svg{display:block;flex:0 0 10px}
+.gradechip.correct{color:var(--success)}
+.gradechip.correct .ico{border:2px solid var(--success);border-radius:50%}
+.gradechip.incorrect{color:var(--error)}
+.gradechip.incorrect .ico{border:2px solid var(--error);border-radius:50%}
+.gradechip.unanswered{color:var(--unanswered)}
+.gradechip.unanswered .ico{border:2px dashed var(--unanswered);border-radius:50%}
+.gradechip.ungraded{color:var(--info)}
+.gradechip.ungraded .ico{border:2px dotted var(--info);border-radius:2px}
+
+/* (d) row left-rule TEXTURE — identical treatments to the results screen */
+.qitem{border-left:6px solid transparent}
+.qitem--correct{border-left-color:var(--success)}
+.qitem--incorrect{
+  border-left-color:transparent;
+  background-image:repeating-linear-gradient(45deg,var(--error) 0 3px,#FFFFFF 3px 7px);
+  background-size:6px 100%;background-repeat:no-repeat;background-position:left top;
+}
+.qitem--unanswered{border-left-style:dashed;border-left-color:var(--unanswered)}
+.qitem--ungraded{border-left-style:dotted;border-left-color:var(--info)}
+
+/* weighted regenerate + MANDATORY cost statement (Q12c.1) */
+.gen{
+  background:var(--bg-paper);border:1px solid var(--divider);
+  border-radius:var(--radius-control);padding:var(--card-pad);
+}
+.gen h3{font-size:1rem;line-height:1.45;font-weight:600;margin:0 0 4px}
+.cost{
+  border:1px solid var(--divider);border-radius:var(--radius-control);
+  background:var(--bg-default);padding:10px;margin:var(--gap) 0;
+}
+.cost dl{margin:0;display:grid;grid-template-columns:1fr auto;gap:4px 12px}
+.cost dt{font-size:0.875rem;line-height:1.40;color:var(--text-secondary);letter-spacing:0.02em}
+.cost dd{
+  margin:0;text-align:right;font-size:1rem;line-height:1.45;font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+.cost .after{color:var(--warning)}
+.btn{
+  display:flex;align-items:center;justify-content:center;
+  width:100%;min-height:var(--tap);padding:0 14px;
+  background:var(--primary);color:#FFFFFF;border:1px solid var(--primary);
+  border-radius:var(--radius-control);
+  font-family:var(--sans);font-size:1rem;line-height:1.45;font-weight:600;
+  letter-spacing:0.02em;cursor:pointer;
+}
+.btn.ghost{background:transparent;color:var(--primary);border-color:var(--divider)}
+.gen .fine{margin:var(--gap) 0 0;font-size:0.8125rem;line-height:1.40;color:var(--text-secondary)}
+
+/* ---- empty states — mechanism plus progress (Q13c) ------------------------- */
+.empty{padding:2px 0}
+.empty p{margin:0;font-size:1.0625rem;line-height:1.55}
+.empty p.prog{margin-top:4px;color:var(--text-secondary);font-size:0.875rem;line-height:1.40}
+.meter{
+  margin-top:10px;height:8px;background:var(--track);border-radius:2px;overflow:hidden;
+}
+.meter > i{display:block;height:100%;background:var(--info);border-radius:2px}
+.meter-legend{
+  display:flex;justify-content:space-between;margin-top:4px;
+  font-size:0.8125rem;line-height:1.40;color:var(--text-secondary);
+  font-variant-numeric:tabular-nums;
+}
+
+/* ---- tablet layout (Q16) --------------------------------------------------- */
+.t-appbar{padding:10px 20px 12px}
+.t-appbar .appbar-top{align-items:center}
+.t-appbar .switcher{width:auto;min-width:320px;margin-top:0}
+.t-body{
+  padding:20px;display:grid;
+  grid-template-columns:340px minmax(0,1fr);
+  gap:20px;align-items:start;
+}
+.t-col{display:flex;flex-direction:column;gap:20px}
+.t-mtable td,.t-mtable th{padding-left:14px;padding-right:14px}
+.t-mtable .barcell{width:180px}
+.t-mtable .colcount{
+  width:96px;text-align:right;font-variant-numeric:tabular-nums;
+  font-size:1rem;color:var(--text-secondary);
+}
+.t-mtable .colskip{
+  width:118px;text-align:right;font-variant-numeric:tabular-nums;font-size:1rem;
+}
+.t-mtable .colskip .has{color:var(--unanswered);font-weight:600}   /* unanswered, not Weak Area */
+.t-mtable .colskip .none{color:var(--text-secondary)}
+.t-mtable .colflag{width:132px}
+.t-mtable .meta{display:none}   /* wide viewport promotes stacked meta to columns */
+.t-mtable .spark-inline{width:120px}
+.t-mtable .spark-inline svg{display:block;width:112px;height:24px}
+
+/* ---- reduced motion (Q6 rider, product-wide) ----
+   Nothing on this screen animates by design — no bar fill, no count-up, no
+   hover flourish. The guard is blanket so any transition added in code is
+   covered without revisiting this file. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
+</style>
+
+<div class="sheet">
+
+  <div class="sheet-head">
+    <h1>Parent View — Analytics dashboard &amp; Topic drill-down</h1>
+    <p>UJ-3, four states. Maria, PIN-gated into Parent View, phone in the kitchen. Dense and factual: a 30-second scan must leave her knowing exactly what to work on. Clear Room palette, Parent accent #0B5FA5, density.compact, flat with 1px borders, no shadows.</p>
+  </div>
+
+  <!-- =========================================================================
+       STATE 1 — CANONICAL DASHBOARD (PHONE)
+       ========================================================================= -->
+  <section class="state">
+    <p class="state-label">State 1 of 4 · phone · 390 × 844</p>
+    <h2 class="state-title">Canonical dashboard</h2>
+    <p class="state-note">Reading order is the answer order: <em>did he do it</em> (FR-28 unstarted vs completed) → <em>is it getting better</em> (one dashboard-level sparkline) → <em>what do I work on</em> (Mastery by Topic, weakest first).</p>
+
+    <div class="states-row">
+      <div class="phone">
+        <div class="screen">
+          <div class="notch" aria-hidden="true"></div>
+          <div class="statusbar"><span>9:41</span><span class="sb-right">▮▮▮ ⌁</span></div>
+
+          <header class="appbar">
+            <div class="appbar-top">
+              <span class="room">
+                <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1a3 3 0 0 0-3 3v2H4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1V4a3 3 0 0 0-3-3Zm0 1.6A1.4 1.4 0 0 1 9.4 4v2H6.6V4A1.4 1.4 0 0 1 8 2.6Z"/></svg>
+                Parent View
+              </span>
+              <button class="exit" type="button">Back to Student Mode</button>
+            </div>
+
+            <!-- persistent profile switcher, reachable from anywhere (Q12a) -->
+            <button class="switcher" type="button" aria-label="Switch student profile. Currently Noah, Grade 5. 2 practice tests not started.">
+              <span class="who">
+                <span class="avatar" aria-hidden="true">N</span>
+                <span>
+                  <span class="name">Noah</span>
+                  <span class="grade">Grade 5</span>
+                </span>
+              </span>
+              <span class="sig"><span class="dot" aria-hidden="true"></span>2 not started</span>
+              <span class="chev" aria-hidden="true">▾</span>
+            </button>
+          </header>
+
+          <main class="body">
+
+            <!-- FR-28 summary: the v0 answer to 'did my child do it' -->
+            <section class="card" aria-labelledby="s1-sum">
+              <h2 class="sec-label" id="s1-sum">Practice tests</h2>
+              <div class="summary">
+                <div class="stat lead"><span class="n">2</span><span class="k">not started</span></div>
+                <div class="stat"><span class="n">3</span><span class="k">completed</span></div>
+              </div>
+              <p class="summary-line">Noah has not started 2 of the 5 practice tests you released.</p>
+              <p class="summary-sub">Last completed 27 August · Multiplication and division · 11 of 15</p>
+            </section>
+
+            <!-- one dashboard-level sparkline, not per-Topic trend (Q12c.2) -->
+            <section class="card" aria-labelledby="s1-trend">
+              <div class="spark-head">
+                <h2 class="sec-label" style="margin:0" id="s1-trend">Score across recent practice tests</h2>
+                <span class="spark-now">73%</span>
+              </div>
+              <div class="spark-wrap">
+                <svg viewBox="0 0 320 64" role="img" aria-label="Noah's scores across his last 5 completed practice tests: 47 percent, 60 percent, 53 percent, 67 percent, 73 percent.">
+                  <line x1="0" y1="48" x2="320" y2="48" stroke="#7C8894" stroke-width="1"/>
+                  <line x1="0" y1="26" x2="320" y2="26" stroke="#7C8894" stroke-width="1" stroke-dasharray="3 4"/>
+                  <polyline points="16,44 92,32 168,38 244,26 312,18"
+                            fill="none" stroke="#0B5FA5" stroke-width="2"
+                            stroke-linejoin="round" stroke-linecap="round"/>
+                  <circle cx="16"  cy="44" r="3" fill="#0B5FA5"/>
+                  <circle cx="92"  cy="32" r="3" fill="#0B5FA5"/>
+                  <circle cx="168" cy="38" r="3" fill="#0B5FA5"/>
+                  <circle cx="244" cy="26" r="3" fill="#0B5FA5"/>
+                  <circle cx="312" cy="18" r="4.5" fill="#0B5FA5"/>
+                </svg>
+              </div>
+              <div class="spark-axis"><span>2 Aug</span><span>27 Aug</span></div>
+              <p class="spark-caption">Noah's last 5 completed practice tests. Dashed line marks 60%.</p>
+            </section>
+
+            <!-- ranked Mastery by Topic, weakest first (Q12b) -->
+            <section class="card flush" aria-labelledby="s1-mastery">
+              <table class="mtable">
+                <caption id="s1-mastery">Mastery by topic · weakest first</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Topic</th>
+                    <th scope="col" class="num">Mastery</th>
+                    <th scope="col"><span class="sr" style="position:absolute;left:-9999px">Comparative bar</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <a class="rowlink" href="#state-2">
+                        <span class="topic">division with remainders</span>
+                        <span class="meta">5 answered · <span class="skip">3 unanswered</span></span>
+                        <span class="weakflag">
+                          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
+                          Weak area
+                        </span>
+                      </a>
+                    </td>
+                    <td class="pct weak">40%</td>
+                    <td class="barcell"><span class="bar"><i class="weak" style="width:40%"></i></span></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <a class="rowlink" href="#state-2">
+                        <span class="topic">multi-step word problems</span>
+                        <span class="meta">25 answered</span>
+                        <span class="weakflag">
+                          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
+                          Weak area
+                        </span>
+                      </a>
+                    </td>
+                    <td class="pct weak">52%</td>
+                    <td class="barcell"><span class="bar"><i class="weak" style="width:52%"></i></span></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <a class="rowlink" href="#state-2">
+                        <span class="topic">equivalent fractions</span>
+                        <span class="meta">12 answered · <span class="skip">1 unanswered</span></span>
+                        <span class="weakflag">
+                          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
+                          Weak area
+                        </span>
+                      </a>
+                    </td>
+                    <td class="pct weak">58%</td>
+                    <td class="barcell"><span class="bar"><i class="weak" style="width:58%"></i></span></td>
+                  </tr>
+                  <tr class="threshold"><td colspan="3">Weak area threshold — below 60% mastery, once Noah has answered at least 5 questions on the topic</td></tr>
+                  <tr>
+                    <td>
+                      <a class="rowlink" href="#state-2">
+                        <span class="topic">decimal place value</span>
+                        <span class="meta">14 answered · <span class="skip">2 unanswered</span></span>
+                      </a>
+                    </td>
+                    <td class="pct">71%</td>
+                    <td class="barcell"><span class="bar"><i style="width:71%"></i></span></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <a class="rowlink" href="#state-2">
+                        <span class="topic">area and perimeter</span>
+                        <span class="meta">21 answered</span>
+                      </a>
+                    </td>
+                    <td class="pct">86%</td>
+                    <td class="barcell"><span class="bar"><i style="width:86%"></i></span></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <a class="rowlink" href="#state-2">
+                        <span class="topic">rounding to the nearest hundred</span>
+                        <span class="meta">13 answered</span>
+                      </a>
+                    </td>
+                    <td class="pct">92%</td>
+                    <td class="barcell"><span class="bar"><i style="width:92%"></i></span></td>
+                  </tr>
+                </tbody>
+              </table>
+              <p class="tablefoot">Mastery counts answered questions only. Unanswered questions are listed separately and are not scored as wrong.</p>
+            </section>
+
+          </main>
+          <div class="homebar"><i></i></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================================
+       STATE 2 — TOPIC DRILL-DOWN
+       ========================================================================= -->
+  <section class="state" id="state-2">
+    <p class="state-label">State 2 of 4 · phone · 390 × 844</p>
+    <h2 class="state-title">Topic drill-down — division with remainders</h2>
+    <p class="state-note">The missed Questions are generated content, so they are PAPER role (square) and set in Literata; everything around them stays Source Sans 3. Grade states here use the same four non-colour carriers and the same four labels as the Student Mode results screen — icon frame shape, glyph, the literal words, and the row left-rule texture — so a row means the same thing in both rooms. <strong>Unanswered is neutral, not warning:</strong> warning is the Weak Area hue on this very screen, and a row that showed both would have used one colour for two unrelated meanings at once. The weighted regenerate control sits with the evidence that justifies it and states its cost <em>in practice tests</em> before it fires, because that is the unit the Generation Allowance is counted in.</p>
+
+    <div class="states-row">
+      <div class="phone">
+        <div class="screen">
+          <div class="notch" aria-hidden="true"></div>
+          <div class="statusbar"><span>9:42</span><span class="sb-right">▮▮▮ ⌁</span></div>
+
+          <header class="appbar">
+            <div class="appbar-top">
+              <span class="room">
+                <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1a3 3 0 0 0-3 3v2H4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1V4a3 3 0 0 0-3-3Zm0 1.6A1.4 1.4 0 0 1 9.4 4v2H6.6V4A1.4 1.4 0 0 1 8 2.6Z"/></svg>
+                Parent View
+              </span>
+              <button class="exit" type="button">Back to Student Mode</button>
+            </div>
+            <button class="switcher" type="button" aria-label="Switch student profile. Currently Noah, Grade 5.">
+              <span class="who">
+                <span class="avatar" aria-hidden="true">N</span>
+                <span><span class="name">Noah</span><span class="grade">Grade 5</span></span>
+              </span>
+              <span class="sig"><span class="dot" aria-hidden="true"></span>2 not started</span>
+              <span class="chev" aria-hidden="true">▾</span>
+            </button>
+          </header>
+
+          <nav class="backbar"><a href="#">‹ Mastery by topic</a></nav>
+
+          <main class="body">
+
+            <section class="card">
+              <h1 class="topic-h">division with remainders</h1>
+              <p class="topic-stats">40% mastery <span class="sep">·</span> 5 answered <span class="sep">·</span> <span class="skip">3 unanswered</span></p>
+              <div class="topic-weak">
+                <span class="weakflag">
+                  <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
+                  Weak area
+                </span>
+              </div>
+              <p class="spark-caption">Noah answered 2 of 5 correctly and left 3 unanswered. Unanswered questions are not counted as wrong and are not counted in the 40%. He submitted both of these tests himself with time still on the clock — if a timer had run out, those questions would be marked not correct instead.</p>
+            </section>
+
+            <section aria-labelledby="s2-missed">
+              <h2 class="sec-label" id="s2-missed">Questions Noah did not get right</h2>
+              <div class="qlist">
+
+                <article class="qitem qitem--incorrect">
+                  <p class="qnum">
+                    <span>Question 4 · Practice test 27 Aug</span>
+                    <span class="gradechip incorrect">
+                      <span class="ico"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M4.2 3.1 8 6.9l3.8-3.8 1.1 1.1L9.1 8l3.8 3.8-1.1 1.1L8 9.1l-3.8 3.8-1.1-1.1L6.9 8 3.1 4.2l1.1-1.1Z"/></svg></span>
+                      Not correct
+                    </span>
+                  </p>
+                  <p class="qbody">A baker packs 187 cookies into boxes of 8. How many cookies are left over?</p>
+                  <div class="answers">
+                    <p class="arow"><span class="lab">Noah answered</span><span class="val given">4</span></p>
+                    <p class="arow"><span class="lab">Correct answer</span><span class="val right">3</span></p>
+                  </div>
+                </article>
+
+                <article class="qitem qitem--unanswered">
+                  <p class="qnum">
+                    <span>Question 9 · Practice test 27 Aug</span>
+                    <span class="gradechip unanswered">
+                      <span class="ico"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M2.6 7.2h10.8v1.6H2.6z"/></svg></span>
+                      Unanswered
+                    </span>
+                  </p>
+                  <p class="qbody">There are 53 pencils shared equally among 7 students. How many pencils are left over?</p>
+                  <div class="answers">
+                    <p class="arow"><span class="lab">Noah answered</span><span class="val given none">Nothing entered</span></p>
+                    <p class="arow"><span class="lab">Correct answer</span><span class="val right">4</span></p>
+                  </div>
+                </article>
+
+                <article class="qitem qitem--incorrect">
+                  <p class="qnum">
+                    <span>Question 12 · Practice test 19 Aug</span>
+                    <span class="gradechip incorrect">
+                      <span class="ico"><svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M4.2 3.1 8 6.9l3.8-3.8 1.1 1.1L9.1 8l3.8 3.8-1.1 1.1L8 9.1l-3.8 3.8-1.1-1.1L6.9 8 3.1 4.2l1.1-1.1Z"/></svg></span>
+                      Not correct
+                    </span>
+                  </p>
+                  <p class="qbody">Divide 95 by 6. Write the quotient and the remainder.</p>
+                  <div class="answers">
+                    <p class="arow"><span class="lab">Noah answered</span><span class="val given">15 r 6</span></p>
+                    <p class="arow"><span class="lab">Correct answer</span><span class="val right">15 r 5</span></p>
+                  </div>
+                </article>
+
+              </div>
+            </section>
+
+            <!-- weighted regenerate — cost stated BEFORE it fires (Q12c.1) -->
+            <section class="gen" aria-labelledby="s2-gen">
+              <h3 id="s2-gen">Generate more on this</h3>
+              <p class="spark-caption">A new practice test weighted toward division with remainders.</p>
+              <div class="cost">
+                <dl>
+                  <dt>This generates</dt><dd>1 practice test</dd>
+                  <dt>Generation Allowance left</dt><dd>2 of 2 practice tests</dd>
+                  <dt>Left after this one</dt><dd class="after">1 of 2 practice tests</dd>
+                </dl>
+              </div>
+              <button class="btn" type="button">Generate 1 practice test</button>
+              <p class="fine">The allowance is counted in practice tests, not requests: a request that makes 3 practice tests costs 3, and you cannot start a request larger than the allowance you have left. You review every question before Noah sees it. Your allowance resets on 1 October.</p>
+            </section>
+
+          </main>
+          <div class="homebar"><i></i></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================================
+       STATE 3 — EMPTY (BELOW THE FR-27 FIVE-QUESTION FLOOR)
+       ========================================================================= -->
+  <section class="state">
+    <p class="state-label">State 3 of 4 · phone · 390 × 844</p>
+    <h2 class="state-title">Empty — below the five-question floor</h2>
+    <p class="state-note">Mechanism plus progress, so absence reads as a threshold not yet met rather than a broken dashboard. The plan is never named as the cause and there is no upsell — there is no self-serve upgrade path in v0, so naming it would be a frustration with no exit.</p>
+
+    <div class="states-row">
+      <div class="phone">
+        <div class="screen">
+          <div class="notch" aria-hidden="true"></div>
+          <div class="statusbar"><span>9:44</span><span class="sb-right">▮▮▮ ⌁</span></div>
+
+          <header class="appbar">
+            <div class="appbar-top">
+              <span class="room">
+                <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1a3 3 0 0 0-3 3v2H4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1V4a3 3 0 0 0-3-3Zm0 1.6A1.4 1.4 0 0 1 9.4 4v2H6.6V4A1.4 1.4 0 0 1 8 2.6Z"/></svg>
+                Parent View
+              </span>
+              <button class="exit" type="button">Back to Student Mode</button>
+            </div>
+            <button class="switcher" type="button" aria-label="Switch student profile. Currently Noah, Grade 5. 1 practice test not started.">
+              <span class="who">
+                <span class="avatar" aria-hidden="true">N</span>
+                <span><span class="name">Noah</span><span class="grade">Grade 5</span></span>
+              </span>
+              <span class="sig"><span class="dot" aria-hidden="true"></span>1 not started</span>
+              <span class="chev" aria-hidden="true">▾</span>
+            </button>
+          </header>
+
+          <main class="body">
+
+            <section class="card" aria-labelledby="s3-sum">
+              <h2 class="sec-label" id="s3-sum">Practice tests</h2>
+              <div class="summary">
+                <div class="stat lead"><span class="n">1</span><span class="k">not started</span></div>
+                <div class="stat"><span class="n">1</span><span class="k">completed</span></div>
+              </div>
+              <p class="summary-line">Noah has not started 1 of the 2 practice tests you released.</p>
+              <p class="summary-sub">Last completed 28 August · Fractions · 3 of 5</p>
+            </section>
+
+            <section class="card" aria-labelledby="s3-trend">
+              <h2 class="sec-label" id="s3-trend">Score across recent practice tests</h2>
+              <div class="empty">
+                <p>The trend line appears once Noah has completed 2 practice tests. He's completed 1 so far.</p>
+                <div class="meter" role="img" aria-label="1 of 2 completed practice tests."><i style="width:50%"></i></div>
+                <div class="meter-legend"><span>1 completed</span><span>2 needed</span></div>
+              </div>
+            </section>
+
+            <section class="card" aria-labelledby="s3-mastery">
+              <h2 class="sec-label" id="s3-mastery">Mastery by topic</h2>
+              <div class="empty">
+                <p>Mastery appears once Noah has answered at least 5 questions on a topic. He's answered 3 so far.</p>
+                <div class="meter" role="img" aria-label="3 of 5 questions answered on the topic with the most answers."><i style="width:60%"></i></div>
+                <div class="meter-legend"><span>3 answered</span><span>5 needed</span></div>
+                <p class="prog">Most answers so far: equivalent fractions, 3 answered.</p>
+              </div>
+            </section>
+
+            <section class="card" aria-labelledby="s3-weak">
+              <h2 class="sec-label" id="s3-weak">Weak areas</h2>
+              <div class="empty">
+                <p>Weak areas appear once a topic has mastery below 60%. No topic has enough answers yet.</p>
+              </div>
+            </section>
+
+          </main>
+          <div class="homebar"><i></i></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================================
+       STATE 4 — TABLET LAYOUT OF THE DASHBOARD (Q16)
+       ========================================================================= -->
+  <section class="state">
+    <p class="state-label">State 4 of 4 · tablet · 1024 × 768</p>
+    <h2 class="state-title">Dashboard — tablet layout</h2>
+    <p class="state-note">One of only two screens granted a breakpoint-specific layout. The wider viewport does not scale the phone layout up: the answering context (summary + trend) moves into a fixed left column so it stays on screen while the table is read, and the table's stacked sub-line is promoted into real columns — answered, unanswered, weak-area flag, and a per-topic bar with room to be read.</p>
+
+    <div class="tablet">
+      <div class="cam" aria-hidden="true"><i></i></div>
+      <div class="screen">
+
+        <header class="appbar t-appbar">
+          <div class="appbar-top">
+            <span class="room">
+              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1a3 3 0 0 0-3 3v2H4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1V4a3 3 0 0 0-3-3Zm0 1.6A1.4 1.4 0 0 1 9.4 4v2H6.6V4A1.4 1.4 0 0 1 8 2.6Z"/></svg>
+              Parent View
+            </span>
+            <button class="switcher" type="button" aria-label="Switch student profile. Currently Noah, Grade 5. 2 practice tests not started.">
+              <span class="who">
+                <span class="avatar" aria-hidden="true">N</span>
+                <span><span class="name">Noah</span><span class="grade">Grade 5</span></span>
+              </span>
+              <span class="sig"><span class="dot" aria-hidden="true"></span>2 not started</span>
+              <span class="chev" aria-hidden="true">▾</span>
+            </button>
+            <button class="exit" type="button">Back to Student Mode</button>
+          </div>
+        </header>
+
+        <main class="t-body">
+
+          <div class="t-col">
+            <section class="card" aria-labelledby="s4-sum">
+              <h2 class="sec-label" id="s4-sum">Practice tests</h2>
+              <div class="summary">
+                <div class="stat lead"><span class="n">2</span><span class="k">not started</span></div>
+                <div class="stat"><span class="n">3</span><span class="k">completed</span></div>
+              </div>
+              <p class="summary-line">Noah has not started 2 of the 5 practice tests you released.</p>
+              <p class="summary-sub">Last completed 27 August · Multiplication and division · 11 of 15</p>
+            </section>
+
+            <section class="card" aria-labelledby="s4-trend">
+              <div class="spark-head">
+                <h2 class="sec-label" style="margin:0" id="s4-trend">Score across recent practice tests</h2>
+                <span class="spark-now">73%</span>
+              </div>
+              <div class="spark-wrap">
+                <svg viewBox="0 0 320 64" role="img" aria-label="Noah's scores across his last 5 completed practice tests: 47 percent, 60 percent, 53 percent, 67 percent, 73 percent.">
+                  <line x1="0" y1="48" x2="320" y2="48" stroke="#7C8894" stroke-width="1"/>
+                  <line x1="0" y1="26" x2="320" y2="26" stroke="#7C8894" stroke-width="1" stroke-dasharray="3 4"/>
+                  <polyline points="16,44 92,32 168,38 244,26 312,18"
+                            fill="none" stroke="#0B5FA5" stroke-width="2"
+                            stroke-linejoin="round" stroke-linecap="round"/>
+                  <circle cx="16" cy="44" r="3" fill="#0B5FA5"/>
+                  <circle cx="92" cy="32" r="3" fill="#0B5FA5"/>
+                  <circle cx="168" cy="38" r="3" fill="#0B5FA5"/>
+                  <circle cx="244" cy="26" r="3" fill="#0B5FA5"/>
+                  <circle cx="312" cy="18" r="4.5" fill="#0B5FA5"/>
+                </svg>
+              </div>
+              <div class="spark-axis"><span>2 Aug</span><span>27 Aug</span></div>
+              <p class="spark-caption">Noah's last 5 completed practice tests. Dashed line marks 60%.</p>
+            </section>
+          </div>
+
+          <section class="card flush" aria-labelledby="s4-mastery">
+            <table class="mtable t-mtable">
+              <caption id="s4-mastery">Mastery by topic · weakest first</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Topic</th>
+                  <th scope="col" class="num">Mastery</th>
+                  <th scope="col">&nbsp;</th>
+                  <th scope="col" class="num">Answered</th>
+                  <th scope="col" class="num">Unanswered</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><a class="rowlink" href="#state-2"><span class="topic">division with remainders</span></a></td>
+                  <td class="pct weak">40%</td>
+                  <td class="barcell"><span class="bar"><i class="weak" style="width:40%"></i></span></td>
+                  <td class="colcount">5</td>
+                  <td class="colskip"><span class="has">3</span></td>
+                  <td class="colflag">
+                    <span class="weakflag">
+                      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
+                      Weak area
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><a class="rowlink" href="#state-2"><span class="topic">multi-step word problems</span></a></td>
+                  <td class="pct weak">52%</td>
+                  <td class="barcell"><span class="bar"><i class="weak" style="width:52%"></i></span></td>
+                  <td class="colcount">25</td>
+                  <td class="colskip"><span class="none">—</span></td>
+                  <td class="colflag">
+                    <span class="weakflag">
+                      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
+                      Weak area
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><a class="rowlink" href="#state-2"><span class="topic">equivalent fractions</span></a></td>
+                  <td class="pct weak">58%</td>
+                  <td class="barcell"><span class="bar"><i class="weak" style="width:58%"></i></span></td>
+                  <td class="colcount">12</td>
+                  <td class="colskip"><span class="has">1</span></td>
+                  <td class="colflag">
+                    <span class="weakflag">
+                      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
+                      Weak area
+                    </span>
+                  </td>
+                </tr>
+                <tr class="threshold"><td colspan="6">Weak area threshold — below 60% mastery, once Noah has answered at least 5 questions on the topic</td></tr>
+                <tr>
+                  <td><a class="rowlink" href="#state-2"><span class="topic">decimal place value</span></a></td>
+                  <td class="pct">71%</td>
+                  <td class="barcell"><span class="bar"><i style="width:71%"></i></span></td>
+                  <td class="colcount">14</td>
+                  <td class="colskip"><span class="has">2</span></td>
+                  <td class="colflag"></td>
+                </tr>
+                <tr>
+                  <td><a class="rowlink" href="#state-2"><span class="topic">area and perimeter</span></a></td>
+                  <td class="pct">86%</td>
+                  <td class="barcell"><span class="bar"><i style="width:86%"></i></span></td>
+                  <td class="colcount">21</td>
+                  <td class="colskip"><span class="none">—</span></td>
+                  <td class="colflag"></td>
+                </tr>
+                <tr>
+                  <td><a class="rowlink" href="#state-2"><span class="topic">rounding to the nearest hundred</span></a></td>
+                  <td class="pct">92%</td>
+                  <td class="barcell"><span class="bar"><i style="width:92%"></i></span></td>
+                  <td class="colcount">13</td>
+                  <td class="colskip"><span class="none">—</span></td>
+                  <td class="colflag"></td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="tablefoot">Mastery counts answered questions only. Unanswered questions are listed separately and are not scored as wrong.</p>
+          </section>
+
+        </main>
+      </div>
+    </div>
+  </section>
+
+</div>
