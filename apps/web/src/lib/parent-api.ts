@@ -13,6 +13,26 @@ export interface AuthPolicy {
   termsText: string;
   noticeVersion: string;
   noticeText: string;
+  pinLength: number;
+  pinMaxAttempts: number;
+  pinCooldownMinutes: number;
+}
+
+export interface PinStatus {
+  pinSet: boolean;
+  /** An ISO instant while the gate is shut, `null` while it is open. */
+  lockedUntil: string | null;
+}
+
+export interface Elevation {
+  token: string;
+  expiresAt: string;
+  ceilingAt: string;
+}
+
+export interface ElevatedSession extends ParentIdentity {
+  expiresAt: string;
+  ceilingAt: string;
 }
 
 export interface ParentIdentity {
@@ -33,6 +53,14 @@ export class ParentApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Present only on a 423: the instant the PIN gate re-opens. */
+    readonly lockedUntil: string | null = null,
+    /**
+     * The elevation guard refused this call, as opposed to a credential on it
+     * being wrong. Both are 401s on the same routes, and only the server can
+     * tell them apart — so it says which, and the screens act accordingly.
+     */
+    readonly notElevated: boolean = false,
   ) {
     super(message);
     this.name = 'ParentApiError';
@@ -45,10 +73,56 @@ export class ParentApiError extends Error {
  */
 export const NETWORK_STATUS = 0;
 
-export function messageFor(status: number, fallback: string): string {
+/** The locked status, 423, is the one rejection that is never the endpoint's own. */
+export const LOCKED_STATUS = 423;
+
+/**
+ * The clock time a lock lifts, in the reader's own locale. A date is shown only
+ * when the lock crosses into another day, so the common case reads as a time.
+ */
+export function lockLiftsAt(lockedUntil: string): string {
+  const instant = new Date(lockedUntil);
+  if (Number.isNaN(instant.getTime())) return lockedUntil;
+  const time = instant.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const sameDay = instant.toDateString() === new Date().toDateString();
+  return sameDay ? time : `${instant.toLocaleDateString()} ${time}`;
+}
+
+export function messageFor(
+  status: number,
+  fallback: string,
+  lockedUntil: string | null = null,
+): string {
   if (status === NETWORK_STATUS) return parentCopy.errors.network;
   if (status === 429) return parentCopy.errors.tooManyAttempts;
+  // The lock states when it lifts; without the instant it states only the lock.
+  if (status === LOCKED_STATUS) {
+    return lockedUntil === null
+      ? parentCopy.pin.lockedUnknown
+      : parentCopy.pin.locked(lockLiftsAt(lockedUntil));
+  }
   return fallback;
+}
+
+interface FailureDetail {
+  lockedUntil: string | null;
+  notElevated: boolean;
+}
+
+/** What a rejection body says beyond its status, read exactly once. */
+async function failureDetailFrom(response: Response): Promise<FailureDetail> {
+  const none: FailureDetail = { lockedUntil: null, notElevated: false };
+  if (response.status !== LOCKED_STATUS && response.status !== 401) return none;
+  try {
+    const body = (await response.json()) as { lockedUntil?: unknown; elevated?: unknown } | null;
+    return {
+      lockedUntil: typeof body?.lockedUntil === 'string' ? body.lockedUntil : null,
+      // `elevated: false` is the elevation guard naming itself as the refuser.
+      notElevated: body?.elevated === false,
+    };
+  } catch {
+    return none;
+  }
 }
 
 async function call<T>(
@@ -73,7 +147,15 @@ async function call<T>(
   }
 
   if (!response.ok) {
-    throw new ParentApiError(messageFor(response.status, failureMessage), response.status);
+    const detail = await failureDetailFrom(response);
+    throw new ParentApiError(
+      detail.notElevated
+        ? parentCopy.pin.notElevated
+        : messageFor(response.status, failureMessage, detail.lockedUntil),
+      response.status,
+      detail.lockedUntil,
+      detail.notElevated,
+    );
   }
   if (response.status === 204) return undefined as T;
   try {
@@ -118,7 +200,51 @@ export const parentApi = {
       { method: 'POST', body: JSON.stringify({ token, password }) },
       parentCopy.resetConfirm.failed,
     ),
+
+  // --- Parent View -------------------------------------------------------
+  //
+  // The elevation bearer is passed in by the caller on every parent-scoped
+  // call, never read from a module-level variable: a token this module could
+  // reach on its own is a token it could also persist, which is exactly what
+  // AD-18 forbids. It travels in a header, never as a cookie.
+
+  pinStatus: () => call<PinStatus>('/parent/pin/status'),
+  setPin: (pin: string) =>
+    call<void>(
+      '/parent/pin',
+      { method: 'POST', body: JSON.stringify({ pin }) },
+      parentCopy.pin.failed,
+    ),
+  verifyPin: (pin: string) =>
+    call<Elevation>(
+      '/parent/pin/verify',
+      { method: 'POST', body: JSON.stringify({ pin }) },
+      parentCopy.pin.incorrect,
+    ),
+  changePin: (token: string, input: { newPin: string; currentPin?: string; password?: string }) =>
+    call<void>(
+      '/parent/pin/change',
+      { method: 'POST', headers: elevated(token), body: JSON.stringify(input) },
+      parentCopy.pin.incorrect,
+    ),
+  refreshElevation: (token: string) =>
+    call<Elevation>(
+      '/parent/elevation/refresh',
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.pin.notElevated,
+    ),
+  parentSession: (token: string) =>
+    call<ElevatedSession>(
+      '/parent/session',
+      { headers: elevated(token) },
+      parentCopy.pin.notElevated,
+    ),
 };
+
+/** The elevation credential's one and only carrier. */
+function elevated(token: string): HeadersInit {
+  return { authorization: `Bearer ${token}` };
+}
 
 /** The device's IANA zone, as the account's first timezone entry (AD-27). */
 export function deviceTimeZone(): string {

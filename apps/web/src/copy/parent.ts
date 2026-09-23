@@ -62,6 +62,53 @@ export const parentCopy = {
     signOut: 'Sign out',
     signingOut: 'Signing out…',
     loading: 'Loading your account…',
+    enterParentView: 'Enter Parent View',
+  },
+  /**
+   * The PIN gate. Not one figure is stated here: the shape and the cool-down
+   * arrive as arguments, from `GET /api/auth/policy`.
+   */
+  pin: {
+    setTitle: 'Set a PIN for Parent View',
+    setIntro: 'Parent View asks for this PIN. Choose one a child will not guess.',
+    enterTitle: 'Enter your PIN',
+    enterIntro: 'Parent View is behind this PIN, on every device and after every reload.',
+    changeTitle: 'Change your PIN',
+    changeIntro: 'Confirm with your current PIN or with your account password.',
+    pinLabel: 'PIN',
+    newPinLabel: 'New PIN',
+    confirmNewPinLabel: 'Confirm new PIN',
+    pinMismatch: 'The two PINs do not match.',
+    currentPinLabel: 'Current PIN',
+    passwordLabel: 'Account password',
+    useCurrentPin: 'Confirm with the current PIN',
+    usePassword: 'Confirm with the account password',
+    pinShape: (length: number) => `Exactly ${length} digits.`,
+    setSubmit: 'Save the PIN',
+    enterSubmit: 'Enter Parent View',
+    changeSubmit: 'Save the new PIN',
+    submitting: 'Checking…',
+    saving: 'Saving…',
+    changed: 'The PIN is saved. The old one no longer works.',
+    loading: 'Loading the PIN settings…',
+    // One generic line for every wrong entry: no counter, no attempts left.
+    incorrect: 'That PIN is not correct.',
+    // States the lock and when it lifts, never how many entries were spent.
+    locked: (until: string) => `Parent View is locked. It unlocks at ${until}.`,
+    lockedUnknown: 'Parent View is locked. Try again later.',
+    notElevated: 'Parent View needs the PIN again.',
+    failed: 'The PIN could not be saved. Check the details and try again.',
+    back: 'Back to Parent View',
+  },
+  parentView: {
+    title: 'Parent View',
+    intro: 'This is the parent side of the account. It closes when you leave it.',
+    emailLabel: 'Signed in as',
+    expiresLabel: 'Parent View stays open until',
+    ceilingLabel: 'The PIN is required again after',
+    changePin: 'Change PIN',
+    leave: 'Leave Parent View',
+    loading: 'Loading Parent View…',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

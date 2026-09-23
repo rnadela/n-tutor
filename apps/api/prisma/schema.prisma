@@ -110,19 +110,29 @@ enum AccountTier {
 /// timezone history. Credentials arrive with Epic 1; v0 story 2.2 needs only
 /// the identity, the tier, and the zone.
 model ParentAccount {
-  id          String      @id @default(uuid())
-  email       String      @unique
-  displayName String?
-  tier        AccountTier @default(Free)
+  id                String      @id @default(uuid())
+  email             String      @unique
+  displayName       String?
+  tier              AccountTier @default(Free)
   /// argon2id. Nullable: accounts created before Epic 1 carry no credential and
   /// simply cannot sign in — reset never promotes them into one either.
-  passwordHash String?
+  passwordHash      String?
   /// Bumped whenever every outstanding session for this account must stop being
   /// valid. The session token carries the epoch it was minted at, so a
   /// long-lived stateless cookie can still be revoked by a password reset.
-  sessionEpoch Int         @default(0)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  sessionEpoch      Int         @default(0)
+  /// argon2id hash of the Parent PIN. Null until a PIN is first set; never
+  /// returned by any read path and never selected by a shared field list.
+  pinHash           String?
+  /// Consecutive wrong PIN entries. A server-side column, not a client counter
+  /// and not a throttler bucket (AD-33): the count has to survive the refresh
+  /// the gate already expects, and a process restart with it.
+  pinFailedAttempts Int         @default(0)
+  /// When the PIN gate re-opens, or null when it is open. The lock lifts on the
+  /// clock alone — a correct PIN never unlocks it early.
+  pinLockedUntil    DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   timezones      AccountTimezone[]
   consents       AccountConsent[]

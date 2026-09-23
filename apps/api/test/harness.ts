@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test, type TestingModule } from '@nestjs/testing';
 import * as argon2 from 'argon2';
+import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app-setup.js';
 import { AdminAuditService } from '../src/admin/admin-audit.service.js';
@@ -27,6 +28,7 @@ import {
   PARENT_SESSION_ISSUER,
   TERMS_VERSION,
 } from '../src/identity/auth-policy.js';
+import { PARENT_ELEVATION_AUDIENCE } from '../src/identity/pin-policy.js';
 import { MailDispatchError, MailService } from '../src/mail/mail.service.js';
 import type { AccountTier } from '../src/generated/prisma/enums.js';
 
@@ -264,4 +266,74 @@ export async function createCredentialedParent(
     noticeVersion: CHILD_DATA_CONSENT_VERSION,
   });
   return { email, password, parentAccountId: session.parentAccountId };
+}
+
+/**
+ * A credentialed parent plus the cookie header a browser would send back.
+ *
+ * The session is minted through `ParentAuthService` rather than over HTTP, so a
+ * fixture never spends the credential rate-limit budget a test may be asserting
+ * on.
+ */
+export async function createSignedInParent(
+  h: Pick<Harness, 'parentAuth'>,
+  overrides: { email?: string; password?: string; timezone?: string } = {},
+): Promise<{ email: string; password: string; parentAccountId: string; cookie: string }> {
+  const parent = await createCredentialedParent(h.parentAuth, overrides);
+  const session = await h.parentAuth.mintSession({
+    id: parent.parentAccountId,
+    email: parent.email,
+    sessionEpoch: 0,
+  });
+  return { ...parent, cookie: `${PARENT_SESSION_COOKIE}=${session.token}` };
+}
+
+/** The `Authorization` value for an elevation bearer. */
+export function bearer(token: string): string {
+  return `Bearer ${token}`;
+}
+
+/** The elevation token out of a `POST /api/parent/pin/verify` response. */
+export function elevationTokenFrom(response: { body: { token?: unknown } }): string {
+  const token = response.body.token;
+  if (typeof token !== 'string' || token.length === 0) {
+    throw new Error('No elevation token in the response body.');
+  }
+  return token;
+}
+
+/** Sets the first PIN over HTTP, exactly as the web app does. */
+export async function setPinFor(h: Harness, cookie: string, pin: string): Promise<void> {
+  await request(h.app.getHttpServer())
+    .post('/api/parent/pin')
+    .set('Cookie', cookie)
+    .send({ pin })
+    .expect(204);
+}
+
+/** Crosses the PIN and returns the bearer the parent-scoped routes take. */
+export async function elevate(h: Harness, cookie: string, pin: string): Promise<string> {
+  const response = await request(h.app.getHttpServer())
+    .post('/api/parent/pin/verify')
+    .set('Cookie', cookie)
+    .send({ pin })
+    .expect(200);
+  return elevationTokenFrom(response);
+}
+
+/**
+ * An elevation-audience token with claims varied one at a time, so each check
+ * in the elevation guard — and the ceiling in particular — is observable
+ * without waiting eight hours for it.
+ */
+export function elevationTokenWithClaims(
+  parentJwt: JwtService,
+  claims: Record<string, unknown>,
+  options: { expiresIn?: number } = {},
+): Promise<string> {
+  return parentJwt.signAsync(claims, {
+    audience: PARENT_ELEVATION_AUDIENCE,
+    issuer: PARENT_SESSION_ISSUER,
+    ...(options.expiresIn === undefined ? {} : { expiresIn: options.expiresIn }),
+  });
 }

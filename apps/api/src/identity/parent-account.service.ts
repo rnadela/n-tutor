@@ -270,6 +270,106 @@ export class ParentAccountService {
   }
 
   /**
+   * The PIN state, and the only read anywhere that selects the hash. It is
+   * never returned to a caller that serialises its result: `ParentPinService`
+   * verifies against it and throws the hash away.
+   */
+  findPinState(id: string): Promise<{
+    pinHash: string | null;
+    pinFailedAttempts: number;
+    pinLockedUntil: Date | null;
+    sessionEpoch: number;
+  } | null> {
+    return this.prisma.parentAccount.findUnique({
+      where: { id },
+      select: {
+        pinHash: true,
+        pinFailedAttempts: true,
+        pinLockedUntil: true,
+        sessionEpoch: true,
+      },
+    });
+  }
+
+  /**
+   * The credential row by account id. The elevation surface knows the account
+   * authoritatively, so it must not re-resolve it from an email claim.
+   */
+  findCredentialById(id: string): Promise<{
+    id: string;
+    email: string;
+    passwordHash: string | null;
+  } | null> {
+    return this.prisma.parentAccount.findUnique({
+      where: { id },
+      select: { id: true, email: true, passwordHash: true },
+    });
+  }
+
+  /**
+   * Writes the PIN and clears the failure state with it, inside the caller's
+   * transaction: a PIN that has just been set or changed must not land behind a
+   * lock left over from the entries that preceded it.
+   */
+  async setPin(tx: TransactionClient, accountId: string, pinHash: string): Promise<void> {
+    await tx.parentAccount.update({
+      where: { id: accountId },
+      data: { pinHash, pinFailedAttempts: 0, pinLockedUntil: null },
+    });
+  }
+
+  /**
+   * Sets the **first** PIN, and only if there is still none. `false` means
+   * another request set one in between; the caller turns that into the same
+   * conflict a prior read would have produced.
+   *
+   * Conditional rather than a read followed by a write, because two concurrent
+   * first-set requests would both pass a prior check and the loser would
+   * silently replace the winner's PIN.
+   */
+  async setFirstPin(tx: TransactionClient, accountId: string, pinHash: string): Promise<boolean> {
+    const written = await tx.parentAccount.updateMany({
+      where: { id: accountId, pinHash: null },
+      data: { pinHash, pinFailedAttempts: 0, pinLockedUntil: null },
+    });
+    return written.count === 1;
+  }
+
+  /**
+   * Counts one wrong entry and returns the counter it produced.
+   *
+   * The increment happens in the database (`pinFailedAttempts + 1`, under the
+   * row lock that statement takes), never as a read-modify-write in JS: a
+   * parallel guessing run would otherwise have every request read the same
+   * count and write the same value back, so the ceiling — the whole of the
+   * brute-force defence — would never be reached.
+   */
+  async recordPinFailure(tx: TransactionClient, accountId: string): Promise<number> {
+    const row = await tx.parentAccount.update({
+      where: { id: accountId },
+      data: { pinFailedAttempts: { increment: 1 } },
+      select: { pinFailedAttempts: true },
+    });
+    return row.pinFailedAttempts;
+  }
+
+  /** Closes the gate until `lockedUntil`, with the counter zeroed behind it. */
+  async lockPin(tx: TransactionClient, accountId: string, lockedUntil: Date): Promise<void> {
+    await tx.parentAccount.update({
+      where: { id: accountId },
+      data: { pinFailedAttempts: 0, pinLockedUntil: lockedUntil },
+    });
+  }
+
+  /** A correct PIN takes the account back to a zero counter and an open gate. */
+  async clearPinFailures(tx: TransactionClient, accountId: string): Promise<void> {
+    await tx.parentAccount.update({
+      where: { id: accountId },
+      data: { pinFailedAttempts: 0, pinLockedUntil: null },
+    });
+  }
+
+  /**
    * Replaces the credential and bumps the session epoch in one step, inside the
    * caller's transaction. The bump is what makes a reset actually lock out
    * whoever prompted it: every session token minted at the old epoch dies here.

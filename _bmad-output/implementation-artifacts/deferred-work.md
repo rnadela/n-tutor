@@ -269,3 +269,107 @@ source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
 severity: low
 reason: `ParentAuthService.signUp` calls `this.mintSession({ ...account, sessionEpoch: 0 })`; `account` comes from `ParentAccountService.create()`, which does not select `sessionEpoch`.
 status: open
+
+### DW-35: Between sign-up and the first PIN there is a window in which anyone holding the signed-in device can set the Parent PIN themselves.
+origin: spec-deferred 1b2c9d4e5f60
+location: apps/api/src/identity/parent-pin.controller.ts, apps/web/src/app/parent/pin/page.tsx
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `POST /api/parent/pin` takes only the session cookie, as the story's acceptance criterion states ("given no PIN is set, when I set one"). On a shared device a child reaching the signed-in landing before the parent sets a PIN could set it. The web flow narrows the window by offering the gate directly from the signed-in landing; closing it entirely would need a credential the story does not state (the account password at first set, say).
+status: open
+
+### DW-36: A forgotten Parent PIN has no recovery path: the change route is elevation-gated, so the account-password alternative is only reachable by someone who can already enter the PIN.
+origin: spec-deferred 95158d061212
+location: apps/api/src/identity/parent-pin.controller.ts
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: medium
+reason: `POST /api/parent/pin/change` sits behind `ParentElevationGuard`, and `/parent/pin/change` redirects to the gate without a token. The UX places "Change PIN" in Parent View Settings, so the gating matches the plan, but no PRD, UX or epic document specifies a reset-PIN flow. A parent who forgets the PIN is permanently shut out of Parent View.
+status: open
+
+### DW-37: Setting the first PIN takes a single obscured field with no confirmation entry and no reveal control, so one typo sets a PIN the parent does not know.
+origin: spec-deferred 0e324c7d38c5
+location: apps/web/src/app/parent/pin/page.tsx
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `apps/web/src/app/parent/pin/page.tsx` renders one `type="password"` input for the set case. Combined with the absent recovery path above, a mistyped first PIN is unrecoverable.
+status: open
+
+### DW-38: Nothing rejects a trivially guessable PIN, and a change may set the PIN it is replacing.
+origin: spec-deferred 9db1cf8f1794
+location: apps/api/src/identity/pin-policy.ts
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `isWellFormedPin` checks four digits only; `0000` and `1234` are accepted, and `changePin` never compares the new PIN with the current one. The stated adversary is a child who knows the parent, against whom a small blocklist is the cheapest control available.
+status: open
+
+### DW-39: An outstanding elevation token survives both a PIN change and "Leave Parent View"; only a password reset's epoch bump ends elevation early.
+origin: spec-deferred 11f7c3adc3c1
+location: apps/api/src/identity/parent-elevation.guard.ts
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: medium
+reason: `clearElevation()` drops the token from React state while the JWT stays valid server-side for the rest of its TTL, and `changePin` does not invalidate tokens minted under the old PIN. Ending elevation on demand needs its own epoch column - bumping `sessionEpoch` would also end the session cookie, which FR-1 says lasts until sign-out.
+status: open
+
+### DW-40: Account-password guesses on the PIN-change path have no counter or lock of their own.
+origin: spec-deferred e93e0e2ab0ca
+location: apps/api/src/identity/parent-pin.service.ts
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: The password branch of `changePin` is deliberately exempt from the PIN lock and has no equivalent ceiling; only the per-address `parent` throttler bounds it. It is reachable only from inside an elevated session, which is what keeps this low.
+status: open
+
+### DW-41: The three new PIN screens have no component-level tests; their branches are covered only by the happy-path Playwright suite.
+origin: spec-deferred 32e61c75eb5c
+location: apps/web/vitest.config.ts
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `apps/web/vitest.config.ts` runs `environment: 'node'`, so the web suite can exercise the elevation context and the API client but not a rendered page. The stale-status path, the lock re-enable timer and the 401-vs-network branches are verified by e2e alone.
+status: open
+
+### DW-42: Unreadable `deferred:` items in spec-1-2-parent-pin-for-parent-view.md
+origin: spec-deferred-malformed feaed088fe8e
+location: n/a
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: The dev session recorded deferred findings the orchestrator could not parse, so they were NOT filed as entries: item 1: not a mapping (got str). Read `spec-1-2-parent-pin-for-parent-view.md`'s frontmatter and re-file them by hand.
+status: open
+
+### DW-43: The browser (e2e) suite never exercises `POST /api/parent/elevation/refresh` or ceiling expiry; that behavior is covered only at the API integration layer.
+origin: spec-deferred 1c60ce783bdf
+location: e2e/tests/parent-pin.spec.ts
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `e2e/tests/parent-pin.spec.ts` covers set/enter/lock/change/leave but has no scenario that calls the refresh endpoint or crosses the 8-hour ceiling from the browser. `parent-pin.int-spec.ts` already covers both at the HTTP layer, so this is a coverage-altitude gap, not an unverified behavior — the same shape as the existing web component-test gap.
+status: open
+
+### DW-44: No notification is sent when the Parent PIN is changed or repeatedly guessed wrong, so a parent has no signal that someone with device access is guessing at or has changed the PIN.
+origin: spec-deferred 688f3eccb75f
+location: apps/api/src/identity/parent-pin.service.ts
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `ParentPinService.changePin` and the lockout path in `recordPinFailure`/`lockPin` never touch `MailModule`, which `IdentityModule` already imports for other identity flows. The intent never states a notification requirement, so this is a silent gap rather than a violation.
+status: open
+
+### DW-45: The change-PIN screen shows the accurate lock message on a 423 but never disables the form or shows a countdown, unlike the gate screen's lock handling.
+origin: spec-deferred 7e4fd5108441
+location: apps/web/src/app/parent/pin/change/page.tsx
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `apps/web/src/app/parent/pin/change/page.tsx`'s catch block renders `cause.message` (which does carry the correct lock-lifts-at text from `messageFor`) in a generic error `Alert`, but neither disables the submit button nor re-enables it on a timer the way `/parent/pin` does.
+status: open
+
+### DW-46: The `/parent/pin` gate screen has no link back to `/auth/signed-in`; the only way off the page is browser back or waiting out a lock's cool-down.
+origin: spec-deferred 791dadd96a5d
+location: apps/web/src/app/parent/pin/page.tsx
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `apps/web/src/app/parent/pin/page.tsx` renders the set/enter/locked states with no exit link, unlike the change-PIN screen which links back to `/parent`.
+status: open
+
+### DW-47: The e2e suite never drives the account-password branch of the change-PIN form, only the current-PIN branch.
+origin: spec-deferred e658348f3a8d
+location: e2e/tests/parent-pin.spec.ts
+source_spec: `spec-1-2-parent-pin-for-parent-view.md`
+severity: low
+reason: `e2e/tests/parent-pin.spec.ts` covers set/enter/lock/change(current-PIN)/leave, but no scenario selects the "use account password" radio on the change screen, so that branch and its distinct 401/lock-exempt behaviour are unverified from the browser — the same coverage-altitude shape already recorded for the refresh/ceiling gap.
+status: open

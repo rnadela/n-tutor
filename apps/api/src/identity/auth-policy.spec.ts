@@ -15,6 +15,7 @@ import {
   resetLinkFor,
   resetTokenExpiryFrom,
 } from './auth-policy.js';
+import { MAX_PIN_ATTEMPTS, PIN_LENGTH, pinCooldownMinutes } from './pin-policy.js';
 
 describe('password policy', () => {
   it('rejects one character below the minimum and accepts the minimum', () => {
@@ -50,6 +51,15 @@ describe('consent versions', () => {
     expect(policy.termsVersion).toBe(TERMS_VERSION);
     expect(policy.noticeVersion).toBe(CHILD_DATA_CONSENT_VERSION);
     expect(policy.noticeText.length).toBeGreaterThan(0);
+  });
+
+  it('publishes the PIN figures from the PIN policy, so the web restates none', () => {
+    const policy = currentAuthPolicy();
+    expect(policy.pinLength).toBe(PIN_LENGTH);
+    expect(policy.pinMaxAttempts).toBe(MAX_PIN_ATTEMPTS);
+    expect(policy.pinCooldownMinutes).toBe(pinCooldownMinutes());
+    // A cool-down that published as zero minutes would state no lock at all.
+    expect(policy.pinCooldownMinutes).toBeGreaterThanOrEqual(1);
   });
 });
 

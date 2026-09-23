@@ -34,6 +34,11 @@ export default defineConfig({
         PARENT_JWT_SECRET:
           process.env.PARENT_JWT_SECRET ?? 'e2e-only-parent-secret-please-rotate-0123456789',
         COOKIE_SECURE: 'false',
+        // Stated rather than inherited: the PIN suite asserts on a lock that
+        // must still be in force when the page it locked is reloaded.
+        PIN_COOLDOWN_MS: process.env.PIN_COOLDOWN_MS ?? '900000',
+        ELEVATION_TTL_SECONDS: process.env.ELEVATION_TTL_SECONDS ?? '900',
+        ELEVATION_CEILING_MS: process.env.ELEVATION_CEILING_MS ?? '28800000',
         WEB_ORIGIN,
         MAIL_TRANSPORT: 'log',
         MAIL_FROM: 'no-reply@example.test',

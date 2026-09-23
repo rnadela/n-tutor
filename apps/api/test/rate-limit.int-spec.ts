@@ -10,7 +10,8 @@ process.env.AUTH_RATE_TTL_MS = '60000';
 process.env.PARENT_AUTH_RATE_LIMIT = String(LIMIT);
 process.env.PARENT_AUTH_RATE_TTL_MS = '60000';
 
-const { createHarness, OPERATOR_EMAIL } = await import('./harness.js');
+const { createHarness, createSignedInParent, OPERATOR_EMAIL } = await import('./harness.js');
+const { resetParentAccounts } = await import('./harness.js');
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 
@@ -72,6 +73,38 @@ describe('credential rate limiting', () => {
     await withHarness(async (h) => {
       for (let i = 0; i < LIMIT * 3; i += 1) {
         await request(h.app.getHttpServer()).get('/api/auth/policy').expect(200);
+      }
+      // The credential budget is still whole afterwards.
+      await parentSignIn(h).expect(401);
+    });
+  });
+
+  it('rejects a PIN-verify flood from one address with 429', async () => {
+    await withHarness(async (h) => {
+      await resetParentAccounts(h.prisma);
+      const parent = await createSignedInParent(h);
+      const verify = () =>
+        request(h.app.getHttpServer())
+          .post('/api/parent/pin/verify')
+          .set('Cookie', parent.cookie)
+          .send({ pin: '0000' });
+
+      // No PIN is set, so each attempt is a 409 — the budget is spent by the
+      // route being called, not by the answer it happens to give.
+      for (let i = 0; i < LIMIT; i += 1) await verify().expect(409);
+      await verify().expect(429);
+    });
+  });
+
+  it('does not spend the parent budget on the PIN status read', async () => {
+    await withHarness(async (h) => {
+      await resetParentAccounts(h.prisma);
+      const parent = await createSignedInParent(h);
+      for (let i = 0; i < LIMIT * 3; i += 1) {
+        await request(h.app.getHttpServer())
+          .get('/api/parent/pin/status')
+          .set('Cookie', parent.cookie)
+          .expect(200);
       }
       // The credential budget is still whole afterwards.
       await parentSignIn(h).expect(401);

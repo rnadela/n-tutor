@@ -7,6 +7,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { parentCopy } from '@/copy/parent';
 import { NETWORK_STATUS, ParentApiError, parentApi, type ParentSession } from '@/lib/parent-api';
@@ -92,6 +93,10 @@ export default function SignedInPage() {
             <Typography>
               {parentCopy.signedIn.timezoneLabel}: {session.timezone}
             </Typography>
+            {/* The gate is reachable straight from here, which narrows the
+                window on a shared device between signing up and setting a
+                PIN. */}
+            <Link href="/parent/pin">{parentCopy.signedIn.enterParentView}</Link>
             <Button
               type="button"
               variant="contained"

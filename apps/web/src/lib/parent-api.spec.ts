@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { NETWORK_STATUS, ParentApiError, messageFor, parentApi } from './parent-api';
+import {
+  LOCKED_STATUS,
+  NETWORK_STATUS,
+  ParentApiError,
+  lockLiftsAt,
+  messageFor,
+  parentApi,
+} from './parent-api';
 import { parentCopy } from '@/copy/parent';
 
 function respondWith(status: number, body: unknown = {}): ReturnType<typeof vi.fn> {
@@ -64,6 +71,46 @@ describe('credentials', () => {
   });
 });
 
+describe('the elevation bearer', () => {
+  it('is attached to the parent-scoped calls, and to those only', async () => {
+    const fetchMock = respondWith(200, { id: 'a', email: 'ada@example.test' });
+    await parentApi.parentSession('elevation-token');
+    const [, elevatedInit] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(new Headers(elevatedInit.headers).get('authorization')).toBe('Bearer elevation-token');
+
+    // The gate-crossing calls take the session cookie alone: there is no token
+    // to attach yet, and the cookie must never satisfy the elevation guard.
+    const statusMock = respondWith(200, { pinSet: true, lockedUntil: null });
+    await parentApi.pinStatus();
+    const [, statusInit] = statusMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(new Headers(statusInit.headers).has('authorization')).toBe(false);
+
+    const verifyMock = respondWith(200, { token: 't', expiresAt: 'x', ceilingAt: 'y' });
+    await parentApi.verifyPin('1234');
+    const [, verifyInit] = verifyMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(new Headers(verifyInit.headers).has('authorization')).toBe(false);
+  });
+
+  it('is taken from the caller, never from state this module holds', async () => {
+    const fetchMock = respondWith(200, { id: 'a', email: 'ada@example.test' });
+    await parentApi.parentSession('first');
+    await parentApi.refreshElevation('second');
+
+    const headers = fetchMock.mock.calls.map(([, init]) =>
+      new Headers((init as RequestInit).headers).get('authorization'),
+    );
+    expect(headers).toEqual(['Bearer first', 'Bearer second']);
+  });
+
+  it('sends the PIN in the body and never in the URL', async () => {
+    const fetchMock = respondWith(204);
+    await parentApi.setPin('1234');
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).not.toContain('1234');
+    expect(init.body).toBe(JSON.stringify({ pin: '1234' }));
+  });
+});
+
 describe('error mapping', () => {
   it('gives 429 its own copy, whatever the endpoint', () => {
     expect(messageFor(429, parentCopy.signIn.failed)).toBe(parentCopy.errors.tooManyAttempts);
@@ -106,6 +153,76 @@ describe('error mapping', () => {
     expect(error).toBeInstanceOf(ParentApiError);
     expect((error as ParentApiError).status).toBe(NETWORK_STATUS);
     expect((error as ParentApiError).message).toBe(parentCopy.errors.network);
+  });
+
+  it('maps a 423 to the lock, stating when it lifts', () => {
+    const until = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    expect(messageFor(LOCKED_STATUS, parentCopy.pin.incorrect, until)).toBe(
+      parentCopy.pin.locked(lockLiftsAt(until)),
+    );
+    // No instant to state: the lock is still stated, the time is not invented.
+    expect(messageFor(LOCKED_STATUS, parentCopy.pin.incorrect)).toBe(parentCopy.pin.lockedUnknown);
+  });
+
+  it('never frames a lock as a count of attempts', () => {
+    const message = messageFor(LOCKED_STATUS, parentCopy.pin.incorrect, new Date().toISOString());
+    expect(message).not.toMatch(/attempt|tries|remaining|!/i);
+  });
+
+  it('surfaces lockedUntil on the error so the screen can render the lock', async () => {
+    const lockedUntil = new Date(Date.now() + 60_000).toISOString();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ statusCode: 423, message: 'locked', lockedUntil }), {
+            status: LOCKED_STATUS,
+          }),
+      ),
+    );
+
+    const error = await parentApi.verifyPin('0000').catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ParentApiError);
+    expect((error as ParentApiError).status).toBe(LOCKED_STATUS);
+    expect((error as ParentApiError).lockedUntil).toBe(lockedUntil);
+  });
+
+  it('distinguishes the elevation guard’s 401 from a wrong-credential 401', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ statusCode: 401, message: 'Not in Parent View.', elevated: false }),
+            { status: 401 },
+          ),
+      ),
+    );
+
+    const error = await parentApi
+      .changePin('stale-token', { newPin: '1234', currentPin: '4321' })
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ParentApiError);
+    // Without this a parent whose Parent View had ended would be told their
+    // PIN was wrong, and would never be sent back to the gate.
+    expect((error as ParentApiError).notElevated).toBe(true);
+    expect((error as ParentApiError).message).toBe(parentCopy.pin.notElevated);
+  });
+
+  it('treats a 401 with no such marker as a wrong credential', async () => {
+    respondWith(401, { statusCode: 401, message: 'That PIN is not correct.' });
+    const error = await parentApi
+      .changePin('good-token', { newPin: '1234', currentPin: '4321' })
+      .catch((cause: unknown) => cause);
+    expect((error as ParentApiError).notElevated).toBe(false);
+    expect((error as ParentApiError).message).toBe(parentCopy.pin.incorrect);
+  });
+
+  it('leaves lockedUntil null for every other rejection', async () => {
+    respondWith(401);
+    const error = await parentApi.verifyPin('0000').catch((cause: unknown) => cause);
+    expect((error as ParentApiError).lockedUntil).toBeNull();
+    expect((error as ParentApiError).message).toBe(parentCopy.pin.incorrect);
   });
 
   it('keeps the per-endpoint messages distinct from one another', () => {

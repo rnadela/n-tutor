@@ -7,6 +7,8 @@
  * string change here, not a code change anywhere else.
  */
 
+import { MAX_PIN_ATTEMPTS, PIN_LENGTH, pinCooldownMinutes } from './pin-policy.js';
+
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 256;
 
@@ -60,6 +62,11 @@ export interface AuthPolicy {
   termsText: string;
   noticeVersion: string;
   noticeText: string;
+  /** The PIN figures, so the web states the shape and the lock without a
+   * literal of its own. Their source of truth is `pin-policy.ts`. */
+  pinLength: number;
+  pinMaxAttempts: number;
+  pinCooldownMinutes: number;
 }
 
 export function currentAuthPolicy(): AuthPolicy {
@@ -70,6 +77,9 @@ export function currentAuthPolicy(): AuthPolicy {
     termsText: TERMS_TEXT,
     noticeVersion: CHILD_DATA_CONSENT_VERSION,
     noticeText: CHILD_DATA_CONSENT_TEXT,
+    pinLength: PIN_LENGTH,
+    pinMaxAttempts: MAX_PIN_ATTEMPTS,
+    pinCooldownMinutes: pinCooldownMinutes(),
   };
 }
 

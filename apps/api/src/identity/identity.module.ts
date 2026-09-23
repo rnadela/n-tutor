@@ -6,6 +6,10 @@ import { PARENT_JWT } from './auth-policy.js';
 import { ParentAccountService } from './parent-account.service.js';
 import { ParentAuthController } from './parent-auth.controller.js';
 import { ParentAuthService } from './parent-auth.service.js';
+import { ParentElevationGuard } from './parent-elevation.guard.js';
+import { ParentPinController } from './parent-pin.controller.js';
+import { ParentPinService } from './parent-pin.service.js';
+import { pinRuntime } from './pin-policy.js';
 import { ParentSessionGuard } from './parent-session.guard.js';
 
 /**
@@ -25,13 +29,22 @@ import { ParentSessionGuard } from './parent-session.guard.js';
     }),
     MailModule,
   ],
-  controllers: [ParentAuthController],
+  controllers: [ParentAuthController, ParentPinController],
   providers: [
     { provide: PARENT_JWT, useExisting: JwtService },
     ParentAccountService,
     ParentAuthService,
+    ParentPinService,
     ParentSessionGuard,
+    ParentElevationGuard,
   ],
   exports: [ParentAccountService],
 })
-export class IdentityModule {}
+export class IdentityModule {
+  constructor() {
+    // Resolved and checked as the module is constructed, so a mistyped PIN or
+    // elevation override fails the process at boot rather than turning the
+    // first request that touches the gate into a 500.
+    pinRuntime();
+  }
+}
