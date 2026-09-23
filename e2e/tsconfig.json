@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": ["node"],
+    "lib": ["ES2023", "dom"],
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "tests/**/*.ts",
+    "global-setup.ts",
+    "database.ts",
+    "prepare.mts",
+    "../playwright.config.ts"
+  ]
+}

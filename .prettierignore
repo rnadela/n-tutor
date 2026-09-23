@@ -1,0 +1,12 @@
+node_modules
+dist
+.next
+.turbo
+_bmad
+_bmad-output
+apps/api/src/generated
+pnpm-lock.yaml
+.claude
+.bmad-loop
+e2e/test-results
+apps/web/next-env.d.ts

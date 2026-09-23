@@ -1,0 +1,11 @@
+packages:
+  - 'apps/*'
+
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - '@swc/core'
+  - argon2
+  - prisma
+  - unrs-resolver
+  - esbuild
+  - sharp

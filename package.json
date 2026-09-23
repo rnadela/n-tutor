@@ -1,0 +1,31 @@
+{
+  "name": "n-test-reviewer",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "e2e": "pnpm run typecheck:e2e && playwright test",
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "pnpm --filter api exec prisma migrate deploy",
+    "db:seed": "pnpm --filter api run seed",
+    "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
+    "e2e:prepare": "node e2e/prepare.mts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "24.10.1",
+    "@types/pg": "8.23.1",
+    "dotenv": "17.2.4",
+    "pg": "8.16.3",
+    "prettier": "3.6.2",
+    "turbo": "2.10.12",
+    "typescript": "6.0.3"
+  }
+}

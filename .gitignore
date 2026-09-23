@@ -2,3 +2,30 @@
 .bmad-loop/cache/
 .bmad-loop/policy.toml
 _bmad/render/
+
+# --- Dependencies ---
+node_modules/
+
+# --- Build output ---
+dist/
+.next/
+out/
+*.tsbuildinfo
+apps/api/src/generated/
+
+# --- Tooling caches ---
+.turbo/
+coverage/
+
+# --- Environment ---
+.env
+.env.*
+!.env.example
+
+# --- Test artifacts ---
+e2e/test-results/
+playwright-report/
+blob-report/
+
+# Seed build output
+apps/api/.seed/

@@ -1,0 +1,90 @@
+// Admin module entity cluster (AD-17, AD-25).
+// `admin` is the sole writer of AdminUser, Subject, GradeLevel,
+// SubjectGradeLevel and AdminAudit.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Operator credential store. Deliberately separate from ParentAccount (AD-25).
+model AdminUser {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("admin_user")
+}
+
+/// A Subject offered at upload time. Disabled, never deleted (UJ-4).
+model Subject {
+  id        String   @id @default(uuid())
+  name      String
+  /// Case-insensitive uniqueness key: lower(trim(name)).
+  nameKey   String   @unique
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gradeLevels SubjectGradeLevel[]
+
+  @@index([name])
+  @@map("subject")
+}
+
+/// A Grade Level. Disabled, never deleted (UJ-4).
+model GradeLevel {
+  id        String   @id @default(uuid())
+  name      String
+  /// Case-insensitive uniqueness key: lower(trim(name)).
+  nameKey   String   @unique
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subjects SubjectGradeLevel[]
+
+  @@index([name])
+  @@map("grade_level")
+}
+
+/// Availability of a Subject for a Grade Level. Third independent flag;
+/// selectability is the conjunction of all three `enabled` columns.
+model SubjectGradeLevel {
+  id           String   @id @default(uuid())
+  subjectId    String
+  gradeLevelId String
+  enabled      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subject    Subject    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  gradeLevel GradeLevel @relation(fields: [gradeLevelId], references: [id], onDelete: Restrict)
+
+  @@unique([subjectId, gradeLevelId])
+  @@index([gradeLevelId, enabled])
+  @@map("subject_grade_level")
+}
+
+/// One row per admin write, in the same transaction as the write (AD-25).
+/// `detail` is redacted metadata only — never child content (AD-20).
+model AdminAudit {
+  id         String   @id @default(uuid())
+  actorId    String
+  action     String
+  targetType String
+  targetId   String
+  detail     Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([targetType, targetId])
+  @@map("admin_audit")
+}
