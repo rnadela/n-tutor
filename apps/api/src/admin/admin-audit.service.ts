@@ -18,6 +18,7 @@ export type AuditAction =
   | 'gradeLevel.disable'
   | 'availability.enable'
   | 'availability.disable'
+  | 'parentAccount.tierChange'
   | 'auth.signIn.failed';
 
 @Injectable()

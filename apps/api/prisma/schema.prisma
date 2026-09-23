@@ -88,3 +88,57 @@ model AdminAudit {
   @@index([targetType, targetId])
   @@map("admin_audit")
 }
+
+// Identity module entity cluster (AD-17).
+// `identity` is the sole writer of ParentAccount and AccountTimezone. Every
+// other module — `admin` included — reads and writes them through
+// ParentAccountService, never through a Prisma delegate of its own.
+
+/// The Account Tier assigned to a Parent Account. Admin-assigned only; there is
+/// no self-serve path to any tier, and `Internal` is reachable only this way.
+/// The figures each tier stands for live once, in `src/allowance/tiers.ts`.
+enum AccountTier {
+  Free
+  Plus
+  Family
+  Internal
+
+  @@map("account_tier")
+}
+
+/// The only credentialed account. Owns one Account Tier and one effective-dated
+/// timezone history. Credentials arrive with Epic 1; v0 story 2.2 needs only
+/// the identity, the tier, and the zone.
+model ParentAccount {
+  id          String      @id @default(uuid())
+  email       String      @unique
+  displayName String?
+  tier        AccountTier @default(Free)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  timezones AccountTimezone[]
+
+  @@map("parent_account")
+}
+
+/// Account timezone as an effective-dated history, never a mutable column
+/// (AD-27). A period's window is computed from the zone in effect at that
+/// period's start, so a zone change applies from the next boundary onward and
+/// never re-slices a running period.
+model AccountTimezone {
+  id              String   @id @default(uuid())
+  parentAccountId String
+  /// An IANA zone name, resolved by the platform's `Intl` time-zone data.
+  timezone        String
+  effectiveFrom   DateTime
+  createdAt       DateTime @default(now())
+
+  parentAccount ParentAccount @relation(fields: [parentAccountId], references: [id], onDelete: Cascade)
+
+  /// One zone per account per instant: two entries at the same `effectiveFrom`
+  /// would make the zone in force at that instant ambiguous. Doubles as the
+  /// lookup index for the history read.
+  @@unique([parentAccountId, effectiveFrom])
+  @@map("account_timezone")
+}

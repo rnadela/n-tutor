@@ -7,6 +7,9 @@ export function configureApp(app: INestApplication): INestApplication {
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
-  app.enableCors({ origin: optionalEnv('WEB_ORIGIN', 'http://localhost:3000'), credentials: false });
+  app.enableCors({
+    origin: optionalEnv('WEB_ORIGIN', 'http://localhost:3000'),
+    credentials: false,
+  });
   return app;
 }

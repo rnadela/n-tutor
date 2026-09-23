@@ -38,6 +38,9 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
             <Button component={Link} href="/admin/taxonomy">
               {adminCopy.nav.taxonomy}
             </Button>
+            <Button component={Link} href="/admin/accounts">
+              {adminCopy.nav.accounts}
+            </Button>
             <Button
               onClick={() => {
                 clearToken();

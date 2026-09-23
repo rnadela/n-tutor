@@ -8,6 +8,13 @@ import { AdminAuditService } from '../src/admin/admin-audit.service.js';
 import { ADMIN_JWT_AUDIENCE, ADMIN_JWT_ISSUER } from '../src/admin/admin-auth.constants.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { TaxonomyService } from '../src/admin/taxonomy.service.js';
+import { AllowanceService } from '../src/allowance/allowance.service.js';
+import { ParentAccountAdminService } from '../src/admin/parent-account-admin.service.js';
+import {
+  ParentAccountService,
+  type ParentAccount,
+} from '../src/identity/parent-account.service.js';
+import type { AccountTier } from '../src/generated/prisma/enums.js';
 
 export const OPERATOR_EMAIL = 'test-operator@example.test';
 export const OPERATOR_PASSWORD = 'correct-horse-battery-staple';
@@ -17,6 +24,9 @@ export interface Harness {
   moduleRef: TestingModule;
   prisma: PrismaService;
   taxonomy: TaxonomyService;
+  identity: ParentAccountService;
+  allowance: AllowanceService;
+  parentAccounts: ParentAccountAdminService;
   audit: AdminAuditService;
   jwt: JwtService;
   operatorId: string;
@@ -34,6 +44,9 @@ export async function createHarness(): Promise<Harness> {
     moduleRef,
     prisma,
     taxonomy: moduleRef.get(TaxonomyService),
+    identity: moduleRef.get(ParentAccountService),
+    allowance: moduleRef.get(AllowanceService),
+    parentAccounts: moduleRef.get(ParentAccountAdminService),
     audit: moduleRef.get(AdminAuditService),
     jwt: moduleRef.get(JwtService),
     operatorId: '',
@@ -59,6 +72,40 @@ export async function resetTaxonomy(prisma: PrismaService): Promise<void> {
   await prisma.$executeRawUnsafe(
     'TRUNCATE TABLE "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE',
   );
+}
+
+/** Wipes Parent Accounts, their timezone history, and audit state. */
+export async function resetParentAccounts(prisma: PrismaService): Promise<void> {
+  await prisma.$executeRawUnsafe(
+    'TRUNCATE TABLE "account_timezone", "parent_account", "admin_audit" CASCADE',
+  );
+}
+
+let fixtureCounter = 0;
+
+/**
+ * Creates a Parent Account through `identity` — never through a raw delegate —
+ * so the fixture exercises the same write path production uses. `tier` is left
+ * unset by default, which is how the schema default (`Free`) gets asserted.
+ */
+export function createParentAccount(
+  identity: ParentAccountService,
+  overrides: {
+    email?: string;
+    displayName?: string | null;
+    tier?: AccountTier;
+    timezone?: string;
+    effectiveFrom?: Date;
+  } = {},
+): Promise<ParentAccount> {
+  fixtureCounter += 1;
+  return identity.create({
+    email: overrides.email ?? `parent-${fixtureCounter}@example.test`,
+    displayName: overrides.displayName ?? `Parent ${fixtureCounter}`,
+    ...(overrides.tier ? { tier: overrides.tier } : {}),
+    ...(overrides.timezone ? { timezone: overrides.timezone } : {}),
+    ...(overrides.effectiveFrom ? { effectiveFrom: overrides.effectiveFrom } : {}),
+  });
 }
 
 /** A token shaped like a parent-scoped credential: same secret, wrong audience. */

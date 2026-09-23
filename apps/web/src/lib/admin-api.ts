@@ -20,6 +20,45 @@ export interface TaxonomySnapshot {
   availability: AvailabilityEntry[];
 }
 
+/** Mirrors the API's AccountTier enum. Carries no figure — only the labels. */
+export const ACCOUNT_TIERS = ['Free', 'Plus', 'Family', 'Internal'] as const;
+export type AccountTier = (typeof ACCOUNT_TIERS)[number];
+
+export interface ParentAccountSummary {
+  id: string;
+  email: string;
+  displayName: string | null;
+  tier: AccountTier;
+  createdAt: string;
+  /** The zone in effect for this account right now. */
+  timezone: string;
+}
+
+/** `limit: null` is unlimited. Every figure originates in the API's tiers table. */
+export interface AllowanceReading {
+  used: number;
+  limit: number | null;
+}
+
+export interface AccountConsumption {
+  periodStart: string;
+  periodEnd: string;
+  resetAt: string;
+  timezone: string;
+  tier: AccountTier;
+  studentProfileLimit: number | null;
+  allowances: {
+    upload: AllowanceReading;
+    generation: AllowanceReading;
+    explanation: AllowanceReading;
+  };
+}
+
+export interface ParentAccountDetail {
+  account: ParentAccountSummary;
+  consumption: AccountConsumption;
+}
+
 const TOKEN_KEY = 'n-test-reviewer.admin.token';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(
@@ -146,4 +185,11 @@ export const adminApi = {
     }),
   selectableSubjects: (gradeLevelId: string) =>
     call<TaxonomyItem[]>(`/admin/taxonomy/grade-levels/${gradeLevelId}/selectable-subjects`),
+  listParentAccounts: () => call<ParentAccountSummary[]>('/admin/parent-accounts'),
+  loadParentAccount: (id: string) => call<ParentAccountDetail>(`/admin/parent-accounts/${id}`),
+  assignTier: (id: string, tier: AccountTier) =>
+    call<ParentAccountSummary>(`/admin/parent-accounts/${id}/tier`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tier }),
+    }),
 };
