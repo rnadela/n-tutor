@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { e2eDatabaseUrl } from './database';
+import { lastMailTo, resetLinkFrom } from './mail-sink';
 
 export interface ParentAccountFixture {
   email: string;
@@ -56,4 +57,42 @@ export async function uniqueParentAccount(
   };
   await createParentAccountFixture(fixture);
   return fixture;
+}
+
+/** An email nothing else in the run touches, sorting after the read-only fixtures. */
+export function uniqueParentEmail(label: string): string {
+  return `zz-${label}-${randomUUID().slice(0, 8)}@example.test`;
+}
+
+/** How many reset rows exist for an email — zero is the assertion that matters. */
+export async function countPasswordResetsFor(email: string): Promise<number> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+       FROM "password_reset" r
+       JOIN "parent_account" a ON a."id" = r."parentAccountId"
+       WHERE a."email" = $1`,
+      [email],
+    );
+    return Number(result.rows[0]?.count ?? '0');
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * The reset link the API actually emailed, read out of the E2E mail sink. The
+ * plaintext token exists nowhere else — the stored row holds only its hash —
+ * so this is the only way to complete the round trip in a browser.
+ */
+export async function waitForResetLink(email: string, timeoutMs = 10_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const message = lastMailTo(email);
+    if (message) return resetLinkFrom(message);
+    if (Date.now() > deadline) throw new Error(`No reset mail for ${email} within ${timeoutMs}ms.`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }

@@ -162,3 +162,15 @@ export function createAdminTheme(): Theme {
 }
 
 export const adminTheme = createAdminTheme();
+
+/**
+ * The parent auth screens' theme. Like the Admin console's, it is the base
+ * theme with `palette.primary` replaced by the Parent View accent and nothing
+ * else — the same override, applied to a different route group. Story 1.7 owns
+ * any design-system work; this reuses what is already here.
+ */
+export function createParentTheme(): Theme {
+  return buildTheme(colorTokens.primaryParent);
+}
+
+export const parentTheme = createParentTheme();

@@ -114,12 +114,54 @@ model ParentAccount {
   email       String      @unique
   displayName String?
   tier        AccountTier @default(Free)
+  /// argon2id. Nullable: accounts created before Epic 1 carry no credential and
+  /// simply cannot sign in — reset never promotes them into one either.
+  passwordHash String?
+  /// Bumped whenever every outstanding session for this account must stop being
+  /// valid. The session token carries the epoch it was minted at, so a
+  /// long-lived stateless cookie can still be revoked by a password reset.
+  sessionEpoch Int         @default(0)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  timezones AccountTimezone[]
+  timezones      AccountTimezone[]
+  consents       AccountConsent[]
+  passwordResets PasswordReset[]
 
   @@map("parent_account")
+}
+
+/// Append-only record of what the parent accepted and when. A new acceptance is
+/// a new row; an existing row is never edited, so the version in force at the
+/// moment of acceptance stays recoverable.
+model AccountConsent {
+  id              String   @id @default(uuid())
+  parentAccountId String
+  termsVersion    String
+  noticeVersion   String
+  acceptedAt      DateTime
+  createdAt       DateTime @default(now())
+
+  parentAccount ParentAccount @relation(fields: [parentAccountId], references: [id], onDelete: Cascade)
+
+  @@index([parentAccountId])
+  @@map("account_consent")
+}
+
+/// A single-use password-reset token. Only the hash is stored: the plaintext
+/// exists solely in the emailed link.
+model PasswordReset {
+  id              String    @id @default(uuid())
+  parentAccountId String
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime  @default(now())
+
+  parentAccount ParentAccount @relation(fields: [parentAccountId], references: [id], onDelete: Cascade)
+
+  @@index([parentAccountId])
+  @@map("password_reset")
 }
 
 /// Account timezone as an effective-dated history, never a mutable column

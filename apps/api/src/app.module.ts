@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import { MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -5,9 +6,12 @@ import { AdminModule } from './admin/admin.module.js';
 import { CorrelationIdMiddleware } from './common/correlation.js';
 import { requireIntEnv } from './common/env.js';
 import { HealthController } from './health/health.controller.js';
+import { IdentityModule } from './identity/identity.module.js';
+import { PARENT_CREDENTIAL_ROUTE } from './identity/parent-credential-route.decorator.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 
 export const LOGIN_THROTTLER = 'login';
+export const PARENT_THROTTLER = 'parent';
 
 @Module({
   imports: [
@@ -28,11 +32,22 @@ export const LOGIN_THROTTLER = 'login';
             limit: requireIntEnv('AUTH_RATE_LIMIT', 5),
             ttl: requireIntEnv('AUTH_RATE_TTL_MS', 60_000),
           },
+          {
+            // The parent credential routes get their own budget, so one
+            // surface's flood cannot exhaust the other's allowance. It applies
+            // only to handlers that mark themselves as spending it.
+            name: PARENT_THROTTLER,
+            limit: requireIntEnv('PARENT_AUTH_RATE_LIMIT', 5),
+            ttl: requireIntEnv('PARENT_AUTH_RATE_TTL_MS', 60_000),
+            skipIf: (context) =>
+              Reflect.getMetadata(PARENT_CREDENTIAL_ROUTE, context.getHandler()) !== true,
+          },
         ],
       }),
     }),
     PrismaModule,
     AdminModule,
+    IdentityModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

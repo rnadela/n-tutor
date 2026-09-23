@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   MIN_JWT_SECRET_LENGTH,
+  optionalBoolEnv,
   PLACEHOLDER_JWT_SECRET,
   requireIntEnv,
   requireJwtSecret,
   requirePortEnv,
+  requireWebOrigin,
 } from './env.js';
 
 const TEST_VAR = 'ENV_SPEC_TEST_VAR';
@@ -60,5 +62,57 @@ describe('requirePortEnv', () => {
   it('accepts a valid port', () => {
     process.env[TEST_VAR] = '3001';
     expect(requirePortEnv(TEST_VAR, 3000)).toBe(3001);
+  });
+});
+
+describe('optionalBoolEnv', () => {
+  it('returns the fallback when unset', () => {
+    expect(optionalBoolEnv(TEST_VAR, true)).toBe(true);
+    expect(optionalBoolEnv(TEST_VAR, false)).toBe(false);
+  });
+
+  it('reads "true" and "false", whatever the casing or padding', () => {
+    process.env[TEST_VAR] = 'true';
+    expect(optionalBoolEnv(TEST_VAR, false)).toBe(true);
+    process.env[TEST_VAR] = ' FALSE ';
+    expect(optionalBoolEnv(TEST_VAR, true)).toBe(false);
+  });
+
+  it('throws for anything else rather than treating it as false', () => {
+    process.env[TEST_VAR] = 'yes';
+    expect(() => optionalBoolEnv(TEST_VAR, true)).toThrow('must be "true" or "false"');
+  });
+});
+
+describe('requireWebOrigin', () => {
+  const withEnv = (values: Record<string, string | undefined>, run: () => void): void => {
+    const saved = { ...process.env };
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    try {
+      run();
+    } finally {
+      process.env = saved;
+    }
+  };
+
+  it('refuses to default in production, because credentialed CORS would fail every call', () => {
+    withEnv({ WEB_ORIGIN: undefined, NODE_ENV: 'production' }, () => {
+      expect(() => requireWebOrigin()).toThrow('WEB_ORIGIN is required');
+    });
+  });
+
+  it('falls back to localhost outside production', () => {
+    withEnv({ WEB_ORIGIN: undefined, NODE_ENV: 'test' }, () => {
+      expect(requireWebOrigin()).toBe('http://localhost:3000');
+    });
+  });
+
+  it('strips a trailing slash, so a reset link never doubles one', () => {
+    withEnv({ WEB_ORIGIN: 'https://app.example.test/', NODE_ENV: 'test' }, () => {
+      expect(requireWebOrigin()).toBe('https://app.example.test');
+    });
   });
 });

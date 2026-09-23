@@ -1,6 +1,7 @@
 import { Client } from 'pg';
 import { createParentAccountFixture } from './fixtures';
 import { e2eDatabaseUrl } from './database';
+import { clearSentMail } from './mail-sink';
 
 /**
  * Two Parent Accounts in different timezones, so the suite can assert that each
@@ -25,11 +26,15 @@ export default async function globalSetup(): Promise<void> {
   await client.connect();
   try {
     await client.query(
-      'TRUNCATE TABLE "subject_grade_level", "subject", "grade_level", "account_timezone", "parent_account", "admin_audit" CASCADE',
+      'TRUNCATE TABLE "subject_grade_level", "subject", "grade_level", "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE',
     );
   } finally {
     await client.end();
   }
+
+  // The mail sink is per-run: a link left over from a previous run must never
+  // be the one a test follows.
+  clearSentMail();
 
   for (const fixture of PARENT_ACCOUNT_FIXTURES) {
     await createParentAccountFixture(fixture);

@@ -192,6 +192,10 @@ export class ParentAccountService {
     tier?: AccountTier;
     timezone?: string;
     effectiveFrom?: Date;
+    /** Epic 1 sign-up: the credential is written with the account, or not at all. */
+    passwordHash?: string;
+    /** Epic 1 sign-up: the first, append-only acceptance record. */
+    consent?: { termsVersion: string; noticeVersion: string; acceptedAt: Date };
   }): Promise<ParentAccount> {
     const email = normaliseEmail(input.email);
     // Rejected before the transaction opens: an unrecognised zone must never
@@ -205,6 +209,7 @@ export class ParentAccountService {
             email,
             displayName: input.displayName ?? null,
             ...(input.tier ? { tier: input.tier } : {}),
+            ...(input.passwordHash ? { passwordHash: input.passwordHash } : {}),
           },
           select: ACCOUNT_FIELDS,
         });
@@ -217,9 +222,67 @@ export class ParentAccountService {
             },
           });
         }
+        if (input.consent) {
+          await tx.accountConsent.create({
+            data: {
+              parentAccountId: account.id,
+              termsVersion: input.consent.termsVersion,
+              noticeVersion: input.consent.noticeVersion,
+              acceptedAt: input.consent.acceptedAt,
+            },
+          });
+        }
         return account;
       }),
     );
+  }
+
+  /**
+   * The credential row for a sign-in attempt, or `null` when no such email
+   * exists. The caller must take the same path for both (AD-23) — the absence
+   * of a row is not an early return.
+   */
+  findCredentialByEmail(email: string): Promise<{
+    id: string;
+    email: string;
+    passwordHash: string | null;
+    sessionEpoch: number;
+  } | null> {
+    return this.prisma.parentAccount.findUnique({
+      where: { email: normaliseEmail(email) },
+      // The epoch travels with the credential so minting a session needs no
+      // second read, which could observe the row already deleted.
+      select: { id: true, email: true, passwordHash: true, sessionEpoch: true },
+    });
+  }
+
+  /**
+   * What the session guard needs and nothing more — notably not the password
+   * hash, which no read path serving a request has any use for.
+   */
+  findSessionSubject(
+    id: string,
+  ): Promise<{ id: string; email: string; sessionEpoch: number } | null> {
+    return this.prisma.parentAccount.findUnique({
+      where: { id },
+      select: { id: true, email: true, sessionEpoch: true },
+    });
+  }
+
+  /**
+   * Replaces the credential and bumps the session epoch in one step, inside the
+   * caller's transaction. The bump is what makes a reset actually lock out
+   * whoever prompted it: every session token minted at the old epoch dies here.
+   */
+  async setPasswordHash(
+    tx: TransactionClient,
+    accountId: string,
+    passwordHash: string,
+  ): Promise<void> {
+    await tx.parentAccount.update({
+      where: { id: accountId },
+      data: { passwordHash, sessionEpoch: { increment: 1 } },
+    });
   }
 
   /**

@@ -125,3 +125,147 @@ source_spec: `spec-2-2-parent-account-tier-assignment-consumption-view.md`
 severity: low
 reason: This spec file is unmodified by this story's diff; the failure did not reproduce across `pnpm exec vitest run` x4 nor when run paired with `parent-account.int-spec.ts` alone, so it looks like a pre-existing, low-frequency flake rather than something this story's changes caused.
 status: open
+
+### DW-17: No Settings screen and no timezone-edit endpoint: a parent cannot change the account's timezone after sign-up
+origin: spec-deferred spec-1-1
+location: apps/web/src/app/auth, apps/api/src/identity
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: medium
+reason: Editing the zone is a Parent-View-gated surface and cannot ship before the elevation token exists (Story 1.2). Sign-up captures the device's zone as the first, append-only `AccountTimezone` entry; until the edit surface ships, a parent who moves has no way to correct it and `ParentAccountService.appendTimezone` stays reachable only from tests.
+status: open
+
+### DW-18: The child-data consent notice and the terms text are placeholder product copy pending legal review
+origin: spec-deferred spec-1-1
+location: apps/api/src/identity/auth-policy.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: medium
+reason: v0 ships the mechanism — versioned notice text served by the API, an append-only `AccountConsent` row per acceptance — with placeholder wording. Replacing it is a version bump plus a string change, but the pending legal review blocks public registration, and acceptances recorded against the placeholder version will not be acceptances of the reviewed text.
+status: open
+
+### DW-19: The `http` mail transport has never run against a real provider
+origin: spec-deferred spec-1-1
+location: apps/api/src/mail/mail.service.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: medium
+reason: Choosing and provisioning a provider (account, verified sending domain, API key) is an operator action outside the repo. The code path, config keys and unit tests ship complete, but the request shape a given provider expects is unverified, and a reset-request response is 204 whether or not the message was actually accepted — so a wrong shape would surface only as parents not receiving links.
+status: open
+
+### DW-20: No per-account lockout or backoff on parent credential routes — throttling is per-address only
+origin: review-deferred spec-1-1
+location: apps/api/src/app.module.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: medium
+reason: The `parent` throttler bucket is keyed by request address, so guessing distributed across addresses against one known email is effectively unbounded. A per-account attempt counter with backoff is the missing half, and it needs a storage decision that belongs with the Story 1.2 elevation work.
+status: open
+
+### DW-21: Parent credential events are not audited
+origin: review-deferred spec-1-1
+location: apps/api/src/identity/parent-auth.service.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: medium
+reason: The admin surface records actions through `AdminAuditService`; parent sign-in, sign-out, reset request and reset confirm — including the `sessionEpoch` bump that signs out every device — record nothing, so a parent asking whether someone else reset their password has no answer.
+status: open
+
+### DW-22: `password_reset` and `account_consent` rows only ever grow
+origin: review-deferred spec-1-1
+location: apps/api/prisma/schema.prisma
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: There is no cleanup of used or expired reset rows and no index on `expiresAt`; consent is append-only by design but has no retention or account-deletion story. Neither matters at v0 volumes; both want deciding before real traffic.
+status: open
+
+### DW-23: `SameSite=Strict` constrains where the API may be deployed relative to the web app
+origin: review-deferred spec-1-1
+location: apps/api/src/identity/parent-session.cookie.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: The session cookie survives credentialed cross-origin calls only while API and web share a registrable domain. Deploying the API under a different domain would silently drop the cookie on every request; the constraint is recorded nowhere in the deployment configuration.
+status: open
+
+### DW-24: A device whose IANA zone the API rejects cannot complete sign-up
+origin: review-deferred spec-1-1
+location: apps/web/src/app/auth/sign-up/page.tsx
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: The screen submits `Intl.DateTimeFormat().resolvedOptions().timeZone` with no fallback and no picker, so a zone the platform does not recognise ends the flow with the generic failure message and no remedy. Rare, but unrecoverable from the browser.
+status: open
+
+### DW-25: Parent credential routes are throttled per address only, with no per-account lockout or backoff.
+origin: spec-deferred eda97199037d
+location: apps/api/src/app.module.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: medium
+reason: The `parent` throttler bucket keys on the request address, so guessing distributed across addresses against one known email is effectively unbounded. Ledger entry DW-20.
+status: open
+
+### DW-26: No audit trail exists for parent sign-in, sign-out, reset request or reset confirm.
+origin: spec-deferred 63e2831557a6
+location: apps/api/src/identity/parent-auth.service.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: medium
+reason: `AdminAuditService` records admin actions; the parent surface records nothing, including the sessionEpoch bump that ends every session. Ledger entry DW-21.
+status: open
+
+### DW-27: `password_reset` and `account_consent` rows have no retention, cleanup or `expiresAt` index.
+origin: spec-deferred c48228585609
+location: apps/api/prisma/schema.prisma
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: Used and expired reset rows are never removed and consent has no account-deletion story. Harmless at v0 volumes. Ledger entry DW-22.
+status: open
+
+### DW-28: `SameSite=Strict` requires the API and the web app to share a registrable domain.
+origin: spec-deferred 2e79d025d97d
+location: apps/api/src/identity/parent-session.cookie.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: A deployment splitting them across domains silently drops the session cookie on every credentialed request; nothing records the constraint. Ledger entry DW-23.
+status: open
+
+### DW-29: A device reporting an IANA zone the API rejects cannot complete sign-up.
+origin: spec-deferred 0cc7b6228f77
+location: apps/web/src/app/auth/sign-up/page.tsx
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: The screen submits the resolved zone with no fallback and no picker, so the rejection ends the flow with the generic message and no remedy. Ledger entry DW-24.
+status: open
+
+### DW-30: Unreadable `deferred:` items in spec-1-1-parent-account-sign-up-sign-in.md
+origin: spec-deferred-malformed 4cf3b748aed2
+location: n/a
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: The dev session recorded deferred findings the orchestrator could not parse, so they were NOT filed as entries: item 1: not a mapping (got str); item 2: not a mapping (got str); item 3: not a mapping (got str). Read `spec-1-1-parent-account-sign-up-sign-in.md`'s frontmatter and re-file them by hand.
+status: open
+
+### DW-31: `requestPasswordReset` retires outstanding tokens and inserts the new one as two separate statements, not one atomically-unique write, so two concurrent requests for the same account could each see
+origin: spec-deferred 009f5ef40317
+location: apps/api/src/identity/parent-auth.service.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: Both statements run inside the same `withTransaction`, and the parent throttler bounds request rate, so the window is narrow; there is no `@@unique` constraint enforcing at most one un-retired `PasswordReset` row per account.
+status: open
+
+### DW-32: `MailService.send` only ever throws `MailDispatchError` today, but `requestPasswordReset` rethrows anything else uncaught, which would turn a future non-`MailDispatchError` mail failure into a 500
+origin: spec-deferred 9c5f7639b605
+location: apps/api/src/identity/parent-auth.service.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: `postToProvider` wraps every failure path in `MailDispatchError`, and the `log` transport swallows its own append errors, so the gap is latent, not currently reachable.
+status: open
+
+### DW-33: `MAIL_LOG_FILE` (dev/E2E JSONL sink) has no boot-time guard forbidding it under `NODE_ENV=production`, so a stray env value would write parent emails and reset-link text to disk in production.
+origin: spec-deferred 0efc83d8e807
+location: apps/api/src/mail/mail.service.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: `resolveMailConfig` validates transport, from, and timeout for production but passes `logFile` through unconditionally.
+status: open
+
+### DW-34: Sign-up hardcodes `sessionEpoch: 0` when minting the first session rather than reading the value the row actually has, so a future change to the schema's default would silently desync the minted
+origin: spec-deferred cf82aa87ae55
+location: apps/api/src/identity/parent-auth.service.ts
+source_spec: `spec-1-1-parent-account-sign-up-sign-in.md`
+severity: low
+reason: `ParentAuthService.signUp` calls `this.mintSession({ ...account, sessionEpoch: 0 })`; `account` comes from `ParentAccountService.create()`, which does not select `sessionEpoch`.
+status: open

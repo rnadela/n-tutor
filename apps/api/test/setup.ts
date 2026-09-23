@@ -7,3 +7,4 @@ process.env.DATABASE_URL = testDatabaseUrl();
 // interfere with a test issuing many requests in a second.
 process.env.API_RATE_LIMIT ??= '10000';
 process.env.AUTH_RATE_LIMIT ??= '10000';
+process.env.PARENT_AUTH_RATE_LIMIT ??= '10000';

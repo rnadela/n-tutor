@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
+import { JwtModule, JwtService } from '@nestjs/jwt';
 import { AllowanceModule } from '../allowance/allowance.module.js';
 import { requireIntEnv, requireJwtSecret } from '../common/env.js';
 import { IdentityModule } from '../identity/identity.module.js';
+import { ADMIN_JWT } from './admin-auth.constants.js';
 import { AdminAuditService } from './admin-audit.service.js';
 import { AdminAuthController } from './admin-auth.controller.js';
 import { AdminAuthGuard } from './admin-auth.guard.js';
@@ -34,6 +35,7 @@ import { TaxonomyService } from './taxonomy.service.js';
   ],
   controllers: [AdminAuthController, TaxonomyController, ParentAccountController],
   providers: [
+    { provide: ADMIN_JWT, useExisting: JwtService },
     AdminAuthService,
     AdminAuthGuard,
     AdminAuditService,
