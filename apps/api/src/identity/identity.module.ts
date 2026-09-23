@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { requireParentJwtSecret } from '../common/env.js';
+import { TaxonomyModule } from '../admin/taxonomy.module.js';
 import { MailModule } from '../mail/mail.module.js';
 import { PARENT_JWT } from './auth-policy.js';
 import { ParentAccountService } from './parent-account.service.js';
@@ -11,10 +12,13 @@ import { ParentPinController } from './parent-pin.controller.js';
 import { ParentPinService } from './parent-pin.service.js';
 import { pinRuntime } from './pin-policy.js';
 import { ParentSessionGuard } from './parent-session.guard.js';
+import { StudentProfileController } from './student-profile.controller.js';
+import { StudentProfileService } from './student-profile.service.js';
 
 /**
  * The `identity` module: sole owner and sole writer of ParentAccount,
- * AccountTimezone, AccountConsent and PasswordReset (AD-17). The credential
+ * AccountTimezone, AccountConsent, PasswordReset and StudentProfile (AD-17).
+ * The credential
  * half lives here rather than in an `auth` module of its own precisely because
  * a second writer of `parent_account` is the drift AD-17 exists to prevent.
  *
@@ -28,8 +32,11 @@ import { ParentSessionGuard } from './parent-session.guard.js';
       useFactory: () => ({ secret: requireParentJwtSecret() }),
     }),
     MailModule,
+    // A shared taxonomy read, not a dependency on `admin`: AdminModule imports
+    // this module, so importing it back would close a cycle.
+    TaxonomyModule,
   ],
-  controllers: [ParentAuthController, ParentPinController],
+  controllers: [ParentAuthController, ParentPinController, StudentProfileController],
   providers: [
     { provide: PARENT_JWT, useExisting: JwtService },
     ParentAccountService,
@@ -37,8 +44,10 @@ import { ParentSessionGuard } from './parent-session.guard.js';
     ParentPinService,
     ParentSessionGuard,
     ParentElevationGuard,
+    StudentProfileService,
   ],
-  exports: [ParentAccountService],
+  // StudentProfileService is exported for Story 1.4's device binding.
+  exports: [ParentAccountService, StudentProfileService],
 })
 export class IdentityModule {
   constructor() {

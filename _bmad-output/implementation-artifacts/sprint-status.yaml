@@ -38,7 +38,7 @@ development_status:
   epic-1: backlog
   1-1-parent-account-sign-up-sign-in: done
   1-2-parent-pin-for-parent-view: done
-  1-3-student-profile-management: backlog
+  1-3-student-profile-management: done
   1-4-student-mode-parent-view-switching: backlog
   1-5-parent-view-idle-expiry: backlog
   1-6-uncommitted-parent-input-survives-expiry-mechanism: backlog

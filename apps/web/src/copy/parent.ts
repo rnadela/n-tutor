@@ -107,8 +107,64 @@ export const parentCopy = {
     expiresLabel: 'Parent View stays open until',
     ceilingLabel: 'The PIN is required again after',
     changePin: 'Change PIN',
+    students: 'Student Profiles',
     leave: 'Leave Parent View',
     loading: 'Loading Parent View…',
+  },
+  /**
+   * The Students screen. A child is named in the third person, by name, and
+   * never addressed. No figure is stated: the name bound arrives from
+   * `GET /api/auth/policy`.
+   */
+  students: {
+    title: 'Student Profiles',
+    intro: 'Each child on this account has a profile with a name and a grade level.',
+    loading: 'Loading the profiles…',
+    empty: 'There are no profiles yet. Add the first one below.',
+    nameColumn: 'Name',
+    gradeLevelColumn: 'Grade level',
+    statusColumn: 'Status',
+    actionsColumn: 'Actions',
+    active: 'Active',
+    archivedStatus: 'Archived',
+    /** Stated on a profile whose stored grade level an Admin has withdrawn. */
+    gradeLevelWithdrawn: 'This grade level is no longer offered. Choose another one.',
+
+    addTitle: 'Add a profile',
+    nameLabel: 'Name',
+    nameMaximum: (max: number) => `At most ${max} characters.`,
+    gradeLevelLabel: 'Grade level',
+    gradeLevelRequired: 'Choose a grade level.',
+    noGradeLevels: 'No grade levels are available yet. Ask an administrator to add one.',
+    add: 'Add the profile',
+    adding: 'Adding…',
+    added: (name: string) => `${name} was added.`,
+
+    rename: 'Rename',
+    renameLabel: 'New name',
+    saveName: 'Save the name',
+    cancel: 'Cancel',
+    renamed: (name: string) => `The profile is now named ${name}.`,
+
+    changeGradeLevel: 'Change grade level',
+    /** Names the child, as every other per-row control does. */
+    changeGradeLevelFor: (name: string) => `Change grade level for ${name}`,
+    /** Says plainly what a grade-level change does *not* touch. */
+    gradeLevelNote: 'Changing the grade level does not change any practice test already made.',
+    gradeLevelChanged: (name: string, gradeLevel: string) => `${name} is now in ${gradeLevel}.`,
+
+    archive: 'Archive',
+    /** Archiving is visibly not deleting: the copy says what is kept. */
+    archiveNote: 'Archiving hides the profile from Student Mode and keeps its history.',
+    archiveConfirm: (name: string) =>
+      `Archive ${name}? The profile is hidden from Student Mode and its history is kept. Nothing is deleted.`,
+    archived: (name: string) => `${name} is archived and hidden from Student Mode.`,
+    restore: 'Restore',
+    restoreNote: 'Restoring puts the profile back in Student Mode.',
+    restored: (name: string) => `${name} is active again.`,
+
+    failed: 'That change could not be saved. Try again.',
+    back: 'Back to Parent View',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

@@ -50,6 +50,9 @@ model GradeLevel {
   updatedAt DateTime @updatedAt
 
   subjects SubjectGradeLevel[]
+  /// Back-relation only. `identity` is the sole writer of StudentProfile
+  /// (AD-17); `admin` never writes through this field.
+  students StudentProfile[]
 
   @@index([name])
   @@map("grade_level")
@@ -137,8 +140,41 @@ model ParentAccount {
   timezones      AccountTimezone[]
   consents       AccountConsent[]
   passwordResets PasswordReset[]
+  students       StudentProfile[]
 
   @@map("parent_account")
+}
+
+/// A child under a Parent Account: a display name and exactly one Grade Level.
+/// `identity` is its sole writer (AD-17) — nothing outside StudentProfileService
+/// touches this delegate, and the Grade Level is read through `admin`'s
+/// TaxonomyService rather than through a second reader of `grade_level`.
+///
+/// Archive is a nullable instant, not a boolean and not a delete: nothing is
+/// copied, nothing is cascaded and nothing is removed, so a reference held by
+/// id keeps resolving and history survives by construction. The timestamp
+/// additionally records *when*, which Epic 8's deletion path and Epic 9's
+/// active count both want.
+model StudentProfile {
+  id              String    @id @default(uuid())
+  parentAccountId String
+  displayName     String
+  gradeLevelId    String
+  /// Null while the profile is active. Set on archive; cleared on restore.
+  archivedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  /// `Restrict` on both sides: a profile is never destroyed as a side effect of
+  /// something else being removed.
+  parentAccount ParentAccount @relation(fields: [parentAccountId], references: [id], onDelete: Restrict)
+  gradeLevel    GradeLevel    @relation(fields: [gradeLevelId], references: [id], onDelete: Restrict)
+
+  /// The list read and the selectable read are both scoped by account and
+  /// filtered by archive state.
+  @@index([parentAccountId, archivedAt])
+  @@index([gradeLevelId])
+  @@map("student_profile")
 }
 
 /// Append-only record of what the parent accepted and when. A new acceptance is

@@ -16,6 +16,26 @@ export interface AuthPolicy {
   pinLength: number;
   pinMaxAttempts: number;
   pinCooldownMinutes: number;
+  studentNameMaxLength: number;
+}
+
+/** A taxonomy item as the API states it. The web never writes one. */
+export interface TaxonomyItem {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+/** A Student Profile, with its grade level resolved by the API on every read. */
+export interface StudentProfileView {
+  id: string;
+  displayName: string;
+  gradeLevelId: string;
+  gradeLevelName: string;
+  gradeLevelEnabled: boolean;
+  archived: boolean;
+  archivedAt: string | null;
+  createdAt: string;
 }
 
 export interface PinStatus {
@@ -238,6 +258,44 @@ export const parentApi = {
       '/parent/session',
       { headers: elevated(token) },
       parentCopy.pin.notElevated,
+    ),
+
+  // --- Student Profiles --------------------------------------------------
+
+  students: (token: string) =>
+    call<StudentProfileView[]>('/parent/students', { headers: elevated(token) }),
+  /** What Student Mode may bind to: the active profiles only. */
+  selectableStudents: (token: string) =>
+    call<StudentProfileView[]>('/parent/students/selectable', { headers: elevated(token) }),
+  gradeLevels: (token: string) =>
+    call<TaxonomyItem[]>('/parent/grade-levels', { headers: elevated(token) }),
+  createStudent: (token: string, input: { displayName: string; gradeLevelId: string }) =>
+    call<StudentProfileView>(
+      '/parent/students',
+      { method: 'POST', headers: elevated(token), body: JSON.stringify(input) },
+      parentCopy.students.failed,
+    ),
+  updateStudent: (
+    token: string,
+    id: string,
+    input: { displayName?: string; gradeLevelId?: string },
+  ) =>
+    call<StudentProfileView>(
+      `/parent/students/${encodeURIComponent(id)}`,
+      { method: 'PATCH', headers: elevated(token), body: JSON.stringify(input) },
+      parentCopy.students.failed,
+    ),
+  archiveStudent: (token: string, id: string) =>
+    call<void>(
+      `/parent/students/${encodeURIComponent(id)}/archive`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.students.failed,
+    ),
+  restoreStudent: (token: string, id: string) =>
+    call<void>(
+      `/parent/students/${encodeURIComponent(id)}/restore`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.students.failed,
     ),
 };
 

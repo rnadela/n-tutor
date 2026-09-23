@@ -8,6 +8,7 @@
  */
 
 import { MAX_PIN_ATTEMPTS, PIN_LENGTH, pinCooldownMinutes } from './pin-policy.js';
+import { DISPLAY_NAME_MAX_LENGTH } from './student-profile-policy.js';
 
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 256;
@@ -67,6 +68,9 @@ export interface AuthPolicy {
   pinLength: number;
   pinMaxAttempts: number;
   pinCooldownMinutes: number;
+  /** The Student Profile display-name bound, so the Students screen restates no
+   * figure of its own. Its source of truth is `student-profile-policy.ts`. */
+  studentNameMaxLength: number;
 }
 
 export function currentAuthPolicy(): AuthPolicy {
@@ -80,6 +84,7 @@ export function currentAuthPolicy(): AuthPolicy {
     pinLength: PIN_LENGTH,
     pinMaxAttempts: MAX_PIN_ATTEMPTS,
     pinCooldownMinutes: pinCooldownMinutes(),
+    studentNameMaxLength: DISPLAY_NAME_MAX_LENGTH,
   };
 }
 

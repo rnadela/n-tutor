@@ -117,6 +117,9 @@ export default function ParentViewPage() {
             {/* A client-side navigation on purpose: a full page load would
                 unmount the provider holding the token, and the change screen
                 would find itself unelevated before it rendered. */}
+            <Link component={NextLink} href="/parent/students">
+              {parentCopy.parentView.students}
+            </Link>
             <Link component={NextLink} href="/parent/pin/change">
               {parentCopy.parentView.changePin}
             </Link>

@@ -109,6 +109,22 @@ export class TaxonomyService {
     });
   }
 
+  /**
+   * The Grade Levels that may be chosen right now: enabled only, by name.
+   *
+   * Read-only, so no audit row — this is the shared taxonomy read `identity`
+   * makes when a parent picks a Grade Level for a Student Profile. It is
+   * deliberately *not* the same call as `resolveGradeLevel`, which succeeds for
+   * a disabled row so a stored reference keeps resolving.
+   */
+  async listSelectableGradeLevels(): Promise<TaxonomyItem[]> {
+    return this.prisma.gradeLevel.findMany({
+      where: { enabled: true },
+      select: ITEM_FIELDS,
+      orderBy: { name: 'asc' },
+    });
+  }
+
   /** Succeeds for a disabled row — a stored id always resolves. */
   async resolveSubject(id: string): Promise<TaxonomyItem> {
     const subject = await this.prisma.subject.findUnique({ where: { id }, select: ITEM_FIELDS });

@@ -26,7 +26,9 @@ export default async function globalSetup(): Promise<void> {
   await client.connect();
   try {
     await client.query(
-      'TRUNCATE TABLE "subject_grade_level", "subject", "grade_level", "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE',
+      // `student_profile` is named explicitly: it holds its Grade Level and its
+      // Parent Account with `onDelete: Restrict`, so no CASCADE reaches it.
+      'TRUNCATE TABLE "student_profile", "subject_grade_level", "subject", "grade_level", "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE',
     );
   } finally {
     await client.end();

@@ -21,6 +21,10 @@ import {
 } from '../src/identity/parent-account.service.js';
 import { ParentAuthService } from '../src/identity/parent-auth.service.js';
 import {
+  StudentProfileService,
+  type StudentProfileView,
+} from '../src/identity/student-profile.service.js';
+import {
   CHILD_DATA_CONSENT_VERSION,
   PARENT_JWT,
   PARENT_SESSION_AUDIENCE,
@@ -51,6 +55,8 @@ export interface Harness {
   /** The identity module's JwtService, signing with `PARENT_JWT_SECRET`. */
   parentJwt: JwtService;
   parentAuth: ParentAuthService;
+  /** `identity`'s sole writer of StudentProfile. */
+  students: StudentProfileService;
   mail: MailCapture;
   operatorId: string;
   close(): Promise<void>;
@@ -74,6 +80,7 @@ export async function createHarness(): Promise<Harness> {
     jwt: moduleRef.get<JwtService>(ADMIN_JWT),
     parentJwt: moduleRef.get<JwtService>(PARENT_JWT),
     parentAuth: moduleRef.get(ParentAuthService),
+    students: moduleRef.get(StudentProfileService),
     mail: captureMail(moduleRef.get(MailService)),
     operatorId: '',
     close: async () => {
@@ -94,17 +101,23 @@ export async function createHarness(): Promise<Harness> {
   return harness;
 }
 
-/** Wipes taxonomy and audit state between tests; the operator row survives. */
+/**
+ * Wipes taxonomy and audit state between tests; the operator row survives.
+ *
+ * `student_profile` is listed explicitly rather than left to the CASCADE from
+ * `grade_level`: a Student Profile holds its Grade Level with `onDelete:
+ * Restrict`, so the truncate has to name it or the statement fails.
+ */
 export async function resetTaxonomy(prisma: PrismaService): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE',
+    'TRUNCATE TABLE "student_profile", "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE',
   );
 }
 
 /** Wipes Parent Accounts, their timezone history, credentials and audit state. */
 export async function resetParentAccounts(prisma: PrismaService): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE',
+    'TRUNCATE TABLE "student_profile", "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE',
   );
 }
 
@@ -200,6 +213,39 @@ export function createParentAccount(
     ...(overrides.tier ? { tier: overrides.tier } : {}),
     ...(overrides.timezone ? { timezone: overrides.timezone } : {}),
     ...(overrides.effectiveFrom ? { effectiveFrom: overrides.effectiveFrom } : {}),
+  });
+}
+
+/**
+ * A Grade Level created through `TaxonomyService` — never a raw delegate — so
+ * the fixture exercises the same write path the Admin console uses, `nameKey`
+ * included. `enabled: false` disables it afterwards, again through the service.
+ */
+export async function createGradeLevel(
+  h: Pick<Harness, 'taxonomy' | 'operatorId'>,
+  overrides: { name?: string; enabled?: boolean } = {},
+): Promise<{ id: string; name: string; enabled: boolean }> {
+  fixtureCounter += 1;
+  const created = await h.taxonomy.createGradeLevel(
+    h.operatorId,
+    overrides.name ?? `Grade ${fixtureCounter}`,
+  );
+  if (overrides.enabled === false) {
+    return h.taxonomy.setGradeLevelEnabled(h.operatorId, created.id, false);
+  }
+  return created;
+}
+
+/** A Student Profile created through `identity`'s sole writer. */
+export async function createStudentProfile(
+  h: Pick<Harness, 'students'>,
+  parentAccountId: string,
+  input: { displayName?: string; gradeLevelId: string },
+): Promise<StudentProfileView> {
+  fixtureCounter += 1;
+  return h.students.create(parentAccountId, {
+    displayName: input.displayName ?? `Child ${fixtureCounter}`,
+    gradeLevelId: input.gradeLevelId,
   });
 }
 

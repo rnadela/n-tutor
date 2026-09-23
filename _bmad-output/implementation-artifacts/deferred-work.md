@@ -373,3 +373,51 @@ source_spec: `spec-1-2-parent-pin-for-parent-view.md`
 severity: low
 reason: `e2e/tests/parent-pin.spec.ts` covers set/enter/lock/change(current-PIN)/leave, but no scenario selects the "use account password" radio on the change screen, so that branch and its distinct 401/lock-exempt behaviour are unverified from the browser — the same coverage-altitude shape already recorded for the refresh/ceiling gap.
 status: open
+
+### DW-48: No audit trail exists for parent-side Student Profile mutations: create, rename, Grade-Level change, archive and restore write no actor and no record.
+origin: spec-deferred d18578588495
+location: apps/api/src/identity/student-profile.service.ts
+source_spec: `spec-1-3-student-profile-management.md`
+severity: low
+reason: Admin writes all go through AdminAuditService (AD-25), but nothing equivalent covers the parent surface. `archivedAt` is the only trace any of these five operations leaves, and renames and Grade-Level changes leave none at all. Epic 8's deletion path and any support question ("who archived this profile, and when?") have nothing to read.
+status: open
+
+### DW-49: Nothing bounds the number of Student Profiles an elevated parent can create.
+origin: spec-deferred 57668f54b73d
+location: apps/api/src/identity/student-profile.service.ts create()
+source_spec: `spec-1-3-student-profile-management.md`
+severity: low
+reason: The Account-Tier cap is deliberately Epic 9 (FR-31) and the suite asserts six profiles succeed on a Free account. Separately from that product rule, no sanity ceiling exists, so an authenticated create loop inserts rows without limit. This is an availability concern rather than the tier rule, and it can outlive Epic 9 if the cap lands as a tier figure alone.
+status: open
+
+### DW-50: Display-name normalisation does not strip zero-width, bidi-override or other format/control characters.
+origin: spec-deferred b8b038d12808
+location: apps/api/src/identity/student-profile-policy.ts
+source_spec: `spec-1-3-student-profile-management.md`
+severity: low
+reason: `normaliseDisplayName` applies NFKC, collapses whitespace and trims, which leaves U+200B and bidi overrides intact. A name can therefore render invisibly or direction-flipped in Parent View, and two visually identical names can differ.
+status: open
+
+### DW-51: `listSelectableGradeLevels()` is unbounded (no take/skip) and is read on every Students screen load.
+origin: spec-deferred bfc9f9303c9b
+location: apps/api/src/admin/taxonomy.service.ts
+source_spec: `spec-1-3-student-profile-management.md`
+severity: low
+reason: Same class as DW-8 (the unbounded Parent Accounts list): `findMany` with a where and an orderBy and no limit. Harmless at today's taxonomy size, unbounded by construction.
+status: open
+
+### DW-52: The web app has no render-testing setup, so no Parent View screen behaviour is unit tested - only exported pure helpers and copy strings.
+origin: spec-deferred 50727f8d28ac
+location: apps/web/vitest.config.ts
+source_spec: `spec-1-3-student-profile-management.md`
+severity: medium
+reason: `apps/web/vitest.config.ts` runs `environment: 'node'` and `apps/web/package.json` carries neither jsdom nor @testing-library/react. Every web spec in the repo therefore tests extracted functions; per-row pending locks, draft-survives-a-rejection, and error rendering are reachable only through Playwright, which is slower and coarser.
+status: open
+
+### DW-53: Display-name length is bounded by UTF-16 code-unit count, not code points or grapheme clusters, so astral-plane characters (many emoji) count double and an unpaired surrogate is not explicitly
+origin: spec-deferred 7f6c751195d8
+location: apps/api/src/identity/student-profile-policy.ts
+source_spec: `spec-1-3-student-profile-management.md`
+severity: low
+reason: `DISPLAY_NAME_MAX_LENGTH` gates both the DTO's `@MaxLength` and `isAcceptableDisplayName` on `string.length`, which counts UTF-16 units. A name built from astral-plane characters therefore has an unpredictable effective character budget, and no test exercises a surrogate pair or a lone surrogate. Same class of gap as the existing zero-width/bidi-override normalisation item above.
+status: open
