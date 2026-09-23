@@ -48,14 +48,23 @@ async function leaveParentView(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
 }
 
-/** A signed-up parent who has set a PIN and is standing in Parent View. */
+/**
+ * A signed-up parent who has set a PIN and is standing in Parent View.
+ *
+ * The Parent View heading is matched `exact`: `getByRole` matches a name by
+ * substring, and the first-PIN screen is itself headed "Set a PIN for Parent
+ * View" — so a loose match reports Parent View as reached while the browser is
+ * still standing at the gate, and everything after it races the PIN submit.
+ */
 async function signUpAndSetPin(page: Page): Promise<string> {
   const email = uniqueParentEmail('pin');
   await signUp(page, email);
   await openTheGate(page);
   await expect(page.getByRole('heading', { name: 'Set a PIN for Parent View' })).toBeVisible();
   await enterPin(page, PIN);
-  await expect(page.getByRole('heading', { name: 'Parent View', level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
+  ).toBeVisible();
   return email;
 }
 
@@ -81,7 +90,9 @@ test.describe('the Parent View PIN gate', () => {
 
     // And the same PIN opens it again.
     await enterPin(page, PIN);
-    await expect(page.getByRole('heading', { name: 'Parent View', level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
+    ).toBeVisible();
   });
 
   test('sends a parent with no elevation straight back to the PIN', async ({ page }) => {
@@ -155,7 +166,9 @@ test.describe('the Parent View PIN gate', () => {
     await expect(alert(page)).not.toContainText(PIN);
 
     await enterPin(page, NEW_PIN);
-    await expect(page.getByRole('heading', { name: 'Parent View', level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
+    ).toBeVisible();
   });
 
   test('refuses a change whose two new-PIN entries do not match, without calling the API', async ({
@@ -176,7 +189,9 @@ test.describe('the Parent View PIN gate', () => {
     await leaveParentView(page);
     await openTheGate(page);
     await enterPin(page, PIN);
-    await expect(page.getByRole('heading', { name: 'Parent View', level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
+    ).toBeVisible();
   });
 
   test('never renders the PIN back, in the field or in a response', async ({ page }) => {
@@ -198,7 +213,9 @@ test.describe('the Parent View PIN gate', () => {
     await expect(field).toHaveAttribute('type', 'password');
 
     await page.getByRole('button', { name: 'Save the PIN' }).click();
-    await expect(page.getByRole('heading', { name: 'Parent View', level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
+    ).toBeVisible();
 
     await expect(page.locator('body')).not.toContainText(PIN);
     for (const body of bodies) {

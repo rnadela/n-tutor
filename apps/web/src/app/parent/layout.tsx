@@ -1,5 +1,6 @@
 import Box from '@mui/material/Box';
 import { BackToStudentMode } from './_components/BackToStudentMode';
+import { ParentIdleExpiry } from './_components/ParentIdleExpiry';
 import { ParentThemeProvider } from './_components/ParentThemeProvider';
 import { ElevationProvider } from '@/lib/elevation';
 import { density } from '@/theme/tokens';
@@ -13,6 +14,11 @@ export default function ParentLayout({ children }: { children: React.ReactNode }
   return (
     <ParentThemeProvider>
       <ElevationProvider>
+        {/* One clock for the whole of Parent View, inside the provider that
+            holds the token it watches: mounting it here is what makes idle
+            expiry the same on every Parent View surface (AD-13). It renders
+            nothing. */}
+        <ParentIdleExpiry />
         <Box
           component="main"
           sx={{

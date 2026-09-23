@@ -469,3 +469,19 @@ source_spec: `spec-1-4-student-mode-parent-view-switching.md`
 severity: low
 reason: student-profile.controller.ts's bind() calls findSelectable(...) to validate the profile, then mintBinding(...) and setStudentModeCookie(...), with no re-check between them. A concurrent archive in that gap lets the 204 response set a cookie for a profile that is no longer selectable. Self-correcting: the next GET /api/student/session read finds the profile unselectable and refuses with the cookie cleared, the same outcome archiving-after-bind already produces.
 status: open
+
+### DW-60: Web unit specs still pin component behaviour by matching component source text, because apps/web runs its unit tests without a DOM.
+origin: spec-deferred b2d4edd00725
+location: apps/web/vitest.config.ts
+source_spec: `spec-1-5-parent-view-idle-expiry.md`
+severity: medium
+reason: apps/web/vitest.config.ts runs environment 'node' with no jsdom and no testing-library, so ParentIdleExpiry.spec.tsx asserts on readFileSync + toContain for the parts of the component that are not extractable as pure functions (the effect body, the Date.parse guard, the onExpire wiring). Those assertions break on a reformat and pass on code that is structurally right and behaviourally wrong. Pre-existing convention recorded in Story 1.4; the story's own mitigation was to push the logic into idle-expiry.ts, which is unit-tested for real. Fixing the convention means adding a jsdom test environment.
+status: open
+
+### DW-61: The parent layout imports a page module, so the Students screen's whole graph loads on every Parent View surface including the PIN gate.
+origin: spec-deferred d876370ff87a
+location: apps/web/src/app/parent/_components/ParentIdleExpiry.tsx
+source_spec: `spec-1-5-parent-view-idle-expiry.md`
+severity: low
+reason: apps/web/src/app/parent/layout.tsx mounts BackToStudentMode and ParentIdleExpiry, both of which import endsParentView from '../students/page' — a 'use client' module pulling ~15 MUI imports, parentApi and parentCopy. endsParentView is a pure predicate over ParentApiError and belongs in apps/web/src/lib/parent-api.ts. The coupling pre-dates this story (Story 1.4 introduced it via BackToStudentMode); this story's clock follows the existing import rather than adding a new kind of dependency.
+status: open

@@ -464,6 +464,51 @@ describe('parent PIN and Parent View elevation', () => {
       .expect(401);
   });
 
+  it('refuses an elevation token past its own expiry, wherever it is presented', async () => {
+    const parent = await createSignedInParent(h);
+    await setPinFor(h, parent.cookie, PIN);
+
+    // Minted already expired rather than waited for: every other claim is
+    // right, so the only thing under test is `exp`. The web app's idle clock is
+    // a convenience — the server does not depend on a client that expires.
+    const expired = await elevationTokenWithClaims(
+      h.parentJwt,
+      {
+        email: parent.email,
+        scope: PARENT_ELEVATION_AUDIENCE,
+        epoch: 0,
+        sub: parent.parentAccountId,
+        elevatedAt: Date.now(),
+      },
+      { expiresIn: -1 },
+    );
+
+    // The parent-scoped read.
+    const read = await server()
+      .get('/api/parent/session')
+      .set('Authorization', bearer(expired))
+      .expect(401);
+    expect(read.body.elevated).toBe(false);
+
+    // The refresh route itself: an expired token cannot re-mint its successor.
+    const refreshed = await server()
+      .post('/api/parent/elevation/refresh')
+      .set('Authorization', bearer(expired))
+      .expect(401);
+    expect(refreshed.body.elevated).toBe(false);
+
+    // And an elevation-guarded write.
+    const write = await server()
+      .post('/api/parent/pin/change')
+      .set('Authorization', bearer(expired))
+      .send({ currentPin: PIN, newPin: OTHER_PIN })
+      .expect(401);
+    expect(write.body.elevated).toBe(false);
+
+    // The refused write changed nothing: the original PIN still crosses.
+    await elevate(h, parent.cookie, PIN);
+  });
+
   it('states an expiry in the future on the parent-scoped read, never a 1970 one', async () => {
     const parent = await createSignedInParent(h);
     await setPinFor(h, parent.cookie, PIN);

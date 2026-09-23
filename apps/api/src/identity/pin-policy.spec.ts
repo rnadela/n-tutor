@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ELEVATION_CEILING_MS,
+  ELEVATION_TTL_SECONDS,
   MAX_PIN_ATTEMPTS,
   PIN_COOLDOWN_MS,
   PIN_LENGTH,
   elevationCeilingFrom,
+  elevationCeilingMs,
+  elevationTtlSeconds,
   isLocked,
   isWellFormedPin,
   isWithinCeiling,
@@ -93,6 +96,47 @@ describe('the lock decision on an already-counted failure', () => {
 describe('published figures', () => {
   it('states the cool-down in whole minutes, never rounded away to zero', () => {
     expect(pinCooldownMinutes()).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('the figure Parent View’s idle window comes from', () => {
+  const saved = {
+    ttl: process.env.ELEVATION_TTL_SECONDS,
+    ceiling: process.env.ELEVATION_CEILING_MS,
+  };
+
+  afterEach(() => {
+    for (const [name, value] of [
+      ['ELEVATION_TTL_SECONDS', saved.ttl],
+      ['ELEVATION_CEILING_MS', saved.ceiling],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    resetPinRuntime();
+  });
+
+  it('is the elevation TTL, and nothing else states it', () => {
+    // The browser derives its idle window from `expiresAt - receivedAt`, both
+    // instants the API stated, precisely so no second definition of fifteen
+    // minutes can exist to drift. This is that one definition.
+    delete process.env.ELEVATION_TTL_SECONDS;
+    delete process.env.ELEVATION_CEILING_MS;
+    resetPinRuntime();
+    expect(elevationTtlSeconds()).toBe(ELEVATION_TTL_SECONDS);
+    expect(elevationCeilingMs()).toBe(ELEVATION_CEILING_MS);
+  });
+
+  it('is a positive whole number of seconds, so a window can be derived from it', () => {
+    expect(Number.isInteger(ELEVATION_TTL_SECONDS)).toBe(true);
+    expect(ELEVATION_TTL_SECONDS).toBeGreaterThan(0);
+  });
+
+  it('never outlives the ceiling that bounds it', () => {
+    // The same rule the runtime check below enforces on an override, asserted
+    // on the shipped constants: a window longer than the ceiling would expire
+    // Parent View at an instant the ceiling had already passed.
+    expect(ELEVATION_TTL_SECONDS * 1000).toBeLessThanOrEqual(ELEVATION_CEILING_MS);
   });
 });
 
