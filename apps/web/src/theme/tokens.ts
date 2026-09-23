@@ -44,7 +44,7 @@ export const density = {
   sectionMargin: 20,
   /** Parent/Admin tap-target floor. */
   tapTarget: 44,
-} as const;
+} as const satisfies DensitySet;
 
 /**
  * `density.comfortable` — Student Mode's set.
@@ -61,16 +61,149 @@ export const comfortableDensity = {
   sectionMargin: 32,
   /** Student Mode's tap-target floor. No component restates the figure. */
   tapTarget: 48,
-} as const;
+} as const satisfies DensitySet;
 
-export const rounded = { control: 8 } as const;
+/**
+ * The shape both density sets share (UX-DR9). `buildTheme` takes one of these
+ * rather than closing over a single import, so a surface's density is a
+ * parameter of the theme and never a figure inside a component.
+ */
+export interface DensitySet {
+  rowHeight: number;
+  cardPadding: number;
+  gap: number;
+  sectionMargin: number;
+  /** The surface's tap-target floor: 44 compact, 48 comfortable (UX-DR10). */
+  tapTarget: number;
+}
+
+/**
+ * Radius is semantic: it encodes is-this-paper-or-a-control (UX-DR12).
+ *
+ * `paper` is the near-square role for anything carrying generated Question or
+ * Explanation content; `control` is the rounded role for everything tappable;
+ * `none` is the deliberate zero, so a component never writes `0` inline.
+ */
+export const rounded = { paper: 2, control: 8, none: 0 } as const;
 
 export const focusRing = { width: 2, offset: 2 } as const;
+
+/** MUI's 8px base, named. No component writes a raw spacing number (UX-DR9). */
+export const spacing = {
+  base: 8,
+  1: 8,
+  2: 16,
+  3: 24,
+  4: 32,
+  5: 40,
+} as const;
+
+/** Question content is capped at this measure regardless of viewport. */
+export const measure = { questionMaxWidth: '34rem' } as const;
+
+/**
+ * Motion is permitted only for the transitions UX-DR37 sanctions, and every
+ * one of them collapses to `0` under `prefers-reduced-motion`. The reduced
+ * duration is a token rather than a literal so the rule is assertable.
+ */
+export const motion = {
+  durationShort: 120,
+  durationStandard: 200,
+  durationLong: 320,
+  /** `prefers-reduced-motion: reduce` resolves every duration to this. */
+  durationReduced: 0,
+  /**
+   * How long a snackbar stays up before dismissing itself. Long enough to read
+   * a sentence twice; a message that never leaves is a message that stacks.
+   */
+  snackbarAutoHide: 6000,
+  easing: 'cubic-bezier(0.2, 0, 0, 1)',
+} as const;
 
 export const sansStack =
   "'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 
-/** The `table-cell` type role covers admin tables. */
+/** Generated content — Question text, Explanations, answer keys — only. */
+export const serifStack = "'Literata', Georgia, 'Iowan Old Style', 'Times New Roman', serif";
+
+export interface TypeRole {
+  fontFamily: string;
+  /** rem, so the role honours the browser's root size. */
+  fontSize: string;
+  fontWeight: number;
+  lineHeight: number;
+  letterSpacing?: string;
+  /**
+   * Whether the role's figures align in a column or tick in place (UX-DR7).
+   * Deliberately false on the serif roles: Literata needs `tnum` applied
+   * explicitly, and running prose keeps proportional figures.
+   */
+  tabular: boolean;
+}
+
+/**
+ * The eight-role scale, one ramp shared identically by Student Mode and Parent
+ * View (UX-DR6). Family follows content, never surface: the two generated
+ * -content roles are serif, the six chrome roles sans.
+ */
 export const typeRoles = {
-  tableCell: { fontSize: 16, lineHeight: 1.45 },
-} as const;
+  questionBody: {
+    fontFamily: serifStack,
+    fontSize: '1.375rem',
+    fontWeight: 400,
+    lineHeight: 1.6,
+    tabular: false,
+  },
+  explanationBody: {
+    fontFamily: serifStack,
+    fontSize: '1.1875rem',
+    fontWeight: 400,
+    lineHeight: 1.65,
+    tabular: false,
+  },
+  cardTitle: {
+    fontFamily: sansStack,
+    fontSize: '1.25rem',
+    fontWeight: 600,
+    lineHeight: 1.35,
+    tabular: false,
+  },
+  dashboardBody: {
+    fontFamily: sansStack,
+    fontSize: '1.0625rem',
+    fontWeight: 400,
+    lineHeight: 1.55,
+    tabular: false,
+  },
+  tableCell: {
+    fontFamily: sansStack,
+    fontSize: '1rem',
+    fontWeight: 400,
+    lineHeight: 1.45,
+    tabular: true,
+  },
+  label: {
+    fontFamily: sansStack,
+    fontSize: '0.875rem',
+    fontWeight: 600,
+    lineHeight: 1.4,
+    letterSpacing: '0.02em',
+    tabular: true,
+  },
+  caption: {
+    fontFamily: sansStack,
+    fontSize: '0.8125rem',
+    fontWeight: 400,
+    lineHeight: 1.4,
+    tabular: true,
+  },
+  timer: {
+    fontFamily: sansStack,
+    fontSize: '1.75rem',
+    fontWeight: 600,
+    lineHeight: 1.2,
+    tabular: true,
+  },
+} as const satisfies Record<string, TypeRole>;
+
+export type TypeRoleName = keyof typeof typeRoles;

@@ -509,3 +509,59 @@ source_spec: `spec-1-6-uncommitted-parent-input-survives-expiry-mechanism.md`
 severity: low
 reason: `apps/web/src/lib/elevation.spec.tsx` and `apps/web/src/lib/parent-api.spec.ts` each carry their own copy. Both strip comments with a line-start-only filter that misses trailing comments, and both match literal identifiers only, so an indirection such as `globalThis['local' + 'Storage']` passes either. Both files now also assert at runtime with storage spies, which is the real guard; unifying the scan means editing a Story 1.4 file this story had no other reason to touch.
 status: open
+
+### DW-65: The address-resolution value carries no possessive or pluralisation helper, so later epics' result strings cannot render "your test" versus "Ada's test" through it.
+origin: spec-deferred 7fe40d5d816f
+location: apps/web/src/components/Address.tsx
+source_spec: `spec-1-7-design-system-foundation.md`
+severity: low
+reason: `AddressValue` exposes `name`, `Name` and `verb` only. UX-DR31 covers every result/analytics string describing student work, and Epic 5/7 copy will need a possessive form. No such string exists yet in Epic 1, so nothing is broken today — but the first consumer will either extend the mechanism or reintroduce a literal.
+status: open
+
+### DW-66: Both variable font families are imported as full CSS entrypoints with no preload and no fallback metric matching, so every weight and subset ships and the swap is unmeasured.
+origin: spec-deferred 1ebdb826a3ff
+location: apps/web/src/app/layout.tsx
+source_spec: `spec-1-7-design-system-foundation.md`
+severity: low
+reason: `apps/web/src/app/layout.tsx` imports the two `@fontsource-variable` index entrypoints, which pull every subset including latin-ext and cyrillic. No `size-adjust`/`ascent-override` is declared on the fallback stacks and no face is preloaded, so a layout shift on swap is possible. UX-DR5 requires self-hosting, which is met; bundle weight and CLS are not addressed by any requirement or test.
+status: open
+
+### DW-67: The new jsx-a11y ESLint rules (UX-DR30) are not run by any automated gate, so a violation ships undetected unless a developer runs lint manually.
+origin: spec-deferred ceadb9df77a2
+location: apps/web/package.json
+source_spec: `spec-1-7-design-system-foundation.md`
+severity: low
+reason: `apps/web/package.json`'s `"lint"` script is separate from `"build"` and `"test"`, neither of which invokes ESLint, and the repository has no `.github/workflows` directory, so no CI job runs it either. This is a repo-wide condition that predates this story — no prior story's lint output is enforced automatically either — so the new jsx-a11y rules inherit the same gap rather than introducing a new one.
+status: open
+
+### DW-68: DestructiveConfirmDialog has no error-state copy or slot for a rejected account password, so the first consumer that wires it to real re-authentication has nowhere defined to show that failure.
+origin: spec-deferred 135ec645b19a
+location: apps/web/src/components/Dialog.tsx
+source_spec: `spec-1-7-design-system-foundation.md`
+severity: low
+reason: `commonCopy.destructive` defines title/irreversible/labels/confirm/cancel but nothing for a failed confirm. This story ships the primitive only, with no API wiring (out of scope per the spec's "Never" boundary), so nothing is broken today — but `onConfirm(password)` currently has no way to report back that the password was wrong.
+status: open
+
+### DW-69: The destructive-confirm password field has no Enter-to-submit: confirming requires clicking the button even once a password is typed.
+origin: spec-deferred c9aced4f6a98
+location: apps/web/src/components/Dialog.tsx
+source_spec: `spec-1-7-design-system-foundation.md`
+severity: low
+reason: `DestructiveConfirmDialog`'s `TextField` carries no `onKeyDown`/form submit handling, so pressing Enter while focused in the field does nothing. Not required by any acceptance criterion or UX-DR in this story; a reasonable follow-up affordance.
+status: open
+
+### DW-70: DestructiveConfirmDialog's `onConfirm(password)` call, the busy/firing interlock, and AppSnackbar's unmount cleanup are only verified through their extracted pure functions (`passwordOnToggle`,
+origin: spec-deferred 8c6ff3f1b8fe
+location: apps/web/src/components/Dialog.tsx, apps/web/src/components/Snackbar.tsx
+source_spec: `spec-1-7-design-system-foundation.md`
+severity: low
+reason: The story's own constraint forbids introducing a DOM test runner — tests run under vitest in the `node` environment against `renderToStaticMarkup`, which never processes effects or click handlers. The pure-function extraction already carries the actual logic under test; only the wiring between a real DOM event and that logic goes unverified, and closing that gap would mean revisiting the no-DOM-runner constraint.
+status: open
+
+### DW-71: `theme.spec.ts` asserts `baseTheme.spacing(3)` against MUI's own generated CSS-variable string, so a MUI version bump could break the assertion with no real regression behind it.
+origin: spec-deferred b4fef3ccd7b7
+location: apps/web/src/theme/theme.spec.ts
+source_spec: `spec-1-7-design-system-foundation.md`
+severity: low
+reason: The assertion checks the literal string `'3 * var(--mui-spacing, 8px)'`, which is MUI's internal `spacing()` output format rather than this story's own token. `package.json` has already carried multiple major-version bumps across this epic, so this coupling is more likely than most to need attention on the next one.
+status: open

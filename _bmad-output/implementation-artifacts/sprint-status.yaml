@@ -42,7 +42,7 @@ development_status:
   1-4-student-mode-parent-view-switching: done
   1-5-parent-view-idle-expiry: done
   1-6-uncommitted-parent-input-survives-expiry-mechanism: done
-  1-7-design-system-foundation: backlog
+  1-7-design-system-foundation: done
   epic-1-retrospective: optional
 
   epic-2: backlog
