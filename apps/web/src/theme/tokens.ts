@@ -46,6 +46,23 @@ export const density = {
   tapTarget: 44,
 } as const;
 
+/**
+ * `density.comfortable` — Student Mode's set.
+ *
+ * A child's surface is roomier than a parent's console: taller rows, more air,
+ * and a larger tap-target floor. It stands beside `density` rather than
+ * replacing or parameterising it, so the Admin and Parent surfaces keep the
+ * compact set they were built against.
+ */
+export const comfortableDensity = {
+  rowHeight: 56,
+  cardPadding: 20,
+  gap: 16,
+  sectionMargin: 32,
+  /** Student Mode's tap-target floor. No component restates the figure. */
+  tapTarget: 48,
+} as const;
+
 export const rounded = { control: 8 } as const;
 
 export const focusRing = { width: 2, offset: 2 } as const;

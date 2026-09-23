@@ -35,6 +35,19 @@ async function enterPin(page: Page, pin: string): Promise<void> {
   await submit.click();
 }
 
+/**
+ * Ends Parent View the way anything other than the handover does: a full load,
+ * which unmounts the provider holding the elevation token.
+ *
+ * "Back to Student Mode" — the one control that leaves Parent View — hands the
+ * device to a child, and these accounts have no child to hand it to. Its
+ * no-profile branch is asserted on its own below.
+ */
+async function leaveParentView(page: Page): Promise<void> {
+  await page.goto('/auth/signed-in');
+  await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
+}
+
 /** A signed-up parent who has set a PIN and is standing in Parent View. */
 async function signUpAndSetPin(page: Page): Promise<string> {
   const email = uniqueParentEmail('pin');
@@ -77,8 +90,13 @@ test.describe('the Parent View PIN gate', () => {
     await expect(page.getByRole('heading', { name: 'Enter your PIN' })).toBeVisible();
   });
 
-  test('leaves Parent View and requires the PIN to come back', async ({ page }) => {
+  test('says there is no child to hand the device to, and still leaves', async ({ page }) => {
     await signUpAndSetPin(page);
+    // The exit is a handover, so an account with no profile has nothing to hand
+    // the device to — the control says so rather than offering an empty list.
+    await page.getByRole('button', { name: 'Back to Student Mode' }).click();
+    await expect(page.getByRole('dialog')).toContainText('no profile');
+
     await page.getByRole('button', { name: 'Leave Parent View' }).click();
     await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
 
@@ -90,7 +108,7 @@ test.describe('the Parent View PIN gate', () => {
     page,
   }) => {
     await signUpAndSetPin(page);
-    await page.getByRole('button', { name: 'Leave Parent View' }).click();
+    await leaveParentView(page);
     await openTheGate(page);
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -129,7 +147,7 @@ test.describe('the Parent View PIN gate', () => {
     await expect(page.locator('main').getByRole('status')).toContainText('saved');
 
     await page.getByRole('link', { name: 'Back to Parent View' }).click();
-    await page.getByRole('button', { name: 'Leave Parent View' }).click();
+    await leaveParentView(page);
     await openTheGate(page);
 
     await enterPin(page, PIN);
@@ -155,7 +173,7 @@ test.describe('the Parent View PIN gate', () => {
 
     // The rejected change never reached the API: the old PIN still works.
     await page.getByRole('link', { name: 'Back to Parent View' }).click();
-    await page.getByRole('button', { name: 'Leave Parent View' }).click();
+    await leaveParentView(page);
     await openTheGate(page);
     await enterPin(page, PIN);
     await expect(page.getByRole('heading', { name: 'Parent View', level: 1 })).toBeVisible();

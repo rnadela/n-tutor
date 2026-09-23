@@ -92,6 +92,23 @@ export class StudentProfileService {
     return this.withGradeLevels(rows);
   }
 
+  /**
+   * One profile that Student Mode may bind to, or `null`.
+   *
+   * Active and owned in the same query, exactly as every other read here is
+   * scoped: a profile that is archived, unknown, or another account's is
+   * indistinguishable from the caller's side — a 404, never a 403, which would
+   * confirm the row exists somewhere.
+   */
+  async findSelectable(parentAccountId: string, id: string): Promise<StudentProfileView | null> {
+    const row = await this.prisma.studentProfile.findFirst({
+      where: { id, parentAccountId, archivedAt: null },
+      select: PROFILE_FIELDS,
+    });
+    if (!row) return null;
+    return this.withGradeLevel(row);
+  }
+
   /** The Grade Levels a parent may choose from right now. */
   listGradeLevels(): Promise<TaxonomyItem[]> {
     return this.taxonomy.listSelectableGradeLevels();
@@ -99,18 +116,34 @@ export class StudentProfileService {
 
   // --- Writes ------------------------------------------------------------
 
+  /**
+   * Creates a profile and reports whether it is the account's **only active**
+   * one, which is what makes it the profile the device binds to (Story 1.4).
+   *
+   * The count runs in the same transaction as the write, so the caller never
+   * makes a second query that a concurrent create could slip between. It counts
+   * active profiles only: an account whose sole child was archived and replaced
+   * is an account whose replacement is again the first thing to bind to.
+   */
   async create(
     parentAccountId: string,
     input: { displayName: string; gradeLevelId: string },
-  ): Promise<StudentProfileView> {
+  ): Promise<{ profile: StudentProfileView; isFirst: boolean }> {
     const displayName = this.requireName(input.displayName);
     const gradeLevel = await this.requireSelectableGradeLevel(input.gradeLevelId);
 
-    const row = await this.prisma.studentProfile.create({
-      data: { parentAccountId, displayName, gradeLevelId: gradeLevel.id },
-      select: PROFILE_FIELDS,
+    const [row, activeCount] = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.studentProfile.create({
+        data: { parentAccountId, displayName, gradeLevelId: gradeLevel.id },
+        select: PROFILE_FIELDS,
+      });
+      const count = await tx.studentProfile.count({
+        where: { parentAccountId, archivedAt: null },
+      });
+      return [created, count] as const;
     });
-    return viewOf(row, gradeLevel);
+
+    return { profile: viewOf(row, gradeLevel), isFirst: activeCount === 1 };
   }
 
   /**

@@ -1,6 +1,7 @@
 'use client';
 
 import { parentCopy } from '@/copy/parent';
+import { studentCopy } from '@/copy/student';
 
 /**
  * Everything the sign-up screen needs to state a requirement, read from the API
@@ -64,6 +65,15 @@ export interface ParentSession extends ParentIdentity {
   timezone: string;
 }
 
+/**
+ * What this device is bound to. The binding itself is an httpOnly cookie the
+ * web app can neither read nor write, so this read is the only way the browser
+ * learns which child the device is handed to.
+ */
+export interface StudentSession {
+  profile: StudentProfileView;
+}
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(
   /\/+$/,
   '',
@@ -81,6 +91,14 @@ export class ParentApiError extends Error {
      * tell them apart — so it says which, and the screens act accordingly.
      */
     readonly notElevated: boolean = false,
+    /**
+     * The Student Mode guard refused this call because the device is not bound
+     * to a profile, as opposed to anything else that answers 401. Only the
+     * server can tell the two apart, so it says which — and the front door
+     * routes a child to sign-in instead of showing them an error they cannot
+     * act on.
+     */
+    readonly notBound: boolean = false,
   ) {
     super(message);
     this.name = 'ParentApiError';
@@ -127,18 +145,25 @@ export function messageFor(
 interface FailureDetail {
   lockedUntil: string | null;
   notElevated: boolean;
+  notBound: boolean;
 }
 
 /** What a rejection body says beyond its status, read exactly once. */
 async function failureDetailFrom(response: Response): Promise<FailureDetail> {
-  const none: FailureDetail = { lockedUntil: null, notElevated: false };
+  const none: FailureDetail = { lockedUntil: null, notElevated: false, notBound: false };
   if (response.status !== LOCKED_STATUS && response.status !== 401) return none;
   try {
-    const body = (await response.json()) as { lockedUntil?: unknown; elevated?: unknown } | null;
+    const body = (await response.json()) as {
+      lockedUntil?: unknown;
+      elevated?: unknown;
+      bound?: unknown;
+    } | null;
     return {
       lockedUntil: typeof body?.lockedUntil === 'string' ? body.lockedUntil : null,
       // `elevated: false` is the elevation guard naming itself as the refuser.
       notElevated: body?.elevated === false,
+      // `bound: false` is the Student Mode guard doing the same.
+      notBound: body?.bound === false,
     };
   } catch {
     return none;
@@ -171,10 +196,13 @@ async function call<T>(
     throw new ParentApiError(
       detail.notElevated
         ? parentCopy.pin.notElevated
-        : messageFor(response.status, failureMessage, detail.lockedUntil),
+        : detail.notBound
+          ? studentCopy.notBound
+          : messageFor(response.status, failureMessage, detail.lockedUntil),
       response.status,
       detail.lockedUntil,
       detail.notElevated,
+      detail.notBound,
     );
   }
   if (response.status === 204) return undefined as T;
@@ -285,6 +313,21 @@ export const parentApi = {
       { method: 'PATCH', headers: elevated(token), body: JSON.stringify(input) },
       parentCopy.students.failed,
     ),
+  /**
+   * Binds the device to a child. The elevation bearer is what authorises it:
+   * there is no unelevated call anywhere that changes the binding.
+   */
+  bindStudentMode: (token: string, studentProfileId: string) =>
+    call<void>(
+      '/parent/student-mode',
+      {
+        method: 'POST',
+        headers: elevated(token),
+        body: JSON.stringify({ studentProfileId }),
+      },
+      parentCopy.parentView.exitFailed,
+    ),
+
   archiveStudent: (token: string, id: string) =>
     call<void>(
       `/parent/students/${encodeURIComponent(id)}/archive`,
@@ -297,6 +340,14 @@ export const parentApi = {
       { method: 'POST', headers: elevated(token) },
       parentCopy.students.failed,
     ),
+
+  // --- Student Mode ------------------------------------------------------
+
+  /**
+   * What this device is bound to. No bearer: the binding travels as its own
+   * httpOnly cookie, which `credentials: 'include'` already carries.
+   */
+  studentSession: () => call<StudentSession>('/student/session', {}, studentCopy.failed),
 };
 
 /** The elevation credential's one and only carrier. */

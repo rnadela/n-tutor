@@ -108,8 +108,30 @@ export const parentCopy = {
     ceilingLabel: 'The PIN is required again after',
     changePin: 'Change PIN',
     students: 'Student Profiles',
-    leave: 'Leave Parent View',
     loading: 'Loading Parent View…',
+
+    /**
+     * Leaving Parent View is handing the device to a child, so the control
+     * names where it goes rather than what it closes. Third person, by name —
+     * this is a parent reading about their child, never the child themself.
+     */
+    backToStudent: 'Back to Student Mode',
+    chooseProfileTitle: 'Who is using this device?',
+    chooseProfileIntro:
+      'The device will be handed to the child you choose. It stays on that child until you change it here.',
+    chooseProfileLabel: 'Child',
+    confirmExit: 'Hand over the device',
+    exiting: 'Leaving…',
+    noProfiles: 'There is no profile to hand the device to yet. Add one first.',
+    boundTo: (name: string) => `This device is set up for ${name}.`,
+    exitFailed: 'The device could not be handed over. Try again.',
+    cancel: 'Cancel',
+    /**
+     * The no-profile branch still needs a real way out — an account with no
+     * child has no Student Mode to be handed to, and a dialog that can only be
+     * cancelled would strand the parent inside Parent View.
+     */
+    leaveWithoutHandover: 'Leave Parent View',
   },
   /**
    * The Students screen. A child is named in the third person, by name, and

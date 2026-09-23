@@ -12,6 +12,9 @@ import { ParentPinController } from './parent-pin.controller.js';
 import { ParentPinService } from './parent-pin.service.js';
 import { pinRuntime } from './pin-policy.js';
 import { ParentSessionGuard } from './parent-session.guard.js';
+import { StudentModeController } from './student-mode.controller.js';
+import { StudentModeGuard } from './student-mode.guard.js';
+import { StudentModeService } from './student-mode.service.js';
 import { StudentProfileController } from './student-profile.controller.js';
 import { StudentProfileService } from './student-profile.service.js';
 
@@ -36,7 +39,12 @@ import { StudentProfileService } from './student-profile.service.js';
     // this module, so importing it back would close a cycle.
     TaxonomyModule,
   ],
-  controllers: [ParentAuthController, ParentPinController, StudentProfileController],
+  controllers: [
+    ParentAuthController,
+    ParentPinController,
+    StudentProfileController,
+    StudentModeController,
+  ],
   providers: [
     { provide: PARENT_JWT, useExisting: JwtService },
     ParentAccountService,
@@ -45,6 +53,8 @@ import { StudentProfileService } from './student-profile.service.js';
     ParentSessionGuard,
     ParentElevationGuard,
     StudentProfileService,
+    StudentModeService,
+    StudentModeGuard,
   ],
   // StudentProfileService is exported for Story 1.4's device binding.
   exports: [ParentAccountService, StudentProfileService],

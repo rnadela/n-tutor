@@ -421,3 +421,51 @@ source_spec: `spec-1-3-student-profile-management.md`
 severity: low
 reason: `DISPLAY_NAME_MAX_LENGTH` gates both the DTO's `@MaxLength` and `isAcceptableDisplayName` on `string.length`, which counts UTF-16 units. A name built from astral-plane characters therefore has an unpredictable effective character budget, and no test exercises a surrogate pair or a lone surrogate. Same class of gap as the existing zero-width/bidi-override normalisation item above.
 status: open
+
+### DW-54: Web unit specs assert component source text with regexes instead of rendering and driving the component.
+origin: spec-deferred 9a23665cb5bb
+location: apps/web/vitest.config.ts
+source_spec: `spec-1-4-student-mode-parent-view-switching.md`
+severity: medium
+reason: apps/web/vitest.config.ts runs environment 'node' with no jsdom and no testing-library anywhere under apps/web/src, so BackToStudentMode.spec.tsx and student/page.spec.tsx pin behaviour as readFileSync + regex matches. They break on reformatting and pass on code that is structurally right but behaviourally wrong. Pre-existing repo-wide convention, not introduced here; fixing it means adding a jsdom test environment.
+status: open
+
+### DW-55: GET /api/student/session sends no Cache-Control: no-store though it returns a named child's profile keyed only on a cookie.
+origin: spec-deferred 670e4d3ab418
+location: apps/api/src/identity/student-mode.controller.ts
+source_spec: `spec-1-4-student-mode-parent-view-switching.md`
+severity: medium
+reason: grep for Cache-Control across apps/api/src returns nothing: no route in the API sets it, so this is an API-wide gap rather than a student-route one. An intermediary or bfcache can re-serve the profile after the binding changed.
+status: open
+
+### DW-56: isFirst can be observed as true by two concurrent first-profile creates under read-committed isolation.
+origin: spec-deferred 3c617fa7e711
+location: apps/api/src/identity/student-profile.service.ts
+source_spec: `spec-1-4-student-mode-parent-view-switching.md`
+severity: low
+reason: StudentProfileService.create counts active profiles inside its own transaction; two simultaneous POST /api/parent/students can each see a count of 1 and each mint a binding, last response winning. Both bindings name a profile of the same account, so the consequence is a nondeterministic choice rather than a leak.
+status: open
+
+### DW-57: The API integration suite fails one shifting test per run when executed under full parallel load against the shared Postgres container.
+origin: spec-deferred a93468b14c12
+location: apps/api/test
+source_spec: `spec-1-4-student-mode-parent-view-switching.md`
+severity: medium
+reason: Reproduced on the pre-change tree (changes stashed): the baseline run failed parent-account.int-spec.ts's row-lock test, while the post-change run failed admin-auth.int-spec.ts. Every implicated spec passes when run alone. Pre-existing contention, not a regression from this story.
+status: open
+
+### DW-58: The exit's live-region announcement can go unheard: the component unmounts on navigation to /student before assistive tech has a chance to perceive it.
+origin: spec-deferred f0af6345afbe
+location: apps/web/src/app/parent/_components/BackToStudentMode.tsx
+source_spec: `spec-1-4-student-mode-parent-view-switching.md`
+severity: medium
+reason: BackToStudentMode.bindAndLeave calls setAnnounced(...) then router.replace('/student') in the same tick. That navigation leaves the /parent route group and unmounts the component — and its live region — along with it. No test renders the component to observe whether the announcement is perceived before the unmount; the existing spec only asserts on the component's source text.
+status: open
+
+### DW-59: A profile archived between the deliberate exit's ownership check and the mint can leave the binding cookie briefly naming an already-archived profile.
+origin: spec-deferred 00ba7a60c655
+location: apps/api/src/identity/student-profile.controller.ts
+source_spec: `spec-1-4-student-mode-parent-view-switching.md`
+severity: low
+reason: student-profile.controller.ts's bind() calls findSelectable(...) to validate the profile, then mintBinding(...) and setStudentModeCookie(...), with no re-check between them. A concurrent archive in that gap lets the 204 response set a cookie for a profile that is no longer selectable. Self-correcting: the next GET /api/student/session read finds the profile unselectable and refuses with the cookie cleared, the same outcome archiving-after-bind already produces.
+status: open

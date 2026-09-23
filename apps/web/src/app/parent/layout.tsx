@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box';
+import { BackToStudentMode } from './_components/BackToStudentMode';
 import { ParentThemeProvider } from './_components/ParentThemeProvider';
 import { ElevationProvider } from '@/lib/elevation';
 import { density } from '@/theme/tokens';
@@ -21,6 +22,10 @@ export default function ParentLayout({ children }: { children: React.ReactNode }
             paddingInline: `${density.cardPadding}px`,
           }}
         >
+          {/* Above every Parent View surface, so the way out of Parent View
+              exists wherever the parent happens to be standing. It renders
+              itself as nothing while no elevation is held. */}
+          <BackToStudentMode />
           {children}
         </Box>
       </ElevationProvider>

@@ -19,6 +19,7 @@ import { ParentCredentialRoute } from './parent-credential-route.decorator.js';
 import { ParentAuthService, type ParentSessionView } from './parent-auth.service.js';
 import { ParentSessionGuard, type ParentRequest } from './parent-session.guard.js';
 import { clearSessionCookie, setSessionCookie } from './parent-session.cookie.js';
+import { clearStudentModeCookie } from './student-mode.cookie.js';
 
 /**
  * The parent-facing credential surface, mounted at `/api/auth`. The session is
@@ -49,6 +50,10 @@ export class ParentAuthController {
   ): Promise<{ id: string; email: string }> {
     const session = await this.auth.signUp(dto);
     setSessionCookie(res, session.token, session.ttlSeconds);
+    // A binding left by whoever used this device before belongs to another
+    // account, and would still satisfy its own guard: a new account starts
+    // unbound and binds when its first profile is created.
+    clearStudentModeCookie(res);
     return { id: session.parentAccountId, email: session.email };
   }
 
@@ -62,15 +67,24 @@ export class ParentAuthController {
   ): Promise<{ id: string; email: string }> {
     const session = await this.auth.signIn(dto.email, dto.password);
     setSessionCookie(res, session.token, session.ttlSeconds);
+    // Signing in is attaching this device to an account; whatever child it was
+    // handed to under the previous one is not this account's to hand.
+    clearStudentModeCookie(res);
     return { id: session.parentAccountId, email: session.email };
   }
 
-  /** Clearing the cookie is the whole of sign-out; there is no server session. */
+  /**
+   * Clearing the cookies is the whole of sign-out; there is no server session.
+   *
+   * Both of them: the device stops being attached to the account it was signed
+   * out of, so it must not sit in a Student Mode belonging to that account.
+   */
   @Post('sign-out')
   @SkipThrottle({ login: true })
   @HttpCode(HttpStatus.NO_CONTENT)
   signOut(@Res({ passthrough: true }) res: Response): void {
     clearSessionCookie(res);
+    clearStudentModeCookie(res);
   }
 
   @Get('me')

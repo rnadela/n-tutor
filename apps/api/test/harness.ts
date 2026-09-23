@@ -33,6 +33,7 @@ import {
   TERMS_VERSION,
 } from '../src/identity/auth-policy.js';
 import { PARENT_ELEVATION_AUDIENCE } from '../src/identity/pin-policy.js';
+import { STUDENT_MODE_AUDIENCE, STUDENT_MODE_COOKIE } from '../src/identity/student-mode-policy.js';
 import { MailDispatchError, MailService } from '../src/mail/mail.service.js';
 import type { AccountTier } from '../src/generated/prisma/enums.js';
 
@@ -243,10 +244,11 @@ export async function createStudentProfile(
   input: { displayName?: string; gradeLevelId: string },
 ): Promise<StudentProfileView> {
   fixtureCounter += 1;
-  return h.students.create(parentAccountId, {
+  const { profile } = await h.students.create(parentAccountId, {
     displayName: input.displayName ?? `Child ${fixtureCounter}`,
     gradeLevelId: input.gradeLevelId,
   });
+  return profile;
 }
 
 /** A token shaped like a parent-scoped credential: same secret, wrong audience. */
@@ -379,6 +381,55 @@ export function elevationTokenWithClaims(
 ): Promise<string> {
   return parentJwt.signAsync(claims, {
     audience: PARENT_ELEVATION_AUDIENCE,
+    issuer: PARENT_SESSION_ISSUER,
+    ...(options.expiresIn === undefined ? {} : { expiresIn: options.expiresIn }),
+  });
+}
+
+/**
+ * The `Set-Cookie` value for the Student Mode binding, or `null` when the
+ * response set none.
+ *
+ * `null` rather than `undefined` so "no cookie was set" is a value a test
+ * asserts on outright, instead of an absent property that a typo would also
+ * produce.
+ */
+export function studentCookieFrom(response: { headers: Record<string, unknown> }): string | null {
+  const raw = response.headers['set-cookie'];
+  const values = Array.isArray(raw) ? (raw as string[]) : typeof raw === 'string' ? [raw] : [];
+  return values.find((value) => value.startsWith(`${STUDENT_MODE_COOKIE}=`)) ?? null;
+}
+
+/**
+ * Binds the device through the deliberate-exit route, exactly as the web app
+ * does, and hands back the cookie header a browser would send back.
+ */
+export async function bindDevice(
+  h: Harness,
+  bearerToken: string,
+  studentProfileId: string,
+): Promise<string> {
+  const response = await request(h.app.getHttpServer())
+    .post('/api/parent/student-mode')
+    .set('Authorization', bearer(bearerToken))
+    .send({ studentProfileId })
+    .expect(204);
+  const cookie = studentCookieFrom(response);
+  if (cookie === null) throw new Error('No student_mode cookie in the bind response.');
+  return cookieHeader(cookie);
+}
+
+/**
+ * A binding-audience token with claims varied one at a time, so each individual
+ * check in the Student Mode guard is observable rather than only the audience.
+ */
+export function studentTokenWithClaims(
+  parentJwt: JwtService,
+  claims: Record<string, unknown>,
+  options: { expiresIn?: number } = {},
+): Promise<string> {
+  return parentJwt.signAsync(claims, {
+    audience: STUDENT_MODE_AUDIENCE,
     issuer: PARENT_SESSION_ISSUER,
     ...(options.expiresIn === undefined ? {} : { expiresIn: options.expiresIn }),
   });

@@ -101,6 +101,8 @@ describe('Student Profiles', () => {
       () => server().patch(`/api/parent/students/${randomUUID()}`).send({ displayName: 'Noa' }),
       () => server().post(`/api/parent/students/${randomUUID()}/archive`),
       () => server().post(`/api/parent/students/${randomUUID()}/restore`),
+      // The device binding is a parent-scoped write like any other.
+      () => server().post('/api/parent/student-mode').send({ studentProfileId: randomUUID() }),
     ];
     for (const call of calls) {
       const response = await call().set('Cookie', parent.cookie).expect(401);
