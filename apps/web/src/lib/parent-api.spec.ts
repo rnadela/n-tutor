@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   LOCKED_STATUS,
@@ -8,6 +10,8 @@ import {
   parentApi,
 } from './parent-api';
 import { parentCopy } from '@/copy/parent';
+
+const SOURCE = readFileSync(path.resolve(import.meta.dirname, 'parent-api.ts'), 'utf8');
 
 function respondWith(status: number, body: unknown = {}): ReturnType<typeof vi.fn> {
   // A 204 carries no body at all; constructing one with a body throws.
@@ -235,5 +239,173 @@ describe('error mapping', () => {
       parentCopy.errors.policyUnavailable,
     ];
     expect(new Set(messages).size).toBe(messages.length);
+  });
+});
+
+describe('uncommitted parent state', () => {
+  const TOKEN = 'elevation-bearer';
+  const PROFILE = '11111111-2222-3333-4444-555555555555';
+
+  const initOf = (fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit] =>
+    fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+
+  it('saves through a PUT on the slot, carrying the bearer and nothing else', async () => {
+    const fetchMock = respondWith(200, { id: 'row-1' });
+
+    await parentApi.saveUncommittedState(TOKEN, {
+      studentProfileId: PROFILE,
+      kind: 'DraftEdit',
+      payload: { a: 1 },
+    });
+
+    const [url, init] = initOf(fetchMock);
+    expect(url).toContain('/parent/uncommitted');
+    expect(init.method).toBe('PUT');
+    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
+    expect(JSON.parse(String(init.body))).toEqual({
+      studentProfileId: PROFILE,
+      kind: 'DraftEdit',
+      payload: { a: 1 },
+    });
+  });
+
+  it('reads by naming the profile, because a row is keyed to one', async () => {
+    const fetchMock = respondWith(200, []);
+
+    await parentApi.uncommittedState(TOKEN, PROFILE);
+
+    const [url, init] = initOf(fetchMock);
+    expect(url).toContain(`/parent/uncommitted?studentProfileId=${PROFILE}`);
+    expect(init.method).toBeUndefined();
+    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('discards by id, and reads nothing back from a 204', async () => {
+    const fetchMock = respondWith(204);
+
+    await expect(parentApi.discardUncommittedState(TOKEN, 'row-1')).resolves.toBeUndefined();
+
+    const [url, init] = initOf(fetchMock);
+    expect(url).toContain('/parent/uncommitted/row-1');
+    expect(init.method).toBe('DELETE');
+    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('carries the bearer in a header, never as a cookie', async () => {
+    const fetchMock = respondWith(200, []);
+    await parentApi.uncommittedState(TOKEN, PROFILE);
+    const [, init] = initOf(fetchMock);
+    expect(String(new Headers(init.headers).get('cookie') ?? '')).not.toContain(TOKEN);
+  });
+
+  it('surfaces the elevation guard’s 401 as notElevated on every one of them', async () => {
+    const notElevated = () =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({ statusCode: 401, message: 'Not in Parent View.', elevated: false }),
+              { status: 401 },
+            ),
+        ),
+      );
+
+    const calls = [
+      () =>
+        parentApi.saveUncommittedState(TOKEN, {
+          studentProfileId: PROFILE,
+          kind: 'DraftEdit',
+          payload: { a: 1 },
+        }),
+      () => parentApi.uncommittedState(TOKEN, PROFILE),
+      () => parentApi.uncommittedStateItem(TOKEN, 'row-1', PROFILE),
+      () => parentApi.discardUncommittedState(TOKEN, 'row-1'),
+    ];
+
+    for (const call of calls) {
+      notElevated();
+      const error = await call().catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(ParentApiError);
+      // A device sent back to Student Mode has to be told to cross the PIN
+      // again, not that something generic went wrong.
+      expect((error as ParentApiError).notElevated).toBe(true);
+      expect((error as ParentApiError).message).toBe(parentCopy.pin.notElevated);
+    }
+  });
+
+  it('reads by id while naming the profile, so a mismatch can be refused', async () => {
+    const fetchMock = respondWith(200, { id: 'row-1' });
+
+    await parentApi.uncommittedStateItem(TOKEN, 'row-1', PROFILE);
+
+    const [url, init] = initOf(fetchMock);
+    expect(url).toContain(`/parent/uncommitted/row-1?studentProfileId=${PROFILE}`);
+    expect(init.method).toBeUndefined();
+    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('touches no storage API while it saves, reads or discards', async () => {
+    // The source scan below catches a persistence path on any code path at all;
+    // this catches one on the paths these calls actually take. The repo pins the
+    // elevation token the same way, and server-side-only is the same constraint.
+    const localStorage = { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() };
+    const sessionStorage = { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() };
+    const cookie = vi.fn();
+    const indexedDB = { open: vi.fn(), databases: vi.fn() };
+    vi.stubGlobal('localStorage', localStorage);
+    vi.stubGlobal('sessionStorage', sessionStorage);
+    vi.stubGlobal('indexedDB', indexedDB);
+    vi.stubGlobal('document', {
+      get cookie() {
+        return cookie();
+      },
+      set cookie(_value: string) {
+        cookie();
+      },
+    });
+    respondWith(200, { id: 'row-1' });
+
+    await parentApi.saveUncommittedState(TOKEN, {
+      studentProfileId: PROFILE,
+      kind: 'DraftEdit',
+      payload: { note: 'half a thought' },
+    });
+    await parentApi.uncommittedState(TOKEN, PROFILE);
+    await parentApi.uncommittedStateItem(TOKEN, 'row-1', PROFILE);
+    respondWith(204);
+    await parentApi.discardUncommittedState(TOKEN, 'row-1');
+
+    for (const spy of [
+      localStorage.getItem,
+      localStorage.setItem,
+      localStorage.removeItem,
+      sessionStorage.getItem,
+      sessionStorage.setItem,
+      sessionStorage.removeItem,
+      indexedDB.open,
+      indexedDB.databases,
+      cookie,
+    ]) {
+      expect(spy).not.toHaveBeenCalled();
+    }
+  });
+
+  it('names no storage API anywhere in the module’s source', () => {
+    // Server-side-only is this story's central constraint, and the spies in a
+    // unit test only catch what a call happens to reach. This catches a
+    // persistence path added on any code path at all.
+    const code = SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    for (const forbidden of [
+      'localStorage',
+      'sessionStorage',
+      'indexedDB',
+      'document.cookie',
+      'window.name',
+    ]) {
+      expect(code).not.toContain(forbidden);
+    }
   });
 });

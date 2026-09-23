@@ -485,3 +485,27 @@ source_spec: `spec-1-5-parent-view-idle-expiry.md`
 severity: low
 reason: apps/web/src/app/parent/layout.tsx mounts BackToStudentMode and ParentIdleExpiry, both of which import endsParentView from '../students/page' — a 'use client' module pulling ~15 MUI imports, parentApi and parentCopy. endsParentView is a pure predicate over ParentApiError and belongs in apps/web/src/lib/parent-api.ts. The coupling pre-dates this story (Story 1.4 introduced it via BackToStudentMode); this story's clock follows the existing import rather than adding a new kind of dependency.
 status: open
+
+### DW-62: Nothing caps how many uncommitted-state slots one account can hold, so an elevated parent can grow the store without bound for the full 72-hour window.
+origin: spec-deferred 084011b39b1f
+location: apps/api/src/identity/uncommitted-state.service.ts
+source_spec: `spec-1-6-uncommitted-parent-input-survives-expiry-mechanism.md`
+severity: medium
+reason: `scope` is a free-form caller-supplied string and every distinct (kind, scope) pair opens a new row holding up to the payload ceiling. There is no per-account row count, no byte budget, and the routes skip the credential throttler bucket because none of them runs argon2. The read is now page-capped, which bounds the response but not the store. A cap is a product decision that belongs with Epic 9's allowance work rather than with the mechanism.
+status: open
+
+### DW-63: The 72-hour sweep runs opportunistically on each save rather than as the pg-boss schedule AD-33 states, so an account that never saves again keeps expired rows on disk.
+origin: spec-deferred 085e91f0f7bb
+location: apps/api/src/identity/uncommitted-state.service.ts
+source_spec: `spec-1-6-uncommitted-parent-input-survives-expiry-mechanism.md`
+severity: medium
+reason: This repo has no pg-boss, no worker entrypoint and no job table; standing all three up belongs to the story that first needs background work (Epic 3's orphaned-capture sweep). Reads filter on `expiresAt`, so an expired row is invisible the instant the clock passes regardless — but the bytes are only deleted when some later save on any account triggers `sweepExpired()`. The scheduled job, when it lands, calls that same method unchanged.
+status: open
+
+### DW-64: The hand-rolled "names no storage API" source scan now exists twice, with two independently drifting comment-stripping regexes.
+origin: spec-deferred d3210dc9edaa
+location: apps/web/src/lib/parent-api.spec.ts
+source_spec: `spec-1-6-uncommitted-parent-input-survives-expiry-mechanism.md`
+severity: low
+reason: `apps/web/src/lib/elevation.spec.tsx` and `apps/web/src/lib/parent-api.spec.ts` each carry their own copy. Both strip comments with a line-start-only filter that misses trailing comments, and both match literal identifiers only, so an indirection such as `globalThis['local' + 'Storage']` passes either. Both files now also assert at runtime with storage spies, which is the real guard; unifying the scan means editing a Story 1.4 file this story had no other reason to touch.
+status: open

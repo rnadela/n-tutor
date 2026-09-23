@@ -141,6 +141,10 @@ model ParentAccount {
   consents       AccountConsent[]
   passwordResets PasswordReset[]
   students       StudentProfile[]
+  /// Uncommitted parent work saved on this account. Cascades from here, like
+  /// the consents and reset tokens above it: a row that was never committed is
+  /// not something a deletion has to preserve, and leaves no tombstone.
+  uncommitted    UncommittedState[]
 
   @@map("parent_account")
 }
@@ -170,11 +174,70 @@ model StudentProfile {
   parentAccount ParentAccount @relation(fields: [parentAccountId], references: [id], onDelete: Restrict)
   gradeLevel    GradeLevel    @relation(fields: [gradeLevelId], references: [id], onDelete: Restrict)
 
+  /// Uncommitted parent work saved under this child. Cascades from here: a row
+  /// that was never committed is not something a deletion has to preserve.
+  uncommitted UncommittedState[]
+
   /// The list read and the selectable read are both scoped by account and
   /// filtered by archive state.
   @@index([parentAccountId, archivedAt])
   @@index([gradeLevelId])
   @@map("student_profile")
+}
+
+/// What a slot of uncommitted parent work is. The extension point AD-16
+/// describes: a later epic adds one value and the payload shape that goes with
+/// it. Story 1.6 ships the mechanism and declares no payload for any of them.
+enum UncommittedStateKind {
+  DraftEdit
+  GradeOverride
+  PartialUpload
+
+  @@map("uncommitted_state_kind")
+}
+
+/// Uncommitted parent input, held server-side so a silently expired Parent View
+/// does not destroy half-typed work (AD-16).
+///
+/// Three rules define the row:
+///
+/// - It is keyed to the Parent Account **and** the Student Profile it was
+///   created under (AD-33). An account-scoped row alone would strand one
+///   child's draft where a sibling is now operating the device.
+/// - It lives 72 hours from `createdAt`, never extended by an update. An
+///   actively re-saved slot must not become an indefinite store of a child's
+///   schoolwork that no clock reaches.
+/// - Both relations cascade: an uncommitted row never blocks a deletion and
+///   leaves no tombstone behind it (AD-15/16). `StudentProfile`'s own
+///   `Restrict` is deliberately not the precedent — nothing of substance is
+///   lost when a row that was never committed goes with its profile.
+///
+/// The payload is opaque JSON with a declared ceiling and carries no bytes:
+/// Page Images are `PageImage` rows under AD-15, referenced by id.
+model UncommittedState {
+  id               String               @id @default(uuid())
+  parentAccountId  String
+  studentProfileId String
+  kind             UncommittedStateKind
+  /// An opaque caller-supplied discriminator — a Practice Test id, say — so one
+  /// kind can hold more than one slot. Non-null with a `''` default rather than
+  /// nullable: a nullable column would let two rows silently occupy one slot,
+  /// because SQL's unique index does not compare NULLs.
+  scope            String               @default("")
+  payload          Json
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  /// Created-at plus the TTL, written once and never moved by a later save.
+  expiresAt        DateTime
+
+  parentAccount  ParentAccount  @relation(fields: [parentAccountId], references: [id], onDelete: Cascade)
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  /// The slot: one row per account, profile, kind and scope.
+  @@unique([parentAccountId, studentProfileId, kind, scope])
+  /// The sweep, and the expiry filter every read carries.
+  @@index([expiresAt])
+  @@map("uncommitted_state")
 }
 
 /// Append-only record of what the parent accepted and when. A new acceptance is

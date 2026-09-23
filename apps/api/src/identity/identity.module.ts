@@ -17,10 +17,13 @@ import { StudentModeGuard } from './student-mode.guard.js';
 import { StudentModeService } from './student-mode.service.js';
 import { StudentProfileController } from './student-profile.controller.js';
 import { StudentProfileService } from './student-profile.service.js';
+import { UncommittedStateController } from './uncommitted-state.controller.js';
+import { uncommittedStateRuntime } from './uncommitted-state-policy.js';
+import { UncommittedStateService } from './uncommitted-state.service.js';
 
 /**
  * The `identity` module: sole owner and sole writer of ParentAccount,
- * AccountTimezone, AccountConsent, PasswordReset and StudentProfile (AD-17).
+ * AccountTimezone, AccountConsent, PasswordReset, StudentProfile and UncommittedState (AD-17).
  * The credential
  * half lives here rather than in an `auth` module of its own precisely because
  * a second writer of `parent_account` is the drift AD-17 exists to prevent.
@@ -44,6 +47,7 @@ import { StudentProfileService } from './student-profile.service.js';
     ParentPinController,
     StudentProfileController,
     StudentModeController,
+    UncommittedStateController,
   ],
   providers: [
     { provide: PARENT_JWT, useExisting: JwtService },
@@ -55,6 +59,7 @@ import { StudentProfileService } from './student-profile.service.js';
     StudentProfileService,
     StudentModeService,
     StudentModeGuard,
+    UncommittedStateService,
   ],
   // StudentProfileService is exported for Story 1.4's device binding.
   exports: [ParentAccountService, StudentProfileService],
@@ -65,5 +70,9 @@ export class IdentityModule {
     // elevation override fails the process at boot rather than turning the
     // first request that touches the gate into a 500.
     pinRuntime();
+    // The same rule for the uncommitted-state figures: a mistyped TTL or payload
+    // ceiling is a process that refuses to start, not a 500 the first parent to
+    // save a draft discovers.
+    uncommittedStateRuntime();
   }
 }

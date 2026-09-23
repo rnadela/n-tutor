@@ -74,6 +74,31 @@ export interface StudentSession {
   profile: StudentProfileView;
 }
 
+/**
+ * The kinds of uncommitted parent work the API declares. A closed list, not a
+ * free string: a later epic adds a value here and the payload shape with it.
+ */
+export type UncommittedStateKind = 'DraftEdit' | 'GradeOverride' | 'PartialUpload';
+
+/**
+ * A slot of retained parent work, exactly as the API states it.
+ *
+ * `payload` is `unknown` on purpose: this story ships the mechanism and no
+ * consumer, so nothing here knows what a draft edit, a grade override or a
+ * partial upload looks like. The epic that adds a shape narrows it there.
+ */
+export interface UncommittedStateView {
+  id: string;
+  studentProfileId: string;
+  kind: UncommittedStateKind;
+  scope: string;
+  payload: unknown;
+  createdAt: string;
+  updatedAt: string;
+  /** Creation plus the TTL. A re-save never moves it. */
+  expiresAt: string;
+}
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(
   /\/+$/,
   '',
@@ -348,6 +373,60 @@ export const parentApi = {
    * httpOnly cookie, which `credentials: 'include'` already carries.
    */
   studentSession: () => call<StudentSession>('/student/session', {}, studentCopy.failed),
+
+  // --- Uncommitted parent state ------------------------------------------
+  //
+  // Server-side only, and behind the elevation bearer like every other
+  // parent-scoped call. Nothing here is persisted to any browser storage API —
+  // the same prohibition the elevation token itself carries, and the whole
+  // point of the mechanism: a device that has fallen back to Student Mode holds
+  // no trace of the work.
+  //
+  // No screen calls these yet. Story 1.6 is the mechanism; the epics that add a
+  // `kind` add the callers.
+
+  saveUncommittedState: (
+    token: string,
+    input: {
+      studentProfileId: string;
+      kind: UncommittedStateKind;
+      scope?: string;
+      payload: object;
+    },
+  ) =>
+    call<UncommittedStateView>('/parent/uncommitted', {
+      method: 'PUT',
+      headers: elevated(token),
+      body: JSON.stringify(input),
+    }),
+
+  uncommittedState: (token: string, studentProfileId: string) =>
+    call<UncommittedStateView[]>(
+      `/parent/uncommitted?studentProfileId=${encodeURIComponent(studentProfileId)}`,
+      { headers: elevated(token) },
+    ),
+
+  /**
+   * One retained slot, restored into the profile named here.
+   *
+   * The profile is a parameter rather than something read off the returned row,
+   * because naming it is what lets the API refuse a mismatch: a slot saved
+   * under a sibling answers 404 instead of being rebound into whichever child
+   * the device is in front of now.
+   */
+  uncommittedStateItem: (token: string, id: string, studentProfileId: string) =>
+    call<UncommittedStateView>(
+      `/parent/uncommitted/${encodeURIComponent(id)}?studentProfileId=${encodeURIComponent(
+        studentProfileId,
+      )}`,
+      { headers: elevated(token) },
+    ),
+
+  discardUncommittedState: (token: string, id: string) =>
+    call<void>(`/parent/uncommitted/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: elevated(token),
+    }),
 };
 
 /** The elevation credential's one and only carrier. */
