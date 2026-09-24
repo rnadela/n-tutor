@@ -1,5 +1,6 @@
 import type { QuestionFormat } from '../generated/prisma/enums.js';
 import { isRichText, plainTextOf, type RichText } from '../extraction/rich-text.js';
+import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-policy.js';
 import { PracticeTestPayload } from './practice-test-schema.js';
 
 /**
@@ -42,6 +43,8 @@ export const ANSWER_REQUIRED = 'A question with no options must state its answer
 export const ANSWER_FORBIDDEN =
   'A multiple-choice question states its answer by marking an option, not in the answer field.';
 export const TOPIC_REQUIRED = 'Every question must carry at least one topic.';
+export const WEIGHTED_TOPIC_UNDERWEIGHT =
+  'The payload does not put enough of its questions on the topic that was weighted.';
 export const RICH_TEXT_INVALID = 'A text field is not a valid rich-text segment array.';
 export const PROMPT_NOT_NEW = 'A question reproduces one that already exists.';
 export const PROMPT_EMPTY = 'A question prompt has no text once normalized.';
@@ -95,6 +98,16 @@ export interface GenerationExpectation {
    * source test's, plus everything already landed in this job.
    */
   forbiddenPrompts: ReadonlySet<string>;
+  /**
+   * The Topic this draft was asked to concentrate on and how many of its
+   * questions must carry it, or absent for an unweighted request — which is
+   * every Story 4.1 request, and which skips the count below entirely.
+   *
+   * One pair rather than two fields: a caller that could pass the Topic and
+   * forget the floor would disable the rule silently, with nothing in the type
+   * to say it had.
+   */
+  weighting?: GenerationWeighting | null;
 }
 
 /**
@@ -238,6 +251,24 @@ export function validateGenerationPayload(
   // A format the targets never named is as wrong as a miscount of one they did.
   for (const format of produced.keys()) {
     if (!expectation.targets.has(format)) refuse(FORMAT_MIX_MISMATCH);
+  }
+
+  // The weighting, counted over the whole payload for the reason the format mix
+  // is: a running per-question check would reject a draft that merely put its
+  // on-topic questions last. Skipped entirely when nothing was weighted, so an
+  // unweighted request is validated exactly as Story 4.1 validates it.
+  //
+  // The comparison goes through the policy's normalizer, the same one the
+  // request-time resolve used, so a model that answered '  fractions ' to a
+  // weighting on 'Fractions' counts — it wrote the Topic, and rejecting a
+  // correct draft over its whitespace would spend another provider call to ask
+  // for the same thing again. The labels themselves are stored raw (AD-11).
+  if (expectation.weighting != null) {
+    const wanted = normalizeTopicLabel(expectation.weighting.topic);
+    const onTopic = questions.filter((question) =>
+      question.topics.some((label) => normalizeTopicLabel(label) === wanted),
+    ).length;
+    if (onTopic < expectation.weighting.floor) refuse(WEIGHTED_TOPIC_UNDERWEIGHT);
   }
 
   return { questions };

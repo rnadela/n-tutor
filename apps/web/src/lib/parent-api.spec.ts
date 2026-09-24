@@ -242,6 +242,39 @@ describe('error mapping', () => {
   });
 });
 
+describe('the generation request body', () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+  const bodyOf = (fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> =>
+    JSON.parse(String((fetchMock.mock.calls[0]! as unknown as [string, RequestInit])[1].body));
+
+  it('sends the count alone when nothing is weighted', async () => {
+    // Byte-for-byte the request Story 4.1 makes: absent, not null.
+    const fetchMock = respondWith(202, {});
+    await parentApi.startGeneration('token', ID, 2);
+    expect(bodyOf(fetchMock)).toEqual({ count: 2 });
+
+    vi.unstubAllGlobals();
+    const withNull = respondWith(202, {});
+    await parentApi.startGeneration('token', ID, 2, null);
+    expect(bodyOf(withNull)).toEqual({ count: 2 });
+  });
+
+  it('sends the topic as the Extraction spells it when one is chosen', async () => {
+    const fetchMock = respondWith(202, {});
+    await parentApi.startGeneration('token', ID, 2, 'Fractions');
+    expect(bodyOf(fetchMock)).toEqual({ count: 2, weightedTopic: 'Fractions' });
+  });
+
+  it('reads the topic list from the route that offers it, carrying the bearer', async () => {
+    const fetchMock = respondWith(200, { topics: ['Fractions'] });
+    const view = await parentApi.generationTopics('token', ID);
+    expect(view.topics).toEqual(['Fractions']);
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/parent/source-tests/${ID}/practice-tests/topics`);
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer token');
+  });
+});
+
 describe('a refusal the API authored', () => {
   it("carries the server's stated reason on a 409, beside the screen's fallback", async () => {
     const reason =

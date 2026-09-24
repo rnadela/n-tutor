@@ -313,6 +313,59 @@ export async function chargeGenerationAllowanceFixture(
 }
 
 /** How many Practice Tests were actually generated for an account. */
+/**
+ * The weighted Topic the server actually stored for this parent's newest
+ * generation job, or null for an unweighted request.
+ *
+ * Read from the row rather than from the screen: what is being proved is that
+ * the choice left the browser, was resolved against the Extraction and was
+ * persisted — none of which a sentence rendered from this page's own state
+ * could show.
+ */
+export async function weightedTopicOfNewestJobFor(parentEmail: string): Promise<string | null> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query<{ weightedTopic: string | null }>(
+      `SELECT j."weightedTopic"
+       FROM "generation_job" j
+       JOIN "parent_account" a ON a."id" = j."parentAccountId"
+       WHERE a."email" = $1
+       ORDER BY j."createdAt" DESC, j."id" DESC
+       LIMIT 1`,
+      [parentEmail],
+    );
+    return result.rows[0]?.weightedTopic ?? null;
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Every Topic label stored against this parent's generated Questions.
+ *
+ * The labels on the rows that actually landed, which is what makes "the draft
+ * was written against the Topic that was chosen" observable end to end.
+ */
+export async function generatedTopicLabelsFor(parentEmail: string): Promise<string[]> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query<{ label: string }>(
+      `SELECT t."label"
+       FROM "practice_test_question_topic" t
+       JOIN "practice_test_question" q ON q."id" = t."questionId"
+       JOIN "practice_test" p ON p."id" = q."practiceTestId"
+       JOIN "parent_account" a ON a."id" = p."parentAccountId"
+       WHERE a."email" = $1`,
+      [parentEmail],
+    );
+    return result.rows.map((row) => row.label);
+  } finally {
+    await client.end();
+  }
+}
+
 export async function countPracticeTestsFor(parentEmail: string): Promise<number> {
   const client = new Client({ connectionString: e2eDatabaseUrl() });
   await client.connect();

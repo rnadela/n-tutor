@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
+  EXTRACTION_NOT_READY,
   GENERATION_CLOCK_ANOMALY,
   GENERATION_FAILED,
   GENERATION_INPUT_UNUSABLE,
@@ -11,9 +12,12 @@ const {
   GENERATION_UPSTREAM_REJECTED,
   MAX_JOB_ATTEMPTS,
   MAX_PER_REQUEST,
+  MAX_TOPIC_LABEL_LENGTH,
   NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
+  WEIGHTED_TOPIC_UNKNOWN,
   claimTimeoutMs,
+  weightedTopicFloor,
   resetPracticeTestRuntime,
 } = await import('../src/practicetest/practice-test-policy.js');
 const { PracticeTestService } = await import('../src/practicetest/practice-test.service.js');
@@ -139,11 +143,66 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
     return consumption.allowances.generation.used;
   }
 
-  function requestGeneration(ready: Ready, count: number) {
-    return server()
-      .post(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests`)
-      .set('Authorization', bearer(ready.token))
-      .send({ count });
+  /**
+   * Raises the attempt budget for one case.
+   *
+   * `setup.ts` pins `AI_MAX_ATTEMPTS` to 1 for the whole suite, because most
+   * specs want an injected fault to surface at once. Where the retry is the
+   * thing under test, a case states its own figure — the same knob `AiService`
+   * retries transport faults under, which is the point: every post-hoc retry is
+   * bounded by the existing policy and not by a second one.
+   */
+  function withAttempts(attempts: number): () => void {
+    const ai = h.moduleRef.get(AiService);
+    const previous = ai.config.maxAttempts;
+    ai.config.maxAttempts = attempts;
+    return () => {
+      ai.config.maxAttempts = previous;
+    };
+  }
+
+  /**
+   * Wraps `AiService.run` so a call selected by `shouldMutate(callNumber)` has
+   * its payload passed through `mutate` before being returned to the caller.
+   *
+   * The fake transport always answers correctly by construction, so an
+   * invalid payload has to be injected after it. Captures and restores the
+   * *property*, not a bound copy of it — restoring `ai.run.bind(ai)` would
+   * reinstate this seam's own wrapper, so sequential uses would accumulate
+   * layers instead of unwinding them. Shared by both malformed-payload and
+   * underweight-payload injection below, which differ only in what counts as
+   * a call to mutate and what the mutation does.
+   */
+  function wrapAiRunForCalls(
+    shouldMutate: (callNumber: number) => boolean,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mutate: (payload: any) => void,
+  ): () => void {
+    const ai = h.moduleRef.get(AiService);
+    const previous = ai.run;
+    const wrapped = previous.bind(ai);
+    let seen = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ai.run = async (req: any): Promise<any> => {
+      const result = await wrapped(req);
+      seen += 1;
+      if (shouldMutate(seen)) mutate(result.payload);
+      return result;
+    };
+    return () => {
+      ai.run = previous;
+    };
+  }
+
+  function requestGeneration(ready: Ready, count: number, weightedTopic?: string) {
+    return (
+      server()
+        .post(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests`)
+        .set('Authorization', bearer(ready.token))
+        // Omitted rather than sent as null when absent, so an unweighted request
+        // is byte-for-byte the request Story 4.1 makes.
+        .send(weightedTopic === undefined ? { count } : { count, weightedTopic })
+    );
   }
 
   // --- The bound -------------------------------------------------------
@@ -569,52 +628,20 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
 
   describe('a payload the deterministic pass rejects', () => {
     /**
-     * Replaces what the provider answered, for the first `times` calls.
-     *
-     * The fake transport always answers correctly by construction, so a
-     * malformed payload has to be injected after it: this wraps the seam and
-     * hands back an answer whose MultipleChoice questions flag no correct
-     * option at all — the canonical malformed case the epic names, and one the
-     * schema happily admits.
+     * Replaces what the provider answered, for the first `times` calls, with
+     * an answer whose MultipleChoice questions flag no correct option at all
+     * — the canonical malformed case the epic names, and one the schema
+     * happily admits.
      */
     function malformFirst(times: number): () => void {
-      const ai = h.moduleRef.get(AiService);
-      const wrapped = ai.run.bind(ai);
-      let seen = 0;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ai.run = async (req: any): Promise<any> => {
-        const result = await wrapped(req);
-        seen += 1;
-        if (seen > times) return result;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const payload = result.payload as any;
-        for (const question of payload.questions ?? []) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          for (const choice of question.choices ?? []) (choice as any).isCorrect = false;
-        }
-        return result;
-      };
-      return () => {
-        ai.run = wrapped;
-      };
-    }
-
-    /**
-     * Raises the attempt budget for one case.
-     *
-     * `setup.ts` pins `AI_MAX_ATTEMPTS` to 1 for the whole suite, because most
-     * specs want an injected fault to surface at once. The retry is the thing
-     * under test here, so this case states its own figure — the same knob
-     * `AiService` retries transport faults under, which is the point: the
-     * post-hoc retry is bounded by the existing policy and not by a second one.
-     */
-    function withAttempts(attempts: number): () => void {
-      const ai = h.moduleRef.get(AiService);
-      const previous = ai.config.maxAttempts;
-      ai.config.maxAttempts = attempts;
-      return () => {
-        ai.config.maxAttempts = previous;
-      };
+      return wrapAiRunForCalls(
+        (call) => call <= times,
+        (payload) => {
+          for (const question of payload.questions ?? []) {
+            for (const choice of question.choices ?? []) choice.isCorrect = false;
+          }
+        },
+      );
     }
 
     it('re-issues the generation call rather than failing the parent at once', async () => {
@@ -770,6 +797,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
         parentAccountId: row.parentAccountId,
         sourceTestId: row.sourceTestId,
         studentProfileId: row.studentProfileId,
+        weightedTopic: row.weightedTopic,
         requestedCount: 2,
         producedCount: 0,
         attempts: 3,
@@ -812,6 +840,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
           parentAccountId: row.parentAccountId,
           sourceTestId: row.sourceTestId,
           studentProfileId: row.studentProfileId,
+          weightedTopic: row.weightedTopic,
           requestedCount: 1,
           producedCount: 0,
           attempts: 1,
@@ -890,6 +919,417 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       const prompts = await h.prisma.practiceTestQuestion.findMany({ select: { prompt: true } });
       const rendered = prompts.map((question) => JSON.stringify(question.prompt));
       expect(new Set(rendered).size).toBe(rendered.length);
+    });
+  });
+  // --- Story 4.2: topic weighting -------------------------------------
+
+  describe('topic weighting', () => {
+    /** The Topics the screen would offer, read from the route that offers them. */
+    async function offeredTopics(ready: Ready): Promise<string[]> {
+      const response = await server()
+        .get(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests/topics`)
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      return response.body.topics;
+    }
+
+    /** Every topic label stored against this account's generated questions. */
+    async function landedTopics(): Promise<string[]> {
+      const rows = await h.prisma.practiceTestQuestionTopic.findMany({ select: { label: true } });
+      return rows.map((row) => row.label);
+    }
+
+    it('offers the Extraction own topic labels, de-duplicated and in first-appearance order', async () => {
+      const ready = await generatable();
+      const topics = await offeredTopics(ready);
+      expect(topics.length).toBeGreaterThan(0);
+      expect(new Set(topics).size).toBe(topics.length);
+      // Raw labels, as the Extraction holds them. Nothing canonicalizes,
+      // merges or sorts them (AD-11, Epic 7).
+      const extracted = await h.prisma.extractedTopicLabel.findMany({ select: { label: true } });
+      for (const topic of topics) {
+        expect(extracted.map((row) => row.label)).toContain(topic);
+      }
+      // The fake extraction payload's only usable questions (the dependent
+      // 'Diagram interpretation' question is unusable, per the uninterpretable
+      // region it depends on) all carry 'Reading comprehension' — first-
+      // appearance order, not sorted, observed with the one label this fixture
+      // actually offers for generation.
+      expect(topics).toEqual(['Reading comprehension']);
+    });
+
+    it('answers 404 for a foreign or unknown upload, never 403', async () => {
+      const mine = await generatable();
+      const theirs = await generatable();
+      const refused = await server()
+        .get(`/api/parent/source-tests/${theirs.sourceTestId}/practice-tests/topics`)
+        .set('Authorization', bearer(mine.token))
+        .expect(404);
+      expect(refused.body.message).toBe(SOURCE_TEST_NOT_FOUND);
+    });
+
+    it('refuses the topics read when the upload has not finished being read', async () => {
+      // The route's other 409: the Source Test is not `Submitted` yet, so
+      // there is no Extraction to offer topics from. A distinct sentence from
+      // the one below, and the matrix names both.
+      const ready = await generatable();
+      await h.prisma.sourceTest.update({
+        where: { id: ready.sourceTestId },
+        data: { status: 'Draft' },
+      });
+      const refused = await server()
+        .get(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests/topics`)
+        .set('Authorization', bearer(ready.token))
+        .expect(409);
+      expect(refused.body.message).toBe(EXTRACTION_NOT_READY);
+    });
+
+    it('refuses the topics read when the Extraction holds nothing usable', async () => {
+      const ready = await generatable();
+      await h.prisma.extractedQuestion.updateMany({ data: { usable: false } });
+      const refused = await server()
+        .get(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests/topics`)
+        .set('Authorization', bearer(ready.token))
+        .expect(409);
+      expect(refused.body.message).toBe(NO_USABLE_QUESTIONS);
+    });
+
+    it('accepts a weighted request and stores the Extraction spelling, not the client', async () => {
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      // Typed back in a different case and with stray spaces, exactly as a
+      // client that round-tripped the label through anything might send it.
+      const drifted = `  ${topic!.toUpperCase()} `;
+      const response = await requestGeneration(ready, 2, drifted).expect(202);
+      expect(response.body.weightedTopic).toBe(topic);
+      expect(response.body.requestedCount).toBe(2);
+
+      const stored = await h.prisma.generationJob.findUniqueOrThrow({
+        where: { id: response.body.id },
+        select: { weightedTopic: true, requestedCount: true },
+      });
+      expect(stored.weightedTopic).toBe(topic);
+      expect(stored.requestedCount).toBe(2);
+    });
+
+    it('refuses a topic the Extraction does not carry, enqueueing and charging nothing', async () => {
+      const ready = await generatable();
+      const refused = await requestGeneration(ready, 1, 'Astrophysics').expect(409);
+      expect(refused.body.message).toBe(WEIGHTED_TOPIC_UNKNOWN);
+      // The refusal names no topic at all: not the one asked for, and not the
+      // ones available (AD-20).
+      expect(refused.body.message).not.toContain('Astrophysics');
+      expect(await h.prisma.generationJob.count()).toBe(0);
+      expect(await generationUsed(ready.parentAccountId)).toBe(0);
+    });
+
+    it('prefers the unknown-topic refusal over the spent-allowance one', async () => {
+      // Both refusals apply at once. The precedence is deliberate: a topic
+      // this upload does not carry is malformed against it however much
+      // allowance is left, and answering "no allowance remains" would send a
+      // parent to wait for a period rollover that would refuse them again for
+      // a reason nobody had stated.
+      const ready = await generatable();
+      await requestGeneration(ready, 2).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      expect(await generationUsed(ready.parentAccountId)).toBe(2);
+
+      const refused = await requestGeneration(ready, 1, 'Astrophysics').expect(409);
+      expect(refused.body.message).toBe(WEIGHTED_TOPIC_UNKNOWN);
+      expect(refused.body.message).not.toBe(NO_GENERATION_ALLOWANCE);
+      // And still nothing more enqueued or charged for it.
+      expect(await h.prisma.generationJob.count()).toBe(1);
+      expect(await generationUsed(ready.parentAccountId)).toBe(2);
+    });
+
+    it('refuses a blank or oversized topic on shape, before any row is read', async () => {
+      const ready = await generatable();
+      await requestGeneration(ready, 1, '').expect(400);
+      // Whitespace-only refuses on shape too, rather than arriving at the
+      // service as a topic nobody could carry.
+      await requestGeneration(ready, 1, '   ').expect(400);
+      await requestGeneration(ready, 1, 'x'.repeat(MAX_TOPIC_LABEL_LENGTH + 1)).expect(400);
+      expect(await h.prisma.generationJob.count()).toBe(0);
+    });
+
+    it('judges the label itself, not the padding around it', async () => {
+      // Trimmed before the length and emptiness rules: a genuine label that
+      // arrived with a space on either end is the label, not one character
+      // too long and not a different topic.
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      const response = await requestGeneration(ready, 1, `\n  ${topic}\t `).expect(202);
+      expect(response.body.weightedTopic).toBe(topic);
+    });
+
+    it('trims before the length rule, so padding alone cannot push a genuine label over it', async () => {
+      // If the length rule ran before the trim, this padded-but-short label
+      // would refuse on shape even though the label itself is nowhere near
+      // MAX_TOPIC_LABEL_LENGTH.
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      const padded =
+        ' '.repeat(MAX_TOPIC_LABEL_LENGTH) + topic + ' '.repeat(MAX_TOPIC_LABEL_LENGTH);
+      expect(padded.length).toBeGreaterThan(MAX_TOPIC_LABEL_LENGTH);
+      const response = await requestGeneration(ready, 1, padded).expect(202);
+      expect(response.body.weightedTopic).toBe(topic);
+    });
+
+    it('clamps and charges a weighted request exactly as an unweighted one', async () => {
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      // Free tier, two remaining, five asked for: the clamp is the same clamp,
+      // and weighting is irrelevant to it.
+      const response = await requestGeneration(ready, 5, topic).expect(202);
+      expect(response.body.requestedCount).toBe(2);
+
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      const job = await h.prisma.generationJob.findUniqueOrThrow({
+        where: { id: response.body.id },
+      });
+      expect(job.status).toBe('Succeeded');
+      expect(job.producedCount).toBe(2);
+      // One Generation Allowance unit per landed draft. Weighting changes what
+      // is generated, never what it costs.
+      expect(await generationUsed(ready.parentAccountId)).toBe(2);
+      const charged = await h.prisma.practiceTest.findMany({ select: { chargedAt: true } });
+      expect(charged).toHaveLength(2);
+      expect(charged.every((row) => row.chargedAt !== null)).toBe(true);
+    });
+
+    it('refuses a weighted request with nothing left, exactly as an unweighted one', async () => {
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      await requestGeneration(ready, 2).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const refused = await requestGeneration(ready, 1, topic).expect(409);
+      expect(refused.body.message).toBe(NO_GENERATION_ALLOWANCE);
+      expect(await generationUsed(ready.parentAccountId)).toBe(2);
+    });
+
+    it('lands drafts that meet the floor on the weighted topic', async () => {
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      await requestGeneration(ready, 1, topic).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const draft = await h.prisma.practiceTest.findFirstOrThrow({
+        select: { id: true, questionCount: true },
+      });
+      const floor = weightedTopicFloor(draft.questionCount);
+      const labels = await landedTopics();
+      const onTopic = labels.filter((label) => label === topic).length;
+      // The rule the post-hoc pass enforces, observed on the rows that landed.
+      expect(onTopic).toBeGreaterThanOrEqual(floor);
+      expect(floor).toBeGreaterThanOrEqual(1);
+    });
+
+    it('names the weighted topic in the prompt, with the minimum count it must meet', async () => {
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      await requestGeneration(ready, 1, topic).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const calls = h.ai.sent.filter((call) => call.callClass === 'Generation');
+      expect(calls).toHaveLength(1);
+      // The prompt states the topic and the minimum count, which is the same
+      // figure the post-hoc pass counts against.
+      const draft = await h.prisma.practiceTest.findFirstOrThrow({
+        select: { questionCount: true },
+      });
+      expect(calls[0]!.prompt).toContain(topic);
+      expect(calls[0]!.prompt).toContain(`At least ${weightedTopicFloor(draft.questionCount)} of`);
+      // Named exactly once. The fake Extraction's usable questions all carry
+      // one topic, so this is the single-topic branch: a sentence saying so,
+      // rather than an instruction about "the other topics" trailing an empty
+      // list.
+      expect(calls[0]!.prompt.split(`- ${topic}`)).toHaveLength(2);
+      expect(calls[0]!.prompt).toContain('It is the only topic this test covers');
+      expect(calls[0]!.prompt).not.toContain('Give the remaining questions to the other topics');
+    });
+
+    it('offers the other topics for the remaining questions, weighted one excluded', async () => {
+      // The multi-topic branch. The fake Extraction marks its diagram question
+      // unusable, which leaves one topic; restoring it gives a second, so the
+      // "spread the rest across the others" instruction is reachable. A count
+      // of 3 keeps the floor (2) below the total, so there are genuinely
+      // remaining questions to spread across the other topics.
+      const ready = await generatable();
+      await h.prisma.extractedQuestion.updateMany({ data: { usable: true } });
+      const topics = await offeredTopics(ready);
+      expect(topics.length).toBeGreaterThan(1);
+      const [topic, ...others] = topics;
+      expect(weightedTopicFloor(3)).toBeLessThan(3);
+
+      await requestGeneration(ready, 3, topic).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const calls = h.ai.sent.filter((call) => call.callClass === 'Generation');
+      const prompt = calls[0]!.prompt;
+      expect(prompt).toContain('Give the remaining questions to the other topics below');
+      // The weighted topic is named once, as the one to concentrate on — never
+      // again in the list of others, which would be the instruction arguing
+      // with itself.
+      expect(prompt.split(`- ${topic}`)).toHaveLength(2);
+      for (const other of others) {
+        expect(prompt).toContain(`- ${other}`);
+      }
+    });
+
+    it('gives every question to the weighted topic when the floor consumes the whole count, even on a multi-topic extraction', async () => {
+      // A one-page source keeps the total at 2 questions, where the floor
+      // equals the total (floor(2) = 2) even though the extraction carries
+      // more than one topic. The prompt must not tell the model to spread
+      // zero remaining questions across topics it names.
+      const ready = await generatable(1);
+      await h.prisma.extractedQuestion.updateMany({ data: { usable: true } });
+      const topics = await offeredTopics(ready);
+      expect(topics.length).toBeGreaterThan(1);
+      const [topic] = topics;
+      expect(weightedTopicFloor(2)).toBe(2);
+
+      await requestGeneration(ready, 1, topic).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const calls = h.ai.sent.filter((call) => call.callClass === 'Generation');
+      const prompt = calls[0]!.prompt;
+      expect(prompt).toContain('give it every question');
+      expect(prompt).not.toContain('Give the remaining questions to the other topics');
+    });
+
+    it('carries the weighted topic on the progress read a returning parent makes', async () => {
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      await requestGeneration(ready, 1, topic).expect(202);
+
+      const progress = await server()
+        .get(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests/job`)
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      expect(progress.body.weightedTopic).toBe(topic);
+    });
+
+    /**
+     * Puts every generated question on a topic that is *not* the weighted one,
+     * for each call `underweight` selects by its number — exactly as
+     * `malformFirst` injects the canonical malformed payload, over the same
+     * seam. Only the topics are touched: the format mix, the prompts and the
+     * choices come back untouched, so the *only* rule the payload can fail is
+     * the weighted-topic floor, and a rejection therefore names that rule and
+     * no other.
+     */
+    function underweightCalls(underweight: (callNumber: number) => boolean): () => void {
+      return wrapAiRunForCalls(underweight, (payload) => {
+        for (const question of payload.questions ?? []) {
+          // Still a topic, so `TOPIC_REQUIRED` is satisfied — just never the
+          // one the request was weighted on.
+          question.topics = ['A topic nobody weighted on'];
+        }
+      });
+    }
+
+    it('re-issues the call when a draft comes back under the floor', async () => {
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      const restoreAttempts = withAttempts(2);
+      // The first call comes back under the floor; the second does not.
+      const restoreAi = underweightCalls((call) => call === 1);
+      try {
+        await requestGeneration(ready, 1, topic).expect(202);
+        expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      } finally {
+        restoreAi();
+        restoreAttempts();
+      }
+
+      // A model told to concentrate that spread evenly anyway is the provider's
+      // fault, not the parent's: the call is re-issued under the existing
+      // budget rather than the request being failed on one bad roll.
+      expect(h.ai.sent.filter((call) => call.callClass === 'Generation')).toHaveLength(2);
+
+      const job = await h.prisma.generationJob.findFirstOrThrow();
+      expect(job.status).toBe('Succeeded');
+      expect(job.producedCount).toBe(1);
+      expect(job.weightedTopic).toBe(topic);
+      expect(await generationUsed(ready.parentAccountId)).toBe(1);
+
+      // And the draft that did land meets the floor it was held to.
+      const draft = await h.prisma.practiceTest.findFirstOrThrow({
+        select: { questionCount: true },
+      });
+      const labels = await landedTopics();
+      expect(labels.filter((label) => label === topic).length).toBeGreaterThanOrEqual(
+        weightedTopicFloor(draft.questionCount),
+      );
+    });
+
+    it('ends the job per policy once every attempt came back under the floor', async () => {
+      const ready = await generatable();
+      const [topic] = await offeredTopics(ready);
+      const restoreAttempts = withAttempts(2);
+      // The first call is left alone, so one draft lands and is charged before
+      // the second draft exhausts its budget — which is what makes this the
+      // `PartiallyComplete` outcome rather than a plain failure.
+      const restoreAi = underweightCalls((call) => call > 1);
+      try {
+        await requestGeneration(ready, 2, topic).expect(202);
+        expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      } finally {
+        restoreAi();
+        restoreAttempts();
+      }
+
+      // One good call, then the second draft's whole budget spent below the
+      // floor. Bounded by the same figure, and no further.
+      expect(h.ai.sent.filter((call) => call.callClass === 'Generation')).toHaveLength(3);
+
+      const job = await h.prisma.generationJob.findFirstOrThrow();
+      expect(job.status).toBe('PartiallyComplete');
+      expect(job.producedCount).toBe(1);
+      // The provider's fault, retryable, and the existing policy constant —
+      // never a new sentence, and never the rule that was broken in the
+      // model's own words.
+      expect(job.failureKind).toBe('UpstreamFault');
+      expect(job.failureReason).toBe(GENERATION_FAILED);
+      expect(job.retryable).toBe(true);
+      // Nothing about the failure names the topic or a fragment of what was
+      // written (AD-20).
+      expect(job.failureReason).not.toContain(topic);
+
+      // What landed stays landed and stays charged.
+      const landed = await h.prisma.practiceTest.findMany({ select: { chargedAt: true } });
+      expect(landed).toHaveLength(1);
+      expect(landed[0]!.chargedAt).not.toBeNull();
+      expect(await generationUsed(ready.parentAccountId)).toBe(1);
+
+      // And the upload is untouched: still submitted, still generatable
+      // without a single new photograph.
+      const sourceTest = await h.prisma.sourceTest.findUniqueOrThrow({
+        where: { id: ready.sourceTestId },
+        select: { status: true },
+      });
+      expect(sourceTest.status).toBe('Submitted');
+      await requestGeneration(ready, 1, topic).expect(202);
+    });
+
+    it('leaves an unweighted request exactly as Story 4.1 made it', async () => {
+      const ready = await generatable();
+      const response = await requestGeneration(ready, 1).expect(202);
+      expect(response.body.weightedTopic).toBeNull();
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const calls = h.ai.sent.filter((call) => call.callClass === 'Generation');
+      // The unweighted prompt says nothing about concentrating on anything.
+      expect(calls[0]!.prompt).toContain(
+        'Cover these topics as evenly as the question count allows',
+      );
+      expect(calls[0]!.prompt).not.toContain('Concentrate this test on one topic');
+      const stored = await h.prisma.generationJob.findUniqueOrThrow({
+        where: { id: response.body.id },
+        select: { weightedTopic: true },
+      });
+      expect(stored.weightedTopic).toBeNull();
     });
   });
 });

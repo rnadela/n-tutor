@@ -23,9 +23,11 @@ import {
   RICH_TEXT_INVALID,
   TOPIC_LABEL_TOO_LONG,
   TOPIC_REQUIRED,
+  WEIGHTED_TOPIC_UNDERWEIGHT,
   normalizePrompt,
   validateGenerationPayload,
 } from './practice-test-payload.js';
+import { weightedTopicFloor, weightingFor } from './practice-test-policy.js';
 
 const text = (value: string) => [{ kind: 'text', value }];
 
@@ -409,5 +411,120 @@ describe('material difference', () => {
         expecting([['MultipleChoice', 1]], ['What is nine minus three?']),
       ),
     ).not.toThrow();
+  });
+});
+
+describe('weighted topic floor', () => {
+  /** N ShortAnswer questions, each with its own prompt and its own topic. */
+  function draft(topics: string[]) {
+    return {
+      questions: topics.map((topic, index) =>
+        shortAnswer({
+          prompt: text(`Question number ${index + 1} about something.`),
+          topics: [topic],
+        }),
+      ),
+    };
+  }
+
+  function weighted(total: number, topic: string) {
+    return {
+      targets: new Map<QuestionFormat, number>([['ShortAnswer', total]]),
+      forbiddenPrompts: new Set<string>(),
+      weighting: weightingFor(topic, total),
+    };
+  }
+
+  it('accepts a draft that carries the floor exactly', () => {
+    const floor = weightedTopicFloor(5);
+    const topics = [
+      ...Array.from({ length: floor }, () => 'Fractions'),
+      ...Array.from({ length: 5 - floor }, () => 'Decimals'),
+    ];
+    const result = validateGenerationPayload(draft(topics), weighted(5, 'Fractions'));
+    expect(result.questions).toHaveLength(5);
+  });
+
+  it('refuses a draft one question below the floor', () => {
+    // The whole point of the post-hoc pass: a model told to concentrate still
+    // sometimes spreads evenly, and only a check in code makes the rule true.
+    const floor = weightedTopicFloor(5);
+    const topics = [
+      ...Array.from({ length: floor - 1 }, () => 'Fractions'),
+      ...Array.from({ length: 5 - floor + 1 }, () => 'Decimals'),
+    ];
+    refusedWith(draft(topics), weighted(5, 'Fractions'), WEIGHTED_TOPIC_UNDERWEIGHT);
+  });
+
+  it('counts a label that drifted in case or spacing', () => {
+    // The model was asked to write the topic in the words it was given and
+    // wrote them with different whitespace. That is the same topic, and
+    // spending another provider call over it would buy nothing.
+    const floor = weightedTopicFloor(3);
+    const topics = [
+      ...Array.from({ length: floor }, () => '  fractions '),
+      ...Array.from({ length: 3 - floor }, () => 'Decimals'),
+    ];
+    const result = validateGenerationPayload(draft(topics), weighted(3, 'Fractions'));
+    expect(result.questions).toHaveLength(3);
+    // Stored raw, as written. Canonicalization is Epic 7's (AD-11).
+    expect(result.questions[0]!.topics).toEqual(['fractions']);
+  });
+
+  it('does not count a different topic that merely contains the weighted one', () => {
+    // Normalization is case and whitespace, never substring matching: "Adding
+    // fractions" is its own topic and a draft made entirely of it did not do
+    // what was asked.
+    refusedWith(
+      draft(['Adding fractions', 'Adding fractions', 'Adding fractions']),
+      weighted(3, 'Fractions'),
+      WEIGHTED_TOPIC_UNDERWEIGHT,
+    );
+  });
+
+  it('counts a question that carries the weighted topic among several', () => {
+    const floor = weightedTopicFloor(2);
+    const questions = [
+      shortAnswer({ prompt: text('One about something.'), topics: ['Decimals', 'Fractions'] }),
+      shortAnswer({ prompt: text('Two about something.'), topics: ['Fractions'] }),
+    ];
+    const result = validateGenerationPayload({ questions }, weighted(2, 'Fractions'));
+    expect(result.questions).toHaveLength(2);
+    expect(floor).toBeLessThanOrEqual(2);
+  });
+
+  it('is trivially met by a single-topic extraction weighted on its one topic', () => {
+    // An Extraction carrying exactly one Topic: weighting on it leaves the
+    // model nothing else to write about, every question lands on it, and the
+    // floor is met by a margin rather than by luck. The rule must accept that
+    // draft rather than trip on a payload with no other topic to spread into.
+    const only = 'Fractions';
+    const payload = draft([only, only, only, only]);
+    const result = validateGenerationPayload(payload, weighted(4, only));
+
+    expect(result.questions).toHaveLength(4);
+    expect(new Set(result.questions.flatMap((question) => question.topics))).toEqual(
+      new Set([only]),
+    );
+    // Every question on it, which is at or above the floor by construction.
+    expect(result.questions.length).toBeGreaterThanOrEqual(weightedTopicFloor(4));
+  });
+
+  it('is not applied at all to an unweighted request', () => {
+    // Story 4.1's requests must pass exactly the checks they passed before:
+    // the same payload that fails a weighting passes without one.
+    const spread = draft(['Decimals', 'Decimals', 'Decimals']);
+    refusedWith(spread, weighted(3, 'Fractions'), WEIGHTED_TOPIC_UNDERWEIGHT);
+    expect(
+      validateGenerationPayload(spread, expecting([['ShortAnswer', 3]])).questions,
+    ).toHaveLength(3);
+  });
+
+  it('refuses a weighted draft that carries the topic nowhere at all', () => {
+    refusedWith(
+      draft(['Decimals', 'Decimals', 'Decimals']),
+      weighted(3, 'Fractions'),
+      WEIGHTED_TOPIC_UNDERWEIGHT,
+    );
   });
 });

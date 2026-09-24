@@ -193,7 +193,23 @@ describe('Source Tests: structured extraction', () => {
       expect(job!.completedAt).not.toBeNull();
 
       // One provider call, carrying all three pages.
-      expect(h.ai.sent).toEqual([{ callClass: 'Extraction', modality: 'vision', imageCount: 3 }]);
+      // The whole captured shape, keys included: a field added to
+      // `CapturedAiCall` and never asserted anywhere is a field nothing pins.
+      expect(h.ai.sent).toHaveLength(1);
+      expect(Object.keys(h.ai.sent[0]!).sort()).toEqual([
+        'callClass',
+        'imageCount',
+        'modality',
+        'prompt',
+      ]);
+      expect(h.ai.sent[0]).toMatchObject({
+        callClass: 'Extraction',
+        modality: 'vision',
+        imageCount: 3,
+      });
+      // The prompt is the extraction module's own, carried to the transport
+      // rather than rebuilt anywhere else.
+      expect(h.ai.sent[0]!.prompt).toContain('You are reading the photographed pages');
 
       const extraction = await storedExtraction(draft.sourceTestId);
       expect(extraction!.pageCount).toBe(3);

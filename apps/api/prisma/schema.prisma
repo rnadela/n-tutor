@@ -792,6 +792,17 @@ model GenerationJob {
   /// What was actually accepted, already clamped to the remaining Generation
   /// Allowance server-side. Never what the client asked for.
   requestedCount   Int
+  /// The one Topic this request asked the drafts to concentrate on, held in the
+  /// **Extraction's own spelling** — resolved at request time against the labels
+  /// the Extraction actually carries, never the spelling the client sent. Null
+  /// for an unweighted request, which is every request Story 4.1 could make and
+  /// still the default one.
+  ///
+  /// It is stored rather than recomputed because the request, the run and the
+  /// progress read all happen at different times: the job has to still know what
+  /// it was asked for when a worker picks it up, and a parent returning to the
+  /// URL has to read the request they actually made.
+  weightedTopic    String?
   /// How many drafts have landed and been charged. Incremented inside the same
   /// fenced transaction that inserts each Practice Test, so the two figures
   /// cannot disagree.

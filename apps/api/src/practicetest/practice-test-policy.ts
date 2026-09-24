@@ -54,6 +54,30 @@ export const DEFAULT_CLAIM_TIMEOUT_MS = 10_800_000;
 /** How often the worker looks for work when it has just found none. */
 export const DEFAULT_POLL_MS = 1_000;
 
+/**
+ * What "predominantly on the chosen Topic" actually means, as a share.
+ *
+ * A figure rather than a phrase, and a figure in exactly one place: the prompt
+ * quotes the count it produces and the post-hoc pass counts against the same
+ * count, so the instruction and the check cannot drift apart. Three fifths is
+ * the product's answer to "predominantly" — comfortably a majority, and still
+ * leaving room for the Extraction's other Topics, which a weighted draft is
+ * still required to cover.
+ */
+export const WEIGHTED_TOPIC_SHARE = 0.6;
+
+/**
+ * The longest a weighted Topic label may be on the way in.
+ *
+ * Mirrors `MAX_LABEL_LENGTH` in `practice-test-payload.ts`, because the two
+ * bound the same thing from opposite directions: that one is the ceiling on a
+ * label coming back from a provider, this one the ceiling on a label arriving
+ * from a browser. A request carrying a label longer than any label the
+ * Extraction could hold is malformed rather than merely unknown, so the DTO
+ * refuses it on shape before a row is read.
+ */
+export const MAX_TOPIC_LABEL_LENGTH = 200;
+
 // --- Messages ------------------------------------------------------------
 //
 // Not one of them carries a provider string, a model name, a tier label or a
@@ -85,6 +109,18 @@ export const NO_GENERATION_ALLOWANCE =
 /** There is nothing to generate from. */
 export const NO_USABLE_QUESTIONS =
   'No questions could be used from this upload. Retake the pages and submit again.';
+
+/**
+ * The weighted Topic asked for is not one this upload carries.
+ *
+ * It names no Topic — not the one asked for and not the ones available — for
+ * the same reason nothing else here does: a Topic label is content read off a
+ * parent's own page, and a refusal sentence is a place it has no business
+ * being. The screen offers the Extraction's own labels, so a parent reaching
+ * this sentence asked for something the screen never showed them.
+ */
+export const WEIGHTED_TOPIC_UNKNOWN =
+  'That topic is not one this upload covers. Choose one of the topics offered, or all topics.';
 
 /** The Extraction has not finished, so there is nothing to read yet. */
 export const EXTRACTION_NOT_READY = 'This upload has not finished being read yet.';
@@ -229,6 +265,23 @@ export function remainingFor(used: number, limit: number | null): number {
 }
 
 /**
+ * When two Topic labels are the same Topic, for the two places that have to
+ * agree: the request-time resolve of what the parent asked for against what the
+ * Extraction carries, and the post-hoc count of how many generated questions
+ * landed on it.
+ *
+ * Case and whitespace only. This is **not** canonicalization and never becomes
+ * it (AD-11, Epic 7): "Fractions" and "fraction" stay two different Topics
+ * here, because deciding they are one is Mastery's job and doing it in two
+ * places would split one concept into two Mastery values. All this says is that
+ * `'  fractions '` and `'Fractions'` are the same label typed twice, which is
+ * the only drift the request and the model actually produce.
+ */
+export function normalizeTopicLabel(label: string): string {
+  return label.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim();
+}
+
+/**
  * The server's own count, computed independently of whatever the client sent.
  *
  * The UI disabling a radio button is a courtesy; this is the control. A request
@@ -241,6 +294,50 @@ export function clampCount(requested: number, remaining: number): number {
   const asked = Math.floor(requested);
   if (asked <= 0) return 0;
   return Math.min(asked, MAX_PER_REQUEST, Math.max(0, remaining));
+}
+
+/**
+ * How many of a weighted draft's Questions must carry the weighted Topic.
+ *
+ * A floor rather than a majority, and deliberately: a floor is a number the
+ * prompt can quote and the post-hoc pass can state, while "most of them" is a
+ * comparison whose meaning wobbles at small totals. One question minimum, so a
+ * one-question Extraction is weightable at all; never more than `total`, so the
+ * rule is always satisfiable by a draft that puts every question on the Topic.
+ */
+export function weightedTopicFloor(total: number): number {
+  if (!Number.isFinite(total)) return 0;
+  const questions = Math.floor(total);
+  if (questions <= 0) return 0;
+  return Math.min(questions, Math.max(1, Math.ceil(questions * WEIGHTED_TOPIC_SHARE)));
+}
+
+/**
+ * A weighting, as one indivisible thing.
+ *
+ * The Topic and the floor travel together and are built together, because the
+ * two are one rule stated twice — once to the model in the prompt, once to the
+ * post-hoc pass in code. Held as two independently-optional fields, a caller
+ * could pass the Topic and forget the floor, and the check would silently
+ * accept every draft with no type error to say so.
+ */
+export interface GenerationWeighting {
+  /** The Topic to concentrate on, in the Extraction's own spelling. */
+  topic: string;
+  /** How many of the draft's Questions must carry it. */
+  floor: number;
+}
+
+/**
+ * Builds the weighting for a draft of `total` Questions, or nothing at all.
+ *
+ * The one place a `GenerationWeighting` is made, so the floor is always
+ * `weightedTopicFloor(total)` for the Topic it sits beside and never a figure
+ * somebody computed separately.
+ */
+export function weightingFor(topic: string | null, total: number): GenerationWeighting | null {
+  if (topic === null) return null;
+  return { topic, floor: weightedTopicFloor(total) };
 }
 
 /**

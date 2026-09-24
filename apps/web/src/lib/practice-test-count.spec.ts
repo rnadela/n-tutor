@@ -4,8 +4,10 @@ import {
   countOptions,
   defaultCount,
   isSettled,
+  progressSentence,
   remainingAfter,
 } from './practice-test-count';
+import { parentCopy } from '@/copy/parent';
 
 describe('countOptions', () => {
   it('offers every count up to the ceiling, whatever the account can afford', () => {
@@ -89,5 +91,45 @@ describe('remainingAfter', () => {
 describe('the poll interval', () => {
   it('is a positive interval, so a running job is actually re-read', () => {
     expect(GENERATION_POLL_MS).toBeGreaterThan(0);
+  });
+});
+
+describe('progressSentence', () => {
+  const job = (weightedTopic: string | null) => ({
+    producedCount: 1,
+    requestedCount: 3,
+    weightedTopic,
+  });
+
+  it('states what has landed and what was asked for when nothing is weighted', () => {
+    expect(progressSentence(job(null))).toBe(parentCopy.generate.progress(1, 3));
+    expect(progressSentence(job(null))).toContain('1 of 3');
+  });
+
+  it('names the weighted topic when the job carries one', () => {
+    // The point of the whole story on this screen: a sentence that dropped the
+    // topic would leave a parent unable to tell a weighted request from an
+    // unweighted one.
+    const sentence = progressSentence(job('Fractions'));
+    expect(sentence).toContain('Fractions');
+    expect(sentence).toContain('1 of 3');
+    expect(sentence).toBe(parentCopy.generate.progressWeighted(1, 3, 'Fractions'));
+    expect(sentence).not.toBe(parentCopy.generate.progress(1, 3));
+  });
+
+  it('names the topic as it was given, whatever is in it', () => {
+    // The label is content read off a parent's page: it is neither retitled
+    // nor truncated on its way into the sentence.
+    const odd = 'Fractions, decimals & “percentages”';
+    expect(progressSentence(job(odd))).toContain(odd);
+  });
+
+  it('carries both figures in both forms, so neither sentence quietly drops one', () => {
+    expect(
+      progressSentence({ producedCount: 0, requestedCount: 5, weightedTopic: null }),
+    ).toContain('0 of 5');
+    expect(
+      progressSentence({ producedCount: 0, requestedCount: 5, weightedTopic: 'Long division' }),
+    ).toContain('0 of 5');
   });
 });

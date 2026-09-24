@@ -29,10 +29,14 @@ import {
   MAX_PER_REQUEST,
   NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
+  WEIGHTED_TOPIC_UNKNOWN,
   claimTimeoutMs,
   clampCount,
   formatTargets,
+  normalizeTopicLabel,
   remainingFor,
+  weightingFor,
+  type GenerationWeighting,
 } from './practice-test-policy.js';
 import {
   GenerationPayloadInvalid,
@@ -111,6 +115,15 @@ export interface ClaimedGenerationJob {
   requestedCount: number;
   producedCount: number;
   attempts: number;
+  /**
+   * The Topic this job was asked to concentrate on, in the Extraction's own
+   * spelling, or null for an unweighted request. Carried into the run because
+   * the run happens later than the request that chose it.
+   *
+   * A Topic label is content read off a parent's page, so it travels here to be
+   * put in a prompt and counted against — never into a log line (AD-20).
+   */
+  weightedTopic: string | null;
 }
 
 /**
@@ -130,12 +143,30 @@ export interface GenerationAllowanceView {
   timezone: string;
 }
 
+/**
+ * The Topics a request may be weighted on: the Extraction's own labels, raw and
+ * de-duplicated, in first-appearance order.
+ *
+ * A list and nothing else — no counts, no mastery, no ordering by how often a
+ * Topic appears. Anything more would be an Analytics figure on a generate
+ * screen, and that surface is Epic 7's (FR-11, FR-29).
+ */
+export interface GenerationTopicsView {
+  topics: string[];
+}
+
 /** The progress read's whole answer: where the job stands, and how much landed. */
 export interface GenerationJobView {
   id: string;
   status: GenerationJobStatus;
   /** Already clamped. What the client asked for is never stored or reported. */
   requestedCount: number;
+  /**
+   * The Topic the request was weighted on, in the Extraction's own spelling, or
+   * null for an unweighted request. It travels on the view so a parent
+   * returning to the URL reads the request they actually made.
+   */
+  weightedTopic: string | null;
   producedCount: number;
   completedAt: string | null;
   failureKind: AiFailureKind | null;
@@ -196,6 +227,32 @@ export class PracticeTestService {
   }
 
   /**
+   * The Topics this Source Test's Extraction actually carries, which are the
+   * only Topics a request may be weighted on.
+   *
+   * In first-appearance order, and de-duplicated by the **same** comparison
+   * `request()` resolves against, so the offered list and the resolver cannot
+   * disagree: two raw labels differing only by case or spacing are one option
+   * here, and choosing it resolves to the spelling offered. Nothing
+   * canonicalizes, merges or sorts beyond that — the labels are raw as they
+   * were read (AD-11, Epic 7), and the screen offers them as they are.
+   *
+   * Its refusals mirror `request()`'s, and for the same reason: a screen that
+   * could list Topics for an upload the request would refuse would be offering
+   * a choice that cannot be made.
+   */
+  async topicsFor(parentAccountId: string, sourceTestId: string): Promise<GenerationTopicsView> {
+    const sourceTest = await this.sourceTests.requireReadable(parentAccountId, sourceTestId);
+    if (sourceTest.status !== 'Submitted') throw new ConflictException(EXTRACTION_NOT_READY);
+
+    const extraction = await this.extraction.readForGeneration(sourceTestId);
+    if (extraction === null) throw new ConflictException(EXTRACTION_NOT_READY);
+    if (extraction.questions.length === 0) throw new ConflictException(NO_USABLE_QUESTIONS);
+
+    return { topics: topicsOf(extraction) };
+  }
+
+  /**
    * Accepts a generation request and enqueues the job, or refuses it.
    *
    * The count is clamped **here**, against a count of charged rows read inside
@@ -205,13 +262,22 @@ export class PracticeTestService {
    *
    * The refusals are ordered so the parent reads the most actionable fact: an
    * upload that has not finished being read, then one with nothing usable in
-   * it, then an allowance that is spent. A foreign or unknown id answers 404
-   * through `sourcetest` before any of them (AD-18).
+   * it, then a weighting on a Topic the upload does not carry, then an
+   * allowance that is spent. A foreign or unknown id answers 404 through
+   * `sourcetest` before any of them (AD-18).
+   *
+   * The weighted Topic is deliberately decided **before** the allowance, and
+   * the ordering is not incidental: a request naming a Topic that does not
+   * exist is malformed against this upload however much allowance is left, and
+   * telling such a parent "no allowance remains" would send them to wait for a
+   * period rollover that would refuse them again for a reason nobody stated.
+   * The unknown Topic is the fact they can act on, so it is the fact they get.
    */
   async request(
     parentAccountId: string,
     sourceTestId: string,
     count: number,
+    weightedTopic?: string | null,
   ): Promise<GenerationJobView> {
     // `requireReadable`, not `requireLive`: a submitted Source Test's
     // `expiresAt` is the draft's capture TTL and is never cleared, so honouring
@@ -223,6 +289,14 @@ export class PracticeTestService {
     const extraction = await this.extraction.readForGeneration(sourceTestId);
     if (extraction === null) throw new ConflictException(EXTRACTION_NOT_READY);
     if (extraction.questions.length === 0) throw new ConflictException(NO_USABLE_QUESTIONS);
+
+    // Resolved here, before the transaction and before anything is enqueued or
+    // charged, and resolved to the **Extraction's** spelling rather than the
+    // client's. The prompt asks the model to write Topics in the words it is
+    // given, and the post-hoc pass counts generated labels against this one, so
+    // persisting what a browser happened to send would put a third spelling
+    // into a loop that only works while there is one.
+    const resolvedTopic = resolveWeightedTopic(extraction, weightedTopic ?? null);
 
     const consumption = await this.allowance.consumptionFor(parentAccountId);
     const { limit } = consumption.allowances.generation;
@@ -251,6 +325,7 @@ export class PracticeTestService {
           sourceTestId,
           studentProfileId: sourceTest.studentProfileId,
           requestedCount,
+          weightedTopic: resolvedTopic,
         },
         select: JOB_VIEW_FIELDS,
       });
@@ -350,6 +425,7 @@ export class PracticeTestService {
           requestedCount: true,
           producedCount: true,
           attempts: true,
+          weightedTopic: true,
         },
       });
     });
@@ -373,7 +449,7 @@ export class PracticeTestService {
       if (extraction === null) throw new GenerationTargetMissing(true);
       if (extraction.questions.length === 0) throw new GenerationTargetMissing(false);
 
-      const plan = planFor(extraction);
+      const plan = planFor(extraction, job.weightedTopic);
       // Seeded with the source's own prompts, then grown with everything this
       // job has landed — including drafts a previous pass of the same job
       // landed, which is why it is read from the rows rather than kept in
@@ -447,6 +523,7 @@ export class PracticeTestService {
           sourceQuestions: extraction.questions,
           targets: plan.targets,
           topics: plan.topics,
+          weighting: plan.weighting,
           alreadyGenerated: landedPrompts,
         }),
         schema: PracticeTestPayload,
@@ -455,13 +532,18 @@ export class PracticeTestService {
           fakePracticeTestPayload({
             targets: plan.fakeTargets,
             topics: plan.topics,
+            weighting: plan.weighting,
             draftOrdinal,
             failure,
           }),
       });
 
       try {
-        return validateGenerationPayload(payload, { targets: plan.targets, forbiddenPrompts });
+        return validateGenerationPayload(payload, {
+          targets: plan.targets,
+          forbiddenPrompts,
+          weighting: plan.weighting,
+        });
       } catch (cause) {
         // Only a post-hoc rejection is worth asking again for. Anything else
         // is this module's own fault and is not made better by repetition.
@@ -743,6 +825,7 @@ const JOB_VIEW_FIELDS = {
   id: true,
   status: true,
   requestedCount: true,
+  weightedTopic: true,
   producedCount: true,
   completedAt: true,
   failureKind: true,
@@ -754,6 +837,7 @@ interface JobRow {
   id: string;
   status: GenerationJobStatus;
   requestedCount: number;
+  weightedTopic: string | null;
   producedCount: number;
   completedAt: Date | null;
   failureKind: AiFailureKind | null;
@@ -766,6 +850,7 @@ function viewOf(job: JobRow): GenerationJobView {
     id: job.id,
     status: job.status,
     requestedCount: job.requestedCount,
+    weightedTopic: job.weightedTopic,
     producedCount: job.producedCount,
     completedAt: job.completedAt?.toISOString() ?? null,
     failureKind: job.failureKind,
@@ -789,9 +874,18 @@ interface GenerationPlan {
   fakeTargets: FakeFormatTarget[];
   topics: string[];
   sourcePrompts: Set<string>;
+  /**
+   * The Topic to concentrate on and how many questions must carry it, or null
+   * when nothing is weighted. One value, so the prompt, the fake and the
+   * validator are all handed the same indivisible rule.
+   */
+  weighting: GenerationWeighting | null;
 }
 
-function planFor(extraction: ExtractionForGeneration): GenerationPlan {
+function planFor(
+  extraction: ExtractionForGeneration,
+  weightedTopic: string | null,
+): GenerationPlan {
   // Each generated Practice Test defaults its Question count from the Source
   // Test's own usable count — the epic's rule, stated here as the one place the
   // total comes from.
@@ -800,12 +894,70 @@ function planFor(extraction: ExtractionForGeneration): GenerationPlan {
     extraction.questions.map((question) => question.format),
     total,
   );
-  const topics = [...new Set(extraction.questions.flatMap((question) => question.topics))];
+  const topics = topicsOf(extraction);
   const sourcePrompts = new Set(
     extraction.questions.map((question) => normalizePrompt(plainTextOf(question.prompt))),
   );
   const fakeTargets = [...targets.entries()]
     .filter(([, count]) => count > 0)
     .map(([format, count]) => ({ format, count }));
-  return { targets, fakeTargets, topics, sourcePrompts };
+  // Taken from the row as it was stored, not re-resolved: `request()` already
+  // matched it against this same `readForGeneration` and persisted the
+  // Extraction's own spelling, and resolving a second time would be a second
+  // chance for the Topic the prompt names to differ from the Topic the
+  // post-hoc pass counts.
+  return {
+    targets,
+    fakeTargets,
+    topics,
+    sourcePrompts,
+    weighting: weightingFor(weightedTopic, total),
+  };
+}
+
+/**
+ * The Extraction's Topic labels, in first-appearance order, de-duplicated by
+ * the same comparison the resolver uses.
+ *
+ * Not a plain `Set`: labels are stored raw (AD-11), so one Extraction can
+ * genuinely hold `Fractions` and `  fractions ` as two rows. A plain `Set`
+ * keeps both, the screen offers both, and `matchTopic` resolves both to the
+ * first — leaving the second option unselectable in a way nothing explains.
+ * Folding them here, keeping the first spelling, makes the list the screen
+ * offers and the list the resolver searches literally the same list.
+ */
+function topicsOf(extraction: ExtractionForGeneration): string[] {
+  const seen = new Set<string>();
+  const topics: string[] = [];
+  for (const label of extraction.questions.flatMap((question) => question.topics)) {
+    const key = normalizeTopicLabel(label);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    topics.push(label);
+  }
+  return topics;
+}
+
+/** The Extraction's own spelling of a label, or undefined if it carries none. */
+function matchTopic(topics: readonly string[], wanted: string): string | undefined {
+  const normalized = normalizeTopicLabel(wanted);
+  return topics.find((label) => normalizeTopicLabel(label) === normalized);
+}
+
+/**
+ * Turns what the client asked to weight into what is stored, or refuses.
+ *
+ * Absent stays absent, which is Story 4.1's request unchanged in every respect.
+ * A label the Extraction does carry resolves to **its** spelling. Anything else
+ * is a 409 before the transaction opens, so nothing is enqueued and nothing is
+ * charged for a request that could never have been satisfied.
+ */
+function resolveWeightedTopic(
+  extraction: ExtractionForGeneration,
+  wanted: string | null,
+): string | null {
+  if (wanted === null) return null;
+  const matched = matchTopic(topicsOf(extraction), wanted);
+  if (matched === undefined) throw new ConflictException(WEIGHTED_TOPIC_UNKNOWN);
+  return matched;
 }

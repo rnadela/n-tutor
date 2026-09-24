@@ -246,6 +246,14 @@ export interface CapturedAiCall {
   /** Stated by the caller; what an assertion about a text call reads. */
   modality: string;
   imageCount: number;
+  /**
+   * The prompt as the caller built it.
+   *
+   * Captured so a test can assert on the *instruction*, not only on what came
+   * back — the generation prompt and the post-hoc pass are two halves of one
+   * rule, and a rule stated in only one of them is a rule that drifts.
+   */
+  prompt: string;
 }
 
 export interface AiCapture {
@@ -279,6 +287,7 @@ function captureAi(ai: AiService): AiCapture {
       callClass: request.callClass,
       modality: request.modality,
       imageCount: request.images.length,
+      prompt: request.prompt,
     });
     if (failOnce === null) return original(request);
     const kind = failOnce;

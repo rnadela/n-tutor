@@ -70,6 +70,71 @@ describe('the count picker', () => {
   });
 });
 
+describe('the topic weighting', () => {
+  it('offers the Extraction own topics, fetched alongside the allowance and the job', () => {
+    // The list arrives from the API, so the label the screen offers is the
+    // label the server will resolve, store and count against.
+    expect(PAGE_SOURCE).toContain('parentApi.generationTopics(token, sourceTestId)');
+    expect(PAGE_SOURCE).toContain('setTopics(offered.topics)');
+    expect(PAGE_SOURCE).toContain('parentCopy.generate.topicOption(label)');
+  });
+
+  it('defaults to all topics, which is the unweighted request', () => {
+    expect(PAGE_SOURCE).toContain('useState<string>(ALL_TOPICS)');
+    expect(PAGE_SOURCE).toContain('value={ALL_TOPICS}');
+    // The sentinel never leaves the screen: an unweighted request sends null.
+    expect(PAGE_SOURCE).toContain('topic === ALL_TOPICS ? null : topic');
+  });
+
+  it('ties the group to its legend and its hint rather than leaving them beside it', () => {
+    expect(PAGE_SOURCE).toContain('aria-labelledby={TOPIC_LEGEND_ID}');
+    expect(PAGE_SOURCE).toContain('aria-describedby={TOPIC_HINT_ID}');
+    expect(PAGE_SOURCE).toContain('id={TOPIC_HINT_ID}');
+  });
+
+  it('shows nothing at all when the Extraction offers no topic to focus on', () => {
+    expect(PAGE_SOURCE).toContain('topics.length > 0 &&');
+  });
+
+  it('does not collapse the screen when the topics read refuses on a rule', () => {
+    // The topics read refuses on the same rules the request does, and those
+    // are states this screen already renders through. A 409 over an optional
+    // control must not turn the whole screen into "could not be opened" —
+    // every other failure is still rethrown and surfaced.
+    expect(PAGE_SOURCE).toContain('parentApi.generationTopics(token, sourceTestId).catch(');
+    expect(PAGE_SOURCE).toContain('cause instanceof ParentApiError && cause.status === 409');
+    expect(PAGE_SOURCE).toContain('return { topics: [] } satisfies GenerationTopicsView;');
+    expect(PAGE_SOURCE).toContain('throw cause;');
+  });
+
+  it('meets the parent tap-target floor on every topic control', () => {
+    // Both the "all topics" option and each topic option, from the density
+    // token rather than a number written here.
+    expect(PAGE_SOURCE.match(/minHeight: density\.tapTarget/g)?.length ?? 0).toBeGreaterThanOrEqual(
+      4,
+    );
+  });
+
+  it('leaves the cost sentence untouched by the choice', () => {
+    // Weighting changes what is generated, never what it costs: the cost is
+    // computed from the count and the allowance alone.
+    expect(PAGE_SOURCE).toContain('parentCopy.generate.costUnlimited(count)');
+    expect(PAGE_SOURCE).toContain('parentCopy.generate.cost(count, after)');
+    expect(PAGE_SOURCE).not.toMatch(/generate\.cost\w*\([^)]*topic/);
+  });
+
+  it('names the topic from the job rather than from the radio group', () => {
+    // A parent who left and came back has no radio group; the request they
+    // made is the one the server stored.
+    // The sentence itself is a pure function in `practice-test-count.ts` and
+    // is asserted on its output there; what this file pins is that the screen
+    // feeds it the job rather than its own radio state.
+    expect(PAGE_SOURCE).toContain('progressSentence(job!)');
+    expect(PAGE_SOURCE).toContain('weightedTopic: jobTopic');
+    expect(PAGE_SOURCE).not.toContain('weightedTopic: topic');
+  });
+});
+
 describe('the cost statement', () => {
   it('is on screen before the confirm control is reachable', () => {
     // The picker's cost line is rendered from the same sentence the dialog
@@ -146,6 +211,13 @@ describe('the progress view', () => {
     expect(partial).toContain('Only the ones that were made used the Generation Allowance.');
   });
 
+  it('names the weighted topic in a finished or partial outcome, and omits it when unweighted', () => {
+    expect(parentCopy.generate.done(3, null)).not.toContain('focused on');
+    expect(parentCopy.generate.done(3, 'Fractions')).toContain('focused on Fractions');
+    expect(parentCopy.generate.partial(3, 5, null)).not.toContain('focused on');
+    expect(parentCopy.generate.partial(3, 5, 'Fractions')).toContain('focused on Fractions');
+  });
+
   it('says a total failure charged nothing and needs no new photos', () => {
     expect(parentCopy.generate.failed).toContain('nothing was used');
     expect(parentCopy.generate.retryFree).toContain('no new photos');
@@ -156,11 +228,16 @@ describe('announcements', () => {
   it('announces each outcome in exactly the words it displays', () => {
     // The same copy function feeds the live region and the visible line, so
     // the two cannot drift apart (UX-DR33).
-    expect(PAGE_SOURCE).toContain('announce(parentCopy.generate.done(producedCount))');
+    expect(PAGE_SOURCE).toContain('announce(parentCopy.generate.done(producedCount, jobTopic))');
     expect(PAGE_SOURCE).toContain(
-      'announce(parentCopy.generate.partial(producedCount, requestedCount))',
+      'announce(parentCopy.generate.partial(producedCount, requestedCount, jobTopic))',
     );
     expect(PAGE_SOURCE).toContain('announce(parentCopy.generate.failed)');
+    // The in-progress sentence goes through the same helper the visible line
+    // does, so a weighted job is announced with its topic in it rather than
+    // with a second, quieter wording.
+    expect(PAGE_SOURCE).toContain('announce(');
+    expect(PAGE_SOURCE).toContain('progressSentence({');
     // Through the surface's one region rather than a second one of its own:
     // two status regions make "the region on this screen" ambiguous.
     expect(PAGE_SOURCE).toContain('useAnnounce()');
@@ -205,6 +282,10 @@ describe('every word comes from the copy module', () => {
       'confirm',
       'cancel',
       'progressHeading',
+      'topicLegend',
+      'topicAll',
+      'topicOption',
+      'topicHint',
       'stayHere',
       'retryFree',
       'retry',

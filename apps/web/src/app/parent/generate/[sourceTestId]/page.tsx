@@ -27,12 +27,14 @@ import {
   ParentApiError,
   type GenerationAllowanceView,
   type GenerationJobView,
+  type GenerationTopicsView,
 } from '@/lib/parent-api';
 import {
   GENERATION_POLL_MS,
   countOptions,
   defaultCount,
   isSettled,
+  progressSentence,
   remainingAfter,
 } from '@/lib/practice-test-count';
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
@@ -52,6 +54,25 @@ const COUNT_LEGEND_ID = 'generate-count-legend';
  * reason part of the group rather than decoration next to it.
  */
 const COUNT_REASON_ID = 'generate-count-reason';
+
+/** The Topic fieldset's own label, named once and pointed at by the group. */
+const TOPIC_LEGEND_ID = 'generate-topic-legend';
+
+/**
+ * The one sentence saying what focusing does, named once and attached to the
+ * group rather than left floating beside it — the same reasoning
+ * `COUNT_REASON_ID` carries.
+ */
+const TOPIC_HINT_ID = 'generate-topic-hint';
+
+/**
+ * The radio value standing for "no weighting", which is the group's default.
+ *
+ * A sentinel rather than an empty string, because a Topic label is arbitrary
+ * text read off a page and `''` is a value `RadioGroup` already uses for "no
+ * selection". It never leaves this file: the request sends `null`.
+ */
+const ALL_TOPICS = '__all__';
 
 /**
  * The generate step: pick a count, read the cost, confirm, then watch the job.
@@ -74,6 +95,14 @@ export default function GeneratePage() {
   const token = elevation?.token ?? null;
 
   const [allowance, setAllowance] = useState<GenerationAllowanceView | null>(null);
+  /** The Extraction's own Topic labels, in the order the API gave them. */
+  const [topics, setTopics] = useState<string[]>([]);
+  /**
+   * The Topic chosen, or `ALL_TOPICS` for the even spread — which is the
+   * default, and is exactly the request this screen made before weighting
+   * existed.
+   */
+  const [topic, setTopic] = useState<string>(ALL_TOPICS);
   const [job, setJob] = useState<GenerationJobView | null>(null);
   const [count, setCount] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -152,13 +181,35 @@ export default function GeneratePage() {
         if (cause instanceof ParentApiError && cause.status === 404) return null;
         throw cause;
       }),
+      // Alongside the other two rather than after them: the Topic group is part
+      // of the picker, and a picker that appeared without it would offer a
+      // choice that silently grew a second control a moment later.
+      //
+      // A 409 is not a failure of this screen. The topics read refuses on the
+      // same rules the request does — an upload still being read, one with
+      // nothing usable in it — and those are states this screen already
+      // renders through, with the server's own sentence surfaced when the
+      // parent actually tries to generate. Collapsing the whole screen into
+      // "this upload could not be opened" over an optional control would tell
+      // them less, and about the wrong thing. Everything else is rethrown.
+      parentApi.generationTopics(token, sourceTestId).catch((cause: unknown) => {
+        if (cause instanceof ParentApiError && cause.status === 409) {
+          return { topics: [] } satisfies GenerationTopicsView;
+        }
+        throw cause;
+      }),
     ]).then(
       applyIfCurrent(
         current.current,
         issued,
-        ([reading, existing]: [GenerationAllowanceView, GenerationJobView | null]) => {
+        ([reading, existing, offered]: [
+          GenerationAllowanceView,
+          GenerationJobView | null,
+          GenerationTopicsView,
+        ]) => {
           setAllowance(reading);
           setJob(existing);
+          setTopics(offered.topics);
           setCount(defaultCount(reading.remaining, reading.maxPerRequest));
           setLoading(false);
         },
@@ -260,14 +311,26 @@ export default function GeneratePage() {
   const producedCount = job?.producedCount ?? 0;
   const jobStatus = job?.status ?? null;
   const requestedCount = job?.requestedCount ?? 0;
+  const jobTopic = job?.weightedTopic ?? null;
   useEffect(() => {
     if (jobStatus === null) return;
-    if (jobStatus === 'Succeeded') announce(parentCopy.generate.done(producedCount));
+    if (jobStatus === 'Succeeded') announce(parentCopy.generate.done(producedCount, jobTopic));
     else if (jobStatus === 'PartiallyComplete') {
-      announce(parentCopy.generate.partial(producedCount, requestedCount));
+      announce(parentCopy.generate.partial(producedCount, requestedCount, jobTopic));
     } else if (jobStatus === 'Failed') announce(parentCopy.generate.failed);
-    else announce(parentCopy.generate.progress(producedCount, requestedCount));
-  }, [jobStatus, producedCount, requestedCount, announce]);
+    // The same sentence the screen shows, weighted Topic included: an
+    // announcement that dropped it would be a second, quieter wording of the
+    // same fact.
+    else {
+      announce(
+        progressSentence({
+          producedCount,
+          requestedCount,
+          weightedTopic: jobTopic,
+        }),
+      );
+    }
+  }, [jobStatus, producedCount, requestedCount, jobTopic, announce]);
 
   function retry(): void {
     setError(null);
@@ -280,7 +343,9 @@ export default function GeneratePage() {
     setError(null);
     const issued = (requestId.current += 1);
     current.current.value = issued;
-    parentApi.startGeneration(token, sourceTestId, count).then(
+    // `null`, never the sentinel: "all topics" is the absence of a weighting,
+    // and the API's unweighted request is the one with no Topic in its body.
+    parentApi.startGeneration(token, sourceTestId, count, topic === ALL_TOPICS ? null : topic).then(
       applyIfCurrent(current.current, issued, (accepted: GenerationJobView) => {
         setStarting(false);
         setConfirming(false);
@@ -365,12 +430,16 @@ export default function GeneratePage() {
                 {/* The figures are the job's own, read from the server. */}
                 <Typography component="p" data-testid="generate-progress-line">
                   {job!.status === 'Succeeded'
-                    ? parentCopy.generate.done(job!.producedCount)
+                    ? parentCopy.generate.done(job!.producedCount, job!.weightedTopic)
                     : job!.status === 'PartiallyComplete'
-                      ? parentCopy.generate.partial(job!.producedCount, job!.requestedCount)
+                      ? parentCopy.generate.partial(
+                          job!.producedCount,
+                          job!.requestedCount,
+                          job!.weightedTopic,
+                        )
                       : job!.status === 'Failed'
                         ? parentCopy.generate.failed
-                        : parentCopy.generate.progress(job!.producedCount, job!.requestedCount)}
+                        : progressSentence(job!)}
                 </Typography>
                 {running && (
                   // Advises staying, and says plainly that leaving loses
@@ -451,6 +520,58 @@ export default function GeneratePage() {
                     </Typography>
                   )}
                 </FormControl>
+
+                {/* Below the count group and above the cost, because it is an
+                    optional refinement of a choice already made — and because
+                    the cost sentence must stay the last thing read before the
+                    confirm control. Absent entirely when the Extraction offers
+                    nothing to focus on. */}
+                {topics.length > 0 && (
+                  <FormControl>
+                    <FormLabel id={TOPIC_LEGEND_ID}>{parentCopy.generate.topicLegend}</FormLabel>
+                    <RadioGroup
+                      aria-labelledby={TOPIC_LEGEND_ID}
+                      aria-describedby={TOPIC_HINT_ID}
+                      value={topic}
+                      onChange={(event) => setTopic(event.target.value)}
+                    >
+                      {/* First and default: the even spread, which is the
+                          request this screen made before weighting existed. */}
+                      <Box data-testid="generate-topic-option" data-topic={ALL_TOPICS}>
+                        <FormControlLabel
+                          value={ALL_TOPICS}
+                          control={<Radio />}
+                          disabled={starting || refreshingAllowance}
+                          label={parentCopy.generate.topicAll}
+                          sx={{ minHeight: density.tapTarget }}
+                        />
+                      </Box>
+                      {topics.map((label) => (
+                        <Box key={label} data-testid="generate-topic-option" data-topic={label}>
+                          <FormControlLabel
+                            value={label}
+                            control={<Radio />}
+                            disabled={starting || refreshingAllowance}
+                            // The Extraction's own words, rendered as they
+                            // arrived. Nothing here retitles or truncates a
+                            // label read off the parent's page.
+                            label={parentCopy.generate.topicOption(label)}
+                            sx={{ minHeight: density.tapTarget }}
+                          />
+                        </Box>
+                      ))}
+                    </RadioGroup>
+
+                    <Typography
+                      component="p"
+                      id={TOPIC_HINT_ID}
+                      data-testid="generate-topic-hint"
+                      sx={{ fontSize: 13 }}
+                    >
+                      {parentCopy.generate.topicHint}
+                    </Typography>
+                  </FormControl>
+                )}
 
                 {costSentence !== null && (
                   // The cost is on screen before the confirm control is ever

@@ -3,9 +3,11 @@ import {
   chargeGenerationAllowanceFixture,
   countPracticeTestsFor,
   createGradeLevelFixture,
+  generatedTopicLabelsFor,
   createSubjectFixture,
   setParentTierFixture,
   uniqueParentEmail,
+  weightedTopicOfNewestJobFor,
 } from '../fixtures';
 
 const PASSWORD = 'correct-horse-battery-staple';
@@ -119,6 +121,28 @@ function countRow(page: Page, count: number) {
   return page.locator(`[data-testid="generate-count-option"][data-count="${count}"]`);
 }
 
+/** The screen's own value for "no weighting", which is the group's default. */
+const ALL_TOPICS = '__all__';
+
+/**
+ * One topic's radio row, by the label it offers.
+ *
+ * Matched by reading the attribute rather than by interpolating the label into
+ * a CSS attribute selector: a Topic label is text read off a parent's own
+ * page, and a quote or a backslash in it would make that selector a syntax
+ * error — or, worse, a different selector that quietly matches the wrong row.
+ */
+async function topicRow(page: Page, topic: string) {
+  const rows = page.getByTestId('generate-topic-option');
+  await expect(rows.first()).toBeVisible();
+  const count = await rows.count();
+  for (let index = 0; index < count; index += 1) {
+    const row = rows.nth(index);
+    if ((await row.getAttribute('data-topic')) === topic) return row;
+  }
+  throw new Error('The topic group offered no option for the requested label.');
+}
+
 test.describe('generating practice tests', () => {
   test('bounds the choice, states the cost, and produces the drafts', async ({ page }) => {
     const email = uniqueParentEmail('generate');
@@ -189,6 +213,66 @@ test.describe('generating practice tests', () => {
     await expect(countRow(page, 1).getByRole('radio')).toBeEnabled();
     await expect(countRow(page, 2).getByRole('radio')).toBeDisabled();
     expect(await countPracticeTestsFor(email)).toBe(1);
+  });
+
+  test('focuses the request on one topic, at exactly the same cost', async ({ page }) => {
+    const email = uniqueParentEmail('generate-weighted');
+    await uploadAndRead(page, email);
+    await enterGenerate(page);
+
+    // "All topics" is the default and the first option: choosing it is
+    // choosing the unweighted request every earlier story made.
+    const allTopics = await topicRow(page, ALL_TOPICS);
+    await expect(allTopics.getByRole('radio')).toBeChecked();
+
+    // The Extraction's own topics, offered beside it. The labels come from the
+    // API, so this reads one off the screen rather than naming it here.
+    const rows = page.locator('[data-testid="generate-topic-option"]');
+    expect(await rows.count()).toBeGreaterThan(1);
+    const chosen = rows.nth(1);
+    const topic = await chosen.getAttribute('data-topic');
+    expect(topic).toBeTruthy();
+
+    await countRow(page, 1).getByRole('radio').check();
+    const cost =
+      'This uses 1 practice test of the Generation Allowance. 1 will be left this period.';
+    await expect(page.getByTestId('generate-cost')).toHaveText(cost);
+
+    await chosen.getByRole('radio').check();
+    await expect(chosen.getByRole('radio')).toBeChecked();
+    await expect(allTopics.getByRole('radio')).not.toBeChecked();
+    // Weighting changes what is generated, never what it costs.
+    await expect(page.getByTestId('generate-cost')).toHaveText(cost);
+
+    await page.getByTestId('generate-start').click();
+    await expect(page.getByTestId('generate-confirm-cost')).toHaveText(cost);
+    await page.getByTestId('generate-confirm').click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // Not asserted on here: the in-progress line names the topic, but a job
+    // this small can settle between two polls, so waiting for that sentence
+    // would be waiting for a window that need not exist. The sentence itself
+    // is a pure function, asserted on its output in
+    // `practice-test-count.spec.ts`.
+    await expect(page.getByTestId('generate-progress-line')).toHaveText(
+      '1 practice test is ready.',
+      { timeout: 30_000 },
+    );
+    // One draft landed, and it cost exactly what an unweighted one costs.
+    await expect(page.getByTestId('generate-usage')).toHaveText('Used this period: 1 of 2.');
+    expect(await countPracticeTestsFor(email)).toBe(1);
+
+    // The choice actually left the browser, was resolved against the
+    // Extraction and was persisted. Without this the whole pass would still be
+    // green if the screen quietly sent an unweighted request.
+    expect(await weightedTopicOfNewestJobFor(email)).toBe(topic);
+
+    // And the draft that landed was written against it: most of its questions
+    // carry the chosen topic, which is the rule the request bought.
+    const labels = await generatedTopicLabelsFor(email);
+    expect(labels.length).toBeGreaterThan(0);
+    const onTopic = labels.filter((label) => label === topic).length;
+    expect(onTopic).toBeGreaterThan(labels.length - onTopic);
   });
 
   test('survives leaving the screen and coming back to its URL', async ({ page }) => {

@@ -197,11 +197,23 @@ export interface GenerationJobView {
   status: 'Queued' | 'Running' | 'Succeeded' | 'PartiallyComplete' | 'Failed';
   /** Already clamped server-side. Never what this app asked for. */
   requestedCount: number;
+  /**
+   * The Topic this request was weighted on, in the Extraction's own spelling,
+   * or null for an unweighted request. Resolved and stored by the server, so a
+   * parent returning to the URL reads the request they actually made rather
+   * than whatever this browser happens to still hold.
+   */
+  weightedTopic: string | null;
   producedCount: number;
   completedAt: string | null;
   failureKind: 'UpstreamFault' | 'ClientFault' | null;
   failureReason: string | null;
   retryable: boolean;
+}
+
+/** The Topics a generation request may be weighted on, exactly as the API states them. */
+export interface GenerationTopicsView {
+  topics: string[];
 }
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(
@@ -692,11 +704,42 @@ export const parentApi = {
    * whatever this app sent, so the response is the only account of what is
    * being spent.
    */
-  startGeneration: (token: string, sourceTestId: string, count: number) =>
+  startGeneration: (
+    token: string,
+    sourceTestId: string,
+    count: number,
+    weightedTopic?: string | null,
+  ) =>
     call<GenerationJobView>(
       `/parent/source-tests/${encodeURIComponent(sourceTestId)}/practice-tests`,
-      { method: 'POST', headers: elevated(token), body: JSON.stringify({ count }) },
+      {
+        method: 'POST',
+        headers: elevated(token),
+        // Omitted rather than sent as null when nothing is weighted: absent is
+        // the unweighted request the API already accepts, and a null would make
+        // this app's body differ from the one Story 4.1 sends.
+        body: JSON.stringify(
+          weightedTopic === undefined || weightedTopic === null
+            ? { count }
+            : { count, weightedTopic },
+        ),
+      },
       parentCopy.generate.startFailed,
+    ),
+
+  /**
+   * The Topics this upload's Extraction carries, which are the only Topics a
+   * request may be weighted on.
+   *
+   * The labels arrive as the Extraction holds them and are rendered as they
+   * arrive: they are content read off the parent's own page, and this app
+   * neither rewrites nor canonicalizes them.
+   */
+  generationTopics: (token: string, sourceTestId: string) =>
+    call<GenerationTopicsView>(
+      `/parent/source-tests/${encodeURIComponent(sourceTestId)}/practice-tests/topics`,
+      { headers: elevated(token) },
+      parentCopy.generate.loadFailed,
     ),
 
   /**

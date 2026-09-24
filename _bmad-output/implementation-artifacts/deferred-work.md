@@ -741,3 +741,59 @@ source_spec: `spec-4-1-practice-test-generation-bounded-priced-async.md`
 severity: low
 reason: `apps/api/test/practice-test.int-spec.ts` covers partial/total failure against the real worker; `apps/web/.../generate/[sourceTestId]/page.spec.tsx` covers the same copy against a fabricated `GenerationJobView`. `e2e/tests/parent-practice-test.spec.ts` covers only the happy path, leave/return-while-succeeding, and the two allowance- boundary cases. A defensible simplification (the e2e harness has no seam to force a real AI failure through the fake transport at a controlled point), not a regression.
 status: open
+
+### DW-94: A weighted job whose stored Topic has since vanished from the Extraction spends the whole AI_MAX_ATTEMPTS budget reaching an unsatisfiable floor.
+origin: spec-deferred 9bfedbd04a2c
+location: apps/api/src/practicetest/practice-test.service.ts (planFor)
+source_spec: `spec-4-2-topic-weighted-regeneration.md`
+severity: medium
+reason: `planFor` takes `weightedTopic` from the job row by design, and the Design Notes argue against re-resolving it against the run's own Extraction read. Neither addresses the case where the label is no longer there: the prompt then names a Topic absent from the topic list, no payload can meet the floor, and every attempt is a paid provider call spent to be refused. A `GenerationTargetMissing`-style early bail would cost one read.
+status: open
+
+### DW-95: "A weighted draft still covers the Extraction's other Topics" is instructed in the prompt but enforced nowhere and asserted by no test.
+origin: spec-deferred 7af43280364b
+location: apps/api/src/practicetest/practice-test-payload.ts (validateGenerationPayload)
+source_spec: `spec-4-2-topic-weighted-regeneration.md`
+severity: low
+reason: `validateGenerationPayload` checks only the floor, so a draft putting every question on the weighted Topic passes. `fakePracticeTestPayload` spreads the remainder, so the integration tier cannot surface it either. Enforcing it in code needs a rule that does not false-reject a single-Topic Extraction, which is a product decision rather than a mechanical fix.
+status: open
+
+### DW-96: The parent-facing weighted control shipped on the generate screen, while the UX design sites weighted regeneration inside the Epic 7 Topic drill-down with the Topic pre-selected.
+origin: spec-deferred c124914b979f
+location: apps/web/src/app/parent/generate/[sourceTestId]/page.tsx
+source_spec: `spec-4-2-topic-weighted-regeneration.md`
+severity: medium
+reason: UX decision Q12c states weighted regenerate lives in the Topic drill-down and that there is no duplicate entry point in v0. This story's picker browses all Extraction Topics from the generate screen and needs a `GET …/practice-tests/topics` route that the drill-down caller will never use, since it already holds the Topic. Epic 7 has to reconcile the two surfaces — keep both deliberately, or retire this one when the drill-down ships.
+status: open
+
+### DW-97: The integration tier fails roughly one full run in two, in a different untouched file each time, with a parent account vanishing mid-test.
+origin: spec-deferred e3692329dcba
+location: apps/api/test/harness.ts
+source_spec: `spec-4-2-topic-weighted-regeneration.md`
+severity: medium
+reason: Observed across five full `pnpm --filter api test` runs on this branch, failing in extraction, source-test, uncommitted-state and practice-test in turn and passing clean once. `practice-test.int-spec.ts` passes 47/47 in isolation on three consecutive runs. Same signature already recorded as deferred in Story 4.1; pre-existing cross-file harness isolation, not caused by this change.
+status: open
+
+### DW-98: `pnpm lint` cannot run in this environment, so the lint half of every spec's verification section is unverifiable.
+origin: spec-deferred 4635b2c0f968
+location: package.json (lint script)
+source_spec: `spec-4-2-topic-weighted-regeneration.md`
+severity: low
+reason: `pnpm lint` exits with `Command "eslint" not found`. Pre-existing and already noted in Story 4.1's run; formatting is still verified through `prettier --check`.
+status: open
+
+### DW-99: The generate screen's tests verify almost entirely by grepping the page's own source text rather than rendering it, so a broken wiring that merely contains the right tokens would still pass.
+origin: spec-deferred 10cad6073382
+location: apps/web/src/app/parent/generate/[sourceTestId]/page.spec.tsx
+source_spec: `spec-4-2-topic-weighted-regeneration.md`
+severity: medium
+reason: `page.spec.tsx` has no React Testing Library usage anywhere in the directory; nearly every assertion is `expect(PAGE_SOURCE).toContain(...)` against `readFileSync(page.tsx)`. This predates this story and spans the whole file, including the new Topic-weighting behavior added here (e.g. the 409-degrade-to-empty-topics branch), so this story's own new UI logic inherits the same untested-at-runtime gap as the rest of the screen.
+status: open
+
+### DW-100: Nothing bounds how many Topic radio options the generate screen renders.
+origin: spec-deferred 9940351f7e92
+location: apps/web/src/app/parent/generate/[sourceTestId]/page.tsx
+source_spec: `spec-4-2-topic-weighted-regeneration.md`
+severity: low
+reason: Topic labels are raw and never canonicalized, merged or deduplicated beyond exact-match normalization (AD-11), unlike `count`, which is clamped by `MAX_PER_REQUEST`. An Extraction with many distinct raw/OCR-noisy Topic labels could render an unbounded radio group with no discussed ceiling or scroll/collapse treatment.
+status: open

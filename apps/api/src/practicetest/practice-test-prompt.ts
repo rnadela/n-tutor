@@ -1,5 +1,6 @@
 import type { QuestionFormat } from '../generated/prisma/enums.js';
 import { plainTextOf, type RichText } from '../extraction/rich-text.js';
+import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-policy.js';
 
 /**
  * The generation prompt.
@@ -34,8 +35,18 @@ export interface GenerationPromptInput {
   sourceQuestions: readonly GenerationSourceQuestion[];
   /** How many Questions of each Format this draft must hold. */
   targets: ReadonlyMap<QuestionFormat, number>;
-  /** Every Topic the Extraction carries, covered evenly (Story 4.2 weights). */
+  /** Every Topic the Extraction carries, covered evenly unless one is weighted. */
   topics: readonly string[];
+  /**
+   * The Topic to concentrate this draft on and how many Questions must carry
+   * it, or absent for the even spread. Absent produces the unweighted prompt
+   * byte for byte: Story 4.1's requests must not change wording under this.
+   *
+   * One pair rather than two fields, so the floor quoted to the model is
+   * always the floor the post-hoc pass counts against — the instruction and
+   * the check are two halves of one rule.
+   */
+  weighting?: GenerationWeighting | null;
   /** Plain text of every prompt already landed in this job. */
   alreadyGenerated: readonly string[];
 }
@@ -49,11 +60,63 @@ function describeSource(question: GenerationSourceQuestion): string {
   return `${question.ordinal}. [${question.format}] ${plainTextOf(question.prompt)}${options}`;
 }
 
+/**
+ * The weighted draft's topic instruction: the one Topic and its minimum count,
+ * then what to do with the questions above that floor.
+ *
+ * The second list is the Extraction's *other* Topics, with the weighted one
+ * filtered out — by the same normalizer the floor is counted with, so a raw
+ * label differing from it only in case or spacing is not re-offered as
+ * something else to write about. A single-Topic Extraction has no others at
+ * all, and gets a sentence saying so rather than an instruction trailing an
+ * empty list.
+ */
+function weightedCoverage(
+  topics: readonly string[],
+  weighting: GenerationWeighting,
+  total: number,
+): string[] {
+  const wanted = normalizeTopicLabel(weighting.topic);
+  const others = topics.filter((topic) => normalizeTopicLabel(topic) !== wanted);
+  const lines = [
+    `Concentrate this test on one topic. At least ${weighting.floor} of the ${total} questions must carry this topic, written in exactly these words:`,
+    `- ${weighting.topic}`,
+  ];
+  if (others.length === 0) {
+    lines.push('', 'It is the only topic this test covers, so give it every question.');
+    return lines;
+  }
+  if (weighting.floor >= total) {
+    lines.push(
+      '',
+      'The floor above already covers every question this test asks, so give it every question.',
+    );
+    return lines;
+  }
+  lines.push(
+    '',
+    'Give the remaining questions to the other topics below, writing each topic in the same words it is given here:',
+    ...others.map((topic) => `- ${topic}`),
+  );
+  return lines;
+}
+
 export function buildGenerationPrompt(input: GenerationPromptInput): string {
   const targetLines = [...input.targets.entries()]
     .filter(([, count]) => count > 0)
     .map(([format, count]) => `- ${format}: ${count}`);
   const total = [...input.targets.values()].reduce((sum, count) => sum + count, 0);
+
+  // Two halves of one rule: the figure stated here is the figure
+  // `practice-test-payload.ts` counts against. An unweighted request takes the
+  // first branch and produces Story 4.1's prompt byte for byte.
+  const coverage =
+    input.weighting == null
+      ? [
+          'Cover these topics as evenly as the question count allows, writing each topic in the same words it is given here:',
+          ...input.topics.map((topic) => `- ${topic}`),
+        ]
+      : weightedCoverage(input.topics, input.weighting, total);
 
   const lines = [
     'You are writing one new practice test for a school student, modelled on a test they have already taken. You are given that test in full. Write fresh questions that examine the same material at the same level.',
@@ -61,8 +124,7 @@ export function buildGenerationPrompt(input: GenerationPromptInput): string {
     `Write exactly ${total} questions, in this mix of formats:`,
     ...targetLines,
     '',
-    'Cover these topics as evenly as the question count allows, writing each topic in the same words it is given here:',
-    ...input.topics.map((topic) => `- ${topic}`),
+    ...coverage,
     '',
     'Rules:',
     '1. Give every question exactly one format, and at least one topic drawn from the list above.',

@@ -45,6 +45,7 @@ const job = (id: string): ClaimedGenerationJob => ({
   parentAccountId: `parent-${id}`,
   sourceTestId: `source-${id}`,
   studentProfileId: `student-${id}`,
+  weightedTopic: null,
   requestedCount: 2,
   producedCount: 0,
   attempts: 1,

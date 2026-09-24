@@ -17,11 +17,12 @@ import {
   PracticeTestService,
   type GenerationAllowanceView,
   type GenerationJobView,
+  type GenerationTopicsView,
 } from './practice-test.service.js';
 
 /**
- * The generate step's three routes: what is left to spend, the request itself,
- * and where the job stands.
+ * The generate step's four routes: what is left to spend, the Topics a request
+ * may be weighted on, the request itself, and where the job stands.
  *
  * There is no route here that returns a generated Question, and that is the
  * design rather than an omission — draft review is Story 4.3's, and one
@@ -62,7 +63,32 @@ export class PracticeTestController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RequestPracticeTestsDto,
   ): Promise<GenerationJobView> {
-    return this.practiceTests.request(req.elevated!.parentAccountId, id, dto.count);
+    return this.practiceTests.request(
+      req.elevated!.parentAccountId,
+      id,
+      dto.count,
+      dto.weightedTopic ?? null,
+    );
+  }
+
+  /**
+   * The Topics this upload's Extraction carries, which are the only Topics a
+   * request may be weighted on.
+   *
+   * It exists because a parent cannot choose from a list the screen has no way
+   * to show, and it reads the **same** Extraction the job will later read — so
+   * the label the screen offers, the label that is persisted and the label the
+   * post-hoc pass counts are one string with one spelling.
+   *
+   * Behind the same guard as everything else here, and a foreign or unknown id
+   * answers 404 rather than 403 (AD-18).
+   */
+  @Get('source-tests/:id/practice-tests/topics')
+  topics(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<GenerationTopicsView> {
+    return this.practiceTests.topicsFor(req.elevated!.parentAccountId, id);
   }
 
   /**

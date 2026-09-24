@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { QuestionFormat } from '../generated/prisma/enums.js';
 import { SOURCE_TEST_NOT_FOUND as SOURCE_TEST_NOT_FOUND_ORIGIN } from '../sourcetest/source-test-policy.js';
+import { MAX_LABEL_LENGTH } from './practice-test-payload.js';
 import {
   DEFAULT_CLAIM_TIMEOUT_MS,
   DEFAULT_POLL_MS,
@@ -13,13 +14,18 @@ import {
   GENERATION_SOURCE_GONE,
   GENERATION_UPSTREAM_REJECTED,
   MAX_PER_REQUEST,
+  MAX_TOPIC_LABEL_LENGTH,
   NO_GENERATION_ALLOWANCE,
   SOURCE_TEST_NOT_FOUND,
+  WEIGHTED_TOPIC_SHARE,
+  WEIGHTED_TOPIC_UNKNOWN,
   clampCount,
   formatTargets,
+  normalizeTopicLabel,
   practiceTestRuntime,
   remainingFor,
   resetPracticeTestRuntime,
+  weightedTopicFloor,
   worstCaseRunMs,
 } from './practice-test-policy.js';
 
@@ -59,8 +65,9 @@ describe('messages', () => {
         GENERATION_INPUT_UNUSABLE,
         GENERATION_REQUEST_REJECTED,
         GENERATION_CLOCK_ANOMALY,
+        WEIGHTED_TOPIC_UNKNOWN,
       ]).size,
-    ).toBe(9);
+    ).toBe(10);
   });
 
   it('asks the parent to retake the pages in exactly one of them', () => {
@@ -276,5 +283,76 @@ describe('formatTargets', () => {
   it('is empty for a source with nothing in it, or a total of nothing', () => {
     expect(mix([], 5)).toEqual({});
     expect(mix([MC], 0)).toEqual({});
+  });
+});
+
+describe('weightedTopicFloor', () => {
+  it('is the share of the total, rounded up', () => {
+    // The figure the prompt quotes and the post-hoc pass counts against, from
+    // one formula: a draft below it is refused, so the two must never differ.
+    for (const total of [2, 3, 4, 5, 10, 17, 40]) {
+      expect(weightedTopicFloor(total)).toBe(Math.ceil(total * WEIGHTED_TOPIC_SHARE));
+    }
+  });
+
+  it('never asks for fewer than one question', () => {
+    // A one-question Extraction must be weightable at all; a floor of zero
+    // would make the weighting a rule nothing enforces.
+    expect(weightedTopicFloor(1)).toBe(1);
+  });
+
+  it('never asks for more questions than the draft holds', () => {
+    // A floor above the total is a rule no draft could ever satisfy, and every
+    // attempt spent on it is a provider call spent to be refused.
+    for (const total of [1, 2, 3, 5, 9]) {
+      expect(weightedTopicFloor(total)).toBeLessThanOrEqual(total);
+    }
+  });
+
+  it('is nothing for a draft with no questions in it', () => {
+    expect(weightedTopicFloor(0)).toBe(0);
+    expect(weightedTopicFloor(-3)).toBe(0);
+    expect(weightedTopicFloor(Number.NaN)).toBe(0);
+  });
+
+  it('leaves room for the other topics a weighted draft must still cover', () => {
+    // "Predominantly", not "entirely": the share is a majority and stops short
+    // of the whole draft wherever the draft is big enough to have a remainder.
+    expect(WEIGHTED_TOPIC_SHARE).toBeGreaterThan(0.5);
+    expect(WEIGHTED_TOPIC_SHARE).toBeLessThan(1);
+    expect(weightedTopicFloor(10)).toBeLessThan(10);
+  });
+});
+
+describe('normalizeTopicLabel', () => {
+  it('folds the drift a model and a browser actually produce', () => {
+    // Case and whitespace, and nothing else. The request-time resolve and the
+    // post-hoc count both go through this, so they agree by construction.
+    expect(normalizeTopicLabel('  fractions ')).toBe(normalizeTopicLabel('Fractions'));
+    expect(normalizeTopicLabel('Long\n  Division')).toBe(normalizeTopicLabel('long division'));
+  });
+
+  it('folds compatibility forms, so one label typed two ways is one label', () => {
+    // NFKC, explicitly: a full-width label pasted out of a document and the
+    // same label typed on an ASCII keyboard are the same Topic, and the
+    // request-time resolve has to match the one the Extraction stored. Without
+    // this case the `normalize` call could be deleted and nothing would fail.
+    expect(normalizeTopicLabel('Ｆｒａｃｔｉｏｎｓ')).toBe(normalizeTopicLabel('Fractions'));
+    // A non-breaking space is whitespace a model emits and a human cannot see.
+    expect(normalizeTopicLabel('Long\u00a0Division')).toBe(normalizeTopicLabel('long division'));
+    // And a compatibility ligature, which is the same word spelled one glyph
+    // shorter.
+    expect(normalizeTopicLabel('\ufb01gures')).toBe(normalizeTopicLabel('Figures'));
+  });
+
+  it('is not canonicalization, and never becomes it', () => {
+    // Merging these two is Mastery's decision (AD-11, Epic 7). Making it here
+    // would split, or fuse, one concept in a second place.
+    expect(normalizeTopicLabel('Fractions')).not.toBe(normalizeTopicLabel('Fraction'));
+    expect(normalizeTopicLabel('Adding fractions')).not.toBe(normalizeTopicLabel('fractions'));
+  });
+
+  it('bounds an incoming label at the same figure a generated one is bounded at', () => {
+    expect(MAX_TOPIC_LABEL_LENGTH).toBe(MAX_LABEL_LENGTH);
   });
 });

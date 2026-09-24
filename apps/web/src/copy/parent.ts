@@ -381,6 +381,31 @@ export const parentCopy = {
           : `Only ${remaining} practice tests are left in this period’s Generation Allowance.`,
 
     /**
+     * The optional weighting's own fieldset label.
+     *
+     * "Focus" rather than "weight": a parent is choosing what the practice is
+     * mostly about, and the arithmetic behind the word is the server's business.
+     */
+    topicLegend: 'What to focus on',
+    /**
+     * The default, and the first option in the group: the even spread every
+     * request made so far produced. Choosing it is choosing today's behaviour.
+     */
+    topicAll: 'All topics',
+    /**
+     * One Topic, in the Extraction's own words. The label arrives from the API
+     * and nothing here rewrites, titles or truncates it — it is what was read
+     * off the parent's own page.
+     */
+    topicOption: (topic: string) => topic,
+    /**
+     * Why the choice is there at all, in one sentence. It says what focusing
+     * does and — because the epic requires it — that it does not change what
+     * this costs.
+     */
+    topicHint:
+      'Most of the questions will be on the topic chosen here. It does not change how much of the Generation Allowance this uses.',
+    /**
      * The cost, stated before the confirm control is actionable, denominated in
      * Practice Tests and never in credits or an abstract unit. It names both
      * what the action spends and what is left afterwards.
@@ -414,20 +439,44 @@ export const parentCopy = {
     progress: (produced: number, requested: number) =>
       `${produced} of ${requested} practice tests are ready.`,
     /**
+     * The same sentence for a weighted job, naming the Topic the request was
+     * actually made with — which is what a parent returning to the URL needs in
+     * order to recognise the request as theirs.
+     *
+     * The Topic arrives from the job view, in the spelling the server resolved
+     * and stored, so the screen names the same label the drafts were written
+     * against rather than whatever this browser last had in a radio group.
+     */
+    progressWeighted: (produced: number, requested: number, topic: string) =>
+      `${produced} of ${requested} practice tests are ready, focused on ${topic}.`,
+    /**
      * The stay-here advice. It says the screen is where completion shows, and
      * it does **not** say anything is lost by leaving — that would be false,
      * and it would contradict both retry-without-re-upload and charge-on-land.
      */
     stayHere:
       'This screen is where the practice tests appear as they are made. Leaving does not stop the work, and anything already made is kept.',
-    done: (produced: number) =>
-      produced === 1 ? '1 practice test is ready.' : `${produced} practice tests are ready.`,
+    /**
+     * A finished job's outcome. When the job was weighted, the Topic is named
+     * here too — a parent returning after completion should read the same
+     * request they made, not just for a job still in progress.
+     */
+    done: (produced: number, topic: string | null = null) => {
+      const base =
+        produced === 1 ? '1 practice test is ready.' : `${produced} practice tests are ready.`;
+      return topic === null ? base : `${base.slice(0, -1)}, focused on ${topic}.`;
+    },
     /**
      * A job that produced some of what was asked for. The count that landed is
-     * the count that was charged, and the sentence says both plainly.
+     * the count that was charged, and the sentence says both plainly. Names
+     * the weighted Topic too, for the same reason `done` does.
      */
-    partial: (produced: number, requested: number) =>
-      `${produced} of ${requested} practice tests were made. Only the ones that were made used the Generation Allowance.`,
+    partial: (produced: number, requested: number, topic: string | null = null) => {
+      const base = `${produced} of ${requested} practice tests were made. Only the ones that were made used the Generation Allowance.`;
+      return topic === null
+        ? base
+        : `${produced} of ${requested} practice tests were made, focused on ${topic}. Only the ones that were made used the Generation Allowance.`;
+    },
     /** A job that produced nothing. The upload is untouched and still usable. */
     failed: 'No practice tests were made, and nothing was used from the Generation Allowance.',
     /** Stated beside a failure: the upload survives it, and so does the reading. */

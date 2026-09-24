@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { AiFakeFailure } from '../ai/ai-config.js';
 import { RichText } from '../extraction/rich-text.js';
+import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-policy.js';
 
 /**
  * The shape a generated Practice Test must come back in: the JSON schema
@@ -87,17 +88,46 @@ export interface FakeFormatTarget {
 export function fakePracticeTestPayload(context: {
   targets: readonly FakeFormatTarget[];
   topics: readonly string[];
+  /**
+   * The Topic to weight and how many questions must carry it, or absent for
+   * the even spread. One pair, so the fake cannot be told which Topic to
+   * concentrate on without also being told how far.
+   */
+  weighting?: GenerationWeighting | null;
   draftOrdinal: number;
   failure: AiFakeFailure;
 }): PracticeTestPayload {
   const topics = context.topics.length > 0 ? context.topics : ['General'];
+  const weighting = context.weighting ?? null;
+  const weightedTopic = weighting?.topic ?? null;
+  const weightedFloor = weighting?.floor ?? 0;
+  // The other Topics the questions above the floor are spread across, folded by
+  // the same normalizer the validator counts with: a case-variant of the
+  // weighted label left in this pool would be counted as on-topic, and the fake
+  // would over-satisfy the floor it is supposed to be held to. Falls back to
+  // the weighted Topic itself on a single-Topic Extraction, where every
+  // question is on it and the floor is trivially met.
+  const restTopics =
+    weightedTopic === null
+      ? topics
+      : topics.filter((label) => normalizeTopicLabel(label) !== normalizeTopicLabel(weightedTopic));
   let seq = 0;
   const questions: GeneratedQuestionPayload[] = [];
 
   for (const target of context.targets) {
     for (let index = 0; index < target.count; index += 1) {
       seq += 1;
-      const topic = topics[(seq - 1) % topics.length]!;
+      // The first `weightedFloor` questions carry the weighted Topic, the rest
+      // cycle the others — so the fake satisfies the rule the integration tier
+      // holds it to, rather than the tier proving the rule by disabling it.
+      const topic =
+        weightedTopic !== null
+          ? seq <= weightedFloor
+            ? weightedTopic
+            : restTopics.length === 0
+              ? weightedTopic
+              : restTopics[(seq - weightedFloor - 1) % restTopics.length]!
+          : topics[(seq - 1) % topics.length]!;
       const prompt = [
         {
           kind: 'text' as const,

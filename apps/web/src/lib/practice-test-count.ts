@@ -13,6 +13,7 @@
  * does with them.
  */
 
+import { parentCopy } from '@/copy/parent';
 import type { GenerationJobView } from './parent-api';
 
 /**
@@ -84,4 +85,31 @@ export function isSettled(status: GenerationJobView['status']): boolean {
 export function remainingAfter(count: number, limit: number | null, used: number): number | null {
   if (limit === null) return null;
   return Math.max(0, limit - used - count);
+}
+
+/**
+ * The in-progress sentence for a job, naming the weighted Topic when it has
+ * one.
+ *
+ * Here rather than inside the screen, and for this module's whole reason: the
+ * screen's own tier can only grep its source, so a version of this that dropped
+ * the Topic would leave every test green. As a function it is asserted on its
+ * output.
+ *
+ * The Topic is the **job's**, never the radio group's: a parent who left and
+ * came back has no radio group, and the request they made is the one the
+ * server stored.
+ */
+export function progressSentence(job: {
+  producedCount: number;
+  requestedCount: number;
+  weightedTopic: string | null;
+}): string {
+  return job.weightedTopic === null
+    ? parentCopy.generate.progress(job.producedCount, job.requestedCount)
+    : parentCopy.generate.progressWeighted(
+        job.producedCount,
+        job.requestedCount,
+        job.weightedTopic,
+      );
 }
