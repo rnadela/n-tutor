@@ -28,8 +28,19 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     await this.$disconnect();
   }
 
-  /** Runs `fn` inside one interactive transaction. */
-  withTransaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
-    return this.$transaction((tx) => fn(tx as TransactionClient));
+  /**
+   * Runs `fn` inside one interactive transaction.
+   *
+   * `options` exists for the rare transaction that is legitimately long — one
+   * that writes a whole AI payload, say — because Prisma's default ceiling is
+   * five seconds and a transaction that aborts on it has thrown away work that
+   * was already paid for. Every ordinary caller omits it: a transaction that
+   * needs a raised ceiling to pass usually needs fewer round trips instead.
+   */
+  withTransaction<T>(
+    fn: (tx: TransactionClient) => Promise<T>,
+    options?: { timeout?: number; maxWait?: number },
+  ): Promise<T> {
+    return this.$transaction((tx) => fn(tx as TransactionClient), options);
   }
 }

@@ -408,8 +408,97 @@ test.describe('page management before submit', () => {
       headers: elevated,
     });
     expect(((await after.json()) as { status: string }).status).toBe('Draft');
+
+    // A draft has no Extraction job, and the read says so with a 404 rather
+    // than an empty document.
+    const beforeSubmit = await fetch(
+      `${API_ORIGIN}/api/parent/source-tests/${sourceTestId}/extraction`,
+      { headers: elevated },
+    );
+    expect(beforeSubmit.status).toBe(404);
+
+    // Now make the same Source Test submittable and let the real worker read
+    // it: full stack, real Postgres, real queue, with `ai` on its fake
+    // transport (AD-22 tier 2).
+    const subject = await createSubjectFixture('Capture API Subject', gradeLevel.id);
+    await expectOk(
+      fetch(`${API_ORIGIN}/api/parent/source-tests/${sourceTestId}/classification`, {
+        method: 'PATCH',
+        headers: elevated,
+        body: JSON.stringify({ subjectId: subject.id }),
+      }),
+      200,
+    );
+    for (const page of [jpeg('page-a.jpg', PAGE_A), jpeg('page-b.jpg', PAGE_B)]) {
+      const form = new FormData();
+      form.set('file', new Blob([new Uint8Array(page.buffer)], { type: page.mimeType }), page.name);
+      await expectOk(
+        fetch(`${API_ORIGIN}/api/parent/source-tests/${sourceTestId}/pages`, {
+          method: 'POST',
+          headers: { authorization: elevated.authorization },
+          body: form,
+        }),
+        201,
+      );
+    }
+    await expectOk(
+      fetch(`${API_ORIGIN}/api/parent/source-tests/${sourceTestId}/submit`, {
+        method: 'POST',
+        headers: elevated,
+      }),
+      200,
+    );
+
+    // The job outlives the request, so the status is polled rather than
+    // awaited: that is the whole point of enqueueing it (AD-3).
+    const extraction = await pollExtraction(sourceTestId, elevated);
+    expect(extraction.status).toBe('Succeeded');
+    expect(extraction.pageCount).toBe(2);
+    expect(extraction.questionCount).toBeGreaterThan(0);
+    expect(extraction.usableQuestionCount).toBeGreaterThan(0);
+
+    // And not one word of what was read comes back: Extraction is not a
+    // browsable surface in v0, so the body is counts and a status, full stop.
+    const body = JSON.stringify(extraction);
+    expect(body).not.toContain('prompt');
+    expect(body).not.toContain('choices');
+    expect(body).not.toContain('topics');
   });
 });
+
+interface ExtractionStatusBody {
+  status: string;
+  pageCount: number | null;
+  questionCount: number | null;
+  usableQuestionCount: number | null;
+  uninterpretableRegionCount: number | null;
+}
+
+/**
+ * Reads the Extraction status until the worker has finished with it.
+ *
+ * A failed job ends the wait immediately rather than burning the timeout: the
+ * body already says what went wrong, and a test that times out says only that
+ * something did.
+ */
+async function pollExtraction(
+  sourceTestId: string,
+  headers: Record<string, string>,
+): Promise<ExtractionStatusBody> {
+  const deadline = Date.now() + 30_000;
+  let latest: ExtractionStatusBody = { status: 'unknown' } as ExtractionStatusBody;
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `${API_ORIGIN}/api/parent/source-tests/${sourceTestId}/extraction`,
+      { headers },
+    );
+    expect(response.status).toBe(200);
+    latest = (await response.json()) as ExtractionStatusBody;
+    if (latest.status === 'Succeeded' || latest.status === 'Failed') return latest;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return latest;
+}
 
 /** The consent versions in force, read from the API rather than restated. */
 async function currentVersion(field: 'termsVersion' | 'noticeVersion'): Promise<string> {

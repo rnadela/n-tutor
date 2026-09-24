@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import { fileTypeFromBuffer } from 'file-type';
 import sharp from 'sharp';
+import { PageBytesUnavailable } from './source-test-reader.js';
 import {
   JPEG_QUALITY,
   STORED_MIME,
@@ -125,6 +126,27 @@ export class PageIngestService {
       throw cause;
     }
     return target;
+  }
+
+  /**
+   * Reads one page's stored bytes back, by row id.
+   *
+   * The path is derived here, exactly as the write derived it, and is never
+   * returned: a caller asks for a page's bytes and gets bytes (AD-15). This is
+   * the only way anything outside this module reaches a stored page, and it is
+   * how the Extraction job gets the images it sends.
+   */
+  async read(pageId: string): Promise<Buffer> {
+    try {
+      return await readFile(storagePathFor(pageId, uploadRoot()));
+    } catch {
+      // `ENOENT` and friends carry the path in their message, and that message
+      // travels to whatever logs the failure. The path is the one thing that
+      // may not leave this module (AD-15, AD-20), so the fault is renamed to
+      // carry the row id alone — deliberately, the way `remove` is deliberate
+      // about its own.
+      throw new PageBytesUnavailable(pageId);
+    }
   }
 
   /**

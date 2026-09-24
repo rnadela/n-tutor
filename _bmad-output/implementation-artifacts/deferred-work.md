@@ -645,3 +645,19 @@ source_spec: `spec-3-3-subject-grade-level-assignment.md`
 severity: medium
 reason: page.spec.tsx's coverage of applyIfCurrent(gradeLevelsCurrent.current, ...) and applyIfCurrent(subjectsCurrent.current, ...) is `PAGE_SOURCE.toContain(...)` against the file text; the spec file never renders CapturePage, only PageStrip. No test (unit or e2e) resolves two grade-level/subject reads out of order and asserts the later-issued one wins. The guard mirrors the already-working profiles/draft guards, so it is very likely correct, but that is unverified.
 status: open
+
+### DW-82: The API integration suite carries a pre-existing intermittent failure, most often in the PIN cool-down case, unrelated to Story 3.5.
+origin: spec-deferred a6b020246054
+location: apps/api/test/parent-pin.int-spec.ts
+source_spec: `spec-3-5-structured-extraction.md`
+severity: medium
+reason: Reproduced by running parent-pin.int-spec.ts, taxonomy.int-spec.ts and source-test.int-spec.ts together without any Story 3.5 file: roughly one run in four fails "accepts the same correct PIN once the cool-down has lapsed". extraction.int-spec.ts ran six times in isolation with zero failures. Present before this story's baseline revision.
+status: open
+
+### DW-83: A Submitted Source Test still carries the 72-hour uncommitted-state expiresAt, so the general Source Test read 404s three days after capture.
+origin: spec-deferred 558a79e167d2
+location: apps/api/src/sourcetest/source-test.service.ts
+source_spec: `spec-3-5-structured-extraction.md`
+severity: medium
+reason: submit() never clears or extends SourceTest.expiresAt, and requireLive() rejects any expired row regardless of status (apps/api/src/sourcetest/source-test.service.ts). Story 3.5 worked around this for its own status route by adding requireReadable, which honours expiry only while the row is a Draft; the pre-existing read path was left alone because it belongs to Stories 3.2/3.3 and AD-16.
+status: open

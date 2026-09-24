@@ -3,8 +3,10 @@ import { MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AdminModule } from './admin/admin.module.js';
+import { AiModule } from './ai/ai.module.js';
 import { CorrelationIdMiddleware } from './common/correlation.js';
 import { requireIntEnv } from './common/env.js';
+import { ExtractionModule } from './extraction/extraction.module.js';
 import { HealthController } from './health/health.controller.js';
 import { IdentityModule } from './identity/identity.module.js';
 import { PARENT_CREDENTIAL_ROUTE } from './identity/parent-credential-route.decorator.js';
@@ -52,6 +54,12 @@ export const PARENT_THROTTLER = 'parent';
     // Sole owner and sole writer of SourceTest and PageImage, and sole owner of
     // image ingest (AD-17).
     SourceTestModule,
+    // The only constructor of a provider client and the sole writer of
+    // `ai_call` (AD-17, AD-20).
+    AiModule,
+    // Sole owner and sole writer of every extraction table, and the owner of
+    // the extraction prompt (AD-17).
+    ExtractionModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

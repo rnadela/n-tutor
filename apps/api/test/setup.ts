@@ -18,3 +18,16 @@ process.env.PARENT_AUTH_RATE_LIMIT ??= '10000';
 // about what was stored is worth being able to look at, and the OS reclaims the
 // temp directory anyway.
 process.env.UPLOAD_ROOT ??= mkdtempSync(path.join(tmpdir(), 'nts-uploads-'));
+
+// The extraction worker is off in the integration tier, so a spec drives
+// `runOnce()` exactly once and asserts on what that pass did. Left on, a poll
+// timer would claim the job first and every assertion about a `Queued` row
+// would be a race.
+process.env.EXTRACTION_WORKER_ENABLED ??= 'false';
+
+// The injected-fault tests drive the retry loop deliberately, and the real
+// backoff is time spent asserting nothing. One attempt is the default here
+// because most specs want the fault to surface at once; the specs that are
+// about the retry loop itself state their own figures.
+process.env.AI_MAX_ATTEMPTS ??= '1';
+process.env.AI_RETRY_BASE_MS ??= '1';

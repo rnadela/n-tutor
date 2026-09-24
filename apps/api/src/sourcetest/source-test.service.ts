@@ -1,10 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
   UnsupportedMediaTypeException,
+  forwardRef,
 } from '@nestjs/common';
+import { ExtractionService } from '../extraction/extraction.service.js';
 import { TaxonomyService, type TaxonomyItem } from '../admin/taxonomy.service.js';
 import type { PageImageState, SourceTestStatus } from '../generated/prisma/enums.js';
 import {
@@ -14,6 +17,7 @@ import {
 } from '../identity/student-profile.service.js';
 import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
 import { PageIngestService, UnsupportedImageFormat } from './page-ingest.service.js';
+import type { PageBytes, SourceTestReader } from './source-test-reader.js';
 import {
   CLASSIFICATION_REQUIRED,
   MAX_PAGES,
@@ -24,6 +28,7 @@ import {
   PageOrderMismatch,
   SOURCE_TEST_NOT_DRAFT,
   SOURCE_TEST_NOT_FOUND,
+  STORED_MIME,
   SUBJECT_NOT_AVAILABLE,
   UNSUPPORTED_IMAGE_FORMAT,
   canAddPage,
@@ -118,7 +123,7 @@ function isUniqueViolation(cause: unknown): boolean {
   return (cause as { code?: unknown } | null)?.code === 'P2002';
 }
 
-interface SourceTestRow {
+export interface SourceTestRow {
   id: string;
   studentProfileId: string;
   status: SourceTestStatus;
@@ -156,7 +161,7 @@ interface SourceTestRow {
  * Story 3.4.
  */
 @Injectable()
-export class SourceTestService {
+export class SourceTestService implements SourceTestReader {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ingest: PageIngestService,
@@ -164,6 +169,13 @@ export class SourceTestService {
     // The sole reader of the taxonomy tables (AD-17). Selectability is computed
     // there and re-derived nowhere.
     private readonly taxonomy: TaxonomyService,
+    // A genuine cycle, expressed honestly: `submit` enqueues the Extraction
+    // job, and the job reads this module's page bytes back. `forwardRef` is
+    // Nest's sanctioned answer, and it keeps each table with exactly one
+    // writer — the alternative is a Prisma delegate reach-across in one
+    // direction or the other (AD-17).
+    @Inject(forwardRef(() => ExtractionService))
+    private readonly extraction: ExtractionService,
   ) {}
 
   // --- Reads -------------------------------------------------------------
@@ -560,9 +572,50 @@ export class SourceTestService {
         data: { status: 'Submitted', submittedAt: new Date() },
       });
       if (written.count !== 1) throw new ConflictException(SOURCE_TEST_NOT_DRAFT);
+      // Inside, not after (AD-5). The job row and the status change are one
+      // transaction, so a Submitted Source Test with no Extraction job is
+      // unreachable and a refused submit — the page gate, the classification
+      // gate, the concurrent-submit conflict above — leaves no job behind.
+      await this.extraction.enqueue(tx, sourceTestId);
     });
 
     return this.read(parentAccountId, sourceTestId);
+  }
+
+  /**
+   * Every `Ready` page's stored bytes, in ordinal order.
+   *
+   * This is how the Extraction job reaches the images, and it is deliberately
+   * the *only* way: `extraction` holds no Prisma delegate for `page_image` and
+   * derives no storage path of its own (AD-17, AD-15). What it gets back is
+   * buffers and ordinals — never a path, for the same reason `PAGE_FIELDS`
+   * excludes one.
+   *
+   * `Ready` alone, like the submit gate: an `Uploading` row has a null
+   * `storagePath` and no bytes behind it, so including it would send the model
+   * a page that does not exist yet.
+   *
+   * No account parameter: the caller is the job, which has already been
+   * enqueued against a Source Test this module admitted. Ownership is proven
+   * once, at the boundary, and not re-asserted by a byte read that has no
+   * principal to assert it against.
+   */
+  async readPageBytes(sourceTestId: string): Promise<PageBytes[]> {
+    const pages = await this.prisma.pageImage.findMany({
+      where: { sourceTestId, state: 'Ready' },
+      select: { id: true, ordinal: true, mimeType: true },
+      orderBy: { ordinal: 'asc' },
+    });
+    return Promise.all(
+      pages.map(async (page) => ({
+        ordinal: page.ordinal,
+        buffer: await this.ingest.read(page.id),
+        // Everything that left ingest is JPEG (AD-28); the stored column is
+        // read anyway rather than assumed, and falls back to the one format
+        // ingest can produce.
+        mimeType: page.mimeType ?? STORED_MIME,
+      })),
+    );
   }
 
   // --- Internals ---------------------------------------------------------
@@ -709,11 +762,34 @@ export class SourceTestService {
   }
 
   /**
+   * The Source Test as a committed-work reader sees it: this account's, and
+   * expired only while it is still a draft.
+   *
+   * `expiresAt` is the uncommitted-capture TTL (AD-16) and submit deliberately
+   * does not clear it, so honouring it here would make the Extraction status —
+   * and everything Epic 4 reads through it — disappear 72 hours after the photo
+   * was taken, for a stored document that is complete and is *designed* to
+   * outlive its images. A Draft stays invisible once expired, because an
+   * expired draft genuinely is over.
+   */
+  async requireReadable(parentAccountId: string, id: string): Promise<SourceTestRow> {
+    const row = await this.prisma.sourceTest.findFirst({
+      where: { id, parentAccountId },
+      select: SOURCE_TEST_FIELDS,
+    });
+    if (!row) throw new NotFoundException(SOURCE_TEST_NOT_FOUND);
+    if (row.status === 'Draft' && isExpired(row, new Date())) {
+      throw new NotFoundException(SOURCE_TEST_NOT_FOUND);
+    }
+    return row;
+  }
+
+  /**
    * The Source Test, whatever its status, provided it is this account's and has
    * not expired. Expiry answers the same 404 an unknown id does: a parent whose
    * draft is over is returned to the start of the flow, not told about a row.
    */
-  private async requireLive(parentAccountId: string, id: string): Promise<SourceTestRow> {
+  async requireLive(parentAccountId: string, id: string): Promise<SourceTestRow> {
     const row = await this.prisma.sourceTest.findFirst({
       where: { id, parentAccountId },
       select: SOURCE_TEST_FIELDS,

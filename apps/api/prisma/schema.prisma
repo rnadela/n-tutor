@@ -52,10 +52,10 @@ model GradeLevel {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  subjects SubjectGradeLevel[]
+  subjects    SubjectGradeLevel[]
   /// Back-relation only. `identity` is the sole writer of StudentProfile
   /// (AD-17); `admin` never writes through this field.
-  students StudentProfile[]
+  students    StudentProfile[]
   /// The same, for `sourcetest`'s per-upload Grade Level.
   sourceTests SourceTest[]
 
@@ -153,6 +153,10 @@ model ParentAccount {
   /// the consents and reset tokens above it: a row that was never committed is
   /// not something a deletion has to preserve, and leaves no tombstone.
   uncommitted    UncommittedState[]
+  /// Back-relation only. `ai` is the sole writer of AiCall (AD-17, AD-20), and
+  /// the edge is `Restrict` from the other side so a cost row never vanishes as
+  /// a side effect of an account removal.
+  aiCalls        AiCall[]
 
   @@map("parent_account")
 }
@@ -383,6 +387,12 @@ model SourceTest {
   /// Source Test it is a page of.
   pages PageImage[]
 
+  /// The one Extraction job and the one Extraction, both owned by `extraction`
+  /// (AD-17) and both Cascade: neither has any existence apart from the Source
+  /// Test they are a reading of.
+  extractionJob ExtractionJob?
+  extraction    Extraction?
+
   /// The resume read: the account's live draft for one child.
   ///
   /// A partial unique index enforces that there is at most **one** of them:
@@ -431,4 +441,282 @@ model PageImage {
   @@unique([sourceTestId, ordinal])
   @@index([sourceTestId])
   @@map("page_image")
+}
+
+// `ai` is the sole owner and sole writer of AiCall (AD-17, AD-20). No domain
+// module constructs a provider client and none writes a cost row.
+
+/// Which class of provider call a cost row belongs to. Each class carries its
+/// own pinned model snapshot and its own price (AD-8, AD-17); the enum is the
+/// list of classes the product has, not the list it uses today.
+enum AiCallClass {
+  Extraction
+  Generation
+  Grading
+  Explanation
+  Legibility
+  TopicNormalization
+
+  @@map("ai_call_class")
+}
+
+/// One completed provider call: what it cost, how long it took, and nothing
+/// about what it said (AD-20). No image byte and no extracted Question content
+/// ever reaches this table — identifiers, counts and money only.
+model AiCall {
+  id              String      @id @default(uuid())
+  parentAccountId String
+  callClass       AiCallClass
+  /// The pinned snapshot actually sent, recorded per row: a re-pin must not
+  /// rewrite the history of what previous calls were billed for.
+  model           String
+  inputTokens     Int
+  outputTokens    Int
+  /// Integer micros. A money column that is a float is a money column that
+  /// drifts.
+  costMicros      Int
+  latencyMs       Int
+  /// Request-scoped (AD-20), so a worker-run job has none: the job id is the
+  /// handle there, and this column stays null.
+  correlationId   String?
+  createdAt       DateTime    @default(now())
+
+  /// `Restrict`: a cost row must never vanish as a side effect of an account
+  /// removal.
+  parentAccount ParentAccount @relation(fields: [parentAccountId], references: [id], onDelete: Restrict)
+
+  @@index([parentAccountId, createdAt])
+  @@index([createdAt])
+  @@map("ai_call")
+}
+
+// `extraction` is the sole owner and sole writer of every table below. It reads
+// Page Image bytes through SourceTestService and never through a Prisma
+// delegate of its own (AD-17, AD-15, AD-28).
+
+/// Where one Extraction job stands. `Queued` and stale `Running` rows are what
+/// a claim pass looks at; `Succeeded` and `Failed` are terminal until the job
+/// is re-enqueued, which returns the one row to `Queued` rather than adding a
+/// second.
+enum ExtractionJobStatus {
+  Queued
+  Running
+  Succeeded
+  Failed
+
+  @@map("extraction_job_status")
+}
+
+/// Whose fault an AI failure was (AD-31). An `UpstreamFault` is the provider's
+/// — transport, timeout, non-OK, schema-invalid payload, post-hoc violation —
+/// and is retryable, except when the provider refused the request outright
+/// (a bad key, a model the account cannot use): still the provider's fault,
+/// but a retry would only buy the same refusal, so that case alone carries
+/// `retryable = false` on the job row. A `ClientFault` is the input's: every
+/// page uninterpretable is terminal, and a retry would only spend the same
+/// money on the same photos.
+enum AiFailureKind {
+  UpstreamFault
+  ClientFault
+
+  @@map("ai_failure_kind")
+}
+
+/// The three formats a question may take. Exactly one per Question, enforced by
+/// deterministic post-hoc validation in code and never trusted from the payload
+/// (AD-30).
+enum QuestionFormat {
+  MultipleChoice
+  FillInTheBlank
+  ShortAnswer
+
+  @@map("question_format")
+}
+
+/// The model's own self-assessment, carried per field where AD-30 requires one.
+/// It is evidence, never a verdict: `usable` is computed from it in code.
+enum ExtractionConfidence {
+  Low
+  Medium
+  High
+
+  @@map("extraction_confidence")
+}
+
+/// What a shared, cross-page piece of context is. Stored once, carrying the page
+/// range it occupies, and pointed at by every question that depends on it.
+enum ExtractedContextKind {
+  Passage
+  DataTable
+
+  @@map("extracted_context_kind")
+}
+
+/// Why a region could not be read. Recorded rather than guessed at.
+enum UninterpretableKind {
+  Diagram
+  Handwriting
+  Cropped
+  Other
+
+  @@map("uninterpretable_kind")
+}
+
+/// The queue row. The substrate is this table in the application database
+/// (AD-5): it is written inside `submit`'s own transaction, so a Submitted
+/// Source Test with no job is unreachable and a refused submit leaves none.
+///
+/// `sourceTestId` is unique: there is exactly one job per Source Test, so a
+/// re-run returns this row to `Queued` rather than adding a second.
+model ExtractionJob {
+  id            String              @id @default(uuid())
+  sourceTestId  String              @unique
+  status        ExtractionJobStatus @default(Queued)
+  /// How many claim passes have taken this row. Incremented by the claim, not
+  /// by the run, so a worker that died mid-run still counts its attempt.
+  attempts      Int                 @default(0)
+  /// When the current claim was taken, or null when the row is not `Running`.
+  /// A `Running` row whose lock has outlived the claim timeout is stale and may
+  /// be claimed again.
+  lockedAt      DateTime?
+  failureKind   AiFailureKind?
+  /// A message **constant** from this module's policy file. Never a provider
+  /// string, which could carry content (AD-20).
+  failureReason String?
+  /// Whether a re-run could plausibly succeed. False for a client fault, which
+  /// is what a later retake prompt reads.
+  retryable     Boolean             @default(false)
+  completedAt   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  sourceTest SourceTest @relation(fields: [sourceTestId], references: [id], onDelete: Cascade)
+
+  /// The claim pass's own index: `Queued` first, oldest first.
+  @@index([status, createdAt])
+  @@map("extraction_job")
+}
+
+/// The persisted reading of one Source Test: a document that outlives the
+/// photographs it came from. Nothing about reading it back touches a Page Image
+/// row or a stored byte, which is what makes Epic 8's 90-day image expiry safe.
+model Extraction {
+  id           String   @id @default(uuid())
+  sourceTestId String   @unique
+  /// How many pages were read as one document. Stored rather than counted from
+  /// `page_image`, for exactly the reason above.
+  pageCount    Int
+  completedAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sourceTest SourceTest @relation(fields: [sourceTestId], references: [id], onDelete: Cascade)
+
+  contexts        ExtractedContext[]
+  questions       ExtractedQuestion[]
+  uninterpretable UninterpretableRegion[]
+
+  @@map("extraction")
+}
+
+/// A passage or data table shared across pages, stored **once** with the page
+/// range it occupies. Every question that depends on it points here, including
+/// questions on later pages — that is the cross-page context the epic requires.
+model ExtractedContext {
+  id               String               @id @default(uuid())
+  extractionId     String
+  ordinal          Int
+  kind             ExtractedContextKind
+  /// A validated rich-text segment array (AD-32), never a plain string.
+  body             Json
+  startPageOrdinal Int
+  endPageOrdinal   Int
+  createdAt        DateTime             @default(now())
+
+  extraction Extraction          @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+  questions  ExtractedQuestion[]
+
+  @@unique([extractionId, ordinal])
+  @@map("extracted_context")
+}
+
+/// One extracted Question: exactly one Format, at least one Topic, and a
+/// `usable` flag **computed in code** from the declared dependency on an
+/// uninterpretable region and the self-assessed confidence — never read from the
+/// payload (AD-30).
+model ExtractedQuestion {
+  id                       String               @id @default(uuid())
+  extractionId             String
+  ordinal                  Int
+  pageOrdinal              Int
+  format                   QuestionFormat
+  /// A validated rich-text segment array (AD-32).
+  prompt                   Json
+  confidence               ExtractionConfidence
+  dependsOnUninterpretable Boolean
+  /// Derived, never declared. Story 3.6 warns on the count of these; Epic 4
+  /// generates from them and from nothing else.
+  usable                   Boolean
+  contextId                String?
+  createdAt                DateTime             @default(now())
+
+  extraction Extraction        @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+  /// `SetNull` rather than `Cascade`: a context removed must not silently take
+  /// the questions that referenced it with it.
+  context    ExtractedContext? @relation(fields: [contextId], references: [id], onDelete: SetNull)
+
+  choices ExtractedChoice[]
+  topics  ExtractedTopicLabel[]
+
+  @@unique([extractionId, ordinal])
+  @@index([extractionId, usable])
+  /// The `SetNull` edge's own index. Without it every context removal scans
+  /// every extracted question to find the rows it must null out.
+  @@index([contextId])
+  @@map("extracted_question")
+}
+
+/// One option of a Multiple Choice question, in the order it was printed.
+model ExtractedChoice {
+  id         String   @id @default(uuid())
+  questionId String
+  ordinal    Int
+  /// A validated rich-text segment array (AD-32).
+  body       Json
+  createdAt  DateTime @default(now())
+
+  question ExtractedQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, ordinal])
+  @@map("extracted_choice")
+}
+
+/// A Topic as the model read it, stored **raw**. Canonicalization is Epic 7's
+/// (AD-11), and doing it here would destroy the evidence it works from.
+model ExtractedTopicLabel {
+  id         String               @id @default(uuid())
+  questionId String
+  label      String
+  confidence ExtractionConfidence
+  createdAt  DateTime             @default(now())
+
+  question ExtractedQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@map("extracted_topic_label")
+}
+
+/// Content the model could not interpret, recorded rather than guessed at. A
+/// question that depends on one is stored `usable = false`.
+model UninterpretableRegion {
+  id           String              @id @default(uuid())
+  extractionId String
+  pageOrdinal  Int
+  kind         UninterpretableKind
+  createdAt    DateTime            @default(now())
+
+  extraction Extraction @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+
+  @@index([extractionId])
+  @@map("uninterpretable_region")
 }

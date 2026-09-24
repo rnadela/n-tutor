@@ -591,6 +591,48 @@ describe('Source Tests: page management before submit', () => {
       expect(response.body.submittedAt).not.toBeNull();
     });
 
+    /**
+     * The transaction rule (AD-5) proved where submit is already exercised,
+     * rather than only in the Extraction spec: the enqueue lives inside this
+     * method's own `withTransaction`, so a Submitted Source Test with no job is
+     * unreachable and every refusal leaves none behind.
+     */
+    it('enqueues exactly one Extraction job in the same transaction', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
+      await server()
+        .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+        .set('Authorization', bearer(draft.token))
+        .expect(200);
+
+      const jobs = await h.prisma.extractionJob.findMany({
+        where: { sourceTestId: draft.sourceTestId },
+      });
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]!.status).toBe('Queued');
+    });
+
+    it('leaves no Extraction job behind when the submit is refused', async () => {
+      // The page gate and the classification gate, one after the other. Both
+      // roll the whole transaction back, so neither writes a job row.
+      const unclassified = await openDraft();
+      await addPage(unclassified.token, unclassified.sourceTestId, await photo()).expect(201);
+      await server()
+        .post(`/api/parent/source-tests/${unclassified.sourceTestId}/submit`)
+        .set('Authorization', bearer(unclassified.token))
+        .expect(400);
+
+      const pageless = await openDraft();
+      await classifyDraft(pageless);
+      await server()
+        .post(`/api/parent/source-tests/${pageless.sourceTestId}/submit`)
+        .set('Authorization', bearer(pageless.token))
+        .expect(400);
+
+      expect(await h.prisma.extractionJob.count()).toBe(0);
+    });
+
     it('refuses every page-management write once it is submitted', async () => {
       const draft = await openDraft();
       await classifyDraft(draft);

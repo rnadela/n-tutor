@@ -1,13 +1,15 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { requireParentJwtSecret } from '../common/env.js';
 import { TaxonomyModule } from '../admin/taxonomy.module.js';
+import { ExtractionModule } from '../extraction/extraction.module.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
 import { PageIngestService } from './page-ingest.service.js';
 import { SourceTestController } from './source-test.controller.js';
 import { SourceTestService } from './source-test.service.js';
 import { sourceTestRuntime } from './source-test-policy.js';
+import { SOURCE_TEST_READER } from './source-test-reader.js';
 
 /**
  * The `sourcetest` module: sole owner and sole writer of SourceTest and
@@ -41,10 +43,25 @@ import { sourceTestRuntime } from './source-test-policy.js';
     // second reader of `subject` / `grade_level` / `subject_grade_level` is
     // exactly the drift AD-17 exists to prevent. No write ever goes this way.
     TaxonomyModule,
+    // A genuine cycle, expressed honestly: `submit` enqueues the Extraction
+    // job inside its own transaction (AD-5), and the job reads this module's
+    // page bytes back. The alternatives — a Prisma delegate reach-across, or
+    // the bytes copied into the job row — each break a decision (AD-17,
+    // AD-20), so `forwardRef` on both module declarations is the honest
+    // expression of it.
+    forwardRef(() => ExtractionModule),
   ],
   controllers: [SourceTestController],
-  providers: [SourceTestService, PageIngestService, ParentElevationGuard],
-  exports: [SourceTestService],
+  providers: [
+    SourceTestService,
+    PageIngestService,
+    ParentElevationGuard,
+    // The same instance under the token `extraction` injects it by. Binding it
+    // here rather than letting `extraction` import the class is what keeps the
+    // ESM cycle from being a boot failure; `source-test-reader.ts` states why.
+    { provide: SOURCE_TEST_READER, useExisting: SourceTestService },
+  ],
+  exports: [SourceTestService, SOURCE_TEST_READER],
 })
 export class SourceTestModule {
   constructor() {

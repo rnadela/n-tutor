@@ -35,6 +35,9 @@ import {
 import { PARENT_ELEVATION_AUDIENCE } from '../src/identity/pin-policy.js';
 import { STUDENT_MODE_AUDIENCE, STUDENT_MODE_COOKIE } from '../src/identity/student-mode-policy.js';
 import { MailDispatchError, MailService } from '../src/mail/mail.service.js';
+import { AiService } from '../src/ai/ai.service.js';
+import { ExtractionRunner } from '../src/extraction/extraction.runner.js';
+import type { AiFakeFailure } from '../src/ai/ai-config.js';
 import type { AccountTier } from '../src/generated/prisma/enums.js';
 
 export const OPERATOR_EMAIL = 'test-operator@example.test';
@@ -59,6 +62,13 @@ export interface Harness {
   /** `identity`'s sole writer of StudentProfile. */
   students: StudentProfileService;
   mail: MailCapture;
+  /** The captured `ai` seam: what was asked for, and the failure latch. */
+  ai: AiCapture;
+  /**
+   * The extraction worker, so a spec drives exactly one pass rather than
+   * waiting on a poll timer. The timer itself is off in the test tier.
+   */
+  extractionRunner: ExtractionRunner;
   operatorId: string;
   close(): Promise<void>;
 }
@@ -83,9 +93,12 @@ export async function createHarness(): Promise<Harness> {
     parentAuth: moduleRef.get(ParentAuthService),
     students: moduleRef.get(StudentProfileService),
     mail: captureMail(moduleRef.get(MailService)),
+    ai: captureAi(moduleRef.get(AiService)),
+    extractionRunner: moduleRef.get(ExtractionRunner),
     operatorId: '',
     close: async () => {
       harness.mail.restore();
+      harness.ai.restore();
       await app.close();
     },
   };
@@ -123,7 +136,7 @@ export async function createHarness(): Promise<Harness> {
  */
 export async function resetTaxonomy(prisma: PrismaService): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "page_image", "source_test", "student_profile", "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE',
+    `TRUNCATE TABLE ${EXTRACTION_TABLES}, "page_image", "source_test", "student_profile", "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE`,
   );
 }
 
@@ -136,9 +149,29 @@ export async function resetTaxonomy(prisma: PrismaService): Promise<void> {
  */
 export async function resetParentAccounts(prisma: PrismaService): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "page_image", "source_test", "student_profile", "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE',
+    `TRUNCATE TABLE ${EXTRACTION_TABLES}, "page_image", "source_test", "student_profile", "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE`,
   );
 }
+
+/**
+ * The extraction cluster and the cost table, child before parent.
+ *
+ * Named in full rather than left to the CASCADE for the reason the two lists
+ * below already name `page_image`: a reader asking "is the Extraction wiped
+ * too?" should find the answer in the list itself. `ai_call` holds its Parent
+ * Account with `onDelete: Restrict`, so that one is not optional — the truncate
+ * fails without it.
+ */
+const EXTRACTION_TABLES = [
+  '"extracted_topic_label"',
+  '"extracted_choice"',
+  '"extracted_question"',
+  '"extracted_context"',
+  '"uninterpretable_region"',
+  '"extraction"',
+  '"extraction_job"',
+  '"ai_call"',
+].join(', ');
 
 /** Every message the captured transport was handed, oldest first. */
 export interface CapturedMail {
@@ -185,6 +218,67 @@ function captureMail(mail: MailService): MailCapture {
     },
     restore: () => {
       mail.send = original;
+    },
+  };
+}
+
+/** One call as the seam recorded it. No bytes, and nothing the model said. */
+export interface CapturedAiCall {
+  callClass: string;
+  imageCount: number;
+}
+
+export interface AiCapture {
+  sent: CapturedAiCall[];
+  /** Drives the fake transport's failure mode for the next call alone. */
+  failNext(kind: AiFakeFailure): void;
+  reset(): void;
+  restore(): void;
+}
+
+/**
+ * Wraps `AiService.run` rather than replacing it, which is the difference that
+ * matters: the real config, the real retry loop, the real schema parse and the
+ * real cost row all still run, and the fake transport underneath is the seam
+ * every test tier is supposed to exercise (AD-22).
+ *
+ * `failNext` drives `AI_FAKE_FAILURE` for exactly one call, restoring whatever
+ * was there afterwards — the variable is read per call, so it has to stay set
+ * across the retries that one `run` makes internally.
+ *
+ * What is recorded is the call class and how many images went with it. Never a
+ * buffer, never a prompt, never a payload (AD-20).
+ */
+function captureAi(ai: AiService): AiCapture {
+  const sent: CapturedAiCall[] = [];
+  const original = ai.run.bind(ai);
+  let failOnce: AiFakeFailure | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ai.run = async (request: any): Promise<any> => {
+    sent.push({ callClass: request.callClass, imageCount: request.images.length });
+    if (failOnce === null) return original(request);
+    const kind = failOnce;
+    failOnce = null;
+    const saved = process.env.AI_FAKE_FAILURE;
+    process.env.AI_FAKE_FAILURE = kind;
+    try {
+      return await original(request);
+    } finally {
+      if (saved === undefined) delete process.env.AI_FAKE_FAILURE;
+      else process.env.AI_FAKE_FAILURE = saved;
+    }
+  };
+  return {
+    sent,
+    failNext: (kind) => {
+      failOnce = kind;
+    },
+    reset: () => {
+      sent.length = 0;
+      failOnce = null;
+    },
+    restore: () => {
+      ai.run = original;
     },
   };
 }
