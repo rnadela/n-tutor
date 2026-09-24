@@ -591,9 +591,12 @@ describe('the generate step and the gate on the way into it', () => {
     expect(parentCopy.capture.generate.retakeStarted).not.toContain('Generation Allowance');
   });
 
-  it('announces reaching the step in the words it displays', () => {
-    expect(PAGE_SOURCE).toContain('announce(parentCopy.capture.generate.reached)');
-    expect(PAGE_SOURCE).toContain('{parentCopy.capture.generate.reached}');
+  it('leaves for the generate route rather than revealing a section in place', () => {
+    // The flow has to survive leaving the screen, and only a URL-addressable
+    // route does: a section revealed here could restore nothing on a return.
+    expect(PAGE_SOURCE).toContain('announce(parentCopy.capture.generate.leaving)');
+    expect(PAGE_SOURCE).toContain('router.push(`/parent/generate/${sourceTest!.id}`)');
+    expect(PAGE_SOURCE).not.toContain('generateReached');
   });
 
   it('states every one of its own words from the copy module', () => {

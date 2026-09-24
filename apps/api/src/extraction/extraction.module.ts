@@ -8,6 +8,7 @@ import { SourceTestModule } from '../sourcetest/source-test.module.js';
 import { ExtractionController } from './extraction.controller.js';
 import { ExtractionRunner } from './extraction.runner.js';
 import { ExtractionService } from './extraction.service.js';
+import { EXTRACTION_READER } from './extraction-reader.js';
 import { extractionRuntime } from './extraction-policy.js';
 
 /**
@@ -36,8 +37,17 @@ import { extractionRuntime } from './extraction-policy.js';
     forwardRef(() => SourceTestModule),
   ],
   controllers: [ExtractionController],
-  providers: [ExtractionService, ExtractionRunner, ParentElevationGuard],
-  exports: [ExtractionService, ExtractionRunner],
+  providers: [
+    ExtractionService,
+    ExtractionRunner,
+    ParentElevationGuard,
+    // The same instance under the token `practicetest` injects it by. Binding
+    // it here rather than letting that module import the class is what keeps
+    // the ESM cycle from being a boot failure; `extraction-reader.ts` states
+    // why, and `source-test-reader.ts` states it in full.
+    { provide: EXTRACTION_READER, useExisting: ExtractionService },
+  ],
+  exports: [ExtractionService, ExtractionRunner, EXTRACTION_READER],
 })
 export class ExtractionModule {
   constructor() {

@@ -398,10 +398,12 @@ test.describe('page management before submit', () => {
     await expect(proceedAgain).toBeVisible({ timeout: 30_000 });
     await proceedAgain.click();
     await page.getByRole('dialog').getByRole('button', { name: 'Continue anyway' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.getByTestId('generate-reached')).toHaveText(
-      'This upload is ready. Making a practice test from it is the next step.',
-    );
+    // Past the gate is a *navigation*, because the generate flow is
+    // asynchronous and has to survive leaving the screen — which only a
+    // URL-addressable route does. The gate ends here; what the route does is
+    // `parent-practice-test.spec.ts`'s.
+    await expect(page).toHaveURL(/\/parent\/generate\//);
+    await expect(page.getByRole('heading', { name: 'Generate practice tests' })).toBeVisible();
   });
 
   test('refuses a submission made straight to the API, with no browser involved', async () => {

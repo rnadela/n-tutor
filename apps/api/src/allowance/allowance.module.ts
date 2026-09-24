@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { IdentityModule } from '../identity/identity.module.js';
+import { PrismaModule } from '../prisma/prisma.module.js';
 import { AllowanceService } from './allowance.service.js';
 
 /**
@@ -8,7 +9,7 @@ import { AllowanceService } from './allowance.service.js';
  * Every surface that shows an allowance reads it from here.
  */
 @Module({
-  imports: [IdentityModule],
+  imports: [IdentityModule, PrismaModule],
   providers: [AllowanceService],
   exports: [AllowanceService],
 })

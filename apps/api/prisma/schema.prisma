@@ -157,6 +157,12 @@ model ParentAccount {
   /// the edge is `Restrict` from the other side so a cost row never vanishes as
   /// a side effect of an account removal.
   aiCalls        AiCall[]
+  /// Practice Tests generated on this account, and the generation jobs that
+  /// produced them. `Restrict` from the other side on the Practice Test: a
+  /// charged artifact is what the Generation Allowance is counted from, so it
+  /// must never vanish as a side effect of an account removal.
+  practiceTests  PracticeTest[]
+  generationJobs GenerationJob[]
 
   @@map("parent_account")
 }
@@ -193,6 +199,11 @@ model StudentProfile {
   /// Source Tests photographed for this child. `Restrict` from the other side,
   /// like the profile's own relations: nothing here goes as a side effect.
   sourceTests SourceTest[]
+
+  /// Practice Tests generated for this child, and the jobs that produced them.
+  /// `Restrict` from the other side, for the same reason.
+  practiceTests  PracticeTest[]
+  generationJobs GenerationJob[]
 
   /// The list read and the selectable read are both scoped by account and
   /// filtered by archive state.
@@ -392,6 +403,14 @@ model SourceTest {
   /// Test they are a reading of.
   extractionJob ExtractionJob?
   extraction    Extraction?
+
+  /// The Practice Tests generated from this Source Test's Extraction, and the
+  /// jobs that produced them. `Cascade`: a Practice Test is a reading of this
+  /// upload and has no existence apart from it. The *charge* it carries is
+  /// already spent and is never refunded — deleting a Source Test is not a
+  /// refund path, and no such path exists.
+  practiceTests  PracticeTest[]
+  generationJobs GenerationJob[]
 
   /// The resume read: the account's live draft for one child.
   ///
@@ -719,4 +738,194 @@ model UninterpretableRegion {
 
   @@index([extractionId])
   @@map("uninterpretable_region")
+}
+
+// `practicetest` is the sole owner and sole writer of every table below
+// (AD-17). It reads the persisted Extraction through `ExtractionReader` and
+// never through a Prisma delegate of its own, and it never touches a Page Image
+// row or a stored byte — which is what makes regeneration survive Epic 8's
+// 90-day image expiry.
+
+/// Where one generated Practice Test stands.
+///
+/// `Draft` is where every one of them lands, and reaching it is what charges
+/// the Generation Allowance — once, durably, carried on the row as `chargedAt`.
+/// `Released` and `Discarded` are Story 4.5's transitions; neither refunds.
+enum PracticeTestStatus {
+  Draft
+  Released
+  Discarded
+
+  @@map("practice_test_status")
+}
+
+/// Where one generation job stands.
+///
+/// `PartiallyComplete` is a real, first-class outcome rather than a flavour of
+/// failure: drafts are committed and charged as they land, so a job that
+/// produced three of five requested tests charged three and kept three. It is
+/// the one status that is neither a success nor a failure, and it exists
+/// because collapsing it into either would misreport what the parent was
+/// charged.
+enum GenerationJobStatus {
+  Queued
+  Running
+  Succeeded
+  PartiallyComplete
+  Failed
+
+  @@map("generation_job_status")
+}
+
+/// The generation queue row. The substrate is this table in the application
+/// database (AD-5), mirroring `extraction_job`'s claim and fence mechanics.
+///
+/// Unlike `extraction_job` there is **no** unique key on `sourceTestId`: a
+/// generation job is one per *request*, and a parent generating again (Story
+/// 4.2) is a second job rather than a reset of the first. That difference in
+/// uniqueness is why this is a second table rather than a generalized one.
+model GenerationJob {
+  id               String              @id @default(uuid())
+  parentAccountId  String
+  sourceTestId     String
+  studentProfileId String
+  /// What was actually accepted, already clamped to the remaining Generation
+  /// Allowance server-side. Never what the client asked for.
+  requestedCount   Int
+  /// How many drafts have landed and been charged. Incremented inside the same
+  /// fenced transaction that inserts each Practice Test, so the two figures
+  /// cannot disagree.
+  producedCount    Int                 @default(0)
+  status           GenerationJobStatus @default(Queued)
+  /// How many claim passes have taken this row. Incremented by the claim, not
+  /// by the run, so a worker that died mid-run still counts its attempt.
+  attempts         Int                 @default(0)
+  /// When the current claim was taken, or null when the row is not `Running`.
+  lockedAt         DateTime?
+  failureKind      AiFailureKind?
+  /// A message **constant** from this module's policy file. Never a provider
+  /// string and never a fragment of generated content (AD-20).
+  failureReason    String?
+  retryable        Boolean             @default(false)
+  completedAt      DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  parentAccount  ParentAccount  @relation(fields: [parentAccountId], references: [id], onDelete: Restrict)
+  // Restrict, not Cascade: a job's PracticeTest rows may already be charged
+  // (AD-14), and a cascaded delete would silently uncharge them by deleting
+  // the derived count's own rows out from under it.
+  sourceTest     SourceTest     @relation(fields: [sourceTestId], references: [id], onDelete: Restrict)
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Restrict)
+
+  practiceTests PracticeTest[]
+
+  /// The claim pass's own index: `Queued` first, oldest first.
+  @@index([status, createdAt])
+  /// The progress read: this account's jobs for one Source Test, newest first.
+  @@index([parentAccountId, sourceTestId, createdAt])
+  @@map("generation_job")
+}
+
+/// One generated Practice Test.
+///
+/// `chargedAt` is the durable marker AD-14 requires: the Generation Allowance
+/// is *derived* by counting rows whose `chargedAt` falls inside the account's
+/// period window, never by decrementing a counter column. It is written in the
+/// same transaction that inserts the row and never rewritten — a Practice Test
+/// charges on first reaching draft and never again, and neither a discard nor a
+/// deletion refunds it.
+model PracticeTest {
+  id               String             @id @default(uuid())
+  parentAccountId  String
+  sourceTestId     String
+  studentProfileId String
+  generationJobId  String
+  status           PracticeTestStatus @default(Draft)
+  /// Its place within the job that produced it, 1-based — "draft 2 of 5".
+  ordinal          Int
+  /// How many Questions it holds, stored rather than counted so a progress
+  /// read never has to join.
+  questionCount    Int
+  /// When the Generation Allowance was spent on this row. Nullable only so the
+  /// column can exist; every row this module writes sets it.
+  chargedAt        DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  parentAccount  ParentAccount  @relation(fields: [parentAccountId], references: [id], onDelete: Restrict)
+  // Restrict, not Cascade: this row may already be charged (AD-14) — "neither
+  // a discard nor a deletion refunds it" above means this table's own rows too,
+  // not only its owning Source Test's.
+  sourceTest     SourceTest     @relation(fields: [sourceTestId], references: [id], onDelete: Restrict)
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Restrict)
+  generationJob  GenerationJob  @relation(fields: [generationJobId], references: [id], onDelete: Cascade)
+
+  questions PracticeTestQuestion[]
+
+  @@unique([generationJobId, ordinal])
+  /// The one index the allowance count reads: this account's charged rows
+  /// inside a period window.
+  @@index([parentAccountId, chargedAt])
+  @@index([sourceTestId])
+  @@index([studentProfileId])
+  @@map("practice_test")
+}
+
+/// One generated Question. Exactly one Format, at least one Topic, and every
+/// text field a validated rich-text segment array (AD-32) — a fraction is
+/// structure, never the glyph "1/2".
+model PracticeTestQuestion {
+  id             String         @id @default(uuid())
+  practiceTestId String
+  ordinal        Int
+  format         QuestionFormat
+  /// A validated rich-text segment array (AD-32).
+  prompt         Json
+  /// The correct free-text answer, for every format but MultipleChoice, where
+  /// the answer is the one choice flagged correct and this is null.
+  answer         Json?
+  createdAt      DateTime       @default(now())
+
+  practiceTest PracticeTest @relation(fields: [practiceTestId], references: [id], onDelete: Cascade)
+
+  choices PracticeTestChoice[]
+  topics  PracticeTestQuestionTopic[]
+
+  @@unique([practiceTestId, ordinal])
+  @@map("practice_test_question")
+}
+
+/// One option of a generated Multiple Choice question, in the order it is to be
+/// shown. Exactly one of a question's choices carries `isCorrect`, enforced by
+/// deterministic post-hoc validation in code and never trusted because the
+/// payload parsed (AD-30).
+model PracticeTestChoice {
+  id         String   @id @default(uuid())
+  questionId String
+  ordinal    Int
+  /// A validated rich-text segment array (AD-32).
+  body       Json
+  isCorrect  Boolean
+  createdAt  DateTime @default(now())
+
+  question PracticeTestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, ordinal])
+  @@map("practice_test_choice")
+}
+
+/// A Topic on a generated Question, stored **raw** and uncanonicalized.
+/// Canonicalization is Epic 7's (AD-11), and doing it here would destroy the
+/// evidence it works from.
+model PracticeTestQuestionTopic {
+  id         String   @id @default(uuid())
+  questionId String
+  label      String
+  createdAt  DateTime @default(now())
+
+  question PracticeTestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@map("practice_test_question_topic")
 }

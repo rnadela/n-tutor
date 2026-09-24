@@ -136,7 +136,6 @@ export default function CapturePage() {
    */
   const [extraction, setExtraction] = useState<ExtractionStatusView | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
-  const [generateReached, setGenerateReached] = useState(false);
 
   const leave = useCallback(() => {
     clearElevation();
@@ -326,7 +325,6 @@ export default function CapturePage() {
     extractionCurrent.current.value = issued;
     setExtraction(null);
     setWarningOpen(false);
-    setGenerateReached(false);
     if (token === null || submittedSourceTestId === null) return;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -562,13 +560,18 @@ export default function CapturePage() {
   }
 
   /**
-   * Past the gate. Nothing is generated and nothing is charged here — Epic 4
-   * owns the generate screen; this story owns the gate on the way into it.
+   * Past the gate, and off this screen.
+   *
+   * A navigation rather than a section revealed in place, and that is the whole
+   * of it: generation is asynchronous and a parent may leave and come back, so
+   * the state they come back to has to be addressable by a URL and read from
+   * the server. A section here could only ever restore what this browser
+   * happened to still be holding.
    */
   function reachGenerateStep(): void {
     setWarningOpen(false);
-    setGenerateReached(true);
-    announce(parentCopy.capture.generate.reached);
+    announce(parentCopy.capture.generate.leaving);
+    router.push(`/parent/generate/${sourceTest!.id}`);
   }
 
   /**
@@ -583,7 +586,6 @@ export default function CapturePage() {
    */
   function retakePages(): void {
     setWarningOpen(false);
-    setGenerateReached(false);
     openDraft(() => announce(parentCopy.capture.generate.retakeStarted));
   }
 
@@ -870,11 +872,6 @@ export default function CapturePage() {
                         >
                           {parentCopy.capture.generate.proceed}
                         </PrimaryButton>
-                        {generateReached && (
-                          <Typography component="p" data-testid="generate-reached">
-                            {parentCopy.capture.generate.reached}
-                          </Typography>
-                        )}
                       </>
                     )}
 

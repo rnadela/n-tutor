@@ -25,6 +25,11 @@ process.env.UPLOAD_ROOT ??= mkdtempSync(path.join(tmpdir(), 'nts-uploads-'));
 // would be a race.
 process.env.EXTRACTION_WORKER_ENABLED ??= 'false';
 
+// The generation worker is off for exactly the same reason: a spec drives
+// `runOnce()` and asserts on what that pass did, and a poll timer racing it
+// would make every assertion about a `Queued` job a coin toss.
+process.env.GENERATION_WORKER_ENABLED ??= 'false';
+
 // The injected-fault tests drive the retry loop deliberately, and the real
 // backoff is time spent asserting nothing. One attempt is the default here
 // because most specs want the fault to surface at once; the specs that are

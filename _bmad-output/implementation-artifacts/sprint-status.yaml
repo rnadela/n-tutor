@@ -60,7 +60,7 @@ development_status:
   epic-3-retrospective: optional
 
   epic-4: backlog
-  4-1-practice-test-generation-bounded-priced-async: backlog
+  4-1-practice-test-generation-bounded-priced-async: done
   4-2-topic-weighted-regeneration: backlog
   4-3-draft-review: backlog
   4-4-draft-editing: backlog

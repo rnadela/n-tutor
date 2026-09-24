@@ -10,6 +10,7 @@ import { ExtractionModule } from './extraction/extraction.module.js';
 import { HealthController } from './health/health.controller.js';
 import { IdentityModule } from './identity/identity.module.js';
 import { PARENT_CREDENTIAL_ROUTE } from './identity/parent-credential-route.decorator.js';
+import { PracticeTestModule } from './practicetest/practice-test.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { SourceTestModule } from './sourcetest/source-test.module.js';
 
@@ -60,6 +61,9 @@ export const PARENT_THROTTLER = 'parent';
     // Sole owner and sole writer of every extraction table, and the owner of
     // the extraction prompt (AD-17).
     ExtractionModule,
+    // Sole owner and sole writer of every Practice Test table, and the owner of
+    // the generation prompt (AD-17).
+    PracticeTestModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -193,7 +193,7 @@ describe('Source Tests: structured extraction', () => {
       expect(job!.completedAt).not.toBeNull();
 
       // One provider call, carrying all three pages.
-      expect(h.ai.sent).toEqual([{ callClass: 'Extraction', imageCount: 3 }]);
+      expect(h.ai.sent).toEqual([{ callClass: 'Extraction', modality: 'vision', imageCount: 3 }]);
 
       const extraction = await storedExtraction(draft.sourceTestId);
       expect(extraction!.pageCount).toBe(3);

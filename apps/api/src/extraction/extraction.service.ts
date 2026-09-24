@@ -25,7 +25,9 @@ import {
   type NormalizedExtraction,
   validateExtractionPayload,
 } from './extraction-payload.js';
+import type { ExtractionForGeneration, ExtractionReader } from './extraction-reader.js';
 import { EXTRACTION_PROMPT } from './extraction-prompt.js';
+import { parseRichText } from './rich-text.js';
 import {
   EXTRACTION_SCHEMA_NAME,
   ExtractionPayload,
@@ -128,7 +130,7 @@ export interface ExtractionStatusView {
  *   without ever knowing what was missing.
  */
 @Injectable()
-export class ExtractionService {
+export class ExtractionService implements ExtractionReader {
   private readonly logger = new Logger(ExtractionService.name);
 
   constructor(
@@ -281,6 +283,8 @@ export class ExtractionService {
       const { payload } = await this.ai.run({
         callClass: 'Extraction',
         parentAccountId: sourceTest.parentAccountId,
+        // Stated, never defaulted: this is the call that reads photographs.
+        modality: 'vision',
         // Already in ordinal order, and sent that way: the model is told the
         // images are the pages of one document in the order given.
         images: pages,
@@ -381,6 +385,53 @@ export class ExtractionService {
       failureKind: job.failureKind,
       failureReason: job.failureReason,
       retryable: job.retryable,
+    };
+  }
+
+  /**
+   * The persisted Extraction as a generation job reads it (AD-17): usable
+   * Questions and the page count, and nothing else.
+   *
+   * No ownership proof here on purpose — the caller has already proved it
+   * through `sourcetest`, and a second proof taking a `parentAccountId` this
+   * service would have to re-derive is a second place the rule could drift.
+   *
+   * `usable = true` is the whole filter, because `ExtractedQuestion.usable`
+   * exists to say exactly this: Epic 4 generates from those and from nothing
+   * else. Not one Page Image row and not one stored byte is touched, which is
+   * what keeps generation working after the photographs have expired.
+   */
+  async readForGeneration(sourceTestId: string): Promise<ExtractionForGeneration | null> {
+    const extraction = await this.prisma.extraction.findUnique({
+      where: { sourceTestId },
+      select: { id: true, pageCount: true },
+    });
+    if (extraction === null) return null;
+
+    const questions = await this.prisma.extractedQuestion.findMany({
+      where: { extractionId: extraction.id, usable: true },
+      orderBy: { ordinal: 'asc' },
+      select: {
+        ordinal: true,
+        format: true,
+        prompt: true,
+        choices: { orderBy: { ordinal: 'asc' }, select: { body: true } },
+        topics: { select: { label: true } },
+      },
+    });
+
+    return {
+      pageCount: extraction.pageCount,
+      questions: questions.map((question) => ({
+        ordinal: question.ordinal,
+        format: question.format,
+        // Stored as validated rich text by `store`; parsed rather than cast, so
+        // a row written before a schema change cannot reach the prompt as a
+        // shape nothing here understands.
+        prompt: parseRichText(question.prompt),
+        choices: question.choices.map((choice) => parseRichText(choice.body)),
+        topics: question.topics.map((topic) => topic.label),
+      })),
     };
   }
 

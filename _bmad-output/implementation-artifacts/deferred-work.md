@@ -685,3 +685,59 @@ source_spec: `spec-3-6-thin-extraction-warning.md`
 severity: medium
 reason: One `pnpm --filter api run test:int` run in this session failed a single case; the immediately following run passed 343/343, and extraction.int-spec.ts passes in isolation on every run. Reproduced on a clean tree with every Story 3.6 change stashed, where parent-auth.int-spec.ts failed instead — the failing file moves between runs and the message is typically "No elevation token in the response body", which is cross-file contention on the one shared Postgres. Already logged against Story 3.5.
 status: open
+
+### DW-87: Two concurrent generation requests for one account can each clamp against the same remaining allowance and overspend the tier limit.
+origin: spec-deferred fa3ed148f5e1
+location: apps/api/src/practicetest/practice-test.service.ts (request)
+source_spec: `spec-4-1-practice-test-generation-bounded-priced-async.md`
+severity: medium
+reason: `PracticeTestService.request` counts only `PracticeTest` rows that already carry `chargedAt`; a Queued or Running job has none, and nothing counts the outstanding `requestedCount` of unsettled jobs. Two tabs or a double-click on an account with 2 remaining both enqueue 2 and 4 drafts land charged. The intent explicitly defers the hard block at cap to Epic 9, so this is out of this story's scope.
+status: open
+
+### DW-88: The Generation Allowance window query exists twice, in two modules, with the half-open-window rule restated in prose in three places.
+origin: spec-deferred f40ebcad8d77
+location: apps/api/src/allowance/allowance.service.ts
+source_spec: `spec-4-1-practice-test-generation-bounded-priced-async.md`
+severity: low
+reason: `ARTIFACT_COUNTERS.generation` in `allowance.service.ts` and the in-transaction count in `PracticeTestService.request` are the same query written twice; a change to the window semantics has to land in both or usage and clamping disagree.
+status: open
+
+### DW-89: The integration tier fails roughly one run in two with a parent account vanishing mid-test, in a different untouched file each time.
+origin: spec-deferred a786cb1710e9
+location: apps/api/test/harness.ts
+source_spec: `spec-4-1-practice-test-generation-bounded-priced-async.md`
+severity: medium
+reason: Reproduced on a stashed baseline (run 1 failed in parent-pin.int-spec.ts, run 2 passed), the same rate and signature as this branch. Pre-existing cross-file isolation or truncation race in the integration harness, not caused by this story, but it makes CI noisy.
+status: open
+
+### DW-90: Two parent-auth password-reset E2E tests fail on a strict-mode locator violation.
+origin: spec-deferred f230636e20d5
+location: e2e/tests/parent-auth.spec.ts:105
+source_spec: `spec-4-1-practice-test-generation-bounded-priced-async.md`
+severity: medium
+reason: `getByRole('status')` resolves to both the MUI success alert and the empty live region, so `toContainText('password is saved')` fails. Confirmed failing identically on a clean stash of this branch, so it predates this story.
+status: open
+
+### DW-91: A parent (or a double-submitted request, e.g. two tabs) can enqueue a second GenerationJob for the same Source Test while one is already Queued or Running.
+origin: spec-deferred e2a5e1c2d5f8
+location: apps/api/src/practicetest/practice-test.service.ts (request, statusFor)
+source_spec: `spec-4-1-practice-test-generation-bounded-priced-async.md`
+severity: low
+reason: `PracticeTestService.request` never checks for an existing unsettled job before inserting a new one. `statusFor` only ever surfaces the newest job by `createdAt`, so the older job keeps running and keeps spending the allowance with no UI surface showing it. The normal single-page UI flow (picker replaced by progress view once a job starts) makes this unreachable through ordinary use; it needs a second tab or a direct API call. Out of this story's scope for the same reason concurrent-request overspend is: the intent explicitly defers a hard block at cap to Epic 9.
+status: open
+
+### DW-92: A charge can land in a period window different from the one `request()` clamped against, if the period rolls over while a job is mid-run; nothing re-verifies the account is still within its limit at
+origin: spec-deferred 8b1694b12b26
+location: apps/api/src/practicetest/practice-test.service.ts (land)
+source_spec: `spec-4-1-practice-test-generation-bounded-priced-async.md`
+severity: medium
+reason: `land()` re-reads `allowance.windowFor` per draft and rejects only a clock/zone anomaly (the instant falling outside its own just-computed window); it never re-clamps against `remainingFor(used, limit)`. A job that spans a period boundary can therefore land a draft the new period's limit would have refused. Same category as the already-recorded concurrent-request overspend risk, and out of scope for the same reason: the intent explicitly defers hard-block-at-cap enforcement to Epic 9.
+status: open
+
+### DW-93: The I/O matrix's "Partial success" and "Total failure" rows are proven at the backend (real job, real DB) and the frontend (real component, mocked API) separately, but never joined at the
+origin: spec-deferred 682ea5a144ac
+location: e2e/tests/parent-practice-test.spec.ts
+source_spec: `spec-4-1-practice-test-generation-bounded-priced-async.md`
+severity: low
+reason: `apps/api/test/practice-test.int-spec.ts` covers partial/total failure against the real worker; `apps/web/.../generate/[sourceTestId]/page.spec.tsx` covers the same copy against a fabricated `GenerationJobView`. `e2e/tests/parent-practice-test.spec.ts` covers only the happy path, leave/return-while-succeeding, and the two allowance- boundary cases. A defensible simplification (the e2e harness has no seam to force a real AI failure through the fake transport at a controlled point), not a regression.
+status: open

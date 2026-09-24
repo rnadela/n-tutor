@@ -163,6 +163,47 @@ export interface ExtractionStatusView {
   retryable: boolean;
 }
 
+/**
+ * What the account has left of its Generation Allowance, exactly as the API
+ * states it.
+ *
+ * Every figure here is the server's: the web app holds no limit, no tier table
+ * and no per-request ceiling of its own, so recalibrating any of them is one
+ * edit on the API side. `limit` is `null` for unlimited and is never a sentinel
+ * number, and `remaining` is what one request may actually ask for.
+ */
+export interface GenerationAllowanceView {
+  used: number;
+  limit: number | null;
+  remaining: number;
+  maxPerRequest: number;
+  /** When the period's counters reset, in the account's own zone. */
+  resetAt: string;
+  timezone: string;
+}
+
+/**
+ * Where a generation job stands, exactly as the API states it.
+ *
+ * Counts and a status, and not one word of what was generated: draft review is
+ * a later story's surface, and a progress body that carried a question would be
+ * the first half of shipping it without the human quality gate.
+ *
+ * `PartiallyComplete` is a real outcome rather than a flavour of failure: the
+ * drafts that landed are kept and were charged, and the screen says so.
+ */
+export interface GenerationJobView {
+  id: string;
+  status: 'Queued' | 'Running' | 'Succeeded' | 'PartiallyComplete' | 'Failed';
+  /** Already clamped server-side. Never what this app asked for. */
+  requestedCount: number;
+  producedCount: number;
+  completedAt: string | null;
+  failureKind: 'UpstreamFault' | 'ClientFault' | null;
+  failureReason: string | null;
+  retryable: boolean;
+}
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(
   /\/+$/,
   '',
@@ -188,6 +229,18 @@ export class ParentApiError extends Error {
      * act on.
      */
     readonly notBound: boolean = false,
+    /**
+     * The server's own stated reason for a refusal it authored, or `null`.
+     *
+     * Present only for a 409, which is the status the API uses when it refuses
+     * on a *rule* — nothing left of an allowance, nothing usable to generate
+     * from, an upload that has not finished being read. Each of those sentences
+     * is written once, in the API's policy file, and a screen that fell back to
+     * its own generic message would be telling the parent less than the server
+     * already said. Kept separate from `message` so only the screens that know
+     * a 409 means something specific read it.
+     */
+    readonly reason: string | null = null,
   ) {
     super(message);
     this.name = 'ParentApiError';
@@ -231,21 +284,37 @@ export function messageFor(
   return fallback;
 }
 
+/** The status the API refuses on a rule with, carrying its own reason. */
+export const CONFLICT_STATUS = 409;
+
 interface FailureDetail {
   lockedUntil: string | null;
   notElevated: boolean;
   notBound: boolean;
+  reason: string | null;
 }
 
 /** What a rejection body says beyond its status, read exactly once. */
 async function failureDetailFrom(response: Response): Promise<FailureDetail> {
-  const none: FailureDetail = { lockedUntil: null, notElevated: false, notBound: false };
-  if (response.status !== LOCKED_STATUS && response.status !== 401) return none;
+  const none: FailureDetail = {
+    lockedUntil: null,
+    notElevated: false,
+    notBound: false,
+    reason: null,
+  };
+  if (
+    response.status !== LOCKED_STATUS &&
+    response.status !== 401 &&
+    response.status !== CONFLICT_STATUS
+  ) {
+    return none;
+  }
   try {
     const body = (await response.json()) as {
       lockedUntil?: unknown;
       elevated?: unknown;
       bound?: unknown;
+      message?: unknown;
     } | null;
     return {
       lockedUntil: typeof body?.lockedUntil === 'string' ? body.lockedUntil : null,
@@ -253,6 +322,13 @@ async function failureDetailFrom(response: Response): Promise<FailureDetail> {
       notElevated: body?.elevated === false,
       // `bound: false` is the Student Mode guard doing the same.
       notBound: body?.bound === false,
+      // Only for a 409, where the message is a sentence the API's own policy
+      // file authored for a parent to read. Nest sends an array for a
+      // validation failure, which is not that, so only a string is taken.
+      reason:
+        response.status === CONFLICT_STATUS && typeof body?.message === 'string'
+          ? body.message
+          : null,
     };
   } catch {
     return none;
@@ -297,6 +373,7 @@ async function call<T>(
       detail.lockedUntil,
       detail.notElevated,
       detail.notBound,
+      detail.reason,
     );
   }
   if (response.status === 204) return undefined as T;
@@ -599,6 +676,40 @@ export const parentApi = {
       `/parent/source-tests/${encodeURIComponent(id)}/extraction`,
       { headers: elevated(token) },
       parentCopy.capture.generate.readFailed,
+    ),
+
+  /** What is left of the Generation Allowance, and the per-request ceiling. */
+  generationAllowance: (token: string) =>
+    call<GenerationAllowanceView>(
+      '/parent/allowance/generation',
+      { headers: elevated(token) },
+      parentCopy.generate.loadFailed,
+    ),
+
+  /**
+   * Asks for `count` Practice Tests and answers with the job as it was actually
+   * accepted — the clamped count included. The server clamps independently of
+   * whatever this app sent, so the response is the only account of what is
+   * being spent.
+   */
+  startGeneration: (token: string, sourceTestId: string, count: number) =>
+    call<GenerationJobView>(
+      `/parent/source-tests/${encodeURIComponent(sourceTestId)}/practice-tests`,
+      { method: 'POST', headers: elevated(token), body: JSON.stringify({ count }) },
+      parentCopy.generate.startFailed,
+    ),
+
+  /**
+   * How the newest generation job for this upload is going.
+   *
+   * A 404 means nothing has been requested for it yet — which is exactly what
+   * a parent who navigated straight to the URL should be told.
+   */
+  generationJob: (token: string, sourceTestId: string) =>
+    call<GenerationJobView>(
+      `/parent/source-tests/${encodeURIComponent(sourceTestId)}/practice-tests/job`,
+      { headers: elevated(token) },
+      parentCopy.generate.progressFailed,
     ),
 };
 

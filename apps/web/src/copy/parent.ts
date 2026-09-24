@@ -100,6 +100,7 @@ export const parentCopy = {
     failed: 'The PIN could not be saved. Check the details and try again.',
     back: 'Back to Parent View',
   },
+
   parentView: {
     title: 'Parent View',
     intro: 'This is the parent side of the account. It closes when you leave it.',
@@ -318,10 +319,11 @@ export const parentCopy = {
       readFailed: 'The reading of this upload could not be checked. Try again.',
       proceed: 'Continue to practice test',
       /**
-       * Reached after the gate, whichever way the parent came through it. The
-       * generation itself is Epic 4's; this says where the flow stands.
+       * Announced as the parent is sent on to the generate screen. It says
+       * where the flow went, because the navigation is the only other signal
+       * that anything happened.
        */
-      reached: 'This upload is ready. Making a practice test from it is the next step.',
+      leaving: 'This upload is ready. Opening the practice test step.',
 
       warningTitle: 'Fewer questions than expected',
       /**
@@ -347,6 +349,90 @@ export const parentCopy = {
     addFailed: 'That page could not be added. Try again with another photo.',
     submitFailed: 'The pages could not be submitted. Try again.',
     back: 'Back to Parent View',
+  },
+  generate: {
+    title: 'Generate practice tests',
+    /**
+     * What the screen is for, in one sentence: the choice about to be made,
+     * and what it is made from. It says nothing about time, cost or outcome —
+     * those have sentences of their own below.
+     */
+    intro: 'Choose how many practice tests to make from this upload.',
+    loading: 'Loading…',
+    loadFailed: 'This upload could not be opened. Try again.',
+    retry: 'Try again',
+    back: 'Back to the upload',
+
+    countLegend: 'How many practice tests',
+    /** The radio label. One figure, handed in — nothing counts here. */
+    countOption: (count: number) => (count === 1 ? '1 practice test' : `${count} practice tests`),
+    /**
+     * Beside a count the account cannot afford. The count stays on screen and
+     * stays readable; only its control is disabled, and this says why.
+     *
+     * Both figures arrive from the API. The web app holds no limit, no tier and
+     * no per-request ceiling of its own.
+     */
+    countUnavailable: (remaining: number) =>
+      remaining === 0
+        ? 'No Generation Allowance is left this period.'
+        : remaining === 1
+          ? 'Only 1 practice test is left in this period’s Generation Allowance.'
+          : `Only ${remaining} practice tests are left in this period’s Generation Allowance.`,
+
+    /**
+     * The cost, stated before the confirm control is actionable, denominated in
+     * Practice Tests and never in credits or an abstract unit. It names both
+     * what the action spends and what is left afterwards.
+     */
+    cost: (spend: number, remainingAfter: number) =>
+      `${spend === 1 ? 'This uses 1 practice test' : `This uses ${spend} practice tests`} of the Generation Allowance. ${
+        remainingAfter === 1
+          ? '1 will be left this period.'
+          : `${remainingAfter} will be left this period.`
+      }`,
+    /** The same sentence on an unlimited tier, which has no remainder to state. */
+    costUnlimited: (spend: number) =>
+      `${spend === 1 ? 'This uses 1 practice test' : `This uses ${spend} practice tests`} of the Generation Allowance. The allowance on this account is unlimited.`,
+    /** What has already been spent this period, as a plain fact. */
+    usage: (used: number, limit: string) => `Used this period: ${used} of ${limit}.`,
+
+    start: 'Generate',
+    confirmTitle: 'Generate practice tests',
+    confirm: 'Generate',
+    cancel: 'Cancel',
+    startFailed: 'The practice tests could not be started. Try again.',
+
+    progressHeading: 'Making the practice tests',
+    /**
+     * The progress sentence, announced in exactly the words it displays.
+     *
+     * It says what has landed and what was asked for, and nothing about time
+     * remaining: there is no honest estimate to give, and an invented one is
+     * the kind of figure a parent plans around.
+     */
+    progress: (produced: number, requested: number) =>
+      `${produced} of ${requested} practice tests are ready.`,
+    /**
+     * The stay-here advice. It says the screen is where completion shows, and
+     * it does **not** say anything is lost by leaving — that would be false,
+     * and it would contradict both retry-without-re-upload and charge-on-land.
+     */
+    stayHere:
+      'This screen is where the practice tests appear as they are made. Leaving does not stop the work, and anything already made is kept.',
+    done: (produced: number) =>
+      produced === 1 ? '1 practice test is ready.' : `${produced} practice tests are ready.`,
+    /**
+     * A job that produced some of what was asked for. The count that landed is
+     * the count that was charged, and the sentence says both plainly.
+     */
+    partial: (produced: number, requested: number) =>
+      `${produced} of ${requested} practice tests were made. Only the ones that were made used the Generation Allowance.`,
+    /** A job that produced nothing. The upload is untouched and still usable. */
+    failed: 'No practice tests were made, and nothing was used from the Generation Allowance.',
+    /** Stated beside a failure: the upload survives it, and so does the reading. */
+    retryFree: 'The upload is still here. Trying again needs no new photos.',
+    progressFailed: 'The progress could not be checked. Try again.',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

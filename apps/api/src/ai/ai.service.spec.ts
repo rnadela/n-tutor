@@ -40,6 +40,9 @@ function request(overrides: Partial<Parameters<AiService['run']>[0]> = {}) {
   return {
     callClass: 'Extraction' as const,
     parentAccountId: 'parent-1',
+    // Stated rather than defaulted, here as at every call site: the modality is
+    // what decides whether an empty image array is a fault or the normal case.
+    modality: 'vision' as const,
     images: [IMAGE],
     prompt: 'Read the pages.',
     schema: Payload,
@@ -177,5 +180,27 @@ describe('input faults', () => {
     const { ai, created } = serviceWith({});
     await expect(ai.run(request({ images: [] }))).rejects.toBeInstanceOf(AiInputError);
     expect(created).toHaveLength(0);
+  });
+
+  it('refuses a text call that carries images', async () => {
+    const { ai, created } = serviceWith({});
+    // The opposite mistake to the one above, and refused rather than silently
+    // tolerated: a request whose modality and payload disagree is a caller
+    // fault, not something to guess at.
+    await expect(ai.run(request({ modality: 'text' }))).rejects.toBeInstanceOf(AiInputError);
+    expect(created).toHaveLength(0);
+  });
+
+  it('bills a text call from the prompt rather than reporting it free', async () => {
+    const { ai, created } = serviceWith({});
+    const result = await ai.run(
+      request({ modality: 'text', images: [], prompt: 'Write a practice test.' }),
+    );
+    // A zero-image call priced by image count would be a real call recorded as
+    // costing nothing, which is worse than a missing row.
+    expect(result.usage.inputTokens).toBeGreaterThan(0);
+    expect(result.usage.outputTokens).toBeGreaterThan(0);
+    expect(result.usage.costMicros).toBeGreaterThan(0);
+    expect(created).toHaveLength(1);
   });
 });

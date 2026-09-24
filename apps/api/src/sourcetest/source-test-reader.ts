@@ -20,6 +20,8 @@
  * because only one side of a cycle has to be cut.
  */
 
+import type { SourceTestStatus } from '../generated/prisma/enums.js';
+
 /** One page's stored bytes, as the Extraction job reads them. Never a path. */
 export interface PageBytes {
   ordinal: number;
@@ -33,6 +35,19 @@ export interface PageBytes {
  */
 export interface LiveSourceTest {
   id: string;
+  /**
+   * The child the upload was photographed for. Carried across the boundary
+   * because a Practice Test generated from it belongs to the same child, and
+   * re-deriving that through a second delegate read would be a second place the
+   * association could drift (AD-17).
+   */
+  studentProfileId: string;
+  /**
+   * Whether the pages have been committed. A `Draft` has no Extraction and
+   * nothing to generate from, so a reader has to be able to tell.
+   */
+  status: SourceTestStatus;
+  /** Not in the shared field list, so absent unless the caller selected it. */
   parentAccountId?: string;
 }
 

@@ -242,6 +242,48 @@ describe('error mapping', () => {
   });
 });
 
+describe('a refusal the API authored', () => {
+  it("carries the server's stated reason on a 409, beside the screen's fallback", async () => {
+    const reason =
+      'No Generation Allowance is left this period. It resets at the start of the next one.';
+    respondWith(409, { message: reason });
+
+    const failure = await parentApi
+      .startGeneration('token', '11111111-1111-4111-8111-111111111111', 2)
+      .catch((cause: unknown) => cause as ParentApiError);
+
+    expect(failure).toBeInstanceOf(ParentApiError);
+    expect((failure as ParentApiError).status).toBe(409);
+    // The sentence is written once, in the API's policy file. A screen that
+    // fell back to its own generic message would say less than the server did.
+    expect((failure as ParentApiError).reason).toBe(reason);
+    // `message` stays the caller's fallback, so screens that do not know what
+    // a 409 means on their route are unchanged.
+    expect((failure as ParentApiError).message).toBe(parentCopy.generate.startFailed);
+  });
+
+  it('carries no reason on a status that is not a refusal on a rule', async () => {
+    respondWith(500, { message: 'Internal server error' });
+
+    const failure = await parentApi
+      .generationJob('token', '11111111-1111-4111-8111-111111111111')
+      .catch((cause: unknown) => cause as ParentApiError);
+
+    // A 500's message is not a sentence anybody wrote for a parent to read.
+    expect((failure as ParentApiError).reason).toBeNull();
+  });
+
+  it('ignores a validation array, which is not a sentence for a parent', async () => {
+    respondWith(409, { message: ['count must be an integer'] });
+
+    const failure = await parentApi
+      .startGeneration('token', '11111111-1111-4111-8111-111111111111', 2)
+      .catch((cause: unknown) => cause as ParentApiError);
+
+    expect((failure as ParentApiError).reason).toBeNull();
+  });
+});
+
 describe('uncommitted parent state', () => {
   const TOKEN = 'elevation-bearer';
   const PROFILE = '11111111-2222-3333-4444-555555555555';

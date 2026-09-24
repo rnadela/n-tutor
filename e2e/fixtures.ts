@@ -231,3 +231,101 @@ export async function waitForResetLink(email: string, timeoutMs = 10_000): Promi
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
+
+/**
+ * Sets an account's tier the way the Admin console does — the column alone,
+ * nothing else touched.
+ *
+ * It exists because the bound this epic is about is a *function* of the tier,
+ * and the tier is Admin's to set: there is no parent-facing route that could
+ * change it, so a Parent-View test that needs anything but the Free default has
+ * to seed it. No limit figure is restated here; the limits live in the API's
+ * one tiers table and the screen reads every one of them off the response.
+ */
+export async function setParentTierFixture(email: string, tier: string): Promise<void> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    await client.query(
+      'UPDATE "parent_account" SET "tier" = $2::"account_tier", "updatedAt" = now() WHERE "email" = $1',
+      [email, tier],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Spends part of an account's Generation Allowance without generating anything.
+ *
+ * Usage is *derived* — it is the count of Practice Tests charged inside the
+ * period window (AD-14) — so "already used one" is expressed as the row that
+ * charge lives on and in no other way. A counter column would be the wrong
+ * shape to seed because no such column exists.
+ *
+ * The rows hang off a real Source Test and generation job, because every one of
+ * those columns is `NOT NULL` and a fixture that faked them would be asserting
+ * about a shape the product cannot produce.
+ */
+export async function chargeGenerationAllowanceFixture(
+  parentEmail: string,
+  count: number,
+): Promise<void> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const target = await client.query<{
+      id: string;
+      parentAccountId: string;
+      studentProfileId: string;
+    }>(
+      `SELECT s."id", s."parentAccountId", s."studentProfileId"
+       FROM "source_test" s
+       JOIN "parent_account" a ON a."id" = s."parentAccountId"
+       WHERE a."email" = $1
+       ORDER BY s."createdAt" DESC
+       LIMIT 1`,
+      [parentEmail],
+    );
+    const row = target.rows[0];
+    if (!row) throw new Error(`No Source Test on ${parentEmail} to charge against.`);
+
+    const jobId = randomUUID();
+    await client.query(
+      `INSERT INTO "generation_job"
+         ("id", "parentAccountId", "sourceTestId", "studentProfileId", "requestedCount",
+          "producedCount", "status", "createdAt", "updatedAt", "completedAt")
+       VALUES ($1, $2, $3, $4, $5, $5, 'Succeeded'::"generation_job_status", now(), now(), now())`,
+      [jobId, row.parentAccountId, row.id, row.studentProfileId, count],
+    );
+    for (let ordinal = 1; ordinal <= count; ordinal += 1) {
+      await client.query(
+        `INSERT INTO "practice_test"
+           ("id", "parentAccountId", "sourceTestId", "studentProfileId", "generationJobId",
+            "status", "ordinal", "questionCount", "chargedAt", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5, 'Draft'::"practice_test_status", $6, 1, now(), now(), now())`,
+        [randomUUID(), row.parentAccountId, row.id, row.studentProfileId, jobId, ordinal],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+
+/** How many Practice Tests were actually generated for an account. */
+export async function countPracticeTestsFor(parentEmail: string): Promise<number> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+       FROM "practice_test" p
+       JOIN "parent_account" a ON a."id" = p."parentAccountId"
+       WHERE a."email" = $1 AND p."chargedAt" IS NOT NULL`,
+      [parentEmail],
+    );
+    return Number(result.rows[0]?.count ?? '0');
+  } finally {
+    await client.end();
+  }
+}

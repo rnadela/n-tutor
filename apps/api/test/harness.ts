@@ -37,6 +37,7 @@ import { STUDENT_MODE_AUDIENCE, STUDENT_MODE_COOKIE } from '../src/identity/stud
 import { MailDispatchError, MailService } from '../src/mail/mail.service.js';
 import { AiService } from '../src/ai/ai.service.js';
 import { ExtractionRunner } from '../src/extraction/extraction.runner.js';
+import { PracticeTestRunner } from '../src/practicetest/practice-test.runner.js';
 import type { AiFakeFailure } from '../src/ai/ai-config.js';
 import type { AccountTier } from '../src/generated/prisma/enums.js';
 
@@ -69,6 +70,12 @@ export interface Harness {
    * waiting on a poll timer. The timer itself is off in the test tier.
    */
   extractionRunner: ExtractionRunner;
+  /**
+   * The generation worker, exposed for the same reason the extraction one is:
+   * a spec drives exactly one pass rather than waiting on a poll timer. The
+   * timer itself is off in the test tier.
+   */
+  practiceTestRunner: PracticeTestRunner;
   operatorId: string;
   close(): Promise<void>;
 }
@@ -95,6 +102,7 @@ export async function createHarness(): Promise<Harness> {
     mail: captureMail(moduleRef.get(MailService)),
     ai: captureAi(moduleRef.get(AiService)),
     extractionRunner: moduleRef.get(ExtractionRunner),
+    practiceTestRunner: moduleRef.get(PracticeTestRunner),
     operatorId: '',
     close: async () => {
       harness.mail.restore();
@@ -163,6 +171,16 @@ export async function resetParentAccounts(prisma: PrismaService): Promise<void> 
  * fails without it.
  */
 const EXTRACTION_TABLES = [
+  // The Practice Test cluster first: it holds its Parent Account and its
+  // Student Profile with `onDelete: Restrict`, so the truncate has to name
+  // every one of these or the statement fails. Named in full rather than left
+  // to the CASCADE for the reason the list already names `page_image`: a reader
+  // asking "are the generated drafts wiped too?" should find the answer here.
+  '"practice_test_question_topic"',
+  '"practice_test_choice"',
+  '"practice_test_question"',
+  '"practice_test"',
+  '"generation_job"',
   '"extracted_topic_label"',
   '"extracted_choice"',
   '"extracted_question"',
@@ -225,6 +243,8 @@ function captureMail(mail: MailService): MailCapture {
 /** One call as the seam recorded it. No bytes, and nothing the model said. */
 export interface CapturedAiCall {
   callClass: string;
+  /** Stated by the caller; what an assertion about a text call reads. */
+  modality: string;
   imageCount: number;
 }
 
@@ -255,7 +275,11 @@ function captureAi(ai: AiService): AiCapture {
   let failOnce: AiFakeFailure | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ai.run = async (request: any): Promise<any> => {
-    sent.push({ callClass: request.callClass, imageCount: request.images.length });
+    sent.push({
+      callClass: request.callClass,
+      modality: request.modality,
+      imageCount: request.images.length,
+    });
     if (failOnce === null) return original(request);
     const kind = failOnce;
     failOnce = null;

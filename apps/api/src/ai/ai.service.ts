@@ -64,6 +64,13 @@ export class AiRejectedError extends Error {
 export const AI_TRANSPORT_FAILED = 'The AI provider could not be reached.';
 export const AI_SCHEMA_INVALID = 'The AI provider answered with a payload the schema rejects.';
 export const AI_NO_IMAGES = 'An AI vision call needs at least one image.';
+/**
+ * A text call that arrived carrying images. Refused rather than silently
+ * ignored: the modality is what decides how the request is built and what the
+ * fake's token figures are derived from, so a request whose two halves
+ * disagree is a caller mistake, not a thing to guess at.
+ */
+export const AI_TEXT_CALL_HAS_IMAGES = 'An AI text call must carry no images.';
 export const AI_REQUEST_REJECTED = 'The AI provider refused the request.';
 export const AI_USAGE_MISSING = 'The AI provider answered without reporting what it spent.';
 
@@ -79,6 +86,13 @@ function statusOf(cause: unknown): number | undefined {
   const status = (cause as { status?: unknown } | null)?.status;
   return typeof status === 'number' ? status : undefined;
 }
+
+/**
+ * The two kinds of call this service makes. Explicit at every call site: never
+ * given a default, because a default is how a vision call that lost its images
+ * becomes a text call nobody noticed.
+ */
+export type AiModality = 'vision' | 'text';
 
 /** One image as a call carries it. Bytes, never a storage path (AD-15). */
 export interface AiImage {
@@ -100,7 +114,20 @@ export interface AiRunRequest<T> {
   callClass: AiCallClassName;
   /** Whose cost row this is. From `req.elevated` or from the job's own row. */
   parentAccountId: string;
-  /** Sent in the order given, which the caller has already made page order. */
+  /**
+   * What kind of call this is, stated at every call site and never defaulted.
+   *
+   * `vision` reads images; `text` reads only the prompt. It is required rather
+   * than inferred from an empty `images` array because the two failures are
+   * opposite: a vision call that forgot its images must be refused, and a text
+   * call has none by construction. Inferring would silently turn the first into
+   * the second.
+   */
+  modality: AiModality;
+  /**
+   * Sent in the order given, which the caller has already made page order.
+   * Empty — and required to be empty — on a `text` call.
+   */
   images: AiImage[];
   /** The prompt text, which lives in the calling domain module (AD-17). */
   prompt: string;
@@ -131,9 +158,22 @@ interface RawCompletion {
   outputTokens: number;
 }
 
-/** The fake's token figures: deterministic, derived from the image count alone. */
+/** The fake's vision token figures: deterministic, derived from the image count. */
 const FAKE_INPUT_TOKENS_PER_IMAGE = 800;
 const FAKE_OUTPUT_TOKENS_PER_IMAGE = 400;
+
+/**
+ * The fake's text token figures, derived from the prompt's own length.
+ *
+ * A text call carries no images, so the vision arithmetic would report every
+ * Generation call as free — and a cost table that says a call cost nothing is
+ * worse than one missing the row, because nothing about it looks wrong. Four
+ * characters to a token is the usual rough conversion; the point is only that
+ * the figure is positive, deterministic and proportional to what was sent.
+ */
+const FAKE_CHARS_PER_TOKEN = 4;
+/** What the answer is assumed to cost against what was asked. */
+const FAKE_OUTPUT_TOKENS_PER_INPUT_TOKEN = 0.5;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -175,7 +215,15 @@ export class AiService {
    * merits, are not made better by making them again.
    */
   async run<T>(request: AiRunRequest<T>): Promise<AiRunResult<T>> {
-    if (request.images.length === 0) throw new AiInputError(AI_NO_IMAGES);
+    // Gated on the modality rather than on the array alone: a vision call with
+    // no images cannot be made, and a text call carrying them is a caller whose
+    // request contradicts itself. Neither is retried.
+    if (request.modality === 'vision' && request.images.length === 0) {
+      throw new AiInputError(AI_NO_IMAGES);
+    }
+    if (request.modality === 'text' && request.images.length > 0) {
+      throw new AiInputError(AI_TEXT_CALL_HAS_IMAGES);
+    }
     const pin = this.config.pins[request.callClass];
 
     let lastFault: AiUpstreamError = new AiUpstreamError(AI_TRANSPORT_FAILED);
@@ -278,6 +326,8 @@ export class AiService {
               role: 'user',
               content: [
                 { type: 'input_text', text: request.prompt },
+                // A text call has no images by the guard in `run`, so this
+                // spreads to nothing and the request is prompt-only.
                 ...request.images.map((image) => ({
                   type: 'input_image' as const,
                   detail: 'auto' as const,
@@ -357,13 +407,23 @@ export class AiService {
     if (failure === 'transport') throw new AiUpstreamError(AI_TRANSPORT_FAILED);
 
     const imageCount = request.images.length;
+    // Figures from whatever the call actually carried: images for a vision
+    // call, the prompt's length for a text one. Never zero for a real call.
+    const inputTokens =
+      request.modality === 'vision'
+        ? FAKE_INPUT_TOKENS_PER_IMAGE * imageCount
+        : Math.max(1, Math.ceil(request.prompt.length / FAKE_CHARS_PER_TOKEN));
+    const outputTokens =
+      request.modality === 'vision'
+        ? FAKE_OUTPUT_TOKENS_PER_IMAGE * imageCount
+        : Math.max(1, Math.ceil(inputTokens * FAKE_OUTPUT_TOKENS_PER_INPUT_TOKEN));
     return {
       // A shape no domain schema admits: the fake's way of being a model that
       // answered with something else.
       raw:
         failure === 'schema' ? { unparseable: true } : request.fakePayload({ imageCount, failure }),
-      inputTokens: FAKE_INPUT_TOKENS_PER_IMAGE * imageCount,
-      outputTokens: FAKE_OUTPUT_TOKENS_PER_IMAGE * imageCount,
+      inputTokens,
+      outputTokens,
     };
   }
 }

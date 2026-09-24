@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { AccountTier } from '../generated/prisma/enums.js';
 import { ParentAccountService } from '../identity/parent-account.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { resolveWindow, type PeriodWindow } from './period.js';
 import { limitsFor } from './tiers.js';
 
@@ -35,23 +36,41 @@ interface UsageCounts {
 }
 
 /** Counts one allowance's artifacts inside `[window.start, window.end)`. */
-type ArtifactCounter = (accountId: string, window: PeriodWindow) => Promise<number>;
+type ArtifactCounter = (
+  prisma: PrismaService,
+  accountId: string,
+  window: PeriodWindow,
+) => Promise<number>;
 
 /**
  * The counting seam — the single place Epics 3–6 wire their counts in.
  *
- * Each entry counts artifacts produced for the account with a creation instant
- * inside the window, read from the owning module's service: Upload from
- * `sourcetest`, Generation from `practicetest` (charged on first reaching
- * draft), Explanation from `explanation`.
+ * Each entry counts artifacts produced for the account with a charging instant
+ * inside the window: Upload from `sourcetest`, Generation from `practicetest`
+ * (charged on first reaching draft), Explanation from `explanation`.
  *
- * None of those entities exists yet, so all three read zero and no query is
- * issued. When they arrive they are counted here and **nowhere else**, and no
- * counter column, period column, or reset job is introduced anywhere (AD-14).
+ * Usage is **derived** and nothing here is ever decremented (AD-14). A discard,
+ * a deletion, or a draft the parent never released does not give the unit back,
+ * because the artifact was produced and the provider call was paid for — which
+ * is exactly why the marker counted is `chargedAt` on the row rather than a
+ * status a later transition could move.
+ *
+ * `upload` and `explanation` have no entity yet, so they read zero and issue no
+ * query. When they arrive they are counted here and **nowhere else**, and no
+ * counter column, period column, or reset job is introduced anywhere.
  */
 const ARTIFACT_COUNTERS: Readonly<Record<keyof UsageCounts, ArtifactCounter>> = {
   upload: async () => 0,
-  generation: async () => 0,
+  generation: (prisma, accountId, window) =>
+    // The half-open window the whole module is stated in: `[start, end)`, so a
+    // Practice Test charged at the instant a period ends belongs to the next
+    // one and is counted exactly once.
+    prisma.practiceTest.count({
+      where: {
+        parentAccountId: accountId,
+        chargedAt: { gte: window.start, lt: window.end },
+      },
+    }),
   explanation: async () => 0,
 };
 
@@ -71,7 +90,15 @@ const ARTIFACT_COUNTERS: Readonly<Record<keyof UsageCounts, ArtifactCounter>> = 
  */
 @Injectable()
 export class AllowanceService {
-  constructor(private readonly accounts: ParentAccountService) {}
+  constructor(
+    private readonly accounts: ParentAccountService,
+    // Held so the counting seam can issue its own count. This module still owns
+    // no entity (AD-14, AD-17): it reads a `chargedAt` column that
+    // `practicetest` alone writes, and writes nothing anywhere. Injecting
+    // `PracticeTestService` instead would make `allowance` — which every
+    // surface reads — depend on a module that depends on it.
+    private readonly prisma: PrismaService,
+  ) {}
 
   /** The window this account's counters are measured over, in its own zone. */
   async windowFor(accountId: string, now: Date = new Date()): Promise<PeriodWindow> {
@@ -108,9 +135,9 @@ export class AllowanceService {
    */
   private async countArtifactsIn(accountId: string, window: PeriodWindow): Promise<UsageCounts> {
     const [upload, generation, explanation] = await Promise.all([
-      ARTIFACT_COUNTERS.upload(accountId, window),
-      ARTIFACT_COUNTERS.generation(accountId, window),
-      ARTIFACT_COUNTERS.explanation(accountId, window),
+      ARTIFACT_COUNTERS.upload(this.prisma, accountId, window),
+      ARTIFACT_COUNTERS.generation(this.prisma, accountId, window),
+      ARTIFACT_COUNTERS.explanation(this.prisma, accountId, window),
     ]);
     return { upload, generation, explanation };
   }

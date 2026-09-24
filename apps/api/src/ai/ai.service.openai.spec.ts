@@ -75,10 +75,25 @@ function request() {
   return {
     callClass: 'Extraction' as const,
     parentAccountId: 'parent-1',
+    modality: 'vision' as const,
     images: IMAGES,
     prompt: 'Read the pages.',
     schema: Payload,
     schemaName: 'source_test_extraction',
+    fakePayload: () => ({ ok: true }),
+  };
+}
+
+/** A text call — Generation's actual shape: text in, text out, no images. */
+function textRequest() {
+  return {
+    callClass: 'Generation' as const,
+    parentAccountId: 'parent-1',
+    modality: 'text' as const,
+    images: [],
+    prompt: 'Write the practice test.',
+    schema: Payload,
+    schemaName: 'practice_test',
     fakePayload: () => ({ ok: true }),
   };
 }
@@ -124,6 +139,17 @@ describe('what is sent', () => {
     expect(images[1]!.image_url).toBe(
       `data:image/jpeg;base64,${Buffer.from('page-two').toString('base64')}`,
     );
+  });
+
+  it('sends only the prompt, with no image parts, for a text call with no images', async () => {
+    const { ai, calls } = openAiServiceWith(answered({ input_tokens: 10, output_tokens: 2 }));
+    await ai.run(textRequest());
+
+    expect((calls[0] as { model: string }).model).toBe(DEFAULT_MODEL_PINS.Generation.model);
+    const content = (
+      calls[0] as { input: { content: { type: string; text?: string }[] }[] }
+    ).input[0]!.content;
+    expect(content).toEqual([{ type: 'input_text', text: 'Write the practice test.' }]);
   });
 
   it('declares the structured-output format under the name it was given', async () => {
