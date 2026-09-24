@@ -1,5 +1,5 @@
 import { expect, test, type Dialog, type Page } from '@playwright/test';
-import { createGradeLevelFixture, uniqueParentEmail } from '../fixtures';
+import { createGradeLevelFixture, createSubjectFixture, uniqueParentEmail } from '../fixtures';
 
 const PASSWORD = 'correct-horse-battery-staple';
 const PIN = '4821';
@@ -31,10 +31,17 @@ async function signUp(page: Page, email: string): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
 }
 
-/** Signs up, crosses the PIN, adds one child, and opens the Pages screen. */
-async function openCapture(page: Page): Promise<void> {
+/**
+ * Signs up, crosses the PIN, adds one child, and opens the Pages screen.
+ *
+ * A Subject offered for the child's Grade Level is seeded too: the submit gate
+ * needs one, and the taxonomy is Admin's, so there is no parent-facing route
+ * that could create it.
+ */
+async function openCapture(page: Page): Promise<{ gradeLevelName: string; subjectName: string }> {
   const email = uniqueParentEmail('capture');
   const gradeLevel = await createGradeLevelFixture('Capture Grade');
+  const subject = await createSubjectFixture('Capture Subject', gradeLevel.id);
 
   await signUp(page, email);
   await page.getByRole('link', { name: 'Enter Parent View' }).click();
@@ -57,6 +64,15 @@ async function openCapture(page: Page): Promise<void> {
   await page.getByRole('link', { name: 'Back to Parent View' }).click();
   await page.getByRole('link', { name: 'Upload a test' }).click();
   await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
+  return { gradeLevelName: gradeLevel.name, subjectName: subject.name };
+}
+
+/** Chooses the Subject from the list the server offers for the Grade Level. */
+async function chooseSubject(page: Page, name: string): Promise<void> {
+  await page.locator('[role="combobox"]#capture-subject').click();
+  await page.getByRole('option', { name }).click();
+  await expect(page.getByRole('listbox')).toBeHidden();
+  await expect(liveRegion(page)).toContainText(`The subject is ${name}.`);
 }
 
 /** The strip's rows, in the order the ordered list holds them. */
@@ -91,12 +107,16 @@ function acceptConfirm(page: Page): void {
 
 test.describe('page management before submit', () => {
   test('orders, renumbers and refuses an empty submission', async ({ page }) => {
-    await openCapture(page);
+    const { subjectName } = await openCapture(page);
 
-    // Nothing yet: the submit control is already refused, with the reason said.
+    // Nothing yet: the submit control is already refused, and *both* unmet
+    // requirements are named rather than only the first.
     await expect(page.getByRole('button', { name: 'Check pages' })).toBeDisabled();
-    await expect(page.getByTestId('submit-blocked')).toBeVisible();
+    await expect(page.getByTestId('submit-blocked')).toHaveText(
+      'Add at least one page before submitting. Choose a subject and a grade level before submitting.',
+    );
 
+    await chooseSubject(page, subjectName);
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
 
@@ -161,14 +181,89 @@ test.describe('page management before submit', () => {
     await expect(rows(page)).toHaveCount(0);
 
     await expect(page.getByRole('button', { name: 'Check pages' })).toBeDisabled();
-    await expect(page.getByTestId('submit-blocked')).toBeVisible();
+    // The classification survived every page change, so the pages are now the
+    // only thing left unmet.
     await expect(page.getByTestId('submit-blocked')).toHaveText(
       'Add at least one page before submitting.',
     );
   });
 
+  test('defaults the grade level to the child’s, and gates submit on the subject', async ({
+    page,
+  }) => {
+    const { gradeLevelName, subjectName } = await openCapture(page);
+
+    // The child's own grade level, already chosen for this upload.
+    await expect(page.locator('[role="combobox"]#capture-grade-level')).toHaveText(gradeLevelName);
+    await expect(
+      page.getByText('Changing it here does not change the child’s profile.', { exact: false }),
+    ).toBeVisible();
+
+    await addPage(page, jpeg('page-a.jpg', PAGE_A));
+
+    // Pages, but no subject: refused, with the missing requirement named.
+    await expect(page.getByRole('button', { name: 'Check pages' })).toBeDisabled();
+    await expect(page.getByTestId('submit-blocked')).toHaveText(
+      'Choose a subject and a grade level before submitting.',
+    );
+
+    // The subject list holds exactly what an administrator offers for that
+    // grade level, and choosing one clears the gate.
+    await page.locator('[role="combobox"]#capture-subject').click();
+    await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(1);
+    await page.getByRole('option', { name: subjectName }).click();
+    await expect(page.getByRole('listbox')).toBeHidden();
+    await expect(liveRegion(page)).toContainText(`The subject is ${subjectName}.`);
+
+    await expect(page.getByTestId('submit-blocked')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Check pages' }).click();
+    await expect(liveRegion(page)).toContainText('The pages were submitted.');
+    await expect(page.getByTestId('submitted-note')).toBeVisible();
+  });
+
+  test('clears a subject the new grade level does not offer, and says so', async ({ page }) => {
+    // A second Grade Level with a Subject of its own, and the first Grade
+    // Level's Subject offered nowhere else. Moving between them is what
+    // exercises the clear-and-re-offer branch end to end.
+    //
+    // Seeded before the screen is opened, because the Grade Level list is read
+    // once on mount: a row created afterwards is simply not among the options.
+    const other = await createGradeLevelFixture('Other Grade');
+    const otherSubject = await createSubjectFixture('Other Subject', other.id);
+    const { subjectName } = await openCapture(page);
+
+    await chooseSubject(page, subjectName);
+
+    await page.locator('[role="combobox"]#capture-grade-level').click();
+    await page.getByRole('option', { name: other.name }).click();
+    await expect(page.getByRole('listbox')).toBeHidden();
+
+    // The server cleared the Subject the new Grade Level does not offer, and
+    // the screen states that rather than leaving it to be noticed.
+    await expect(liveRegion(page)).toContainText(
+      `The grade level is ${other.name}. That grade level does not offer the subject that was chosen, so the subject was cleared.`,
+    );
+    await expect(page.getByTestId('submit-blocked')).toContainText(
+      'Choose a subject and a grade level before submitting.',
+    );
+
+    // And the Subject list is the new Grade Level's, re-read rather than
+    // filtered from the one already held.
+    await page.locator('[role="combobox"]#capture-subject').click();
+    await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(1);
+    await page.getByRole('option', { name: otherSubject.name }).click();
+    await expect(page.getByRole('listbox')).toBeHidden();
+    await expect(liveRegion(page)).toContainText(`The subject is ${otherSubject.name}.`);
+
+    // Re-classified against the grade level it now holds, so the only thing
+    // left between the parent and submitting is a page.
+    await addPage(page, jpeg('page-a.jpg', PAGE_A));
+    await expect(page.getByTestId('submit-blocked')).toHaveCount(0);
+  });
+
   test('submits the pages and then refuses every further change to them', async ({ page }) => {
-    await openCapture(page);
+    const { subjectName } = await openCapture(page);
+    await chooseSubject(page, subjectName);
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
     await expect(liveRegion(page)).toContainText('Page 2 was added.');
@@ -186,6 +281,7 @@ test.describe('page management before submit', () => {
     );
     await expect(page.getByRole('button', { name: 'Check pages' })).toHaveCount(0);
     await expect(page.locator('#capture-add-page')).toHaveCount(0);
+    await expect(page.locator('#capture-subject')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Delete page/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Move page/ })).toHaveCount(0);
   });

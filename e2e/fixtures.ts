@@ -104,6 +104,48 @@ function taxonomyNameKey(name: string): string {
   return name.normalize('NFKC').replace(/\s+/gu, ' ').trim().toLowerCase();
 }
 
+export interface SubjectFixture {
+  id: string;
+  name: string;
+}
+
+/**
+ * An enabled Subject, plus the enabled `subject_grade_level` join row that
+ * makes it *offered* for one Grade Level.
+ *
+ * Both rows, because selectability is the conjunction of three independent
+ * flags: the Subject's, the Grade Level's, and the join row's. A Subject seeded
+ * without the join row is enabled and offered nowhere, which is not the state a
+ * capture test needs. `taxonomyNameKey` is reused for the same reason
+ * `createGradeLevelFixture` uses it — a seeded row that keys itself differently
+ * from an Admin-created one would collide, or fail to collide, for reasons no
+ * product rule explains.
+ */
+export async function createSubjectFixture(
+  label: string,
+  gradeLevelId: string,
+): Promise<SubjectFixture> {
+  const name = `${label} ${randomUUID().slice(0, 8)}`;
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO "subject" ("id", "name", "nameKey", "enabled", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, true, now(), now())`,
+      [id, name, taxonomyNameKey(name)],
+    );
+    await client.query(
+      `INSERT INTO "subject_grade_level" ("id", "subjectId", "gradeLevelId", "enabled", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, true, now(), now())`,
+      [randomUUID(), id, gradeLevelId],
+    );
+    return { id, name };
+  } finally {
+    await client.end();
+  }
+}
+
 /**
  * Withdraws a Grade Level the way Admin does — the flag alone, nothing deleted
  * — so a test can observe what a profile already stored against it then reads.

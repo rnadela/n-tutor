@@ -11,9 +11,11 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   PayloadTooLargeException,
   Post,
   Put,
+  Query,
   Req,
   UploadedFile,
   UseFilters,
@@ -25,7 +27,12 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { SkipThrottle } from '@nestjs/throttler';
 import { MulterError, memoryStorage } from 'multer';
 import { ParentElevationGuard, type ElevatedRequest } from '../identity/parent-elevation.guard.js';
-import { OpenSourceTestDto, ReorderPagesDto } from './dto/source-test.dto.js';
+import type { TaxonomyItem } from '../admin/taxonomy.service.js';
+import {
+  ClassifySourceTestDto,
+  OpenSourceTestDto,
+  ReorderPagesDto,
+} from './dto/source-test.dto.js';
 import { UNSUPPORTED_IMAGE_FORMAT, maxPageBytes, pageTooLarge } from './source-test-policy.js';
 import { SourceTestService, type SourceTestView } from './source-test.service.js';
 
@@ -152,6 +159,26 @@ export class SourceTestController {
     return this.sourceTests.openDraft(req.elevated!.parentAccountId, dto.studentProfileId);
   }
 
+  /**
+   * The Subjects offered for a Grade Level.
+   *
+   * Declared **before** `@Get(':id')`, and that order is load-bearing for
+   * exactly the reason `pages/order` is declared before `pages/:pageId`:
+   * Express matches in declaration order, so `GET .../:id` would otherwise
+   * swallow this path and `ParseUUIDPipe` would answer 400 about the literal
+   * "subjects".
+   *
+   * It lives on this controller rather than at a free-standing
+   * `/parent/subjects` because the Subject list exists in this product for one
+   * purpose — classifying a Source Test — and is served by the module that
+   * needs it, reading through `TaxonomyService`. `/parent/grade-levels` on
+   * `StudentProfileController` is the same arrangement.
+   */
+  @Get('subjects')
+  subjects(@Query('gradeLevelId', ParseUUIDPipe) gradeLevelId: string): Promise<TaxonomyItem[]> {
+    return this.sourceTests.listSubjectsFor(gradeLevelId);
+  }
+
   @Get(':id')
   read(
     @Req() req: ElevatedRequest,
@@ -225,7 +252,23 @@ export class SourceTestController {
     return this.sourceTests.deletePage(req.elevated!.parentAccountId, id, pageId);
   }
 
-  /** Refused server-side while zero pages remain, whatever the client did. */
+  /**
+   * Sets the Subject, the Grade Level, or both — validated as the one pair the
+   * Source Test will hold afterwards, never field by field.
+   */
+  @Patch(':id/classification')
+  classify(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ClassifySourceTestDto,
+  ): Promise<SourceTestView> {
+    return this.sourceTests.classify(req.elevated!.parentAccountId, id, dto);
+  }
+
+  /**
+   * Refused server-side while zero pages remain or either half of the
+   * classification is unset, whatever the client did.
+   */
   @Post(':id/submit')
   @HttpCode(HttpStatus.OK)
   submit(

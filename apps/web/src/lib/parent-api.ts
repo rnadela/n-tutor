@@ -124,6 +124,16 @@ export interface SourceTestView {
   /** Creation plus the TTL. Activity never moves it. */
   expiresAt: string;
   submittedAt: string | null;
+  /**
+   * The classification. Ids with their names resolved by the API on every read
+   * — the web app stores neither and never renders a label it was not handed.
+   * Both are null until set; the Grade Level is seeded from the child's on
+   * open, so in practice it is the Subject that starts unset.
+   */
+  subjectId: string | null;
+  subjectName: string | null;
+  gradeLevelId: string | null;
+  gradeLevelName: string | null;
   /** The page ceiling, stated by the API so the web app owns no copy of it. */
   maxPages: number;
   pages: PageImageView[];
@@ -519,6 +529,33 @@ export const parentApi = {
       `/parent/source-tests/${encodeURIComponent(id)}/pages/order`,
       { method: 'PUT', headers: elevated(token), body: JSON.stringify({ pageIds }) },
       parentCopy.capture.failed,
+    ),
+
+  /**
+   * The Subjects offered for a Grade Level — the API's own conjunction of the
+   * three `enabled` flags, never anything this app filters for itself.
+   */
+  sourceTestSubjects: (token: string, gradeLevelId: string) =>
+    call<TaxonomyItem[]>(
+      `/parent/source-tests/subjects?gradeLevelId=${encodeURIComponent(gradeLevelId)}`,
+      { headers: elevated(token) },
+      parentCopy.capture.classification.subjectsFailed,
+    ),
+
+  /**
+   * Sets the Subject, the Grade Level, or both. The server validates the pair
+   * that results and may answer with the Subject cleared, so the returned view
+   * is the only account of what the Source Test now holds.
+   */
+  classifySourceTest: (
+    token: string,
+    id: string,
+    input: { subjectId?: string; gradeLevelId?: string },
+  ) =>
+    call<SourceTestView>(
+      `/parent/source-tests/${encodeURIComponent(id)}/classification`,
+      { method: 'PATCH', headers: elevated(token), body: JSON.stringify(input) },
+      parentCopy.capture.classification.failed,
     ),
 
   submitSourceTest: (token: string, id: string) =>

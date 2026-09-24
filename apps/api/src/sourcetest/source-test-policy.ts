@@ -92,6 +92,32 @@ export const UNSUPPORTED_IMAGE_FORMAT =
 export const NO_PAGES_TO_SUBMIT = 'Add at least one page before submitting.';
 
 /**
+ * The Subject is not offered for the Grade Level the Source Test will hold
+ * after the write. Availability is a property of the *pair*, so the sentence
+ * names both rather than the Subject alone.
+ *
+ * The Grade Level's own refusal is `identity`'s exported
+ * `GRADE_LEVEL_NOT_SELECTABLE`, reused rather than restated here: one sentence
+ * per rule, wherever the rule first got one.
+ */
+export const SUBJECT_NOT_AVAILABLE = 'That subject is not available for that grade level.';
+
+/** The submit gate's own refusal, distinct from the page-count one. */
+export const CLASSIFICATION_REQUIRED = 'Choose a subject and a grade level before submitting.';
+
+/** A classification patch that would change nothing is a mistake, not a no-op. */
+export const NOTHING_TO_CLASSIFY = 'Choose a subject or a grade level.';
+
+/**
+ * The shape refusals the classification DTO answers with, stated here beside
+ * every other sentence this module owns rather than left to class-validator's
+ * own English. A value that is not an identifier at all is a different fault
+ * from one that names no row, so each says which field it is about.
+ */
+export const SUBJECT_ID_INVALID = 'That subject could not be recognised.';
+export const GRADE_LEVEL_ID_INVALID = 'That grade level could not be recognised.';
+
+/**
  * The multipart layer's own refusal, stated rather than left to surface as a
  * framework fault. It names the bound in megabytes because that is the unit the
  * photo a parent is holding is measured in; the byte figure is the one the
@@ -181,6 +207,22 @@ export function storagePathFor(pageId: string, root: string = uploadRoot()): str
  */
 export function canSubmit(pageCount: number): boolean {
   return pageCount >= 1;
+}
+
+/**
+ * Whether a Source Test carries the classification submission requires.
+ *
+ * Non-null, never enabled: the taxonomy's whole design is that disabling
+ * changes what may be *chosen*, not what a stored reference resolves to
+ * (`resolveSubject` succeeds for a disabled row on purpose). A gate that
+ * re-checked enablement would let an Admin action invalidate work a parent had
+ * already done.
+ */
+export function isClassified(row: {
+  subjectId: string | null;
+  gradeLevelId: string | null;
+}): boolean {
+  return row.subjectId !== null && row.gradeLevelId !== null;
 }
 
 /** And an eleventh page is refused before any byte is written. */

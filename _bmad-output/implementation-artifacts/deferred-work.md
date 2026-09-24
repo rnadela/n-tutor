@@ -597,3 +597,51 @@ source_spec: `spec-3-2-page-management-before-submit.md`
 severity: low
 reason: `apps/web/src/app/parent/capture/page.spec.tsx` asserts things like `expect(PAGE_SOURCE).toContain('const isDraft = sourceTest !== null')`. These assertions execute nothing: a differently-phrased but equally buggy implementation would pass, and a correct implementation phrased differently would fail. Real behavioral coverage of this logic exists only in `e2e/tests/parent-capture.spec.ts`, which is a full-stack Playwright suite rather than a colocated, DOM-free spec on an exported function -- the shape the story's own "pure functions with colocated specs" language points at. `apps/web/src/lib/page-order.ts` already extracts the narrower ordering/count rules the story's own task list names; this is about the rest of the screen's decision logic that stayed inline.
 status: open
+
+### DW-76: source_test.subjectId carries a Restrict foreign key with no index, while the grade-level axis is indexed.
+origin: spec-deferred 656b057f1784
+location: apps/api/prisma/schema.prisma
+source_spec: `spec-3-3-subject-grade-level-assignment.md`
+severity: low
+reason: Postgres does not index foreign-key columns automatically. Subject-axis reads planned for Epics 4 and 7, and the Restrict check run on every Subject delete, both scan source_test. The spec asked only for @@index([gradeLevelId]), so the omission is deliberate-by-spec rather than an implementation slip.
+status: open
+
+### DW-77: A Subject patch against a draft whose stored Grade Level an Admin has since withdrawn is refused with the Subject sentence, naming the wrong cause.
+origin: spec-deferred f5763ce515a7
+location: apps/api/src/sourcetest/source-test.service.ts
+source_spec: `spec-3-3-subject-grade-level-assignment.md`
+severity: low
+reason: isSubjectOffered delegates to listSelectableSubjects, which answers [] for a disabled Grade Level rather than throwing, so every subjectId patch on such a draft returns 400 SUBJECT_NOT_AVAILABLE. Submission is unaffected, and the stored classification still resolves, so this is a message-accuracy gap on a rare state rather than a broken rule.
+status: open
+
+### DW-78: One classification patch issues more queries than it needs, fetching the whole offered Subject list only to test membership and re-resolving both names after the write.
+origin: spec-deferred fbad4082d2f7
+location: apps/api/src/sourcetest/source-test.service.ts
+source_spec: `spec-3-3-subject-grade-level-assignment.md`
+severity: low
+reason: classify runs requireDraft, resolveSubject, listSelectableSubjects, updateMany and then a full read that resolves both taxonomy names again. Membership could be a single join-row read, and the answering view could be built from state the method already holds. No measured problem at current volumes.
+status: open
+
+### DW-79: A pre-existing E2E failure in the auth spec, surfaced by running the full suite during this story and untouched by it.
+origin: spec-deferred 86153ee3e6ac
+location: e2e/tests/parent-auth.spec.ts:105
+source_spec: `spec-3-3-subject-grade-level-assignment.md`
+severity: medium
+reason: e2e/tests/parent-auth.spec.ts:105 uses getByRole('status'), which became a strict-mode violation when story 1-7 added a global polite live region in ThemeRegistry. No file in this story's diff touches auth or the live region, and the capture spec passes.
+status: open
+
+### DW-80: The classify() announcement on the capture screen assumes a patch never carries both subjectId and gradeLevelId at once, so a combined patch would describe only the grade-level change and never
+origin: spec-deferred 2c80b1effee5
+location: apps/web/src/lib/classification.ts (classificationAnnouncement)
+source_spec: `spec-3-3-subject-grade-level-assignment.md`
+severity: low
+reason: classificationAnnouncement branches solely on whether gradeLevelId is present in the patch; today's UI only ever sends one field per select's onChange, so the combined path is unreachable from the current screen. The DTO, API and service all accept both fields together, so a future caller (e.g. a combined-picker UI) would hit this silently.
+status: open
+
+### DW-81: loadGradeLevels/loadSubjects' out-of-order-response guard is verified only by asserting the guard call text is present in page.tsx's raw source, not by exercising the guard against
+origin: spec-deferred 9d863e3434a7
+location: apps/web/src/app/parent/capture/page.tsx (loadGradeLevels, loadSubjects)
+source_spec: `spec-3-3-subject-grade-level-assignment.md`
+severity: medium
+reason: page.spec.tsx's coverage of applyIfCurrent(gradeLevelsCurrent.current, ...) and applyIfCurrent(subjectsCurrent.current, ...) is `PAGE_SOURCE.toContain(...)` against the file text; the spec file never renders CapturePage, only PageStrip. No test (unit or e2e) resolves two grade-level/subject reads out of order and asserts the later-issued one wins. The guard mirrors the already-working profiles/draft guards, so it is very likely correct, but that is unverified.
+status: open

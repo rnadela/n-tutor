@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { requireParentJwtSecret } from '../common/env.js';
+import { TaxonomyModule } from '../admin/taxonomy.module.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
 import { PageIngestService } from './page-ingest.service.js';
@@ -35,6 +36,11 @@ import { sourceTestRuntime } from './source-test-policy.js';
       useFactory: () => ({ secret: requireParentJwtSecret() }),
     }),
     IdentityModule,
+    // The taxonomy read this module classifies through. Imported directly, the
+    // way `IdentityModule` imports it — `identity` does not re-export it, and a
+    // second reader of `subject` / `grade_level` / `subject_grade_level` is
+    // exactly the drift AD-17 exists to prevent. No write ever goes this way.
+    TaxonomyModule,
   ],
   controllers: [SourceTestController],
   providers: [SourceTestService, PageIngestService, ParentElevationGuard],

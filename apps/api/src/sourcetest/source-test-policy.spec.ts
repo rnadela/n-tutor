@@ -11,6 +11,7 @@ import {
   canSubmit,
   expiryFrom,
   isAllowedMime,
+  isClassified,
   isExpired,
   renumbered,
   reorderedOrThrow,
@@ -125,5 +126,25 @@ describe('the one TTL', () => {
     expect(isExpired({ expiresAt }, new Date(expiresAt.getTime() - 1))).toBe(false);
     expect(isExpired({ expiresAt }, expiresAt)).toBe(true);
     expect(isExpired({ expiresAt }, new Date(expiresAt.getTime() + 1))).toBe(true);
+  });
+});
+
+describe('the classification gate', () => {
+  const SUBJECT = '55555555-5555-4555-8555-555555555555';
+  const GRADE_LEVEL = '66666666-6666-4666-8666-666666666666';
+
+  it('holds only when both references are stored', () => {
+    expect(isClassified({ subjectId: SUBJECT, gradeLevelId: GRADE_LEVEL })).toBe(true);
+    expect(isClassified({ subjectId: SUBJECT, gradeLevelId: null })).toBe(false);
+    expect(isClassified({ subjectId: null, gradeLevelId: GRADE_LEVEL })).toBe(false);
+    expect(isClassified({ subjectId: null, gradeLevelId: null })).toBe(false);
+  });
+
+  it('reads nothing but the two references, so a later disable cannot move it', () => {
+    // The rule takes no enablement flag at all — that is what makes "a stored
+    // reference keeps submitting" a property of the signature rather than a
+    // promise about the caller.
+    const disabledLater = { subjectId: SUBJECT, gradeLevelId: GRADE_LEVEL, enabled: false };
+    expect(isClassified(disabledLater)).toBe(true);
   });
 });

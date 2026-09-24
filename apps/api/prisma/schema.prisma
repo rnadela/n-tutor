@@ -34,6 +34,9 @@ model Subject {
   updatedAt DateTime @updatedAt
 
   gradeLevels SubjectGradeLevel[]
+  /// Back-relation only. `sourcetest` is the sole writer of SourceTest
+  /// (AD-17); `admin` never writes through this field.
+  sourceTests SourceTest[]
 
   @@index([name])
   @@map("subject")
@@ -53,6 +56,8 @@ model GradeLevel {
   /// Back-relation only. `identity` is the sole writer of StudentProfile
   /// (AD-17); `admin` never writes through this field.
   students StudentProfile[]
+  /// The same, for `sourcetest`'s per-upload Grade Level.
+  sourceTests SourceTest[]
 
   @@index([name])
   @@map("grade_level")
@@ -353,8 +358,26 @@ model SourceTest {
   /// Null until submission; set once, in the same transaction as the status.
   submittedAt      DateTime?
 
+  /// The classification, held as ids and never as copied labels: the names are
+  /// resolved on read through `admin`'s TaxonomyService, exactly as a Student
+  /// Profile resolves its Grade Level, so an Admin rename or disable changes
+  /// what this row reads without writing it.
+  ///
+  /// Nullable because a draft opened before the columns existed has neither,
+  /// and because "unset" is precisely the state the submit gate exists to
+  /// refuse. The Grade Level is seeded from the Student Profile's on open and
+  /// is overridable per upload; the Subject starts unset.
+  subjectId    String?
+  gradeLevelId String?
+
   parentAccount  ParentAccount  @relation(fields: [parentAccountId], references: [id], onDelete: Restrict)
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Restrict)
+
+  /// `Restrict`, like both relations above: a Source Test is never destroyed as
+  /// a side effect of something else being removed, and taxonomy rows are
+  /// disabled rather than deleted in any case.
+  subject    Subject?    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  gradeLevel GradeLevel? @relation(fields: [gradeLevelId], references: [id], onDelete: Restrict)
 
   /// Cascade in this direction only: a page has no existence apart from the
   /// Source Test it is a page of.
@@ -370,6 +393,9 @@ model SourceTest {
   @@index([parentAccountId, studentProfileId, status])
   /// The expiry filter every read carries.
   @@index([expiresAt])
+  /// The Grade Level a Source Test was classified under: the axis Epic 4's
+  /// generation and Epic 7's Mastery read across.
+  @@index([gradeLevelId])
   @@map("source_test")
 }
 

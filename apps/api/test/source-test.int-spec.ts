@@ -5,8 +5,11 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const {
+  CLASSIFICATION_REQUIRED,
+  GRADE_LEVEL_ID_INVALID,
   MAX_PAGES,
   MAX_PAGE_BYTES,
+  NOTHING_TO_CLASSIFY,
   NO_PAGES_TO_SUBMIT,
   PAGE_LIMIT_REACHED,
   PAGE_NOT_FOUND,
@@ -14,17 +17,22 @@ const {
   SOURCE_TEST_NOT_DRAFT,
   SOURCE_TEST_NOT_FOUND,
   STORED_MIME,
+  SUBJECT_ID_INVALID,
+  SUBJECT_NOT_AVAILABLE,
   UNSUPPORTED_IMAGE_FORMAT,
   pageTooLarge,
   resetSourceTestRuntime,
 } = await import('../src/sourcetest/source-test-policy.js');
-const { PROFILE_NOT_FOUND } = await import('../src/identity/student-profile.service.js');
+const { GRADE_LEVEL_NOT_SELECTABLE, PROFILE_NOT_FOUND } = await import(
+  '../src/identity/student-profile.service.js'
+);
 const {
   bearer,
   createGradeLevel,
   createHarness,
   createSignedInParent,
   createStudentProfile,
+  createSubject,
   elevate,
   resetParentAccounts,
   resetTaxonomy,
@@ -91,6 +99,9 @@ describe('Source Tests: page management before submit', () => {
     token: string;
     studentProfileId: string;
     sourceTestId: string;
+    /** The child's own Grade Level — what the draft is opened defaulted to. */
+    gradeLevelId: string;
+    gradeLevelName: string;
   }> {
     const parent = await elevatedParent();
     const gradeLevel = await createGradeLevel(h);
@@ -102,7 +113,13 @@ describe('Source Tests: page management before submit', () => {
       .set('Authorization', bearer(parent.token))
       .send({ studentProfileId: profile.id })
       .expect(200);
-    return { ...parent, studentProfileId: profile.id, sourceTestId: response.body.id };
+    return {
+      ...parent,
+      studentProfileId: profile.id,
+      sourceTestId: response.body.id,
+      gradeLevelId: gradeLevel.id,
+      gradeLevelName: gradeLevel.name,
+    };
   }
 
   /** Adds one page through the real route, returning the Source Test after it. */
@@ -119,6 +136,27 @@ describe('Source Tests: page management before submit', () => {
         filename: options.filename ?? 'page.jpg',
         contentType: options.contentType ?? 'image/jpeg',
       });
+  }
+
+  /**
+   * Classifies a draft with a Subject offered for the Grade Level it already
+   * holds, through the real route.
+   *
+   * Submission is gated on the classification as well as the page count, so
+   * every test whose subject is the *page* gate has to get past this one first.
+   */
+  async function classifyDraft(draft: {
+    token: string;
+    sourceTestId: string;
+    gradeLevelId: string;
+  }) {
+    const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+    await server()
+      .patch(`/api/parent/source-tests/${draft.sourceTestId}/classification`)
+      .set('Authorization', bearer(draft.token))
+      .send({ subjectId: subject.id })
+      .expect(200);
+    return subject;
   }
 
   /**
@@ -541,6 +579,7 @@ describe('Source Tests: page management before submit', () => {
 
     it('accepts a draft holding at least one page', async () => {
       const draft = await openDraft();
+      await classifyDraft(draft);
       await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
 
       const response = await server()
@@ -554,6 +593,7 @@ describe('Source Tests: page management before submit', () => {
 
     it('refuses every page-management write once it is submitted', async () => {
       const draft = await openDraft();
+      await classifyDraft(draft);
       const seeded = await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
       const [pageId] = seeded.body.pages.map((page: { id: string }) => page.id);
       await server()
@@ -751,10 +791,572 @@ describe('Source Tests: page management before submit', () => {
         () => server().post('/api/parent/source-tests').send({ studentProfileId: randomUUID() }),
         () => server().post(`${base}/submit`).set('Cookie', parent.cookie),
         () => server().delete(`${base}/pages/${randomUUID()}`),
+        // The classification write, and the taxonomy read it is chosen from:
+        // the guard stands in front of every route on this controller, and an
+        // enumeration that stops short of the newest ones is an enumeration
+        // that stops proving anything the moment a route is added.
+        () => server().patch(`${base}/classification`).send({ subjectId: randomUUID() }),
+        () =>
+          server()
+            .patch(`${base}/classification`)
+            .set('Cookie', parent.cookie)
+            .send({ gradeLevelId: randomUUID() }),
+        () =>
+          server().get('/api/parent/source-tests/subjects').query({ gradeLevelId: randomUUID() }),
+        () =>
+          server()
+            .get('/api/parent/source-tests/subjects')
+            .query({ gradeLevelId: randomUUID() })
+            .set('Cookie', parent.cookie),
       ]) {
         const response = await refusal().expect(401);
         expect(response.body.elevated).toBe(false);
       }
+    });
+  });
+
+  describe('classification', () => {
+    /** The classification patch, through the real route. */
+    function classify(token: string, sourceTestId: string, patch: Record<string, unknown>) {
+      return server()
+        .patch(`/api/parent/source-tests/${sourceTestId}/classification`)
+        .set('Authorization', bearer(token))
+        .send(patch);
+    }
+
+    /** The offered-Subjects read, through the real route. */
+    function subjects(token: string, gradeLevelId: string) {
+      return server()
+        .get('/api/parent/source-tests/subjects')
+        .query({ gradeLevelId })
+        .set('Authorization', bearer(token));
+    }
+
+    /** The stored classification columns alone — what was actually written. */
+    function storedClassification(sourceTestId: string) {
+      return h.prisma.sourceTest.findUniqueOrThrow({
+        where: { id: sourceTestId },
+        select: { subjectId: true, gradeLevelId: true },
+      });
+    }
+
+    describe('the Grade Level a draft opens with', () => {
+      it('is the child\u2019s own, resolved by name, with no Subject yet', async () => {
+        const draft = await openDraft();
+        const view = await server()
+          .get(`/api/parent/source-tests/${draft.sourceTestId}`)
+          .set('Authorization', bearer(draft.token))
+          .expect(200);
+
+        expect(view.body.gradeLevelId).toBe(draft.gradeLevelId);
+        expect(view.body.gradeLevelName).toBe(draft.gradeLevelName);
+        expect(view.body.subjectId).toBeNull();
+        expect(view.body.subjectName).toBeNull();
+      });
+
+      it('is never re-defaulted when the draft is resumed after an override', async () => {
+        const draft = await openDraft();
+        const other = await createGradeLevel(h);
+        await classify(draft.token, draft.sourceTestId, { gradeLevelId: other.id }).expect(200);
+
+        const resumed = await server()
+          .post('/api/parent/source-tests')
+          .set('Authorization', bearer(draft.token))
+          .send({ studentProfileId: draft.studentProfileId })
+          .expect(200);
+
+        expect(resumed.body.id).toBe(draft.sourceTestId);
+        expect(resumed.body.gradeLevelId).toBe(other.id);
+      });
+
+      it('leaves the Student Profile exactly as it was', async () => {
+        const draft = await openDraft();
+        const other = await createGradeLevel(h);
+        await classify(draft.token, draft.sourceTestId, { gradeLevelId: other.id }).expect(200);
+
+        const profile = await h.prisma.studentProfile.findUniqueOrThrow({
+          where: { id: draft.studentProfileId },
+          select: { gradeLevelId: true },
+        });
+        expect(profile.gradeLevelId).toBe(draft.gradeLevelId);
+      });
+    });
+
+    describe('the Subjects offered for a Grade Level', () => {
+      it('is exactly the three-flag conjunction, by name', async () => {
+        const draft = await openDraft();
+        const offered = await createSubject(h, {
+          name: 'Offered Subject',
+          gradeLevelId: draft.gradeLevelId,
+        });
+        // Enabled everywhere, but not paired with this Grade Level at all.
+        await createSubject(h, { name: 'Unpaired Subject' });
+        // Paired, but the join row is disabled.
+        await createSubject(h, {
+          name: 'Withdrawn Pairing',
+          gradeLevelId: draft.gradeLevelId,
+          available: false,
+        });
+        // Paired and enabled for it, but the Subject itself is disabled.
+        await createSubject(h, {
+          name: 'Disabled Subject',
+          gradeLevelId: draft.gradeLevelId,
+          enabled: false,
+        });
+
+        const response = await subjects(draft.token, draft.gradeLevelId).expect(200);
+        expect(response.body.map((item: { name: string }) => item.name)).toEqual([offered.name]);
+      });
+
+      it('is empty for a Grade Level an Admin has withdrawn', async () => {
+        const draft = await openDraft();
+        await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        const withdrawn = await createGradeLevel(h, { enabled: false });
+        await createSubject(h, { gradeLevelId: withdrawn.id });
+
+        const response = await subjects(draft.token, withdrawn.id).expect(200);
+        expect(response.body).toEqual([]);
+      });
+
+      it('is a 404 for a Grade Level that does not exist', async () => {
+        const draft = await openDraft();
+        await subjects(draft.token, randomUUID()).expect(404);
+      });
+
+      it('is declared before the id route, so the literal path is not parsed as one', async () => {
+        const draft = await openDraft();
+        // Without the declaration order this answers 400 about "subjects"
+        // failing `ParseUUIDPipe`, never 200.
+        await subjects(draft.token, draft.gradeLevelId).expect(200);
+      });
+
+      it('refuses a missing or unparseable Grade Level before reading anything', async () => {
+        const draft = await openDraft();
+        // The query parameter is the whole question the route answers, so an
+        // absent one is a shape fault and not an empty list.
+        await server()
+          .get('/api/parent/source-tests/subjects')
+          .set('Authorization', bearer(draft.token))
+          .expect(400);
+        await server()
+          .get('/api/parent/source-tests/subjects')
+          .query({ gradeLevelId: 'grade five' })
+          .set('Authorization', bearer(draft.token))
+          .expect(400);
+      });
+    });
+
+    describe('assigning a Subject', () => {
+      it('sets it and resolves its name, against the stored Grade Level', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+
+        const response = await classify(draft.token, draft.sourceTestId, {
+          subjectId: subject.id,
+        }).expect(200);
+
+        expect(response.body.subjectId).toBe(subject.id);
+        expect(response.body.subjectName).toBe(subject.name);
+        expect(response.body.gradeLevelId).toBe(draft.gradeLevelId);
+      });
+
+      it('refuses one the Admin has disabled, and writes nothing', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, {
+          gradeLevelId: draft.gradeLevelId,
+          enabled: false,
+        });
+
+        const response = await classify(draft.token, draft.sourceTestId, {
+          subjectId: subject.id,
+        }).expect(400);
+
+        expect(messagesOf(response)).toContain(SUBJECT_NOT_AVAILABLE);
+        expect(await storedClassification(draft.sourceTestId)).toMatchObject({ subjectId: null });
+      });
+
+      it('refuses one not paired with this Grade Level, and writes nothing', async () => {
+        const draft = await openDraft();
+        const elsewhere = await createGradeLevel(h);
+        const subject = await createSubject(h, { gradeLevelId: elsewhere.id });
+
+        const response = await classify(draft.token, draft.sourceTestId, {
+          subjectId: subject.id,
+        }).expect(400);
+
+        expect(messagesOf(response)).toContain(SUBJECT_NOT_AVAILABLE);
+        expect(await storedClassification(draft.sourceTestId)).toMatchObject({ subjectId: null });
+      });
+
+      it('validates the pair that results, not the one already stored', async () => {
+        const draft = await openDraft();
+        const other = await createGradeLevel(h);
+        // Offered for the draft's current Grade Level, and for no other.
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+
+        // Sent together, the Subject is judged against the *new* Grade Level.
+        const response = await classify(draft.token, draft.sourceTestId, {
+          subjectId: subject.id,
+          gradeLevelId: other.id,
+        }).expect(400);
+
+        expect(messagesOf(response)).toContain(SUBJECT_NOT_AVAILABLE);
+        expect(await storedClassification(draft.sourceTestId)).toEqual({
+          subjectId: null,
+          gradeLevelId: draft.gradeLevelId,
+        });
+      });
+
+      it('accepts a pair sent together when the resulting pair is offered', async () => {
+        const draft = await openDraft();
+        const other = await createGradeLevel(h);
+        const subject = await createSubject(h, { gradeLevelId: other.id });
+
+        const response = await classify(draft.token, draft.sourceTestId, {
+          subjectId: subject.id,
+          gradeLevelId: other.id,
+        }).expect(200);
+
+        expect(response.body).toMatchObject({ subjectId: subject.id, gradeLevelId: other.id });
+      });
+
+      it('answers 404 for a uuid that names no Subject row', async () => {
+        const draft = await openDraft();
+        await classify(draft.token, draft.sourceTestId, { subjectId: randomUUID() }).expect(404);
+        expect(await storedClassification(draft.sourceTestId)).toMatchObject({ subjectId: null });
+      });
+    });
+
+    describe('overriding the Grade Level', () => {
+      it('keeps a Subject the new Grade Level still offers', async () => {
+        const draft = await openDraft();
+        const other = await createGradeLevel(h);
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        await h.taxonomy.setAvailability(h.operatorId, subject.id, other.id, true);
+
+        await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
+        const response = await classify(draft.token, draft.sourceTestId, {
+          gradeLevelId: other.id,
+        }).expect(200);
+
+        expect(response.body).toMatchObject({ subjectId: subject.id, gradeLevelId: other.id });
+      });
+
+      it('clears a Subject the new Grade Level does not offer, rather than refusing', async () => {
+        const draft = await openDraft();
+        const other = await createGradeLevel(h);
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+
+        await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
+        const response = await classify(draft.token, draft.sourceTestId, {
+          gradeLevelId: other.id,
+        }).expect(200);
+
+        expect(response.body.gradeLevelId).toBe(other.id);
+        expect(response.body.subjectId).toBeNull();
+        expect(response.body.subjectName).toBeNull();
+        expect(await storedClassification(draft.sourceTestId)).toEqual({
+          subjectId: null,
+          gradeLevelId: other.id,
+        });
+      });
+
+      it('refuses a withdrawn Grade Level with 400, and writes nothing', async () => {
+        const draft = await openDraft();
+        const withdrawn = await createGradeLevel(h, { enabled: false });
+
+        const response = await classify(draft.token, draft.sourceTestId, {
+          gradeLevelId: withdrawn.id,
+        }).expect(400);
+
+        expect(messagesOf(response)).toContain(GRADE_LEVEL_NOT_SELECTABLE);
+        expect(await storedClassification(draft.sourceTestId)).toMatchObject({
+          gradeLevelId: draft.gradeLevelId,
+        });
+      });
+
+      it('answers 404 for a uuid that names no Grade Level row', async () => {
+        const draft = await openDraft();
+        await classify(draft.token, draft.sourceTestId, { gradeLevelId: randomUUID() }).expect(404);
+        // Nothing written: the seeded Grade Level from `openDraft` stands
+        // unchanged, exactly as the sibling unknown-Subject case above asserts.
+        expect(await storedClassification(draft.sourceTestId)).toMatchObject({
+          gradeLevelId: draft.gradeLevelId,
+        });
+      });
+    });
+
+    describe('the patch itself', () => {
+      it('refuses an empty body, rather than treating it as a no-op', async () => {
+        const draft = await openDraft();
+        const response = await classify(draft.token, draft.sourceTestId, {}).expect(400);
+        expect(messagesOf(response)).toContain(NOTHING_TO_CLASSIFY);
+      });
+
+      it('refuses a value that is not a uuid, in this module’s own words', async () => {
+        const draft = await openDraft();
+
+        const subject = await classify(draft.token, draft.sourceTestId, {
+          subjectId: 'maths',
+        }).expect(400);
+        // The sentence, not merely the status: a shape fault says which field
+        // it is about, and says it in the wording this module owns rather than
+        // class-validator's own English.
+        expect(messagesOf(subject)).toContain(SUBJECT_ID_INVALID);
+
+        const gradeLevel = await classify(draft.token, draft.sourceTestId, {
+          gradeLevelId: 'grade five',
+        }).expect(400);
+        expect(messagesOf(gradeLevel)).toContain(GRADE_LEVEL_ID_INVALID);
+
+        // A v1 uuid is a uuid but not one this system issues, so it is refused
+        // as shape too, exactly as every sibling DTO refuses it.
+        const v1 = await classify(draft.token, draft.sourceTestId, {
+          subjectId: '2c1b814e-9a3f-11ee-b9d1-0242ac120002',
+        }).expect(400);
+        expect(messagesOf(v1)).toContain(SUBJECT_ID_INVALID);
+
+        expect(await storedClassification(draft.sourceTestId)).toMatchObject({ subjectId: null });
+      });
+
+      it('treats an explicit null as nothing sent, and writes nothing', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
+
+        // `@IsOptional()` skips a null as well as an absent value, so these
+        // reach the service validated against nothing. There is no unset route,
+        // so they mean what an empty body means — and in particular they must
+        // not clear what is stored.
+        for (const patch of [
+          { subjectId: null },
+          { gradeLevelId: null },
+          { subjectId: null, gradeLevelId: null },
+        ]) {
+          const response = await classify(draft.token, draft.sourceTestId, patch).expect(400);
+          expect(messagesOf(response)).toContain(NOTHING_TO_CLASSIFY);
+        }
+
+        expect(await storedClassification(draft.sourceTestId)).toEqual({
+          subjectId: subject.id,
+          gradeLevelId: draft.gradeLevelId,
+        });
+      });
+
+      it('refuses a Subject against a draft holding no Grade Level at all', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        // The state a draft opened before these columns existed is in: no Grade
+        // Level, so nothing is offered, so no Subject can be first.
+        await h.prisma.sourceTest.update({
+          where: { id: draft.sourceTestId },
+          data: { gradeLevelId: null },
+        });
+
+        const response = await classify(draft.token, draft.sourceTestId, {
+          subjectId: subject.id,
+        }).expect(400);
+
+        expect(messagesOf(response)).toContain(SUBJECT_NOT_AVAILABLE);
+        expect(await storedClassification(draft.sourceTestId)).toEqual({
+          subjectId: null,
+          gradeLevelId: null,
+        });
+      });
+
+      it('answers the vanished-upload 404 for another account\u2019s Source Test', async () => {
+        const mine = await elevatedParent();
+        const theirs = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: theirs.gradeLevelId });
+
+        const response = await classify(mine.token, theirs.sourceTestId, {
+          subjectId: subject.id,
+        }).expect(404);
+
+        expect(messagesOf(response)).toContain(SOURCE_TEST_NOT_FOUND);
+        expect(await storedClassification(theirs.sourceTestId)).toMatchObject({ subjectId: null });
+      });
+
+      it('refuses a submitted Source Test with the already-submitted 409', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
+        await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
+        await server()
+          .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+          .set('Authorization', bearer(draft.token))
+          .expect(200);
+
+        const response = await classify(draft.token, draft.sourceTestId, {
+          subjectId: subject.id,
+        }).expect(409);
+        expect(messagesOf(response)).toContain(SOURCE_TEST_NOT_DRAFT);
+      });
+
+      it('answers the vanished-upload 404 for an expired draft', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        await h.prisma.sourceTest.update({
+          where: { id: draft.sourceTestId },
+          data: { expiresAt: new Date(Date.now() - 1000) },
+        });
+
+        const response = await classify(draft.token, draft.sourceTestId, {
+          subjectId: subject.id,
+        }).expect(404);
+        expect(messagesOf(response)).toContain(SOURCE_TEST_NOT_FOUND);
+      });
+    });
+
+    describe('the submit gate', () => {
+      it('refuses a draft with pages but no Subject, and leaves it a draft', async () => {
+        const draft = await openDraft();
+        await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
+
+        const response = await server()
+          .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+          .set('Authorization', bearer(draft.token))
+          .expect(400);
+
+        expect(messagesOf(response)).toContain(CLASSIFICATION_REQUIRED);
+        const row = await h.prisma.sourceTest.findUniqueOrThrow({
+          where: { id: draft.sourceTestId },
+          select: { status: true, submittedAt: true },
+        });
+        expect(row).toEqual({ status: 'Draft', submittedAt: null });
+      });
+
+      it('refuses a draft with a Subject but no Grade Level', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
+        await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
+        // There is no route that unsets a Grade Level — a draft predating the
+        // columns is how this state arises — so the row is put into it here.
+        await h.prisma.sourceTest.update({
+          where: { id: draft.sourceTestId },
+          data: { gradeLevelId: null },
+        });
+
+        const response = await server()
+          .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+          .set('Authorization', bearer(draft.token))
+          .expect(400);
+        expect(messagesOf(response)).toContain(CLASSIFICATION_REQUIRED);
+      });
+
+      it('states the page requirement first when neither is met', async () => {
+        const draft = await openDraft();
+        const response = await server()
+          .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+          .set('Authorization', bearer(draft.token))
+          .expect(400);
+        expect(messagesOf(response)).toContain(NO_PAGES_TO_SUBMIT);
+      });
+
+      it('admits a classified draft with pages', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
+        await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
+
+        const response = await server()
+          .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+          .set('Authorization', bearer(draft.token))
+          .expect(200);
+        expect(response.body.status).toBe('Submitted');
+        expect(response.body.subjectId).toBe(subject.id);
+      });
+    });
+
+    describe('two classification patches at once', () => {
+      it('never leaves a pair neither of them validated', async () => {
+        const draft = await openDraft();
+        // A Subject offered for the draft's own Grade Level and for nothing
+        // else, and a second Grade Level that does not offer it. Sent
+        // concurrently, the two patches validate against the same pre-write
+        // state: the Subject is offered for the *stored* Grade Level, and the
+        // Grade Level change sees no Subject to drop. Without a compare-and-set
+        // the losing write still lands and the row ends up holding a pair that
+        // was never offered.
+        const onlyHere = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        const elsewhere = await createGradeLevel(h);
+
+        const [setSubject, moveGradeLevel] = await Promise.all([
+          classify(draft.token, draft.sourceTestId, { subjectId: onlyHere.id }),
+          classify(draft.token, draft.sourceTestId, { gradeLevelId: elsewhere.id }),
+        ]);
+        // Neither is a server fault. A loser re-reads and re-validates against
+        // what is now stored, so it either applies (200), is refused because
+        // the pair it would now produce is not offered (400), or is refused as
+        // the draft having moved out from under it twice (409). What it never
+        // does is apply the pair it validated against a state that is gone.
+        for (const response of [setSubject, moveGradeLevel]) {
+          expect([200, 400, 409]).toContain(response.status);
+        }
+        // And at least one of the two was actually applied: a compare-and-set
+        // that refused both would be safe and useless.
+        expect([setSubject.status, moveGradeLevel.status]).toContain(200);
+
+        const stored = await storedClassification(draft.sourceTestId);
+        if (stored.subjectId !== null) {
+          // Whatever order they resolved in, the stored Subject is offered for
+          // the stored Grade Level — asked of the one service that knows.
+          const offered = await h.taxonomy.listSelectableSubjects(stored.gradeLevelId!);
+          expect(offered.map((item) => item.id)).toContain(stored.subjectId);
+        }
+      });
+    });
+
+    describe('a stored reference outlives the Admin action taken against it', () => {
+      it('still resolves, still names, and still submits after the Subject is disabled', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
+        await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
+
+        // The Admin action, after the parent had already chosen.
+        await h.taxonomy.setSubjectEnabled(h.operatorId, subject.id, false);
+
+        const read = await server()
+          .get(`/api/parent/source-tests/${draft.sourceTestId}`)
+          .set('Authorization', bearer(draft.token))
+          .expect(200);
+        expect(read.body.subjectId).toBe(subject.id);
+        expect(read.body.subjectName).toBe(subject.name);
+
+        // And the gate asserts non-null, never enablement.
+        const submitted = await server()
+          .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+          .set('Authorization', bearer(draft.token))
+          .expect(200);
+        expect(submitted.body.status).toBe('Submitted');
+        expect(submitted.body.subjectName).toBe(subject.name);
+      });
+
+      it('reads the renamed label without the Source Test row being written', async () => {
+        const draft = await openDraft();
+        const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
+        await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
+        const before = await h.prisma.sourceTest.findUniqueOrThrow({
+          where: { id: draft.sourceTestId },
+          select: { subjectId: true, updatedAt: true },
+        });
+
+        await h.taxonomy.renameSubject(h.operatorId, subject.id, 'Mathematics');
+
+        const read = await server()
+          .get(`/api/parent/source-tests/${draft.sourceTestId}`)
+          .set('Authorization', bearer(draft.token))
+          .expect(200);
+        expect(read.body.subjectName).toBe('Mathematics');
+
+        const after = await h.prisma.sourceTest.findUniqueOrThrow({
+          where: { id: draft.sourceTestId },
+          select: { subjectId: true, updatedAt: true },
+        });
+        expect(after).toEqual(before);
+      });
     });
   });
 });

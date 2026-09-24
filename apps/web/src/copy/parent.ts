@@ -244,7 +244,14 @@ export const parentCopy = {
      * courtesy; this sentence is what makes the refusal legible, and the server
      * refuses a zero-page submission whatever the browser did.
      */
-    submitBlocked: 'Add at least one page before submitting.',
+    submitBlocked: (reasons: readonly ('pages' | 'classification')[]): string =>
+      reasons
+        .map((reason) =>
+          reason === 'pages'
+            ? 'Add at least one page before submitting.'
+            : 'Choose a subject and a grade level before submitting.',
+        )
+        .join(' '),
 
     added: (ordinal: number) => `Page ${ordinal} was added.`,
     deleted: (ordinal: number, total: number) =>
@@ -259,6 +266,43 @@ export const parentCopy = {
      * — and the sentence says plainly why nothing on it can be changed.
      */
     submittedNote: 'These pages were submitted. Nothing on this upload can be changed now.',
+
+    /**
+     * What the upload is *of*. One subject and one grade level, chosen from
+     * what an administrator offers — so both lists are the server's answer and
+     * neither is filtered here.
+     */
+    classification: {
+      heading: 'Subject and grade level',
+      /** Says what the grade level here is, and what it is not. */
+      intro:
+        'This is the grade level for this upload. Changing it here does not change the child’s profile.',
+      gradeLevelLabel: 'Grade level',
+      subjectLabel: 'Subject',
+      /** The subject list is a function of the grade level, so it says so. */
+      chooseGradeLevelFirst: 'Choose a grade level to see the subjects offered for it.',
+      noSubjects: 'No subjects are offered for that grade level yet. Choose another grade level.',
+      loadingSubjects: 'Loading the subjects…',
+      noGradeLevels: 'No grade levels are available yet. Ask an administrator to add one.',
+      loadingGradeLevels: 'Loading the grade levels…',
+      saving: 'Saving…',
+      subjectSet: (subject: string) => `The subject is ${subject}.`,
+      gradeLevelSet: (gradeLevel: string) => `The grade level is ${gradeLevel}.`,
+      /**
+       * A grade-level change may clear a subject the new grade level does not
+       * offer. That is announced rather than left to be noticed.
+       */
+      gradeLevelSetSubjectCleared: (gradeLevel: string) =>
+        `The grade level is ${gradeLevel}. That grade level does not offer the subject that was chosen, so the subject was cleared. Choose one again.`,
+      failed: 'That choice could not be saved. Try again.',
+      subjectsFailed: 'The subjects could not be loaded. Try again.',
+      /**
+       * Distinct from `noGradeLevels`: a read that failed is not the same fact
+       * as a catalogue that is empty, and telling a parent to ask an
+       * administrator about a network fault sends them somewhere useless.
+       */
+      gradeLevelsFailed: 'The grade levels could not be loaded. Try again.',
+    },
 
     failed: 'That change could not be saved. Try again.',
     addFailed: 'That page could not be added. Try again with another photo.',

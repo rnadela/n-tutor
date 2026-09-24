@@ -250,3 +250,135 @@ describe('the announcements the screen makes', () => {
     expect(PAGE_SOURCE).toContain('parentCopy.capture.adding');
   });
 });
+
+describe('the classification the screen adds above the strip', () => {
+  it('states both blocked reasons, in reading order, from the rule', () => {
+    const capture = parentCopy.capture;
+    expect(capture.submitBlocked(['pages'])).toBe('Add at least one page before submitting.');
+    expect(capture.submitBlocked(['classification'])).toBe(
+      'Choose a subject and a grade level before submitting.',
+    );
+    expect(capture.submitBlocked(['pages', 'classification'])).toBe(
+      'Add at least one page before submitting. Choose a subject and a grade level before submitting.',
+    );
+    // Nothing unmet states nothing — the sentence is only rendered when the
+    // control is refused, and it should not manufacture one.
+    expect(capture.submitBlocked([])).toBe('');
+  });
+
+  it('is fed by the rule module rather than by a second copy of the gates', () => {
+    expect(PAGE_SOURCE).toContain('submitBlockedReasons(classification, readyPageCount)');
+    expect(PAGE_SOURCE).toContain('isClassified(classification)');
+    expect(PAGE_SOURCE).toContain('parentCopy.capture.submitBlocked(blockedReasons)');
+  });
+
+  it('re-reads the Subjects whenever the stored Grade Level moves', () => {
+    // A filtered cache would be a second reader of the availability rule; the
+    // list is the server's answer for the Grade Level actually stored.
+    expect(PAGE_SOURCE).toContain('parentApi.sourceTestSubjects(token, gradeLevelId)');
+    expect(PAGE_SOURCE).toContain('loadSubjects(draftGradeLevelId)');
+    // And with the same staleness guard every other read here carries.
+    expect(PAGE_SOURCE).toContain('applyIfCurrent(subjectsCurrent.current, issued');
+  });
+
+  it('writes both selects through the shared write path, so the strip locks', () => {
+    expect(PAGE_SOURCE).toContain("'classify',");
+    expect(PAGE_SOURCE).toContain('parentApi.classifySourceTest(token!, sourceTest!.id, patch)');
+    expect(PAGE_SOURCE).toContain(
+      'onChange={(event) => classify({ gradeLevelId: event.target.value })}',
+    );
+    expect(PAGE_SOURCE).toContain(
+      'onChange={(event) => classify({ subjectId: event.target.value })}',
+    );
+  });
+
+  it('announces a grade-level change that cleared the subject as exactly that', () => {
+    const copy = parentCopy.capture.classification;
+    expect(copy.gradeLevelSet('Grade 5')).toBe('The grade level is Grade 5.');
+    expect(copy.subjectSet('Maths')).toBe('The subject is Maths.');
+    expect(copy.gradeLevelSetSubjectCleared('Grade 5')).toContain('the subject was cleared');
+    expect(copy.gradeLevelSetSubjectCleared('Grade 5')).toContain('Grade 5');
+  });
+
+  it('derives the announcement from the pure classificationAnnouncement rule, not restated inline', () => {
+    // The rule itself — which branch fires for which patch and answer — is
+    // asserted behaviorally in classification.spec.ts. This only checks that
+    // the screen defers to it rather than re-deciding the branch here.
+    expect(PAGE_SOURCE).toContain(
+      'const announcement = classificationAnnouncement(classification, patch, after)',
+    );
+    expect(PAGE_SOURCE).toContain("case 'subjectSet':");
+    expect(PAGE_SOURCE).toContain("case 'gradeLevelSet':");
+    expect(PAGE_SOURCE).toContain("case 'gradeLevelSetSubjectCleared':");
+  });
+
+  it('says plainly that the grade level here is not the child’s profile', () => {
+    expect(parentCopy.capture.classification.intro).toContain('does not change the child');
+  });
+
+  it('states every one of its own words from the copy module', () => {
+    const code = PAGE_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    for (const marker of [
+      'classification.heading',
+      'classification.intro',
+      'classification.gradeLevelLabel',
+      'classification.subjectLabel',
+      'classification.chooseGradeLevelFirst',
+      'classification.noSubjects',
+      'classification.loadingSubjects',
+      'classification.noGradeLevels',
+      'classification.saving',
+    ]) {
+      expect(code).toContain(`parentCopy.capture.${marker}`);
+    }
+  });
+
+  it('names its section by the heading it renders, not by repeating the words', () => {
+    expect(PAGE_SOURCE).toContain('aria-labelledby={CLASSIFICATION_HEADING_ID}');
+    expect(PAGE_SOURCE).toContain('id={CLASSIFICATION_HEADING_ID}');
+  });
+});
+
+describe('what the classification selects show against what they offer', () => {
+  it('renders both selects from the offered list plus whatever the draft holds', () => {
+    // An administrator disabling a chosen Subject drops it out of the offered
+    // list while the draft keeps it and stays submittable; a select fed by the
+    // offered list alone would then render blank for a classified upload.
+    expect(PAGE_SOURCE).toContain(
+      'optionsWithStored(\n    gradeLevels,\n    classification.gradeLevelId,\n    sourceTest?.gradeLevelName ?? null,\n  )',
+    );
+    expect(PAGE_SOURCE).toContain(
+      'optionsWithStored(\n    subjects,\n    classification.subjectId,\n    sourceTest?.subjectName ?? null,\n  )',
+    );
+    // Including the empty states, which are about what is renderable and not
+    // about what the server last offered.
+    expect(PAGE_SOURCE).toContain('gradeLevelOptions.length === 0');
+    expect(PAGE_SOURCE).toContain('subjectOptions.length === 0');
+    expect(PAGE_SOURCE).toContain('{gradeLevelOptions.map(');
+    expect(PAGE_SOURCE).toContain('{subjectOptions.map(');
+    // And the gate is untouched: still the two ids, never the offered lists.
+    expect(PAGE_SOURCE).toContain('isClassified(classification)');
+  });
+
+  it('states a failed grade-level read as a failure, not as an empty catalogue', () => {
+    expect(parentCopy.capture.classification.gradeLevelsFailed).not.toBe(
+      parentCopy.capture.classification.noGradeLevels,
+    );
+    expect(PAGE_SOURCE).toContain('parentCopy.capture.classification.gradeLevelsFailed');
+  });
+
+  it('guards the grade-level read against an out-of-order response, like the other reads', () => {
+    // Retry can re-issue this while an earlier attempt is still in flight;
+    // without the same guard the Subject and profile reads carry, a slow
+    // first attempt could overwrite what a faster retry already rendered.
+    expect(PAGE_SOURCE).toContain('applyIfCurrent(gradeLevelsCurrent.current, issued');
+  });
+
+  it('re-issues every read on Retry, the Subject one included', () => {
+    expect(PAGE_SOURCE).toContain(
+      'loadSubjects(draftGradeLevelId);\n  }, [loadProfiles, openDraft, loadGradeLevels, loadSubjects, draftGradeLevelId]);',
+    );
+  });
+});

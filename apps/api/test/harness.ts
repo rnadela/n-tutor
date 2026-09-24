@@ -255,6 +255,46 @@ export async function createGradeLevel(
   return created;
 }
 
+/**
+ * A Subject created through `TaxonomyService` — never a raw delegate — so the
+ * fixture exercises the same write path the Admin console uses, `nameKey` and
+ * the audit row included.
+ *
+ * `gradeLevelId` sets the join row's own flag through `setAvailability`, which
+ * is the third of the three independent `enabled` columns selectability is the
+ * conjunction of; `available: false` creates the join row *disabled*, which is
+ * the state that makes "the Subject and the Grade Level are both enabled and it
+ * still is not offered" observable. `enabled: false` disables the Subject
+ * itself, again through the service.
+ */
+export async function createSubject(
+  h: Pick<Harness, 'taxonomy' | 'operatorId'>,
+  overrides: {
+    name?: string;
+    gradeLevelId?: string;
+    enabled?: boolean;
+    available?: boolean;
+  } = {},
+): Promise<{ id: string; name: string; enabled: boolean }> {
+  fixtureCounter += 1;
+  const created = await h.taxonomy.createSubject(
+    h.operatorId,
+    overrides.name ?? `Subject ${fixtureCounter}`,
+  );
+  if (overrides.gradeLevelId !== undefined) {
+    // Enabling upserts the join row; a disabled one has to be created enabled
+    // first, because `setAvailability` answers 404 for a row that is not there.
+    await h.taxonomy.setAvailability(h.operatorId, created.id, overrides.gradeLevelId, true);
+    if (overrides.available === false) {
+      await h.taxonomy.setAvailability(h.operatorId, created.id, overrides.gradeLevelId, false);
+    }
+  }
+  if (overrides.enabled === false) {
+    return h.taxonomy.setSubjectEnabled(h.operatorId, created.id, false);
+  }
+  return created;
+}
+
 /** A Student Profile created through `identity`'s sole writer. */
 export async function createStudentProfile(
   h: Pick<Harness, 'students'>,
