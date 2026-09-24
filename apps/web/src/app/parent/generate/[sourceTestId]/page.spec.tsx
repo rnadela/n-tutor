@@ -197,6 +197,16 @@ describe('the progress view', () => {
     expect(PAGE_SOURCE).toContain('jobSettled');
   });
 
+  it('offers the way to drafts for a partial outcome too, not only a full success', () => {
+    // "What landed landed, and it was charged for" — a job that only partially
+    // completed must still link on to the drafts it produced.
+    expect(PAGE_SOURCE).toContain(
+      "(job!.status === 'Succeeded' || job!.status === 'PartiallyComplete') &&",
+    );
+    expect(PAGE_SOURCE).toContain('job!.producedCount > 0 &&');
+    expect(PAGE_SOURCE).toContain('data-testid="generate-to-drafts"');
+  });
+
   it('advises staying without ever claiming work would be lost', () => {
     const stay = parentCopy.generate.stayHere;
     expect(stay).toContain('Leaving does not stop the work');

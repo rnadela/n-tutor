@@ -18,16 +18,22 @@ import {
   type GenerationAllowanceView,
   type GenerationJobView,
   type GenerationTopicsView,
+  type PracticeTestDraftSummary,
+  type PracticeTestDraftView,
 } from './practice-test.service.js';
 
 /**
- * The generate step's four routes: what is left to spend, the Topics a request
- * may be weighted on, the request itself, and where the job stands.
+ * The generate step's four routes — what is left to spend, the Topics a request
+ * may be weighted on, the request itself, and where the job stands — and draft
+ * review's two: the drafts this account is holding, and one of them whole.
  *
- * There is no route here that returns a generated Question, and that is the
- * design rather than an omission — draft review is Story 4.3's, and one
- * endpoint that returned content now would be the first half of shipping it
- * without the human quality gate the epic exists for.
+ * Until Story 4.3 there was deliberately no route here that returned a
+ * generated Question: an endpoint serving content before there was a screen to
+ * review it on would have been the first half of shipping generation without
+ * the human quality gate the epic exists for. The two reads below are the
+ * *other* half — they exist because the gate is being built, and they are
+ * parent-only, elevation-guarded and `Draft`-scoped precisely so that building
+ * it cannot amount to bypassing it. Nothing student-scoped reaches them.
  *
  * Every route is behind `ParentElevationGuard`, and the account is taken from
  * `req.elevated` and never from the path or the body (AD-18). A Source Test id
@@ -104,5 +110,43 @@ export class PracticeTestController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<GenerationJobView> {
     return this.practiceTests.statusFor(req.elevated!.parentAccountId, id);
+  }
+
+  /**
+   * Every draft this account is still holding — Pending drafts' whole answer.
+   *
+   * Declared **above** `practice-tests/:id` on purpose: Nest matches in
+   * declaration order, and the other way round `drafts` would be handed to
+   * `ParseUUIDPipe` as an id and refused with a 400 that describes nothing a
+   * parent did.
+   *
+   * An account with no drafts reads an empty list, never a 404: having nothing
+   * yet is a state the screen renders, not a refusal.
+   */
+  @Get('practice-tests/drafts')
+  drafts(@Req() req: ElevatedRequest): Promise<PracticeTestDraftSummary[]> {
+    return this.practiceTests.draftsFor(req.elevated!.parentAccountId);
+  }
+
+  /**
+   * One draft, whole: every Question in stored order with its correct answer,
+   * its options and its Topics.
+   *
+   * The id is the review position. A parent who reloads, returns to the URL
+   * days later, or is put back through the PIN by an idle expiry resumes on the
+   * same draft, because the address bar is the only thing holding where they
+   * were — no stored slot, no restore path.
+   *
+   * Same guard and same account as everything else here, and the same
+   * 404-not-403 rule (AD-18) — with one addition: a `Released` or `Discarded`
+   * id answers that identical 404 too. Those are Story 4.5's states, and this
+   * story does not own a surface for them.
+   */
+  @Get('practice-tests/:id')
+  draft(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PracticeTestDraftView> {
+    return this.practiceTests.draftFor(req.elevated!.parentAccountId, id);
   }
 }

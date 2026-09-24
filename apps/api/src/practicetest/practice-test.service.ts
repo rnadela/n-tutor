@@ -4,6 +4,7 @@ import { Prisma } from '../generated/prisma/client.js';
 import type {
   AiFailureKind,
   GenerationJobStatus,
+  PracticeTestStatus,
   QuestionFormat,
 } from '../generated/prisma/enums.js';
 import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai/ai.service.js';
@@ -29,6 +30,7 @@ import {
   MAX_PER_REQUEST,
   NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
+  PRACTICE_TEST_NOT_FOUND,
   WEIGHTED_TOPIC_UNKNOWN,
   claimTimeoutMs,
   clampCount,
@@ -172,6 +174,75 @@ export interface GenerationJobView {
   failureKind: AiFailureKind | null;
   failureReason: string | null;
   retryable: boolean;
+}
+
+/**
+ * One row of Pending drafts: enough to recognise a draft and open it, and not
+ * one word of what it holds.
+ *
+ * `studentProfileId` rather than a child's name: `practicetest` does not read
+ * an identity table (AD-17), so the screen joins the name from the Student
+ * Profile read it already makes.
+ */
+export interface PracticeTestDraftSummary {
+  id: string;
+  sourceTestId: string;
+  studentProfileId: string;
+  /** Its place within the job that produced it, 1-based — "draft 2 of 5". */
+  ordinal: number;
+  /** How many drafts of the same job are still drafts. The "of 5". */
+  siblingCount: number;
+  questionCount: number;
+  createdAt: string;
+}
+
+/** One generated option, in the order it is to be shown. */
+export interface DraftChoiceView {
+  ordinal: number;
+  /**
+   * The stored rich-text segment array, exactly as it was stored (AD-32). It is
+   * not re-parsed on the way out: it was validated on the way in, and a second
+   * parse would be a second chance for the two to disagree.
+   */
+  body: RichText;
+  isCorrect: boolean;
+}
+
+/** One generated Question, with everything a parent reviews it by. */
+export interface DraftQuestionView {
+  id: string;
+  ordinal: number;
+  format: QuestionFormat;
+  prompt: RichText;
+  /**
+   * The correct free-text answer, or null for MultipleChoice — where the answer
+   * is the one choice flagged correct rather than a field of its own.
+   */
+  answer: RichText | null;
+  /** Empty for every format but MultipleChoice. */
+  choices: DraftChoiceView[];
+  /** Raw as stored. Canonicalization is Epic 7's (AD-11). */
+  topics: string[];
+}
+
+/**
+ * One draft, whole: the review screen's entire answer.
+ *
+ * It carries `status` even though this read serves `Draft` rows and nothing
+ * else, because Story 4.5 owns `Released` and `Discarded` and widening this
+ * later should be an `in` clause rather than a redesign.
+ */
+export interface PracticeTestDraftView {
+  id: string;
+  sourceTestId: string;
+  studentProfileId: string;
+  status: PracticeTestStatus;
+  ordinal: number;
+  siblingCount: number;
+  questionCount: number;
+  createdAt: string;
+  /** Every Question the draft holds, in stored `ordinal` order. Never a page. */
+  questions: DraftQuestionView[];
 }
 
 /**
@@ -358,6 +429,170 @@ export class PracticeTestService {
     // report, and nothing about the answer confirms which of the two it was.
     if (job === null) throw new NotFoundException(GENERATION_NOT_REQUESTED);
     return viewOf(job);
+  }
+
+  /**
+   * Every draft this account is still holding, newest first.
+   *
+   * This is what makes the generation screen's "nothing is lost by leaving"
+   * true: a parent who walked away from a running job finds the drafts they
+   * paid for here, addressed by id and reachable without the URL they left.
+   *
+   * The account is the `where`, not a comparison after the read — which is what
+   * makes another account's draft unreachable by construction rather than by
+   * remembering to check. Nothing of what a draft *holds* is on this view: a
+   * list is for finding one, and the questions are the full read's answer.
+   *
+   * The rows and their sibling counts are read in **one transaction**: a
+   * sibling released or discarded between two separate reads would produce
+   * "draft 2 of 1", and that figure is stated as authoritative precisely
+   * because the browser has no way to check it.
+   */
+  async draftsFor(parentAccountId: string): Promise<PracticeTestDraftSummary[]> {
+    const { drafts, countByJob } = await this.prisma.withTransaction(async (tx) => {
+      const rows = await tx.practiceTest.findMany({
+        where: { parentAccountId, status: 'Draft' },
+        // `id` breaks a tie on `createdAt`: two drafts of one job can land
+        // inside the same millisecond, and "newest first" must not mean
+        // "whatever order Postgres happened to return".
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          sourceTestId: true,
+          studentProfileId: true,
+          generationJobId: true,
+          ordinal: true,
+          questionCount: true,
+          createdAt: true,
+        },
+      });
+      if (rows.length === 0) return { drafts: rows, countByJob: new Map<string, number>() };
+
+      // "Draft 2 of 3" is a fact about the job, counted here in one grouped
+      // read rather than by the browser fetching each job's whole draft set to
+      // render a heading.
+      const siblings = await tx.practiceTest.groupBy({
+        by: ['generationJobId'],
+        where: {
+          parentAccountId,
+          status: 'Draft',
+          generationJobId: { in: [...new Set(rows.map((draft) => draft.generationJobId))] },
+        },
+        _count: { _all: true },
+      });
+      return {
+        drafts: rows,
+        countByJob: new Map(siblings.map((row) => [row.generationJobId, row._count._all])),
+      };
+    });
+
+    return drafts.map((draft) => ({
+      id: draft.id,
+      sourceTestId: draft.sourceTestId,
+      studentProfileId: draft.studentProfileId,
+      ordinal: draft.ordinal,
+      // The draft is its own sibling, so the grouped count always holds it and
+      // the fallback is never reached — it exists so the view carries a real
+      // figure rather than a `?? 0` that would read as "of 0".
+      siblingCount: countByJob.get(draft.generationJobId) ?? 1,
+      questionCount: draft.questionCount,
+      createdAt: draft.createdAt.toISOString(),
+    }));
+  }
+
+  /**
+   * One draft, whole — every Question in stored order, each with its answer,
+   * its options and its Topics.
+   *
+   * Nothing is paginated and nothing is collapsed: "every Question" is the
+   * epic's acceptance criterion, and this is the read it is met by. The whole
+   * draft is one round trip because the screen shows the whole draft.
+   *
+   * `Draft` is in the `where` beside the account, so a `Released` or
+   * `Discarded` row answers the same 404 an unknown id and a foreign id get —
+   * those are Story 4.5's states and Story 4.5's surface, and a differently
+   * flavoured refusal here would be this module answering a question that story
+   * has not been asked yet (AD-18).
+   *
+   * The stored `Json` travels out as it is stored. It was parsed by
+   * `parseRichText` on the way in; re-parsing on the way out would be a second
+   * chance for the two readings to disagree about a row neither of them wrote.
+   *
+   * The draft and its sibling count are read in **one transaction**, for the
+   * reason `draftsFor` states: a sibling discarded between two separate reads
+   * would head the screen "draft 2 of 1".
+   */
+  async draftFor(parentAccountId: string, practiceTestId: string): Promise<PracticeTestDraftView> {
+    const { draft, siblingCount } = await this.prisma.withTransaction(async (tx) => {
+      const row = await tx.practiceTest.findFirst({
+        where: { id: practiceTestId, parentAccountId, status: 'Draft' },
+        select: {
+          id: true,
+          sourceTestId: true,
+          studentProfileId: true,
+          status: true,
+          generationJobId: true,
+          ordinal: true,
+          questionCount: true,
+          createdAt: true,
+          questions: {
+            orderBy: { ordinal: 'asc' },
+            select: {
+              id: true,
+              ordinal: true,
+              format: true,
+              prompt: true,
+              answer: true,
+              choices: {
+                orderBy: { ordinal: 'asc' },
+                select: { ordinal: true, body: true, isCorrect: true },
+              },
+              topics: {
+                orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+                select: { label: true },
+              },
+            },
+          },
+        },
+      });
+      // The one sentence all three refusals share. Nothing about the answer
+      // says which of them it was. Thrown inside the transaction, which reads
+      // and writes nothing there is anything to roll back.
+      if (row === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+
+      return {
+        draft: row,
+        siblingCount: await tx.practiceTest.count({
+          where: { parentAccountId, generationJobId: row.generationJobId, status: 'Draft' },
+        }),
+      };
+    });
+
+    return {
+      id: draft.id,
+      sourceTestId: draft.sourceTestId,
+      studentProfileId: draft.studentProfileId,
+      status: draft.status,
+      ordinal: draft.ordinal,
+      siblingCount,
+      questionCount: draft.questionCount,
+      createdAt: draft.createdAt.toISOString(),
+      questions: draft.questions.map((question) => ({
+        id: question.id,
+        ordinal: question.ordinal,
+        format: question.format,
+        prompt: storedRichText(question.prompt),
+        // A MultipleChoice question's column is SQL NULL, and Prisma reads it
+        // back as `null` — the flagged choice is the answer.
+        answer: question.answer === null ? null : storedRichText(question.answer),
+        choices: question.choices.map((choice) => ({
+          ordinal: choice.ordinal,
+          body: storedRichText(choice.body),
+          isCorrect: choice.isCorrect,
+        })),
+        topics: question.topics.map((topic) => topic.label),
+      })),
+    };
   }
 
   /**
@@ -857,6 +1092,20 @@ function viewOf(job: JobRow): GenerationJobView {
     failureReason: job.failureReason,
     retryable: job.retryable,
   };
+}
+
+/**
+ * A stored rich-text column, on its way back out.
+ *
+ * A cast and nothing else, deliberately. Every one of these columns went
+ * through `parseRichText` before it was written (AD-32, AD-30), so the shape is
+ * already an invariant of the row; re-parsing here would be a second reading of
+ * a value neither reading wrote, and a second place for the two to disagree.
+ * The cast is named rather than sprinkled so there is exactly one line in the
+ * module that asserts it.
+ */
+function storedRichText(value: Prisma.JsonValue): RichText {
+  return value as unknown as RichText;
 }
 
 /**

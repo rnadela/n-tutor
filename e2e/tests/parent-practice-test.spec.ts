@@ -249,13 +249,18 @@ test.describe('generating practice tests', () => {
     await page.getByTestId('generate-confirm').click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
 
-    // Not asserted on here: the in-progress line names the topic, but a job
+    // Not asserted on here: the *in-progress* line names the topic, but a job
     // this small can settle between two polls, so waiting for that sentence
     // would be waiting for a window that need not exist. The sentence itself
     // is a pure function, asserted on its output in
     // `practice-test-count.spec.ts`.
+    //
+    // The settled line, though, is a window that always exists — and it names
+    // the topic too, because a parent returning after the job finished has to
+    // read the request they actually made. The label is the one read off the
+    // screen above, never a literal.
     await expect(page.getByTestId('generate-progress-line')).toHaveText(
-      '1 practice test is ready.',
+      `1 practice test is ready, focused on ${topic}.`,
       { timeout: 30_000 },
     );
     // One draft landed, and it cost exactly what an unweighted one costs.
@@ -323,6 +328,101 @@ test.describe('generating practice tests', () => {
     );
     // Nothing to spend, so nothing to confirm.
     await expect(page.getByTestId('generate-start')).toBeDisabled();
+  });
+
+  test('shows every generated question, with its answer and its topics', async ({ page }) => {
+    // Two drafts, an upload and an extraction all in one pass: the longest
+    // journey in this file, and the default budget is written for the shortest.
+    test.setTimeout(150_000);
+    const email = uniqueParentEmail('generate-review');
+    await uploadAndRead(page, email);
+    await enterGenerate(page);
+
+    // Two drafts, so "draft N of M" is a real figure rather than "1 of 1".
+    await countRow(page, 2).getByRole('radio').check();
+    await page.getByTestId('generate-start').click();
+    await page.getByTestId('generate-confirm').click();
+    await expect(page.getByTestId('generate-progress-line')).toHaveText(
+      '2 practice tests are ready.',
+      { timeout: 60_000 },
+    );
+
+    // A finished job links on to Pending drafts — the destination a parent who
+    // left would have found the drafts at anyway.
+    await page.getByTestId('generate-to-drafts').click();
+    await expect(
+      page.getByRole('heading', { name: 'Pending practice tests', level: 1 }),
+    ).toBeVisible();
+
+    const rows = page.locator('[data-testid="draft-row"]');
+    await expect(rows).toHaveCount(2);
+    // The figures are the server's: the browser holds a list, not the job.
+    await expect(rows.nth(0).getByTestId('draft-position')).toHaveText(/^Draft [12] of 2$/u);
+    // The child's name, joined in the browser from the Student Profile read.
+    await expect(rows.nth(0)).toContainText('For Noah');
+
+    const reviewed = rows.nth(0);
+    const position = await reviewed.getByTestId('draft-position').innerText();
+    await reviewed.getByRole('link', { name: 'Read it' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+    // The same draft, named the same way, from the server's own figures.
+    await expect(page.getByTestId('draft-position')).toHaveText(position);
+    const draftUrl = page.url();
+
+    const questions = page.locator('[data-testid="draft-question"]');
+    const questionCount = await questions.count();
+    expect(questionCount).toBeGreaterThan(0);
+    // Every Question the draft holds is in the list — the count the server
+    // states, and no fewer.
+    await expect(page.getByTestId('draft-question-total')).toHaveText(
+      questionCount === 1 ? '1 question' : `${questionCount} questions`,
+    );
+
+    for (let index = 0; index < questionCount; index += 1) {
+      const question = questions.nth(index);
+      // In stored order, 1-based.
+      await expect(question).toHaveAttribute('data-ordinal', String(index + 1));
+      await expect(question.getByTestId('draft-question-prompt')).not.toBeEmpty();
+      // A Topic, read out of the DOM rather than asserted as a literal: the
+      // labels are content read off the parent's own page.
+      await expect(question.getByTestId('draft-question-topics')).not.toBeEmpty();
+
+      const choices = question.locator('[data-testid="draft-choice"]');
+      if ((await choices.count()) > 0) {
+        // Exactly one option is marked correct, and it is marked in words.
+        await expect(
+          question.locator('[data-testid="draft-choice"][data-correct="true"]'),
+        ).toHaveCount(1);
+        await expect(question.getByTestId('draft-choice-correct')).toHaveText('Correct');
+      } else {
+        await expect(question.getByTestId('draft-question-answer')).not.toBeEmpty();
+      }
+    }
+
+    // A fraction is drawn as structure and carries its own spoken reading —
+    // never flattened to the glyph the schema went to the trouble of avoiding.
+    const fraction = page.locator('[data-testid="rich-text-fraction"]').first();
+    await expect(fraction).toBeVisible();
+    await expect(fraction).toHaveAttribute('role', 'math');
+    const reading = await fraction.getAttribute('aria-label');
+    expect(reading).toMatch(/^\d+( and \d+)? over \d+$/u);
+
+    // Nothing here changes a draft: no edit, no delete, no release, no discard
+    // and no timer. Those are Stories 4.4 to 4.6.
+    for (const name of [/edit/iu, /delete/iu, /release/iu, /discard/iu, /timer/iu]) {
+      await expect(page.getByRole('button', { name })).toHaveCount(0);
+    }
+
+    // The review position is the URL and nothing else. A reload would drop the
+    // in-memory bearer, so this is the return a parent makes through the app —
+    // the same address, the same draft, with nothing stored anywhere.
+    await page.getByRole('link', { name: 'Back to the pending practice tests' }).click();
+    await expect(rows).toHaveCount(2);
+    await page.goBack();
+    await expect(page).toHaveURL(draftUrl);
+    await expect(page.getByTestId('draft-position')).toHaveText(position);
+    await expect(page.locator('[data-testid="draft-question"]')).toHaveCount(questionCount);
   });
 
   test('offers every count on an unlimited tier, with no remainder invented', async ({ page }) => {

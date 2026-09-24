@@ -112,6 +112,12 @@ export default function ParentViewPage() {
             <Link component={NextLink} href="/parent/capture">
               {parentCopy.parentView.capture}
             </Link>
+            {/* A first-class destination, not a step of the generate flow: it
+                is where a parent who left a running job finds the drafts they
+                paid for. Client-side for the same reason as its neighbours. */}
+            <Link component={NextLink} href="/parent/drafts">
+              {parentCopy.parentView.drafts}
+            </Link>
             <Link component={NextLink} href="/parent/pin/change">
               {parentCopy.parentView.changePin}
             </Link>

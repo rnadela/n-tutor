@@ -454,6 +454,20 @@ export default function GeneratePage() {
                     {parentCopy.generate.retryFree}
                   </Typography>
                 )}
+                {/* Drafts exist, so there is somewhere to go and read them.
+                    Offered for a partially complete job too: what landed
+                    landed, and it was charged for. Client-side, so the
+                    provider holding the elevation bearer stays mounted. */}
+                {(job!.status === 'Succeeded' || job!.status === 'PartiallyComplete') &&
+                  job!.producedCount > 0 && (
+                    <Link
+                      component={NextLink}
+                      href="/parent/drafts"
+                      data-testid="generate-to-drafts"
+                    >
+                      {parentCopy.generate.toDrafts}
+                    </Link>
+                  )}
               </Box>
             ) : null}
 

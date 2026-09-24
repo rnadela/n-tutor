@@ -528,4 +528,100 @@ describe('Student Mode and the device binding', () => {
 
     expect(studentCookieFrom(signUp)).toMatch(/student_mode=;/u);
   });
+
+  // --- A draft never reaches a child ---------------------------------------
+  //
+  // The acceptance criterion is a negative, and a negative nothing asserts is
+  // a negative that quietly stops being true the first time somebody adds a
+  // convenience route.
+
+  it('exposes no practice-test path to a bound device, and still answers one read', async () => {
+    const parent = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    const profile = await createStudentProfile(h, parent.parentAccountId, {
+      gradeLevelId: grade.id,
+    });
+    const cookie = await bindDevice(h, parent.token, profile.id);
+
+    // A real draft in this very account, so the refusals below are about a row
+    // that actually exists. A random UUID would answer 404 whether the route
+    // were absent or merely unmatched, which is the one failure this case is
+    // here to rule out. Written directly rather than generated: what is under
+    // test is the reach of the student surface, not how the row got there.
+    const sourceTest = await h.prisma.sourceTest.create({
+      data: {
+        parentAccountId: parent.parentAccountId,
+        studentProfileId: profile.id,
+        status: 'Submitted',
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+      select: { id: true },
+    });
+    const job = await h.prisma.generationJob.create({
+      data: {
+        parentAccountId: parent.parentAccountId,
+        sourceTestId: sourceTest.id,
+        studentProfileId: profile.id,
+        requestedCount: 1,
+        producedCount: 1,
+        status: 'Succeeded',
+      },
+      select: { id: true },
+    });
+    const draft = await h.prisma.practiceTest.create({
+      data: {
+        parentAccountId: parent.parentAccountId,
+        sourceTestId: sourceTest.id,
+        studentProfileId: profile.id,
+        generationJobId: job.id,
+        ordinal: 1,
+        questionCount: 1,
+        chargedAt: new Date(),
+        questions: {
+          create: [
+            {
+              ordinal: 1,
+              format: 'ShortAnswer',
+              prompt: [{ kind: 'text', value: 'What is half of four?' }],
+              answer: [{ kind: 'text', value: 'two' }],
+              topics: { create: [{ label: 'Fractions' }] },
+            },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+
+    // Every shape that draft could be reached by from the student side — by
+    // its own id, not a guess. The student-scoped API is one read of the bound
+    // profile, and it stays that.
+    for (const path of [
+      '/api/student/practice-tests',
+      '/api/student/practice-tests/drafts',
+      `/api/student/practice-tests/${draft.id}`,
+      `/api/student/session/practice-tests/${draft.id}`,
+      '/api/student/session/practice-tests',
+      // And a shape nothing serves, so the case still says something if the
+      // real paths above ever start answering.
+      `/api/student/practice-tests/${randomUUID()}`,
+    ]) {
+      await server().get(path).set('Cookie', cookie).expect(404);
+    }
+
+    // The parent-scoped reads are not reachable with a student credential
+    // either — the list **or** the read of that draft's real id. They take an
+    // elevation bearer, and a cookie is not one.
+    await server().get('/api/parent/practice-tests/drafts').set('Cookie', cookie).expect(401);
+    await server().get(`/api/parent/practice-tests/${draft.id}`).set('Cookie', cookie).expect(401);
+
+    const session = await readStudentSession(cookie).expect(200);
+    // One read, the bound profile, and nothing else on it.
+    expect(Object.keys(session.body)).toEqual(['profile']);
+    expect(session.body.profile.id).toBe(profile.id);
+    const serialized = JSON.stringify(session.body);
+    expect(serialized).not.toContain('practiceTest');
+    // Not the draft, and not a word of what it holds.
+    expect(serialized).not.toContain(draft.id);
+    expect(serialized).not.toContain('half of four');
+  });
 });

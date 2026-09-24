@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +16,7 @@ const {
   MAX_TOPIC_LABEL_LENGTH,
   NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
+  PRACTICE_TEST_NOT_FOUND,
   WEIGHTED_TOPIC_UNKNOWN,
   claimTimeoutMs,
   weightedTopicFloor,
@@ -1330,6 +1332,266 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
         select: { weightedTopic: true },
       });
       expect(stored.weightedTopic).toBeNull();
+    });
+  });
+
+  // --- Draft review ------------------------------------------------------
+  //
+  // The read half. Every row these cases read was landed by the real runner
+  // through the real generator, because "every Question with its correct
+  // answer, its distractors and its Topics" is a claim about what generation
+  // actually wrote, not about what a hand-seeded row could be made to say.
+
+  describe('the draft reads', () => {
+    /** A parent standing on drafts that have actually landed. */
+    async function withDrafts(count: number): Promise<Ready> {
+      const ready = await generatable();
+      await server()
+        .post('/api/parent/source-tests/' + ready.sourceTestId + '/practice-tests')
+        .set('Authorization', bearer(ready.token))
+        .send({ count })
+        .expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      return ready;
+    }
+
+    function listDrafts(token: string) {
+      return server().get('/api/parent/practice-tests/drafts').set('Authorization', bearer(token));
+    }
+
+    function readDraft(token: string, id: string) {
+      return server().get(`/api/parent/practice-tests/${id}`).set('Authorization', bearer(token));
+    }
+
+    it('lists every draft the account holds, newest first, with its place in its job', async () => {
+      const ready = await withDrafts(2);
+      const response = await listDrafts(ready.token).expect(200);
+
+      expect(response.body).toHaveLength(2);
+      for (const row of response.body) {
+        expect(row.sourceTestId).toBe(ready.sourceTestId);
+        expect(typeof row.studentProfileId).toBe('string');
+        // Counted server-side: "draft 2 of 2" is a fact about the job, and the
+        // browser holds one draft.
+        expect(row.siblingCount).toBe(2);
+        expect(row.questionCount).toBeGreaterThan(0);
+        expect(typeof row.createdAt).toBe('string');
+      }
+      // Newest first, with `id` breaking a tie on `createdAt` — asserted as the
+      // exact sequence the stored rows put them in. A sorted comparison would
+      // pass for any permutation, which is to say it would pass with the
+      // `orderBy` deleted.
+      const stored = await h.prisma.practiceTest.findMany({
+        where: { status: 'Draft' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { id: true, ordinal: true },
+      });
+      expect(response.body.map((row: { id: string }) => row.id)).toEqual(
+        stored.map((row) => row.id),
+      );
+      expect(response.body.map((row: { ordinal: number }) => row.ordinal)).toEqual(
+        stored.map((row) => row.ordinal),
+      );
+      // And both drafts of the job are there, whichever way round they landed.
+      expect([...response.body].map((row: { ordinal: number }) => row.ordinal).sort()).toEqual([
+        1, 2,
+      ]);
+
+      // A list is for finding a draft. Not a word of what one holds is on it.
+      const serialized = JSON.stringify(response.body);
+      expect(serialized).not.toContain('prompt');
+      expect(serialized).not.toContain('Practice 1.1');
+    });
+
+    it('answers an empty list, not a 404, for an account holding no drafts', async () => {
+      const ready = await generatable();
+      await listDrafts(ready.token).expect(200).expect([]);
+    });
+
+    it('leaves a released or discarded row out of the list entirely', async () => {
+      const ready = await withDrafts(2);
+      const [first] = await h.prisma.practiceTest.findMany({
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      });
+      await h.prisma.practiceTest.update({
+        where: { id: first!.id },
+        data: { status: 'Released' },
+      });
+
+      const response = await listDrafts(ready.token).expect(200);
+      expect(response.body).toHaveLength(1);
+      expect(response.body[0].id).not.toBe(first!.id);
+      // And the sibling count follows: "of 2" was true while both were drafts.
+      expect(response.body[0].siblingCount).toBe(1);
+    });
+
+    it('reads one draft whole: every Question, in stored order, with its answer and Topics', async () => {
+      const ready = await withDrafts(1);
+      const stored = await h.prisma.practiceTest.findFirstOrThrow({
+        select: { id: true, questionCount: true },
+      });
+
+      const response = await readDraft(ready.token, stored.id).expect(200);
+
+      expect(response.body.id).toBe(stored.id);
+      expect(response.body.status).toBe('Draft');
+      expect(response.body.ordinal).toBe(1);
+      expect(response.body.siblingCount).toBe(1);
+      expect(response.body.questionCount).toBe(stored.questionCount);
+      // Every Question, never a page of them.
+      expect(response.body.questions).toHaveLength(stored.questionCount);
+      expect(
+        response.body.questions.map((question: { ordinal: number }) => question.ordinal),
+      ).toEqual(Array.from({ length: stored.questionCount }, (_unused, index) => index + 1));
+      for (const question of response.body.questions) {
+        expect(Array.isArray(question.prompt)).toBe(true);
+        expect(question.prompt.length).toBeGreaterThan(0);
+        expect(question.topics.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('gives a Multiple Choice question its options in order, with exactly one flagged', async () => {
+      const ready = await withDrafts(1);
+      const stored = await h.prisma.practiceTest.findFirstOrThrow({ select: { id: true } });
+      const response = await readDraft(ready.token, stored.id).expect(200);
+
+      const choiceQuestions = response.body.questions.filter(
+        (question: { format: string }) => question.format === 'MultipleChoice',
+      );
+      expect(choiceQuestions.length).toBeGreaterThan(0);
+      for (const question of choiceQuestions) {
+        // The answer is the flagged option, so the field is null rather than a
+        // second, separately-maintained copy of it.
+        expect(question.answer).toBeNull();
+        expect(question.choices.length).toBeGreaterThanOrEqual(3);
+        expect(question.choices.map((choice: { ordinal: number }) => choice.ordinal)).toEqual(
+          Array.from({ length: question.choices.length }, (_unused, index) => index + 1),
+        );
+        expect(
+          question.choices.filter((choice: { isCorrect: boolean }) => choice.isCorrect),
+        ).toHaveLength(1);
+      }
+    });
+
+    it('gives a non-Multiple-Choice question its stored answer and no options', async () => {
+      // The fake Extraction yields only Multiple Choice usable questions, so
+      // the free-text shape is written directly into a real landed draft. What
+      // is under test here is the read's mapping of a stored row, not what the
+      // generator chose to produce.
+      const ready = await withDrafts(1);
+      const stored = await h.prisma.practiceTest.findFirstOrThrow({
+        select: { id: true, questionCount: true },
+      });
+      await h.prisma.practiceTestQuestion.create({
+        data: {
+          practiceTestId: stored.id,
+          ordinal: stored.questionCount + 1,
+          format: 'FillInTheBlank',
+          prompt: [{ kind: 'text', value: 'Half of four is ___.' }],
+          answer: [{ kind: 'text', value: 'two' }],
+          topics: { create: [{ label: 'Fractions' }] },
+        },
+      });
+
+      const response = await readDraft(ready.token, stored.id).expect(200);
+      const written = response.body.questions.find(
+        (question: { format: string }) => question.format === 'FillInTheBlank',
+      );
+      expect(written.answer).toEqual([{ kind: 'text', value: 'two' }]);
+      expect(written.choices).toEqual([]);
+      expect(written.topics).toEqual(['Fractions']);
+    });
+
+    it('returns a fraction as the structure it was stored as, unchanged', async () => {
+      const ready = await withDrafts(1);
+      const stored = await h.prisma.practiceTest.findFirstOrThrow({ select: { id: true } });
+      const response = await readDraft(ready.token, stored.id).expect(200);
+
+      const fractions = response.body.questions.flatMap(
+        (question: { prompt: { kind: string }[] }) =>
+          question.prompt.filter((segment) => segment.kind === 'fraction'),
+      );
+      expect(fractions.length).toBeGreaterThan(0);
+      for (const fraction of fractions) {
+        // Structure out, exactly as structure in (AD-32). A spoken reading
+        // cannot be recovered from the glyph "1/2".
+        expect(Object.keys(fraction).sort()).toEqual(['denominator', 'kind', 'numerator', 'whole']);
+        expect(Number.isInteger(fraction.numerator)).toBe(true);
+        expect(Number.isInteger(fraction.denominator)).toBe(true);
+      }
+      expect(JSON.stringify(response.body)).not.toMatch(/"[^"]*\d\/\d[^"]*"/u);
+    });
+
+    it("refuses another account's draft as though it did not exist", async () => {
+      await withDrafts(1);
+      const stored = await h.prisma.practiceTest.findFirstOrThrow({ select: { id: true } });
+
+      const stranger = await createSignedInParent(h);
+      await setPinFor(h, stranger.cookie, PIN);
+      const strangerToken = await elevate(h, stranger.cookie, PIN);
+
+      const refusal = await readDraft(strangerToken, stored.id).expect(404);
+      expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      // And it never appears in their list, either.
+      await listDrafts(strangerToken).expect(200).expect([]);
+
+      // The very same sentence an id that never existed gets — nothing about
+      // the answer says which of the two it was (AD-18).
+      const unknown = await readDraft(strangerToken, randomUUID()).expect(404);
+      expect(unknown.body.message).toBe(refusal.body.message);
+    });
+
+    it('refuses a released or discarded id identically to an unknown one', async () => {
+      const ready = await withDrafts(2);
+      const rows = await h.prisma.practiceTest.findMany({
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      });
+      await h.prisma.practiceTest.update({
+        where: { id: rows[0]!.id },
+        data: { status: 'Released' },
+      });
+      await h.prisma.practiceTest.update({
+        where: { id: rows[1]!.id },
+        data: { status: 'Discarded' },
+      });
+
+      const released = await readDraft(ready.token, rows[0]!.id).expect(404);
+      const discarded = await readDraft(ready.token, rows[1]!.id).expect(404);
+      const unknown = await readDraft(ready.token, randomUUID()).expect(404);
+      expect(released.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      expect(discarded.body.message).toBe(released.body.message);
+      expect(unknown.body.message).toBe(released.body.message);
+    });
+
+    it('refuses a malformed id on shape, before any row is read', async () => {
+      const ready = await generatable();
+      await readDraft(ready.token, 'not-a-uuid').expect(400);
+    });
+
+    it('keeps "drafts" a route rather than an id', async () => {
+      // Declared above the id route, so the word is never handed to the UUID
+      // pipe and refused with a 400 describing nothing the parent did.
+      const ready = await generatable();
+      await listDrafts(ready.token).expect(200);
+    });
+
+    it('refuses both reads without an elevation token, revealing nothing', async () => {
+      const ready = await withDrafts(1);
+      const stored = await h.prisma.practiceTest.findFirstOrThrow({ select: { id: true } });
+
+      await server().get('/api/parent/practice-tests/drafts').expect(401);
+      const refusal = await server().get(`/api/parent/practice-tests/${stored.id}`).expect(401);
+      // Nothing about the account, the draft or what it holds is in the answer.
+      expect(JSON.stringify(refusal.body)).not.toContain(ready.parentAccountId);
+      expect(JSON.stringify(refusal.body)).not.toContain('Practice');
+    });
+
+    it('carries no content in the one sentence either read refuses with', async () => {
+      // Identifiers and counts only (AD-20): no Question text, no Topic label,
+      // no allowance figure, no tier, no model.
+      expect(PRACTICE_TEST_NOT_FOUND).not.toMatch(/gpt|Free|Allowance|topic/iu);
     });
   });
 });

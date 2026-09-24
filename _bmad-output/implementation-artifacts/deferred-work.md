@@ -797,3 +797,35 @@ source_spec: `spec-4-2-topic-weighted-regeneration.md`
 severity: low
 reason: Topic labels are raw and never canonicalized, merged or deduplicated beyond exact-match normalization (AD-11), unlike `count`, which is clamped by `MAX_PER_REQUEST`. An Extraction with many distinct raw/OCR-noisy Topic labels could render an unbounded radio group with no discussed ceiling or scroll/collapse treatment.
 status: open
+
+### DW-101: The Pending drafts read is unbounded: every `Draft` row the account holds is returned and rendered, with no cap, cursor or stated ceiling.
+origin: spec-deferred 3c15842b3bd5
+location: apps/api/src/practicetest/practice-test.service.ts (draftsFor)
+source_spec: `spec-4-3-draft-review.md`
+severity: medium
+reason: `draftsFor` issues `findMany` with no `take`, and the screen maps the whole array. The "every Question" acceptance criterion bounds the *question* list, not the draft list, which grows monotonically until Story 4.5 ships release and discard. `RESTORABLE_PAGE_SIZE` in `uncommitted-state.service.ts` is the repo's own precedent for capping a parent-facing list read. A cap needs a deliberate UI treatment for the overflow, which is a product decision rather than a mechanical fix.
+status: open
+
+### DW-102: Both new parent screens are covered by specs that grep their own source text rather than render them, so the 404, empty-list and error states have no executing test.
+origin: spec-deferred dc262b0cbe68
+location: apps/web/src/app/parent/drafts/page.spec.tsx
+source_spec: `spec-4-3-draft-review.md`
+severity: medium
+reason: `drafts/page.spec.tsx` and `drafts/[practiceTestId]/page.spec.tsx` assert with `expect(PAGE_SOURCE).toContain(...)` against `readFileSync(page.tsx)`. Moving the `draft-missing` alert inside the `draft !== null` block would leave every searched string in place and ship green. The screens are client components whose states appear only after an effect resolves, so a real render test needs a DOM the web tier does not have (`environment: 'node'`). Same gap already carried from Story 4.2 for the generate screen; this story adds two more instances of it.
+status: open
+
+### DW-103: `RichText` sits in the shared component directory but imports parent-only copy.
+origin: spec-deferred 54847222ef18
+location: apps/web/src/components/RichText.tsx
+source_spec: `spec-4-3-draft-review.md`
+severity: low
+reason: It reads `parentCopy.drafts.fractionReading` and its types from `@/lib/parent-api`, while living beside `Screen`, `Dialog` and `LiveRegion`. The same segment structure is what a student will read in Epic 5, so the first student-side use either imports parent copy or forks the component. Taking the reading as a prop, or moving the string to shared copy, is a small refactor better made when the second caller actually exists.
+status: open
+
+### DW-104: Neither new screen announces its state changes, unlike every sibling Parent View surface.
+origin: spec-deferred f48fb4936d4c
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.tsx
+source_spec: `spec-4-3-draft-review.md`
+severity: low
+reason: `capture/page.tsx` and `generate/[sourceTestId]/page.tsx` both drive the `LiveRegion` through the `Announcement`/`seq` machinery in `apps/web/src/lib/parent-view.ts`. The loading-to-loaded, error and draft-is-gone transitions here announce nothing beyond what the `role="alert"`/`role="status"` alerts carry on their own.
+status: open

@@ -216,6 +216,77 @@ export interface GenerationTopicsView {
   topics: string[];
 }
 
+/**
+ * A run of generated text, or a fraction as structure (AD-32).
+ *
+ * Structure and never the glyph `"1/2"`: a spoken alternative cannot be
+ * recovered from a glyph, so the numerator and the denominator travel apart
+ * and `RichText` is the one component that decides how they are drawn. Nothing
+ * in this app builds a fraction string of its own.
+ */
+export type RichTextSegment =
+  | { kind: 'text'; value: string }
+  | { kind: 'fraction'; whole: number | null; numerator: number; denominator: number };
+
+/**
+ * One row of Pending drafts, exactly as the API states it.
+ *
+ * `studentProfileId` and not a name: the Practice Test module does not read an
+ * identity table (AD-17), so the screen joins the child's display name from
+ * the Student Profile read it already makes.
+ */
+export interface PracticeTestDraftSummary {
+  id: string;
+  sourceTestId: string;
+  studentProfileId: string;
+  /** Its place within the job that produced it, 1-based — the "2" of "2 of 3". */
+  ordinal: number;
+  /** How many drafts its job is still holding — the "3". Counted server-side. */
+  siblingCount: number;
+  questionCount: number;
+  createdAt: string;
+}
+
+/** One generated option, in the order the API states it. */
+export interface DraftChoiceView {
+  ordinal: number;
+  body: RichTextSegment[];
+  isCorrect: boolean;
+}
+
+/** One generated Question, with everything a parent reviews it by. */
+export interface DraftQuestionView {
+  id: string;
+  ordinal: number;
+  format: 'MultipleChoice' | 'FillInTheBlank' | 'ShortAnswer';
+  prompt: RichTextSegment[];
+  /** Null for MultipleChoice, where the answer is the flagged option. */
+  answer: RichTextSegment[] | null;
+  /** Empty for every format but MultipleChoice. */
+  choices: DraftChoiceView[];
+  /** Raw as stored, rendered as they arrive. Nothing here canonicalizes a label. */
+  topics: string[];
+}
+
+/**
+ * One draft, whole: every Question it holds, in one answer.
+ *
+ * Nothing is paginated and nothing is a second call — "every Question in one
+ * reviewable list" is the epic's criterion, and a screen that had to ask twice
+ * could show half of one.
+ */
+export interface PracticeTestDraftView {
+  id: string;
+  sourceTestId: string;
+  studentProfileId: string;
+  status: 'Draft' | 'Released' | 'Discarded';
+  ordinal: number;
+  siblingCount: number;
+  questionCount: number;
+  createdAt: string;
+  questions: DraftQuestionView[];
+}
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(
   /\/+$/,
   '',
@@ -753,6 +824,34 @@ export const parentApi = {
       `/parent/source-tests/${encodeURIComponent(sourceTestId)}/practice-tests/job`,
       { headers: elevated(token) },
       parentCopy.generate.progressFailed,
+    ),
+
+  /**
+   * Every draft this account is still holding, newest first.
+   *
+   * An empty list is the ordinary answer for an account that has generated
+   * nothing yet — it is a state the screen renders, never an error.
+   */
+  practiceTestDrafts: (token: string) =>
+    call<PracticeTestDraftSummary[]>(
+      '/parent/practice-tests/drafts',
+      { headers: elevated(token) },
+      parentCopy.drafts.listFailed,
+    ),
+
+  /**
+   * One draft, whole: every Question with its correct answer, its options and
+   * its Topics.
+   *
+   * A 404 covers an id that was never there, one belonging to another account
+   * and one whose Practice Test is no longer a draft — the API states one
+   * sentence for all three, and this app does not try to tell them apart.
+   */
+  practiceTestDraft: (token: string, practiceTestId: string) =>
+    call<PracticeTestDraftView>(
+      `/parent/practice-tests/${encodeURIComponent(practiceTestId)}`,
+      { headers: elevated(token) },
+      parentCopy.drafts.openFailed,
     ),
 };
 

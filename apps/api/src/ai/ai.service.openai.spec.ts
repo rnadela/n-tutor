@@ -146,9 +146,8 @@ describe('what is sent', () => {
     await ai.run(textRequest());
 
     expect((calls[0] as { model: string }).model).toBe(DEFAULT_MODEL_PINS.Generation.model);
-    const content = (
-      calls[0] as { input: { content: { type: string; text?: string }[] }[] }
-    ).input[0]!.content;
+    const content = (calls[0] as { input: { content: { type: string; text?: string }[] }[] })
+      .input[0]!.content;
     expect(content).toEqual([{ type: 'input_text', text: 'Write the practice test.' }]);
   });
 

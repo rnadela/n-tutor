@@ -111,6 +111,12 @@ export const parentCopy = {
     students: 'Student Profiles',
     /** The way in to page management; the surface itself is titled "Pages". */
     capture: 'Upload a test',
+    /**
+     * The way in to draft review, and a first-class destination rather than a
+     * step in the generate flow: a parent who left a running job finds what
+     * they paid for here.
+     */
+    drafts: 'Pending practice tests',
     loading: 'Loading Parent View…',
 
     /**
@@ -482,6 +488,77 @@ export const parentCopy = {
     /** Stated beside a failure: the upload survives it, and so does the reading. */
     retryFree: 'The upload is still here. Trying again needs no new photos.',
     progressFailed: 'The progress could not be checked. Try again.',
+    /**
+     * The way on from a finished job. It names the destination rather than the
+     * action, because Pending drafts is a place a parent comes back to and not
+     * a step in a wizard.
+     */
+    toDrafts: 'Review the practice tests',
+  },
+  /**
+   * Draft review: the list of what is waiting, and one draft read whole.
+   *
+   * Every string here is parameterized and every figure in one arrives from the
+   * API. Nothing names an allowance, a cost, a tier or a model: nothing is
+   * being spent on either screen.
+   */
+  drafts: {
+    listTitle: 'Pending practice tests',
+    /**
+     * What the list is for. It says these are waiting on the parent, which is
+     * the whole reason the screen exists — nothing generated reaches a child
+     * before someone has read it.
+     */
+    listIntro: 'These practice tests are waiting to be read. Nothing is shown to a child yet.',
+    loading: 'Loading…',
+    /** Nothing waiting is a state, not a fault, and it is said as plain fact. */
+    empty: 'There are no practice tests waiting to be read.',
+    listFailed: 'The practice tests could not be listed. Try again.',
+    openFailed: 'That practice test could not be opened. Try again.',
+    /** A draft that is no longer there. The way back is offered beside it. */
+    notFound: 'That practice test could not be found.',
+    retry: 'Try again',
+    backToParentView: 'Back to Parent View',
+    backToList: 'Back to the pending practice tests',
+
+    /**
+     * Which draft of its job this is, from the two figures the server supplies.
+     * The browser holds one draft and could not count the other two.
+     */
+    position: (ordinal: number, siblingCount: number) => `Draft ${ordinal} of ${siblingCount}`,
+    /** Whose practice this is. Third person, by name, as every parent string is. */
+    forStudent: (studentName: string) => `For ${studentName}`,
+    /** The child a draft belongs to, before the profile list has been joined. */
+    unknownStudent: 'A student profile',
+    questionTotal: (count: number) => (count === 1 ? '1 question' : `${count} questions`),
+    /** When the draft landed, in the device's own formatting. */
+    made: (when: string) => `Made ${when}`,
+    open: 'Read it',
+
+    reviewTitle: 'Read the practice test',
+    /** Each Question's own heading, by its stored place in the draft. */
+    questionHeading: (ordinal: number) => `Question ${ordinal}`,
+    correctAnswerLabel: 'Correct answer',
+    optionsLabel: 'Options',
+    /** Beside the one option flagged correct. Words, never colour alone. */
+    correctOption: 'Correct',
+    topicsLabel: 'Topics',
+    /** A Question the Extraction gave no Topic for. Stated, never left blank. */
+    noTopics: 'No topic',
+
+    /**
+     * The spoken reading of a fraction, built here rather than concatenated in
+     * the component — which is what keeps "1/2" from being assembled anywhere
+     * and the reading from being lost (AD-32).
+     */
+    fractionReading: (fraction: {
+      whole: number | null;
+      numerator: number;
+      denominator: number;
+    }) =>
+      fraction.whole === null
+        ? `${fraction.numerator} over ${fraction.denominator}`
+        : `${fraction.whole} and ${fraction.numerator} over ${fraction.denominator}`,
   },
   errors: {
     generic: 'Something went wrong. Try again.',

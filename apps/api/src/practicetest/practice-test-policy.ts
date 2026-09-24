@@ -111,6 +111,17 @@ export const NO_USABLE_QUESTIONS =
   'No questions could be used from this upload. Retake the pages and submit again.';
 
 /**
+ * The draft reads' one and only refusal.
+ *
+ * One sentence for three different facts — an id that never existed, an id
+ * belonging to another account, and an owned id whose Practice Test is no
+ * longer a draft — and that is the point (AD-18): an id a parent may not read
+ * is an id that does not exist, and three sentences would let the outside tell
+ * the three apart. It names no Practice Test, no Topic and no count.
+ */
+export const PRACTICE_TEST_NOT_FOUND = 'That practice test could not be found.';
+
+/**
  * The weighted Topic asked for is not one this upload carries.
  *
  * It names no Topic — not the one asked for and not the ones available — for

@@ -275,6 +275,76 @@ describe('the generation request body', () => {
   });
 });
 
+describe('the draft reads', () => {
+  const ID = '22222222-2222-4222-8222-222222222222';
+
+  it('lists the pending drafts, carrying the bearer and nothing else', async () => {
+    const fetchMock = respondWith(200, []);
+    const drafts = await parentApi.practiceTestDrafts('token');
+    expect(drafts).toEqual([]);
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/parent/practice-tests/drafts');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer token');
+    // The elevation bearer travels in a header, never as a cookie (AD-18).
+    expect(new Headers(init.headers).get('cookie')).toBeNull();
+  });
+
+  it('treats an empty list as an answer rather than an absence', async () => {
+    respondWith(200, []);
+    await expect(parentApi.practiceTestDrafts('token')).resolves.toEqual([]);
+  });
+
+  it('reads one draft by its id, with every question the server states', async () => {
+    const fetchMock = respondWith(200, {
+      id: ID,
+      ordinal: 2,
+      siblingCount: 3,
+      questionCount: 1,
+      questions: [
+        {
+          id: 'q1',
+          ordinal: 1,
+          format: 'MultipleChoice',
+          // Structure on the wire, never the glyph "1/2" (AD-32).
+          prompt: [
+            { kind: 'text', value: 'Add ' },
+            { kind: 'fraction', whole: null, numerator: 1, denominator: 2 },
+          ],
+          answer: null,
+          choices: [{ ordinal: 1, body: [{ kind: 'text', value: 'a' }], isCorrect: true }],
+          topics: ['Fractions'],
+        },
+      ],
+    });
+
+    const draft = await parentApi.practiceTestDraft('token', ID);
+    expect(draft.ordinal).toBe(2);
+    expect(draft.siblingCount).toBe(3);
+    expect(draft.questions[0]!.prompt[1]).toEqual({
+      kind: 'fraction',
+      whole: null,
+      numerator: 1,
+      denominator: 2,
+    });
+    expect(draft.questions[0]!.choices[0]!.isCorrect).toBe(true);
+    expect(draft.questions[0]!.topics).toEqual(['Fractions']);
+
+    const [url] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/parent/practice-tests/${ID}`);
+  });
+
+  it('surfaces a 404 as a 404 rather than flattening it into a generic failure', async () => {
+    // The screen renders a missing draft as a state and offers the way back;
+    // it can only do that if the status survives the call.
+    respondWith(404, { message: 'That practice test could not be found.' });
+    const failure = await parentApi
+      .practiceTestDraft('token', ID)
+      .catch((cause: unknown) => cause as ParentApiError);
+    expect((failure as ParentApiError).status).toBe(404);
+  });
+});
+
 describe('a refusal the API authored', () => {
   it("carries the server's stated reason on a 409, beside the screen's fallback", async () => {
     const reason =
