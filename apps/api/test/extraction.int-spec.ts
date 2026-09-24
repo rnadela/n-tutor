@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   EXTRACTION_FAILED,
@@ -11,6 +11,7 @@ const {
   EXTRACTION_UPSTREAM_REJECTED,
   MAX_JOB_ATTEMPTS,
   claimTimeoutMs,
+  resetExtractionRuntime,
 } = await import('../src/extraction/extraction-policy.js');
 const { SOURCE_TEST_NOT_FOUND } = await import('../src/sourcetest/source-test-policy.js');
 const { ExtractionService } = await import('../src/extraction/extraction.service.js');
@@ -63,6 +64,13 @@ describe('Source Tests: structured extraction', () => {
     await resetParentAccounts(h.prisma);
     h.mail.reset();
     h.ai.reset();
+  });
+
+  // Every env knob a case drives is restored here rather than by hand, so a
+  // failed assertion mid-case cannot leak the override into the next one.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetExtractionRuntime();
   });
 
   /** A parent standing inside Parent View, with the bearer its routes take. */
@@ -486,6 +494,97 @@ describe('Source Tests: structured extraction', () => {
       expect(body).not.toContain('passage');
       expect(body).not.toContain('Reading comprehension');
       expect(body).not.toContain('prompt');
+    });
+
+    it('calls a two-page upload that yielded too little thin, and states both counts', async () => {
+      // The default fake puts one usable question on each page, against a
+      // threshold of two per page — so two pages yielding two usable questions
+      // is exactly the case the warning exists for.
+      const draft = await submitted(2);
+      await h.extractionRunner.runOnce();
+
+      const response = await statusOf(draft.token, draft.sourceTestId).expect(200);
+      expect(response.body.status).toBe('Succeeded');
+      expect(response.body.pageCount).toBe(2);
+      // Both counts: the rule is about the *usable* ones, and the fake's one
+      // dependent question is exactly what makes the two differ.
+      expect(response.body.questionCount).toBe(3);
+      expect(response.body.usableQuestionCount).toBe(2);
+      expect(response.body.thin).toBe(true);
+
+      // The verdict rides the status read and carries nothing with it.
+      const body = JSON.stringify(response.body);
+      expect(body).not.toContain('prompt');
+      expect(body).not.toContain('passage');
+      expect(body).not.toContain('Reading comprehension');
+    });
+
+    it('calls the same upload healthy once its pages yield enough', async () => {
+      vi.stubEnv('AI_FAKE_QUESTIONS_PER_PAGE', '3');
+      const draft = await submitted(2);
+      await h.extractionRunner.runOnce();
+
+      const response = await statusOf(draft.token, draft.sourceTestId).expect(200);
+      expect(response.body.status).toBe('Succeeded');
+      expect(response.body.pageCount).toBe(2);
+      // Three usable a page plus the one dependent question the fake always
+      // adds, so the usable-versus-total distinction is checked on this side
+      // of the verdict too.
+      expect(response.body.questionCount).toBe(7);
+      expect(response.body.usableQuestionCount).toBe(6);
+      expect(response.body.thin).toBe(false);
+
+      const body = JSON.stringify(response.body);
+      expect(body).not.toContain('prompt');
+    });
+
+    it('measures the verdict against the configured figure, not the default constant', async () => {
+      // The same Extraction, read twice under two thresholds. Without this,
+      // `statusFor` could pass DEFAULT_MIN_USABLE_QUESTIONS_PER_PAGE straight
+      // to the rule and every other case would stay green.
+      const draft = await submitted(2);
+      await h.extractionRunner.runOnce();
+
+      const thin = await statusOf(draft.token, draft.sourceTestId).expect(200);
+      expect(thin.body.usableQuestionCount).toBe(2);
+      expect(thin.body.thin).toBe(true);
+
+      // One usable question a page is enough under a threshold of one.
+      vi.stubEnv('EXTRACTION_MIN_USABLE_PER_PAGE', '1');
+      resetExtractionRuntime();
+      try {
+        const healthy = await statusOf(draft.token, draft.sourceTestId).expect(200);
+        expect(healthy.body.pageCount).toBe(2);
+        expect(healthy.body.usableQuestionCount).toBe(2);
+        expect(healthy.body.thin).toBe(false);
+      } finally {
+        vi.unstubAllEnvs();
+        // The memoised runtime outlives the stub, so the next test would read
+        // the overridden figure from cache rather than the default.
+        resetExtractionRuntime();
+      }
+    });
+
+    it('has no verdict at all while the job is still Queued', async () => {
+      const draft = await submitted(2);
+      const response = await statusOf(draft.token, draft.sourceTestId).expect(200);
+      expect(response.body.status).toBe('Queued');
+      expect(response.body.usableQuestionCount).toBeNull();
+      // Not `false`: there is no Extraction to be thin or healthy yet, and a
+      // screen reading `false` would show "no warning needed" before anything
+      // had been read.
+      expect(response.body.thin).toBeNull();
+    });
+
+    it('has no verdict on a job that failed', async () => {
+      const draft = await submitted(2);
+      h.ai.failNext('transport');
+      await h.extractionRunner.runOnce();
+
+      const response = await statusOf(draft.token, draft.sourceTestId).expect(200);
+      expect(response.body.status).toBe('Failed');
+      expect(response.body.thin).toBeNull();
+      expect(response.body.failureReason).toBe(EXTRACTION_FAILED);
     });
 
     it("names whose fault a failure was, and only the provider's is retryable", async () => {

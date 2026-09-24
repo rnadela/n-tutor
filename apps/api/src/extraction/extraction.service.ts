@@ -16,6 +16,8 @@ import {
   EXTRACTION_UPSTREAM_REJECTED,
   MAX_JOB_ATTEMPTS,
   claimTimeoutMs,
+  isThinExtraction,
+  minUsableQuestionsPerPage,
 } from './extraction-policy.js';
 import {
   ExtractionInputUnusable,
@@ -93,6 +95,16 @@ export interface ExtractionStatusView {
   questionCount: number | null;
   usableQuestionCount: number | null;
   uninterpretableRegionCount: number | null;
+  /**
+   * Whether the usable-question count is low for the pages submitted, as the
+   * one server-side rule decides it (Story 3.6).
+   *
+   * `null` means there is no verdict yet — the job has not produced counts, so
+   * there is nothing to judge. `false` here would be a verdict about an
+   * Extraction that does not exist, which a screen would read as "no warning
+   * needed" before anything had been read.
+   */
+  thin: boolean | null;
   completedAt: string | null;
   /** Whose fault it was, or null (AD-31). Named, so a retake prompt can read it. */
   failureKind: AiFailureKind | null;
@@ -355,6 +367,16 @@ export class ExtractionService {
       questionCount: counts?.questionCount ?? null,
       usableQuestionCount: counts?.usableQuestionCount ?? null,
       uninterpretableRegionCount: counts?.uninterpretableRegionCount ?? null,
+      // Through the rule, never as arithmetic here: the product's definition of
+      // thin has exactly one statement, and this read is one of its callers.
+      thin:
+        counts === null
+          ? null
+          : isThinExtraction(
+              counts.usableQuestionCount,
+              counts.pageCount,
+              minUsableQuestionsPerPage(),
+            ),
       completedAt: job.completedAt?.toISOString() ?? null,
       failureKind: job.failureKind,
       failureReason: job.failureReason,

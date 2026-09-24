@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ALL_PAGES_UNINTERPRETABLE,
   CHOICES_FORBIDDEN,
@@ -27,7 +27,11 @@ import {
   usableFrom,
   validateExtractionPayload,
 } from './extraction-payload.js';
-import { fakeExtractionPayload } from './extraction-schema.js';
+import {
+  DEFAULT_FAKE_QUESTIONS_PER_PAGE,
+  fakeExtractionPayload,
+  fakeQuestionsPerPage,
+} from './extraction-schema.js';
 
 const text = (value: string) => [{ kind: 'text' as const, value }];
 
@@ -451,5 +455,49 @@ describe('the one client-fault branch', () => {
         ORDINALS,
       ),
     ).toThrow(ExtractionInputUnusable);
+  });
+});
+
+describe("the fake transport's density knob", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('puts one usable question on each page unless told otherwise', () => {
+    // One by default so every assertion written against the fake before the
+    // knob existed still holds — and so the fake is thin under the default
+    // threshold, which is the case a test should not have to arrange.
+    expect(fakeQuestionsPerPage()).toBe(DEFAULT_FAKE_QUESTIONS_PER_PAGE);
+    expect(DEFAULT_FAKE_QUESTIONS_PER_PAGE).toBe(1);
+    const document = fakeExtractionPayload({ imageCount: 3, failure: 'none' });
+    // Three usable, plus the one question that depends on the region.
+    expect(document.questions).toHaveLength(4);
+  });
+
+  it('emits the stated number on every page', () => {
+    vi.stubEnv('AI_FAKE_QUESTIONS_PER_PAGE', '3');
+    const document = fakeExtractionPayload({ imageCount: 2, failure: 'none' });
+    expect(document.questions).toHaveLength(7);
+    for (const ordinal of [1, 2]) {
+      expect(
+        document.questions.filter(
+          (question) => question.pageOrdinal === ordinal && !question.dependsOnUninterpretable,
+        ),
+      ).toHaveLength(3);
+    }
+  });
+
+  it('refuses a zero, which would emit a document with no questions at all', () => {
+    vi.stubEnv('AI_FAKE_QUESTIONS_PER_PAGE', '0');
+    expect(() => fakeExtractionPayload({ imageCount: 2, failure: 'none' })).toThrow(
+      /AI_FAKE_QUESTIONS_PER_PAGE must be a positive whole number/,
+    );
+  });
+
+  it('refuses a value that is not a number at all', () => {
+    vi.stubEnv('AI_FAKE_QUESTIONS_PER_PAGE', 'abc');
+    expect(() => fakeExtractionPayload({ imageCount: 2, failure: 'none' })).toThrow(
+      /AI_FAKE_QUESTIONS_PER_PAGE must be a positive whole number/,
+    );
   });
 });

@@ -456,6 +456,7 @@ describe('Source Test calls', () => {
       () => parentApi.sourceTest('tok', 'st-1'),
       () => parentApi.submitSourceTest('tok', 'st-1'),
       () => parentApi.reorderSourceTestPages('tok', 'st-1', ['p-1']),
+      () => parentApi.extraction('tok', 'st-1'),
     ]) {
       const fetchMock = respondWith(200, { id: 'st-1', pages: [] });
       await call();

@@ -9,6 +9,7 @@ import type { PageImageView } from '@/lib/parent-api';
 import { parentTheme } from '@/theme/theme';
 import { density } from '@/theme/tokens';
 import { PageStrip, type PageStripProps } from './PageStrip';
+import { ThinExtractionWarning, type ThinExtractionWarningProps } from './ThinExtractionWarning';
 
 const DIR = import.meta.dirname;
 
@@ -376,9 +377,242 @@ describe('what the classification selects show against what they offer', () => {
     expect(PAGE_SOURCE).toContain('applyIfCurrent(gradeLevelsCurrent.current, issued');
   });
 
-  it('re-issues every read on Retry, the Subject one included', () => {
+  it('re-issues every read on Retry, the Subject and Extraction ones included', () => {
+    expect(PAGE_SOURCE).toContain('loadSubjects(draftGradeLevelId);');
+    // The Extraction poll stops on its own failure, so Retry has to re-issue
+    // it as well or the Alert's button retries nothing that broke.
+    expect(PAGE_SOURCE).toContain('setExtractionAttempt((attempt) => attempt + 1);');
     expect(PAGE_SOURCE).toContain(
-      'loadSubjects(draftGradeLevelId);\n  }, [loadProfiles, openDraft, loadGradeLevels, loadSubjects, draftGradeLevelId]);',
+      '}, [loadProfiles, openDraft, loadGradeLevels, loadSubjects, draftGradeLevelId]);',
     );
+  });
+});
+
+/** The warning, rendered inline so the dialog's own markup is assertable. */
+function warning(overrides: Partial<ThinExtractionWarningProps> = {}): string {
+  const props: ThinExtractionWarningProps = {
+    open: true,
+    usableQuestionCount: 3,
+    pageCount: 3,
+    busy: false,
+    onContinue: () => undefined,
+    onRetake: () => undefined,
+    onDismiss: () => undefined,
+    disablePortal: true,
+    keepMounted: true,
+    ...overrides,
+  };
+  return renderToStaticMarkup(
+    createElement(
+      ThemeProvider,
+      { theme: parentTheme },
+      createElement(ThinExtractionWarning, props),
+    ),
+  );
+}
+
+describe('the thin-extraction warning states all three of the requirement’s facts', () => {
+  it('names the usable-question count and the page count together', () => {
+    const markup = warning({ usableQuestionCount: 3, pageCount: 3 });
+    expect(markup).toContain(parentCopy.capture.generate.counts(3, 3));
+    expect(markup).toContain('3 usable questions');
+    expect(markup).toContain('3 pages');
+  });
+
+  it('reads correctly when either figure is one', () => {
+    expect(parentCopy.capture.generate.counts(1, 1)).toBe(
+      '1 usable question was found across 1 page.',
+    );
+    expect(parentCopy.capture.generate.counts(0, 2)).toBe(
+      '0 usable questions were found across 2 pages.',
+    );
+  });
+
+  it('says that retaking costs no Generation Allowance', () => {
+    const markup = warning();
+    expect(markup).toContain(parentCopy.capture.generate.noGenerationCharge);
+    expect(parentCopy.capture.generate.noGenerationCharge).toContain('Generation Allowance');
+  });
+
+  it('offers both ways out as real, named, focusable controls', () => {
+    const markup = warning();
+    expect(markup.match(/<button/g)?.length).toBe(2);
+    expect(markup).toContain(parentCopy.capture.generate.continueAnyway);
+    expect(markup).toContain(parentCopy.capture.generate.retakePages);
+    // At the parent tap-target floor, from the token rather than a literal.
+    expect(markup).toContain(`min-height:${density.tapTarget}px`);
+  });
+
+  it('never refuses the proceed — the warning informs, it does not block', () => {
+    // Even mid-write, when retake has to wait for the draft it is opening,
+    // continuing stays available.
+    const markup = warning({ busy: true });
+    const continueControl = markup
+      .split('<button')
+      .find((part) => part.includes(parentCopy.capture.generate.continueAnyway));
+    expect(continueControl).toBeDefined();
+    expect(continueControl!.slice(0, continueControl!.indexOf('>'))).not.toContain('disabled');
+    const source = readFileSync(path.resolve(DIR, 'ThinExtractionWarning.tsx'), 'utf8');
+    // The retake control is the only one a busy state may lock.
+    expect(source.match(/disabled=\{busy\}/g)).toHaveLength(1);
+  });
+
+  it('treats a dismissal as a cancel, never as a quiet continue', () => {
+    const source = readFileSync(path.resolve(DIR, 'ThinExtractionWarning.tsx'), 'utf8');
+    // Escape and the scrim reach `onClose`, and it is its own prop: wired to
+    // `onContinue` an accidental tap would advance the flow and announce that
+    // the upload is ready.
+    expect(source).toContain('onClose={onDismiss}');
+    expect(source).not.toContain('onClose={onContinue}');
+    // And the screen's dismissal only closes the warning — it neither reaches
+    // the step nor announces anything.
+    const dismiss = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('function dismissWarning()'));
+    const body = dismiss.slice(0, dismiss.indexOf('\n  }'));
+    expect(body).toContain('setWarningOpen(false);');
+    expect(body).not.toContain('announce(');
+    expect(body).not.toContain('setGenerateReached');
+    expect(PAGE_SOURCE).toContain('onDismiss={dismissWarning}');
+  });
+
+  it('is a dialog labelled by its own title', () => {
+    const markup = warning();
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain(parentCopy.capture.generate.warningTitle);
+    const labelled = /aria-labelledby="([^"]+)"/.exec(markup);
+    expect(labelled).not.toBeNull();
+    expect(markup).toContain(`id="${labelled![1]}"`);
+  });
+
+  it('decides nothing: no verdict, no threshold and no request inside it', () => {
+    const source = readFileSync(path.resolve(DIR, 'ThinExtractionWarning.tsx'), 'utf8');
+    const code = source
+      .split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toContain('parentApi');
+    expect(code).not.toContain('useState');
+    // It is handed two numbers, not a verdict: neither the server's `thin` nor
+    // the gate that reads it appears in the code.
+    expect(code).not.toContain('.thin');
+    expect(code).not.toContain('warningNeeded');
+    // Both figures are handed in; neither is computed here.
+    expect(code).toContain('copy.counts(usableQuestionCount, pageCount)');
+  });
+
+  it('states every one of its own words from the copy module', () => {
+    const source = readFileSync(path.resolve(DIR, 'ThinExtractionWarning.tsx'), 'utf8');
+    const code = source
+      .split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toMatch(/(aria-label|children)=["']/);
+    expect(code).toContain('parentCopy.capture.generate');
+  });
+});
+
+describe('the generate step and the gate on the way into it', () => {
+  it('exists only past submit, where an Extraction job exists at all', () => {
+    expect(PAGE_SOURCE).toContain('{!isDraft && (');
+    expect(PAGE_SOURCE).toContain(
+      "sourceTest !== null && sourceTest.status === 'Submitted' ? sourceTest.id : null",
+    );
+  });
+
+  it('gates the warning on the pure rule, never on `thin` read here', () => {
+    // `thin === null` must read as neither thin nor healthy, and that
+    // distinction lives in `warningNeeded` where a test can state it.
+    expect(PAGE_SOURCE).toContain('if (warningNeeded(extraction) && warningCounts !== null) {');
+    expect(PAGE_SOURCE).not.toMatch(/extraction[?.]*\.thin/);
+  });
+
+  it('hands the warning two real counts rather than defaulting a missing one to zero', () => {
+    // A `?? 0` would let the dialog state "0 usable questions were found across
+    // 0 pages" about counts that are simply not in yet, so the absence stops it
+    // being mounted at all.
+    expect(PAGE_SOURCE).toContain('{warningCounts !== null && (');
+    expect(PAGE_SOURCE).toContain('usableQuestionCount={warningCounts.usable}');
+    expect(PAGE_SOURCE).toContain('pageCount={warningCounts.pages}');
+    expect(PAGE_SOURCE).not.toContain('?? 0}');
+    expect(PAGE_SOURCE).toContain(
+      'extraction !== null && extraction.usableQuestionCount !== null && extraction.pageCount !== null',
+    );
+  });
+
+  it('never disables the proceed control for the verdict', () => {
+    const proceed = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('onClick={proceedToGenerate}'));
+    const control = proceed.slice(0, proceed.indexOf('</PrimaryButton>'));
+    expect(control).toContain('data-testid="extraction-proceed"');
+    expect(control).not.toContain('disabled');
+    // And nothing above it in the same element disables it either.
+    const opened = PAGE_SOURCE.lastIndexOf(
+      '<PrimaryButton',
+      PAGE_SOURCE.indexOf('proceedToGenerate'),
+    );
+    expect(
+      PAGE_SOURCE.slice(opened, PAGE_SOURCE.indexOf('onClick={proceedToGenerate}')),
+    ).not.toContain('disabled');
+  });
+
+  it('polls until the job settles and clears the timer when it stops', () => {
+    expect(PAGE_SOURCE).toContain('if (!stopped && !isSettled(view.status)) timer = setTimeout(');
+    expect(PAGE_SOURCE).toContain('if (timer !== null) clearTimeout(timer);');
+    // And bumps the counter on the way out, so a response already in flight is
+    // inapplicable after unmount — which clearing the timer alone cannot do.
+    expect(PAGE_SOURCE).toContain('applyIfCurrent(extractionCurrent.current, issued');
+  });
+
+  it('ends Parent View on the poll exactly as every other call does', () => {
+    const poll = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('parentApi.extraction('));
+    expect(poll.slice(0, poll.indexOf('read();'))).toContain('if (endsParentView(cause)) {');
+  });
+
+  it('shows the job’s own reason for a failure, announced as a failure', () => {
+    expect(PAGE_SOURCE).toContain(
+      '{extraction.failureReason ?? parentCopy.capture.generate.readFailed}',
+    );
+    // Rendered the way every other failure on this screen is: a bare paragraph
+    // would never tell a screen reader the reading had failed at all.
+    const branch = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf("extraction.status === 'Failed' ? ("));
+    const rendered = branch.slice(0, branch.indexOf('</Alert>'));
+    expect(rendered).toContain('severity="error"');
+    expect(rendered).toContain('role="alert"');
+    expect(rendered).toContain('data-testid="extraction-failed"');
+  });
+
+  it('opens a fresh draft on retake, and says so rather than implying the pages return', () => {
+    const retake = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('function retakePages()'));
+    const body = retake.slice(0, retake.indexOf('\n  }'));
+    // Announced from the draft the server answered with, never up front: a
+    // failed open would otherwise claim a new upload started beside an error
+    // saying it did not.
+    expect(body).toContain('openDraft(() => announce(parentCopy.capture.generate.retakeStarted));');
+    expect(body).not.toMatch(/openDraft\(\);\s*\n\s*announce\(/);
+    expect(parentCopy.capture.generate.retakeStarted).toContain('new upload');
+    expect(parentCopy.capture.generate.retakeStarted).not.toContain('Generation Allowance');
+  });
+
+  it('announces reaching the step in the words it displays', () => {
+    expect(PAGE_SOURCE).toContain('announce(parentCopy.capture.generate.reached)');
+    expect(PAGE_SOURCE).toContain('{parentCopy.capture.generate.reached}');
+  });
+
+  it('states every one of its own words from the copy module', () => {
+    const code = PAGE_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    for (const marker of ['generate.heading', 'generate.reading', 'generate.proceed']) {
+      expect(code).toContain(`parentCopy.capture.${marker}`);
+    }
+  });
+
+  it('holds no threshold of its own, anywhere in the screen or its rules', () => {
+    const rules = readFileSync(
+      path.resolve(DIR, '..', '..', '..', 'lib', 'extraction-status.ts'),
+      'utf8',
+    );
+    for (const source of [PAGE_SOURCE, rules]) {
+      expect(source).not.toMatch(/usableQuestionCount\s*[<>]/);
+      expect(source).not.toMatch(/pageCount\s*\*/);
+    }
   });
 });

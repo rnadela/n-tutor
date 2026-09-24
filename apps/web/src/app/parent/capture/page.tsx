@@ -22,9 +22,11 @@ import {
   optionsWithStored,
   submitBlockedReasons,
 } from '@/lib/classification';
+import { EXTRACTION_POLL_MS, isSettled, warningNeeded } from '@/lib/extraction-status';
 import { canAddPage, canSubmitPages, movedOrder, type MoveDirection } from '@/lib/page-order';
 import {
   parentApi,
+  type ExtractionStatusView,
   type SourceTestView,
   type StudentProfileView,
   type TaxonomyItem,
@@ -32,6 +34,7 @@ import {
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
 import { density } from '@/theme/tokens';
 import { controlSx, ORDER_HEADING_ID, PageStrip } from './PageStrip';
+import { ThinExtractionWarning } from './ThinExtractionWarning';
 
 /**
  * The classification section's heading, which names the section rather than the
@@ -39,6 +42,9 @@ import { controlSx, ORDER_HEADING_ID, PageStrip } from './PageStrip';
  * page strip uses with `ORDER_HEADING_ID`.
  */
 const CLASSIFICATION_HEADING_ID = 'capture-classification-heading';
+
+/** The generate step's own heading, named the same way the other two sections are. */
+const GENERATE_HEADING_ID = 'capture-generate-heading';
 
 /**
  * Which write is in flight, so the screen can say what it is doing rather than
@@ -115,6 +121,22 @@ export default function CapturePage() {
   const gradeLevelsRequestId = useRef(0);
   const gradeLevelsCurrent = useRef({ value: 0 });
   gradeLevelsCurrent.current.value = gradeLevelsRequestId.current;
+  /**
+   * The Extraction status poll, with the same guard the other four streams
+   * carry — and it needs it most: it re-issues on a timer, so a slow read has
+   * every chance of landing after a later one.
+   */
+  const extractionRequestId = useRef(0);
+  const extractionCurrent = useRef({ value: 0 });
+  extractionCurrent.current.value = extractionRequestId.current;
+
+  /**
+   * Where the committed upload's reading stands, and what the parent has done
+   * about it. None of it is persisted: it is a screen state, not a row.
+   */
+  const [extraction, setExtraction] = useState<ExtractionStatusView | null>(null);
+  const [warningOpen, setWarningOpen] = useState(false);
+  const [generateReached, setGenerateReached] = useState(false);
 
   const leave = useCallback(() => {
     clearElevation();
@@ -158,29 +180,38 @@ export default function CapturePage() {
    * exactly this: an error here is most often the draft round trip failing, and
    * a Retry that only re-read the profile list would leave the parent pressing a
    * button that never retries what broke.
+   *
+   * `onOpened` runs only on the draft the server actually answered with, so a
+   * caller with something to say about the new upload — the retake, which
+   * announces one — says it once the upload exists and says nothing when the
+   * open failed.
    */
-  const openDraft = useCallback(() => {
-    if (token === null || studentProfileId === '') return;
-    const issued = (draftRequestId.current += 1);
-    draftCurrent.current.value = issued;
-    setSourceTest(null);
-    setDraftLoading(true);
-    setError(null);
-    parentApi.openSourceTest(token, studentProfileId).then(
-      applyIfCurrent(draftCurrent.current, issued, (opened: SourceTestView) => {
-        setSourceTest(opened);
-        setDraftLoading(false);
-      }),
-      applyIfCurrent(draftCurrent.current, issued, (cause: unknown) => {
-        if (endsParentView(cause)) {
-          leave();
-          return;
-        }
-        setDraftLoading(false);
-        setError(cause instanceof Error ? cause.message : parentCopy.capture.failed);
-      }),
-    );
-  }, [token, studentProfileId, leave]);
+  const openDraft = useCallback(
+    (onOpened?: (opened: SourceTestView) => void) => {
+      if (token === null || studentProfileId === '') return;
+      const issued = (draftRequestId.current += 1);
+      draftCurrent.current.value = issued;
+      setSourceTest(null);
+      setDraftLoading(true);
+      setError(null);
+      parentApi.openSourceTest(token, studentProfileId).then(
+        applyIfCurrent(draftCurrent.current, issued, (opened: SourceTestView) => {
+          setSourceTest(opened);
+          setDraftLoading(false);
+          onOpened?.(opened);
+        }),
+        applyIfCurrent(draftCurrent.current, issued, (cause: unknown) => {
+          if (endsParentView(cause)) {
+            leave();
+            return;
+          }
+          setDraftLoading(false);
+          setError(cause instanceof Error ? cause.message : parentCopy.capture.failed);
+        }),
+      );
+    },
+    [token, studentProfileId, leave],
+  );
 
   /**
    * The Grade Levels a parent may choose — the same parent-facing taxonomy read
@@ -271,6 +302,63 @@ export default function CapturePage() {
   }, [loadSubjects, draftGradeLevelId]);
 
   /**
+   * The committed upload the generate step is about, or null while there is
+   * none. A Draft has no Extraction job at all — the status read answers 404 —
+   * so the step and its poll exist only past submit.
+   */
+  const submittedSourceTestId =
+    sourceTest !== null && sourceTest.status === 'Submitted' ? sourceTest.id : null;
+  /** Bumped by Retry, so a poll that stopped on an error can be re-issued. */
+  const [extractionAttempt, setExtractionAttempt] = useState(0);
+
+  /**
+   * The Extraction status, read on entering the generate step and then polled
+   * until the job settles.
+   *
+   * A poll rather than a held connection because the job deliberately outlives
+   * the request that enqueued it. Everything the step held is cleared as the
+   * state is entered, so a fresh upload never shows the previous one's outcome;
+   * and the cleanup both cancels the pending timer and bumps the counter, which
+   * is what makes a response already in flight inapplicable after unmount.
+   */
+  useEffect(() => {
+    const issued = (extractionRequestId.current += 1);
+    extractionCurrent.current.value = issued;
+    setExtraction(null);
+    setWarningOpen(false);
+    setGenerateReached(false);
+    if (token === null || submittedSourceTestId === null) return;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+
+    const read = (): void => {
+      parentApi.extraction(token, submittedSourceTestId).then(
+        applyIfCurrent(extractionCurrent.current, issued, (view: ExtractionStatusView) => {
+          setExtraction(view);
+          if (!stopped && !isSettled(view.status)) timer = setTimeout(read, EXTRACTION_POLL_MS);
+        }),
+        applyIfCurrent(extractionCurrent.current, issued, (cause: unknown) => {
+          if (endsParentView(cause)) {
+            leave();
+            return;
+          }
+          // Stops rather than hammers: the screen's Retry re-issues it.
+          setError(cause instanceof Error ? cause.message : parentCopy.capture.generate.readFailed);
+        }),
+      );
+    };
+    read();
+
+    return () => {
+      stopped = true;
+      if (timer !== null) clearTimeout(timer);
+      extractionRequestId.current += 1;
+      extractionCurrent.current.value = extractionRequestId.current;
+    };
+  }, [token, submittedSourceTestId, extractionAttempt, leave]);
+
+  /**
    * What the error Alert's Retry does: every read, not only the first — the
    * Subject read included, because it is one of the reads that can be the
    * reason the Alert is on screen at all, and clearing an error without
@@ -281,6 +369,9 @@ export default function CapturePage() {
     openDraft();
     loadGradeLevels();
     loadSubjects(draftGradeLevelId);
+    // The Extraction poll stops on its own failure, so Retry has to re-issue
+    // it too — clearing the error without re-reading would retry nothing.
+    setExtractionAttempt((attempt) => attempt + 1);
   }, [loadProfiles, openDraft, loadGradeLevels, loadSubjects, draftGradeLevelId]);
 
   /**
@@ -319,6 +410,16 @@ export default function CapturePage() {
   // is terminal here: every write against it answers 409, so offering the
   // controls would only be a way of collecting that refusal.
   const isDraft = sourceTest !== null && sourceTest.status === 'Draft';
+  /**
+   * The two figures the warning states, or null when the read has not produced
+   * them. Narrowed rather than defaulted: a `?? 0` would let the warning say
+   * "0 usable questions were found across 0 pages" about counts that simply are
+   * not in yet, so the absence has to stop the dialog existing at all.
+   */
+  const warningCounts =
+    extraction !== null && extraction.usableQuestionCount !== null && extraction.pageCount !== null
+      ? { usable: extraction.usableQuestionCount, pages: extraction.pageCount }
+      : null;
   const busy = pending !== null;
   const ready = sourceTest !== null && !draftLoading;
   // The server's submit gate counts `Ready` rows only — a page stranded in
@@ -433,6 +534,57 @@ export default function CapturePage() {
         }
       },
     );
+  }
+
+  /**
+   * The gate, and the whole of it: the warning when the server called this
+   * Extraction thin, and the generate step otherwise.
+   *
+   * `warningNeeded` decides, not `thin` read here — an unfinished job's `null`
+   * must read as neither thin nor healthy, and that distinction belongs in the
+   * pure rule where a test can state it.
+   */
+  function proceedToGenerate(): void {
+    if (warningNeeded(extraction) && warningCounts !== null) {
+      setWarningOpen(true);
+      return;
+    }
+    reachGenerateStep();
+  }
+
+  /**
+   * Dismissing the warning — Escape, or a tap on the scrim — is a cancel, as it
+   * is everywhere else in this app. It closes the warning and leaves the parent
+   * on the proceed control; it is not a quiet way of continuing.
+   */
+  function dismissWarning(): void {
+    setWarningOpen(false);
+  }
+
+  /**
+   * Past the gate. Nothing is generated and nothing is charged here — Epic 4
+   * owns the generate screen; this story owns the gate on the way into it.
+   */
+  function reachGenerateStep(): void {
+    setWarningOpen(false);
+    setGenerateReached(true);
+    announce(parentCopy.capture.generate.reached);
+  }
+
+  /**
+   * Retake: a fresh upload for the same child, because a Submitted Source Test
+   * is terminal (AD-16) and the old pages cannot come back. `openDraft` is the
+   * open-or-resume call the screen already makes, so a failure surfaces as the
+   * screen's own error with Retry.
+   *
+   * The announcement waits for the draft the server answered with: said up
+   * front, it would tell a parent a new upload had started while the screen
+   * beside it showed the open having failed.
+   */
+  function retakePages(): void {
+    setWarningOpen(false);
+    setGenerateReached(false);
+    openDraft(() => announce(parentCopy.capture.generate.retakeStarted));
   }
 
   function submit(): void {
@@ -671,6 +823,76 @@ export default function CapturePage() {
                       </Typography>
                     )}
                   </>
+                )}
+
+                {/* The generate step, and the gate on the way into it. It
+                    exists only past submit: a Draft has no Extraction job, and
+                    the status read answers 404 for one. */}
+                {!isDraft && (
+                  <Box
+                    component="section"
+                    aria-labelledby={GENERATE_HEADING_ID}
+                    sx={{ display: 'grid', gap: `${density.gap}px` }}
+                  >
+                    <Typography
+                      id={GENERATE_HEADING_ID}
+                      component="h2"
+                      sx={{ fontSize: 18, fontWeight: 700 }}
+                    >
+                      {parentCopy.capture.generate.heading}
+                    </Typography>
+
+                    {extraction === null || !isSettled(extraction.status) ? (
+                      <Typography component="p" data-testid="extraction-reading">
+                        {parentCopy.capture.generate.reading}
+                      </Typography>
+                    ) : extraction.status === 'Failed' ? (
+                      // The job's own stored reason, which is a written
+                      // constant and never a provider string — announced as a
+                      // failure the way every other failure on this screen is,
+                      // so a screen reader is told rather than left to find it.
+                      <Alert
+                        severity="error"
+                        role="alert"
+                        variant="outlined"
+                        data-testid="extraction-failed"
+                      >
+                        {extraction.failureReason ?? parentCopy.capture.generate.readFailed}
+                      </Alert>
+                    ) : (
+                      <>
+                        {/* Never disabled by the verdict: the warning informs,
+                            it does not block. */}
+                        <PrimaryButton
+                          sx={{ minHeight: density.tapTarget }}
+                          onClick={proceedToGenerate}
+                          data-testid="extraction-proceed"
+                        >
+                          {parentCopy.capture.generate.proceed}
+                        </PrimaryButton>
+                        {generateReached && (
+                          <Typography component="p" data-testid="generate-reached">
+                            {parentCopy.capture.generate.reached}
+                          </Typography>
+                        )}
+                      </>
+                    )}
+
+                    {/* Mounted only once both figures are in: the warning
+                        states counts it was handed, and there is nothing to
+                        hand it until the read produced them. */}
+                    {warningCounts !== null && (
+                      <ThinExtractionWarning
+                        open={warningOpen}
+                        usableQuestionCount={warningCounts.usable}
+                        pageCount={warningCounts.pages}
+                        busy={busy || draftLoading}
+                        onContinue={reachGenerateStep}
+                        onRetake={retakePages}
+                        onDismiss={dismissWarning}
+                      />
+                    )}
+                  </Box>
                 )}
               </>
             )}

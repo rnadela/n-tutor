@@ -342,6 +342,68 @@ test.describe('page management before submit', () => {
     await expect(retry).toHaveCount(0);
   });
 
+  test('warns before generating when the reading came back thin, and never blocks', async ({
+    page,
+  }) => {
+    const { subjectName } = await openCapture(page);
+
+    await chooseSubject(page, subjectName);
+    await addPage(page, jpeg('page-a.jpg', PAGE_A));
+    await addPage(page, jpeg('page-b.jpg', PAGE_B));
+    await page.getByRole('button', { name: 'Check pages' }).click();
+    await expect(page.getByTestId('submitted-note')).toBeVisible();
+
+    // The job outlives the request, so the step says what it is doing and then
+    // polls until the worker has finished — no reload anywhere in between.
+    await expect(page.getByRole('heading', { name: 'Generate a practice test' })).toBeVisible();
+    const proceed = page.getByRole('button', { name: 'Continue to practice test' });
+    await expect(proceed).toBeVisible({ timeout: 30_000 });
+
+    // The fake reads one usable question off each page, against a threshold of
+    // two — so two pages is exactly the case the warning exists for, with no
+    // environment manipulation anywhere in this test.
+    await proceed.click();
+    const warning = page.getByRole('dialog');
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText('Fewer questions than expected');
+    // Both counts, in the same sentence, and the no-charge guarantee.
+    await expect(page.getByTestId('thin-counts')).toHaveText(
+      '2 usable questions were found across 2 pages.',
+    );
+    await expect(page.getByTestId('thin-no-charge')).toHaveText(
+      'Retaking the pages uses no Generation Allowance.',
+    );
+    // And the proceed is offered, not withheld: the warning informs.
+    await expect(warning.getByRole('button', { name: 'Continue anyway' })).toBeEnabled();
+
+    // Retake: a fresh upload for the same child, back at an empty strip.
+    await warning.getByRole('button', { name: 'Retake the pages' }).click();
+    await expect(liveRegion(page)).toContainText('A new upload was started.');
+    await expect(page.getByTestId('page-count')).toHaveText(
+      'Pages are used in this order. 0 of 10 page images.',
+    );
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.getByTestId('submitted-note')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // Nothing was generated on the way through, and the step is gone with the
+    // upload it was about.
+    await expect(page.getByRole('heading', { name: 'Generate a practice test' })).toHaveCount(0);
+
+    // The same path again, taken to the end this time.
+    await chooseSubject(page, subjectName);
+    await addPage(page, jpeg('page-a.jpg', PAGE_A));
+    await addPage(page, jpeg('page-b.jpg', PAGE_B));
+    await page.getByRole('button', { name: 'Check pages' }).click();
+    const proceedAgain = page.getByRole('button', { name: 'Continue to practice test' });
+    await expect(proceedAgain).toBeVisible({ timeout: 30_000 });
+    await proceedAgain.click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Continue anyway' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByTestId('generate-reached')).toHaveText(
+      'This upload is ready. Making a practice test from it is the next step.',
+    );
+  });
+
   test('refuses a submission made straight to the API, with no browser involved', async () => {
     // The elevation bearer lives in the page's memory alone (AD-18), so a
     // browser test cannot issue a parent-scoped call. This one therefore drives

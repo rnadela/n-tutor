@@ -37,6 +37,19 @@ export const DEFAULT_POLL_MS = 1_000;
  */
 export const MAX_JOB_ATTEMPTS = 5;
 
+/**
+ * How many usable questions a submitted page is expected to have yielded before
+ * the Extraction is taken at face value.
+ *
+ * Two, because a school test page that yielded fewer than two usable questions
+ * has more likely been misread — a bad angle, a shadow, a page photographed
+ * twice — than been that short. The verdict never blocks anything, so an
+ * over-eager warning costs a parent one sentence to read while a missed one
+ * costs them a Generation Allowance; erring toward warning is the cheap
+ * direction.
+ */
+export const DEFAULT_MIN_USABLE_QUESTIONS_PER_PAGE = 2;
+
 // --- Messages ------------------------------------------------------------
 //
 // Not one of them carries a provider string, a payload fragment or a page byte
@@ -91,12 +104,14 @@ export interface ExtractionRuntime {
   workerEnabled: boolean;
   pollMs: number;
   claimTimeoutMs: number;
+  /** The figure behind the thin verdict; see `isThinExtraction`. */
+  minUsableQuestionsPerPage: number;
 }
 
 let resolved: ExtractionRuntime | null = null;
 
 /**
- * Reads and checks the three overrides once, at boot (`ExtractionModule` asks
+ * Reads and checks the four overrides once, at boot (`ExtractionModule` asks
  * for it as it is constructed), so a mistyped interval is a process that
  * refuses to start rather than a worker that silently never runs.
  */
@@ -106,6 +121,13 @@ export function extractionRuntime(): ExtractionRuntime {
       workerEnabled: optionalBoolEnv('EXTRACTION_WORKER_ENABLED', true),
       pollMs: requireIntEnv('EXTRACTION_POLL_MS', DEFAULT_POLL_MS),
       claimTimeoutMs: requireIntEnv('EXTRACTION_CLAIM_TIMEOUT_MS', DEFAULT_CLAIM_TIMEOUT_MS),
+      // `requireIntEnv` already refuses a zero, a negative and a typo, and a
+      // zero is exactly the value that would quietly switch the warning off
+      // for every upload rather than announce itself.
+      minUsableQuestionsPerPage: requireIntEnv(
+        'EXTRACTION_MIN_USABLE_PER_PAGE',
+        DEFAULT_MIN_USABLE_QUESTIONS_PER_PAGE,
+      ),
     };
     // The two figures are not independent. A claim held across `ai`'s own
     // retries — every attempt's timeout plus the backoff sleep between them —
@@ -114,8 +136,7 @@ export function extractionRuntime(): ExtractionRuntime {
     // pages to a second worker, and the account is billed twice for one
     // upload. Checked at boot rather than discovered on the invoice.
     const { timeoutMs: aiTimeoutMs, maxAttempts, retryBaseMs } = resolveAiConfig();
-    const worstCaseRunMs =
-      maxAttempts * aiTimeoutMs + retryBaseMs * (2 ** (maxAttempts - 1) - 1);
+    const worstCaseRunMs = maxAttempts * aiTimeoutMs + retryBaseMs * (2 ** (maxAttempts - 1) - 1);
     if (resolved.claimTimeoutMs <= worstCaseRunMs) {
       const stated = resolved.claimTimeoutMs;
       resolved = null;
@@ -142,4 +163,37 @@ export function resetExtractionRuntime(): void {
  */
 export function claimTimeoutMs(): number {
   return extractionRuntime().claimTimeoutMs;
+}
+
+/**
+ * The product's whole definition of a *thin* Extraction, as one comparison.
+ *
+ * Usable questions against pages submitted, measured per page so a one-page
+ * quiz and a ten-page exam are held to the same density rather than to one
+ * absolute count. Pure and parameterised on the figure, so the rule is
+ * assertable without an environment and stated in exactly one place: the web
+ * app reads the verdict off the status body and holds no threshold of its own.
+ *
+ * Nothing here is a block. The verdict feeds a warning a parent may proceed
+ * past, because a genuinely short quiz is valid and the cost of being wrong in
+ * the other direction is a Generation Allowance.
+ *
+ * A page count of zero is thin outright rather than by the comparison, which
+ * would make it healthy: nothing usable over no pages is the emptiest read
+ * there is, and healthy is the one answer it cannot be. The submit gate refuses
+ * a zero-page upload, so this is a guard against the arithmetic rather than a
+ * case the product reaches.
+ */
+export function isThinExtraction(
+  usableQuestionCount: number,
+  pageCount: number,
+  minPerPage: number,
+): boolean {
+  if (pageCount <= 0) return true;
+  return usableQuestionCount < pageCount * minPerPage;
+}
+
+/** The configured figure the verdict is measured against. */
+export function minUsableQuestionsPerPage(): number {
+  return extractionRuntime().minUsableQuestionsPerPage;
 }

@@ -661,3 +661,27 @@ source_spec: `spec-3-5-structured-extraction.md`
 severity: medium
 reason: submit() never clears or extends SourceTest.expiresAt, and requireLive() rejects any expired row regardless of status (apps/api/src/sourcetest/source-test.service.ts). Story 3.5 worked around this for its own status route by adding requireReadable, which honours expiry only while the row is a Draft; the pre-existing read path was left alone because it belongs to Stories 3.2/3.3 and AD-16.
 status: open
+
+### DW-84: The web unit tier runs in a node environment with no DOM library, so the capture screen's interactive behavior is asserted by grepping its own source text rather than by running it.
+origin: spec-deferred 3e867c264d7e
+location: apps/web/vitest.config.ts
+source_spec: `spec-3-6-thin-extraction-warning.md`
+severity: medium
+reason: apps/web/vitest.config.ts sets environment: 'node' and the workspace has no jsdom or testing-library dependency, so page.spec.tsx can only render presentational components with renderToStaticMarkup and otherwise match literals against PAGE_SOURCE. That predates this story — the same idiom covers Stories 3.2 and 3.3 — but it now also carries this story's gate, poll, retry and dismissal wiring, each of which a behavior-preserving refactor breaks and a behavior regression can slip past. Closing it means adding a DOM tier to apps/web, which is an architectural change no single story should make unannounced.
+status: open
+
+### DW-85: The healthy (non-thin) proceed path is never exercised in a browser, because Playwright starts the API once with one environment.
+origin: spec-deferred 3755172d893d
+location: playwright.config.ts
+source_spec: `spec-3-6-thin-extraction-warning.md`
+severity: medium
+reason: The thin verdict is covered end to end, and the healthy one is covered at the pure-rule tier (extraction-status.spec.ts) and the API tier (extraction.int-spec.ts, via AI_FAKE_QUESTIONS_PER_PAGE). Nothing clicks proceed on a succeeded, non-thin Extraction in a real page and asserts no dialog opens. Closing it needs a second Playwright project running the API under a raised AI_FAKE_QUESTIONS_PER_PAGE, which is a test-infrastructure change rather than a fix to this diff.
+status: open
+
+### DW-86: The API integration suite carries a pre-existing intermittent failure under full-suite parallelism, unrelated to this story.
+origin: spec-deferred 23f70b170ef4
+location: apps/api/test/harness.ts
+source_spec: `spec-3-6-thin-extraction-warning.md`
+severity: medium
+reason: One `pnpm --filter api run test:int` run in this session failed a single case; the immediately following run passed 343/343, and extraction.int-spec.ts passes in isolation on every run. Reproduced on a clean tree with every Story 3.6 change stashed, where parent-auth.int-spec.ts failed instead — the failing file moves between runs and the message is typically "No elevation token in the response body", which is cross-file contention on the one shared Postgres. Already logged against Story 3.5.
+status: open

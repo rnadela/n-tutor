@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { requireIntEnv } from '../common/env.js';
 import { RichText } from './rich-text.js';
 
 /**
@@ -96,6 +97,29 @@ export type ExtractedContextPayload = z.infer<typeof ExtractedContextPayload>;
 export const EXTRACTION_SCHEMA_NAME = 'source_test_extraction';
 
 /**
+ * How many usable questions the fake transport puts on each page.
+ *
+ * One, so every assertion written against the fake before Story 3.6 holds
+ * unchanged — and so the fake is *thin* under the default threshold, which is
+ * the common case a test should not have to arrange.
+ */
+export const DEFAULT_FAKE_QUESTIONS_PER_PAGE = 1;
+
+/**
+ * The density knob for the fake's payload, read per call like
+ * `AI_FAKE_FAILURE` — which is what lets one booted application answer thin for
+ * one submit and healthy for the next (AD-22).
+ *
+ * It is read *here* rather than in `ai-config.ts` on purpose: the shape of a
+ * valid Extraction payload is this module's under the same AD-17 carve-out that
+ * keeps the prompt here, and `ai-config.ts` owns only transport-level knobs. A
+ * zero or a typo refuses, through the one integer reader.
+ */
+export function fakeQuestionsPerPage(): number {
+  return requireIntEnv('AI_FAKE_QUESTIONS_PER_PAGE', DEFAULT_FAKE_QUESTIONS_PER_PAGE);
+}
+
+/**
  * What the `fake` transport answers with (AD-22).
  *
  * It lives here, beside the schema it has to satisfy, for the same reason the
@@ -106,8 +130,9 @@ export const EXTRACTION_SCHEMA_NAME = 'source_test_extraction';
  * payload that exercises every rule the story has: a context that spans every
  * page and is referenced from questions on more than one of them, a fraction
  * emitted as structure rather than as text, an uninterpretable region, and
- * exactly one question that depends on it. Deterministic in the page count
- * alone, so a test asserts on figures rather than on whatever came back.
+ * exactly one question that depends on it. Deterministic in the page count and
+ * `AI_FAKE_QUESTIONS_PER_PAGE` alone, so a test asserts on figures rather than
+ * on whatever came back.
  */
 export function fakeExtractionPayload(context: {
   imageCount: number;
@@ -120,26 +145,36 @@ export function fakeExtractionPayload(context: {
   }));
   const lastPage = Math.max(context.imageCount, 1);
 
-  const questions: ExtractedQuestionPayload[] = pages.map((page) => ({
-    pageOrdinal: page.ordinal,
-    format: 'MultipleChoice' as const,
-    prompt: [
-      { kind: 'text' as const, value: `Question on page ${page.ordinal}. What is ` },
-      // Structure, never the string "1/2" (AD-32).
-      { kind: 'fraction' as const, whole: null, numerator: 1, denominator: 2 },
-      { kind: 'text' as const, value: ' of the passage about?' },
-    ],
-    choices: [
-      [{ kind: 'text' as const, value: 'The first option.' }],
-      [{ kind: 'text' as const, value: 'The second option.' }],
-    ],
-    topics: [{ label: 'Reading comprehension', confidence: 'High' as const }],
-    confidence: 'High' as const,
-    // Every question points at the one shared context, including the ones on
-    // pages after the page it starts on.
-    contextId: 'context-1',
-    dependsOnUninterpretable: false,
-  }));
+  // How dense the fake's pages are, so both sides of Story 3.6's thin verdict
+  // are drivable without a second transport. One per page by default, which is
+  // thin under the default threshold.
+  const perPage = fakeQuestionsPerPage();
+
+  const questions: ExtractedQuestionPayload[] = pages.flatMap((page) =>
+    Array.from({ length: perPage }, (_unused, index) => ({
+      pageOrdinal: page.ordinal,
+      format: 'MultipleChoice' as const,
+      prompt: [
+        {
+          kind: 'text' as const,
+          value: `Question ${index + 1} on page ${page.ordinal}. What is `,
+        },
+        // Structure, never the string "1/2" (AD-32).
+        { kind: 'fraction' as const, whole: null, numerator: 1, denominator: 2 },
+        { kind: 'text' as const, value: ' of the passage about?' },
+      ],
+      choices: [
+        [{ kind: 'text' as const, value: 'The first option.' }],
+        [{ kind: 'text' as const, value: 'The second option.' }],
+      ],
+      topics: [{ label: 'Reading comprehension', confidence: 'High' as const }],
+      confidence: 'High' as const,
+      // Every question points at the one shared context, including the ones on
+      // pages after the page it starts on.
+      contextId: 'context-1',
+      dependsOnUninterpretable: false,
+    })),
+  );
 
   // Exactly one question depends on the region, so "only the dependent one is
   // unusable" is observable rather than vacuous.

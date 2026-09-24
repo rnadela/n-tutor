@@ -139,6 +139,30 @@ export interface SourceTestView {
   pages: PageImageView[];
 }
 
+/**
+ * Where the Extraction of a submitted Source Test stands, exactly as the API
+ * states it.
+ *
+ * Counts and a status, and not one word of what was read: Extraction is not a
+ * browsable surface in v0 (AD-3). `thin` is the server's own verdict on whether
+ * the usable-question count is low for the pages submitted — the web app holds
+ * no threshold and computes nothing from these counts but the sentence it shows.
+ */
+export interface ExtractionStatusView {
+  status: 'Queued' | 'Running' | 'Succeeded' | 'Failed';
+  /** Null until the job has succeeded. */
+  pageCount: number | null;
+  questionCount: number | null;
+  usableQuestionCount: number | null;
+  uninterpretableRegionCount: number | null;
+  /** `null` while there is no verdict yet; never to be read as healthy. */
+  thin: boolean | null;
+  completedAt: string | null;
+  failureKind: 'UpstreamFault' | 'ClientFault' | null;
+  failureReason: string | null;
+  retryable: boolean;
+}
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(
   /\/+$/,
   '',
@@ -563,6 +587,18 @@ export const parentApi = {
       `/parent/source-tests/${encodeURIComponent(id)}/submit`,
       { method: 'POST', headers: elevated(token) },
       parentCopy.capture.submitFailed,
+    ),
+
+  /**
+   * How the Extraction of a submitted Source Test is going, and its verdict.
+   *
+   * A Draft answers 404: there is no job until the pages are committed.
+   */
+  extraction: (token: string, id: string) =>
+    call<ExtractionStatusView>(
+      `/parent/source-tests/${encodeURIComponent(id)}/extraction`,
+      { headers: elevated(token) },
+      parentCopy.capture.generate.readFailed,
     ),
 };
 

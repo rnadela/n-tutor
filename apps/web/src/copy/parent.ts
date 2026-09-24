@@ -304,6 +304,45 @@ export const parentCopy = {
       gradeLevelsFailed: 'The grade levels could not be loaded. Try again.',
     },
 
+    /**
+     * The step between a committed upload and Epic 4's generation, and the one
+     * gate that fires on the way into it.
+     *
+     * Not one figure is stated: both counts arrive from the status read, and
+     * the verdict that decides whether the warning appears is the server's.
+     */
+    generate: {
+      heading: 'Generate a practice test',
+      /** While the job is Queued or Running. Says what is happening and why. */
+      reading: 'The pages are being read. This takes a moment.',
+      readFailed: 'The reading of this upload could not be checked. Try again.',
+      proceed: 'Continue to practice test',
+      /**
+       * Reached after the gate, whichever way the parent came through it. The
+       * generation itself is Epic 4's; this says where the flow stands.
+       */
+      reached: 'This upload is ready. Making a practice test from it is the next step.',
+
+      warningTitle: 'Fewer questions than expected',
+      /**
+       * FR-9a's two load-bearing figures, in plain words. Both are handed in;
+       * neither is computed here.
+       */
+      counts: (usable: number, pages: number) =>
+        `${usable === 1 ? '1 usable question was' : `${usable} usable questions were`} found across ${
+          pages === 1 ? '1 page' : `${pages} pages`
+        }.`,
+      /** FR-9a's third: retaking is free, and the parent is told so up front. */
+      noGenerationCharge: 'Retaking the pages uses no Generation Allowance.',
+      continueAnyway: 'Continue anyway',
+      retakePages: 'Retake the pages',
+      /**
+       * Honest about what retake does. A submitted upload is terminal, so this
+       * is a new upload rather than the old pages coming back.
+       */
+      retakeStarted: 'A new upload was started. Add the pages again.',
+    },
+
     failed: 'That change could not be saved. Try again.',
     addFailed: 'That page could not be added. Try again with another photo.',
     submitFailed: 'The pages could not be submitted. Try again.',
