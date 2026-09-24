@@ -1,9 +1,20 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 import { e2eDatabaseUrl } from './e2e/database';
 import { MAIL_LOG_FILE } from './e2e/mail-sink';
 
 const WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
 const API_ORIGIN = `http://localhost:${process.env.API_PORT ?? '3001'}`;
+
+/**
+ * Page images written by the E2E run land in a directory of that run's own,
+ * outside the repository. Declared here because Playwright replaces the API
+ * server's environment wholesale: a variable absent from the block below is
+ * absent under E2E, whatever `.env` says.
+ */
+const UPLOAD_ROOT = process.env.UPLOAD_ROOT ?? mkdtempSync(path.join(tmpdir(), 'nts-e2e-uploads-'));
 
 /** Tier-2 E2E: full stack, real Postgres, no AI module in scope (AD-22). */
 export default defineConfig({
@@ -40,6 +51,7 @@ export default defineConfig({
         ELEVATION_TTL_SECONDS: process.env.ELEVATION_TTL_SECONDS ?? '900',
         ELEVATION_CEILING_MS: process.env.ELEVATION_CEILING_MS ?? '28800000',
         WEB_ORIGIN,
+        UPLOAD_ROOT,
         MAIL_TRANSPORT: 'log',
         MAIL_FROM: 'no-reply@example.test',
         // The E2E suite reads issued reset links out of this sink; nothing in

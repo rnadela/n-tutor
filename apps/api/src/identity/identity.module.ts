@@ -61,7 +61,13 @@ import { UncommittedStateService } from './uncommitted-state.service.js';
     StudentModeGuard,
     UncommittedStateService,
   ],
-  // StudentProfileService is exported for Story 1.4's device binding.
+  // StudentProfileService is exported for Story 1.4's device binding, and again
+  // for `sourcetest`, which resolves the child a draft is opened under through
+  // it rather than through a second reader of `student_profile` (AD-17).
+  //
+  // ParentAccountService is exported alongside them because the guard another
+  // module stands behind is constructed in that module's own injector, and it
+  // takes this service.
   exports: [ParentAccountService, StudentProfileService],
 })
 export class IdentityModule {

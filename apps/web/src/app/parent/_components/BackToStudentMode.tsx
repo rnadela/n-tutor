@@ -19,7 +19,7 @@ import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import { ParentApiError, parentApi, type StudentProfileView } from '@/lib/parent-api';
 import { density } from '@/theme/tokens';
-import { endsParentView } from '../students/page';
+import { endsParentView } from '@/lib/parent-view';
 
 /**
  * Whether the parent has to be asked which child the device is handed to.

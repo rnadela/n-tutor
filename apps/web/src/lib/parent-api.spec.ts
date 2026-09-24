@@ -409,3 +409,59 @@ describe('uncommitted parent state', () => {
     }
   });
 });
+
+describe('Source Test calls', () => {
+  it('resolves a 204 delete without trying to parse an empty body', async () => {
+    const fetchMock = respondWith(204);
+    // `undefined`, and no throw: a `response.json()` on an empty body rejects,
+    // and the catch around it would report the generic failure copy for a
+    // delete that in fact succeeded.
+    await expect(parentApi.deleteSourceTestPage('t', 'st-1', 'p-1')).resolves.toBeUndefined();
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init as RequestInit).method).toBe('DELETE');
+  });
+
+  it('still reports a failed delete as a rejection', async () => {
+    respondWith(404, { message: 'gone' });
+    await expect(parentApi.deleteSourceTestPage('t', 'st-1', 'p-1')).rejects.toBeInstanceOf(
+      ParentApiError,
+    );
+  });
+
+  it('lets the browser describe a multipart body, boundary included', async () => {
+    const fetchMock = respondWith(201, { id: 'st-1', pages: [] });
+    const file = new File([new Uint8Array([1, 2, 3])], 'page.jpg', { type: 'image/jpeg' });
+    await parentApi.addSourceTestPage('t', 'st-1', file);
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const headers = new Headers((init as RequestInit).headers);
+    // A hand-set `multipart/form-data` carries no boundary, and the upload is
+    // unparseable on arrival.
+    expect(headers.get('content-type')).toBeNull();
+    expect((init as RequestInit).body).toBeInstanceOf(FormData);
+    expect(((init as RequestInit).body as FormData).get('file')).toBe(file);
+  });
+
+  it('still declares JSON on the calls that send it', async () => {
+    const fetchMock = respondWith(200, { id: 'st-1', pages: [] });
+    await parentApi.reorderSourceTestPages('t', 'st-1', ['p-2', 'p-1']);
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(new Headers((init as RequestInit).headers).get('content-type')).toBe('application/json');
+    expect((init as RequestInit).body).toBe(JSON.stringify({ pageIds: ['p-2', 'p-1'] }));
+  });
+
+  it('carries the elevation bearer on every Source Test call', async () => {
+    for (const call of [
+      () => parentApi.openSourceTest('tok', 'profile-1'),
+      () => parentApi.sourceTest('tok', 'st-1'),
+      () => parentApi.submitSourceTest('tok', 'st-1'),
+      () => parentApi.reorderSourceTestPages('tok', 'st-1', ['p-1']),
+    ]) {
+      const fetchMock = respondWith(200, { id: 'st-1', pages: [] });
+      await call();
+      const [, init] = fetchMock.mock.calls[0]!;
+      expect(new Headers((init as RequestInit).headers).get('authorization')).toBe('Bearer tok');
+      vi.unstubAllGlobals();
+    }
+  });
+});

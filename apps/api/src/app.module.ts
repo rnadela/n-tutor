@@ -9,6 +9,7 @@ import { HealthController } from './health/health.controller.js';
 import { IdentityModule } from './identity/identity.module.js';
 import { PARENT_CREDENTIAL_ROUTE } from './identity/parent-credential-route.decorator.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { SourceTestModule } from './sourcetest/source-test.module.js';
 
 export const LOGIN_THROTTLER = 'login';
 export const PARENT_THROTTLER = 'parent';
@@ -48,6 +49,9 @@ export const PARENT_THROTTLER = 'parent';
     PrismaModule,
     AdminModule,
     IdentityModule,
+    // Sole owner and sole writer of SourceTest and PageImage, and sole owner of
+    // image ingest (AD-17).
+    SourceTestModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -20,12 +20,18 @@ import Typography from '@mui/material/Typography';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
-  ParentApiError,
   parentApi,
   type AuthPolicy,
   type StudentProfileView,
   type TaxonomyItem,
 } from '@/lib/parent-api';
+import {
+  announcedText,
+  applyIfCurrent,
+  endsParentView,
+  NOTHING_ANNOUNCED,
+  type Announcement,
+} from '@/lib/parent-view';
 import { density } from '@/theme/tokens';
 
 /**
@@ -41,57 +47,18 @@ export function canCreateStudent(displayName: string, gradeLevelId: string): boo
 }
 
 /**
- * Whether a failure means the parent has to cross the PIN again, as opposed to
- * something transient they should be able to retry from where they stand.
- *
- * Only the elevation guard's own refusal ends Parent View. A 500, a 429, or a
- * 400 — including one from the unauthenticated policy read that loads alongside
- * the profiles — is a fault to show with a Retry, not a reason to throw away a
- * token that is still perfectly good.
+ * Re-exported rather than defined here: a second parent-scoped screen now needs
+ * the same three rules, so they live in `@/lib/parent-view` and both screens
+ * read them from one place. The names stay reachable here because that is where
+ * this screen's spec has always addressed them.
  */
-export function endsParentView(cause: unknown): boolean {
-  return cause instanceof ParentApiError && (cause.notElevated || cause.status === 401);
-}
-
-/**
- * The staleness guard every screen in Parent View uses: a response is applied
- * only while it is still the most recent request. Without it a superseded
- * in-flight read — outlived by Retry, or by the parent leaving — could resolve
- * after the fact and overwrite fresher state.
- */
-export function applyIfCurrent<T>(
-  current: { readonly value: number },
-  issued: number,
-  apply: (value: T) => void,
-): (value: T) => void {
-  return (value: T) => {
-    if (current.value !== issued) return;
-    apply(value);
-  };
-}
-
-/** What the live region holds: the sentence, and which announcement it is. */
-export interface Announcement {
-  text: string;
-  /** Bumped per announcement, so a repeat is still a change. */
-  seq: number;
-}
-
-export const NOTHING_ANNOUNCED: Announcement = { text: '', seq: 0 };
-
-/**
- * The live region's content.
- *
- * A screen reader announces a polite region when its text *changes*, so
- * archiving, restoring and archiving again — three actions, two distinct
- * sentences — would announce only twice. Alternating an invisible zero-width
- * space makes every announcement a change, while leaving the sentence a sighted
- * reader sees, and a test asserts on, exactly as written.
- */
-export function announcedText(announcement: Announcement): string {
-  if (announcement.text === '') return '';
-  return announcement.seq % 2 === 0 ? announcement.text : `${announcement.text}\u200B`;
-}
+export {
+  announcedText,
+  applyIfCurrent,
+  endsParentView,
+  NOTHING_ANNOUNCED,
+  type Announcement,
+} from '@/lib/parent-view';
 
 interface Draft {
   displayName: string;

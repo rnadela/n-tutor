@@ -99,6 +99,36 @@ export interface UncommittedStateView {
   expiresAt: string;
 }
 
+/** One page of a Source Test, exactly as the API states it.
+ *
+ * There is no path and no URL: stored image bytes are never served, so nothing
+ * here could point at them even if a screen wanted to.
+ */
+export interface PageImageView {
+  id: string;
+  /** Contiguous `1..N`, and the number the strip shows in text. */
+  ordinal: number;
+  state: 'Uploading' | 'Ready';
+  width: number | null;
+  height: number | null;
+  byteSize: number | null;
+  createdAt: string;
+}
+
+/** A Source Test, pages in stored order. */
+export interface SourceTestView {
+  id: string;
+  studentProfileId: string;
+  status: 'Draft' | 'Submitted';
+  createdAt: string;
+  /** Creation plus the TTL. Activity never moves it. */
+  expiresAt: string;
+  submittedAt: string | null;
+  /** The page ceiling, stated by the API so the web app owns no copy of it. */
+  maxPages: number;
+  pages: PageImageView[];
+}
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(
   /\/+$/,
   '',
@@ -203,7 +233,12 @@ async function call<T>(
   const headers = new Headers(init.headers);
   // Declared only when there is a body to describe; a GET carrying a
   // content-type describes nothing and can force a CORS preflight.
-  if (init.body !== undefined && !headers.has('content-type')) {
+  //
+  // A `FormData` body is the exception: the browser has to set the header
+  // itself, because only it knows the multipart boundary it generated. A
+  // hand-set `multipart/form-data` has no boundary in it, and the upload is
+  // unparseable on arrival.
+  if (init.body !== undefined && !headers.has('content-type') && !isFormData(init.body)) {
     headers.set('content-type', 'application/json');
   }
 
@@ -427,7 +462,90 @@ export const parentApi = {
       method: 'DELETE',
       headers: elevated(token),
     }),
+
+  // --- Source Tests ------------------------------------------------------
+  //
+  // Behind the elevation bearer like every other parent-scoped call. The two
+  // byte-carrying calls send `FormData` and deliberately set no content-type:
+  // `call` leaves it to the browser so the multipart boundary is the real one.
+
+  /** Opens the child's draft, or resumes the one already open. */
+  openSourceTest: (token: string, studentProfileId: string) =>
+    call<SourceTestView>(
+      '/parent/source-tests',
+      {
+        method: 'POST',
+        headers: elevated(token),
+        body: JSON.stringify({ studentProfileId }),
+      },
+      parentCopy.capture.failed,
+    ),
+
+  sourceTest: (token: string, id: string) =>
+    call<SourceTestView>(
+      `/parent/source-tests/${encodeURIComponent(id)}`,
+      { headers: elevated(token) },
+      parentCopy.capture.failed,
+    ),
+
+  addSourceTestPage: (token: string, id: string, file: File) =>
+    call<SourceTestView>(
+      `/parent/source-tests/${encodeURIComponent(id)}/pages`,
+      { method: 'POST', headers: elevated(token), body: pagePart(file) },
+      parentCopy.capture.addFailed,
+    ),
+
+  retakeSourceTestPage: (token: string, id: string, pageId: string, file: File) =>
+    call<SourceTestView>(
+      `/parent/source-tests/${encodeURIComponent(id)}/pages/${encodeURIComponent(pageId)}`,
+      { method: 'PUT', headers: elevated(token), body: pagePart(file) },
+      parentCopy.capture.addFailed,
+    ),
+
+  deleteSourceTestPage: (token: string, id: string, pageId: string) =>
+    call<void>(
+      `/parent/source-tests/${encodeURIComponent(id)}/pages/${encodeURIComponent(pageId)}`,
+      { method: 'DELETE', headers: elevated(token) },
+      parentCopy.capture.failed,
+    ),
+
+  /**
+   * The whole resulting order, never a direction: the server validates it as a
+   * permutation of exactly the pages it holds and applies it or rejects it
+   * whole.
+   */
+  reorderSourceTestPages: (token: string, id: string, pageIds: readonly string[]) =>
+    call<SourceTestView>(
+      `/parent/source-tests/${encodeURIComponent(id)}/pages/order`,
+      { method: 'PUT', headers: elevated(token), body: JSON.stringify({ pageIds }) },
+      parentCopy.capture.failed,
+    ),
+
+  submitSourceTest: (token: string, id: string) =>
+    call<SourceTestView>(
+      `/parent/source-tests/${encodeURIComponent(id)}/submit`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.capture.submitFailed,
+    ),
 };
+
+/** The one multipart field name both byte-carrying routes read. */
+function pagePart(file: File): FormData {
+  const form = new FormData();
+  form.append('file', file);
+  return form;
+}
+
+/**
+ * Whether a body is multipart the browser must describe itself.
+ *
+ * Guarded rather than a bare `instanceof`: this module is imported by the
+ * Node-side unit suite, where `FormData` exists but a body may be any of the
+ * other `BodyInit` shapes, and by a server render where it may not exist at all.
+ */
+function isFormData(body: BodyInit | null | undefined): boolean {
+  return typeof FormData !== 'undefined' && body instanceof FormData;
+}
 
 /** The elevation credential's one and only carrier. */
 function elevated(token: string): HeadersInit {

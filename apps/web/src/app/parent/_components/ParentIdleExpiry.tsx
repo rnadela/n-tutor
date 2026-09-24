@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useElevation } from '@/lib/elevation';
 import { createIdleClock, type RefreshOutcome, type TokenInstants } from '@/lib/idle-expiry';
 import { parentApi } from '@/lib/parent-api';
-import { endsParentView } from '../students/page';
+import { endsParentView } from '@/lib/parent-view';
 
 /**
  * What a failed refresh means for Parent View.

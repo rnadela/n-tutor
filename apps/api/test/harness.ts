@@ -109,6 +109,13 @@ export async function createHarness(): Promise<Harness> {
  * `grade_level`: a Student Profile holds its Grade Level with `onDelete:
  * Restrict`, so the truncate has to name it or the statement fails.
  *
+ * `source_test` and `page_image` are listed for the same reason
+ * `student_profile` is: a Source Test holds its Parent Account and its Student
+ * Profile with `onDelete: Restrict`, so the truncate has to name it. `page_image`
+ * is named beside it rather than left to the Cascade, because the two tables are
+ * one story's substrate and a reader looking for "are the pages wiped too?"
+ * should find the answer in the list itself.
+ *
  * `uncommitted_state` is deliberately *not* named: its FK to `student_profile`
  * is `onDelete: Cascade`, so `TRUNCATE ... CASCADE` reaches it through the
  * profile. Naming it would be harmless but would suggest the cascade does not
@@ -116,7 +123,7 @@ export async function createHarness(): Promise<Harness> {
  */
 export async function resetTaxonomy(prisma: PrismaService): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "student_profile", "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE',
+    'TRUNCATE TABLE "page_image", "source_test", "student_profile", "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE',
   );
 }
 
@@ -129,7 +136,7 @@ export async function resetTaxonomy(prisma: PrismaService): Promise<void> {
  */
 export async function resetParentAccounts(prisma: PrismaService): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "student_profile", "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE',
+    'TRUNCATE TABLE "page_image", "source_test", "student_profile", "password_reset", "account_consent", "account_timezone", "parent_account", "admin_audit" CASCADE',
   );
 }
 

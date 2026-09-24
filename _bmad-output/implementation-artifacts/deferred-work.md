@@ -565,3 +565,35 @@ source_spec: `spec-1-7-design-system-foundation.md`
 severity: low
 reason: The assertion checks the literal string `'3 * var(--mui-spacing, 8px)'`, which is MUI's internal `spacing()` output format rather than this story's own token. `package.json` has already carried multiple major-version bumps across this epic, so this coupling is more likely than most to need attention on the next one.
 status: open
+
+### DW-72: The api integration suite is flaky under a full-suite run, failing a different spec on each run with unrelated 404s or 60s timeouts.
+origin: spec-deferred d2bf38dd80a2
+location: apps/api/vitest.config.ts, apps/api/test/harness.ts
+source_spec: `spec-3-2-page-management-before-submit.md`
+severity: medium
+reason: Reproduced on HEAD (b38a804) with this story's changes stashed: a full `pnpm --filter api run test` failed `uncommitted-state.int-spec.ts` with "expected 200 OK, got 404 Not Found". Three runs with the story applied failed `student-mode.int-spec.ts`, then `parent-auth.int-spec.ts`, then `taxonomy.int-spec.ts`; each of those files passes when run alone. The suite declares `fileParallelism: false`, so this is cross-file state or resource leakage between Nest apps rather than parallelism.
+status: open
+
+### DW-73: Two password-reset E2E tests fail on a strict-mode violation because a second role="status" region exists on the page.
+origin: spec-deferred 014852ca6cea
+location: e2e/tests/parent-auth.spec.ts
+source_spec: `spec-3-2-page-management-before-submit.md`
+severity: medium
+reason: `e2e/tests/parent-auth.spec.ts` uses `getByRole('status')`, which now matches both the page's own region and the global AnnouncementRegion that ThemeRegistry mounted in Story 1.7. Both ThemeRegistry.tsx and the reset-confirm page are unmodified at HEAD, and the failure artifacts were already in the working tree when this run started.
+status: open
+
+### DW-74: The in-flight "adding a page" indicator and the blocked-state reasons (page-limit, submit-blocked) render as plain text with no live-region wiring, so a screen-reader user only learns of those state
+origin: spec-deferred 9d11992f5f68
+location: apps/web/src/app/parent/capture/page.tsx
+source_spec: `spec-3-2-page-management-before-submit.md`
+severity: low
+reason: `apps/web/src/app/parent/capture/page.tsx`: the `data-testid="adding"` span, `parentCopy.capture.limitReached(maxPages)`, and `parentCopy.capture.submitBlocked` are all plain `Typography` with no `role="status"` and no `useAnnounce()` call, unlike every completed add/move/delete/retake action, which is announced.
+status: open
+
+### DW-75: page.tsx's own gating and orchestration logic (isDraft, addable, submittable, the ordinal lookups in retakePage/deletePage) is exercised in page.spec.tsx only by grepping the component's source text
+origin: spec-deferred 4c9f70cf2e05
+location: apps/web/src/app/parent/capture/page.tsx, apps/web/src/app/parent/capture/page.spec.tsx
+source_spec: `spec-3-2-page-management-before-submit.md`
+severity: low
+reason: `apps/web/src/app/parent/capture/page.spec.tsx` asserts things like `expect(PAGE_SOURCE).toContain('const isDraft = sourceTest !== null')`. These assertions execute nothing: a differently-phrased but equally buggy implementation would pass, and a correct implementation phrased differently would fail. Real behavioral coverage of this logic exists only in `e2e/tests/parent-capture.spec.ts`, which is a full-stack Playwright suite rather than a colocated, DOM-free spec on an exported function -- the shape the story's own "pure functions with colocated specs" language points at. `apps/web/src/lib/page-order.ts` already extracts the narrower ordering/count rules the story's own task list names; this is about the rest of the screen's decision logic that stayed inline.
+status: open

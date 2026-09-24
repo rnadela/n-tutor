@@ -109,6 +109,9 @@ export default function ParentViewPage() {
             <Link component={NextLink} href="/parent/students">
               {parentCopy.parentView.students}
             </Link>
+            <Link component={NextLink} href="/parent/capture">
+              {parentCopy.parentView.capture}
+            </Link>
             <Link component={NextLink} href="/parent/pin/change">
               {parentCopy.parentView.changePin}
             </Link>

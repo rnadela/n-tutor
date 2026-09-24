@@ -141,6 +141,9 @@ model ParentAccount {
   consents       AccountConsent[]
   passwordResets PasswordReset[]
   students       StudentProfile[]
+  /// Source Tests opened on this account. `Restrict` from the other side: a
+  /// Source Test is never destroyed as a side effect of an account removal.
+  sourceTests    SourceTest[]
   /// Uncommitted parent work saved on this account. Cascades from here, like
   /// the consents and reset tokens above it: a row that was never committed is
   /// not something a deletion has to preserve, and leaves no tombstone.
@@ -177,6 +180,10 @@ model StudentProfile {
   /// Uncommitted parent work saved under this child. Cascades from here: a row
   /// that was never committed is not something a deletion has to preserve.
   uncommitted UncommittedState[]
+
+  /// Source Tests photographed for this child. `Restrict` from the other side,
+  /// like the profile's own relations: nothing here goes as a side effect.
+  sourceTests SourceTest[]
 
   /// The list read and the selectable read are both scoped by account and
   /// filtered by archive state.
@@ -292,4 +299,110 @@ model AccountTimezone {
   /// lookup index for the history read.
   @@unique([parentAccountId, effectiveFrom])
   @@map("account_timezone")
+}
+
+// Source Test module entity cluster (AD-17).
+// `sourcetest` is the sole writer of SourceTest and PageImage, and the sole
+// owner of image ingest. Nothing outside SourceTestService touches either
+// delegate.
+
+/// Where a Source Test stands. `Draft` is the only state page management acts
+/// on; `Submitted` is terminal for this story — Story 3.4's legibility check
+/// and Upload Allowance charge, and Story 3.5's Extraction, hang off it later.
+enum SourceTestStatus {
+  Draft
+  Submitted
+
+  @@map("source_test_status")
+}
+
+/// Where one Page Image stands. `Uploading` is the state the row is INSERTed
+/// in, **before any byte is written** (AD-15): the row is the authority from
+/// the first byte, so a directory scan never has to be. It leaves `Uploading`
+/// only once ingest has sniffed, rotated and re-encoded the bytes (AD-28), so
+/// no downstream consumer ever sees a format the model cannot read.
+enum PageImageState {
+  Uploading
+  Ready
+
+  @@map("page_image_state")
+}
+
+/// One photographed paper test: 1–10 Page Images in an explicit order.
+///
+/// Three rules define the row:
+///
+/// - It is keyed to the Parent Account **and** the Student Profile it was
+///   opened under. Every read and every write is scoped by the account, which
+///   comes from the elevation token and never from the path or body (AD-18).
+/// - It lives 72 hours from `createdAt` while it is a draft, never extended by
+///   activity — the same single TTL the uncommitted-state mechanism runs on
+///   (AD-16). The figure is stated once, in `uncommitted-state-policy.ts`.
+/// - Both parent relations are `Restrict`: a Source Test is never destroyed as
+///   a side effect of something else being removed. Epic 8 owns deletion and
+///   expiry semantics deliberately, so nothing here sweeps or tombstones.
+model SourceTest {
+  id               String           @id @default(uuid())
+  parentAccountId  String
+  studentProfileId String
+  status           SourceTestStatus @default(Draft)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  /// Created-at plus the one TTL, written once and never moved by activity.
+  expiresAt        DateTime
+  /// Null until submission; set once, in the same transaction as the status.
+  submittedAt      DateTime?
+
+  parentAccount  ParentAccount  @relation(fields: [parentAccountId], references: [id], onDelete: Restrict)
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Restrict)
+
+  /// Cascade in this direction only: a page has no existence apart from the
+  /// Source Test it is a page of.
+  pages PageImage[]
+
+  /// The resume read: the account's live draft for one child.
+  ///
+  /// A partial unique index enforces that there is at most **one** of them:
+  /// `("parentAccountId", "studentProfileId") WHERE status = 'Draft'`. Prisma's
+  /// schema language cannot express a partial index, so it is written by hand
+  /// in the migration; without it "one draft per child" would rest on a read
+  /// followed by a write, which two concurrent opens slip straight through.
+  @@index([parentAccountId, studentProfileId, status])
+  /// The expiry filter every read carries.
+  @@index([expiresAt])
+  @@map("source_test")
+}
+
+/// One page of a Source Test, at a contiguous ordinal.
+///
+/// `@@unique([sourceTestId, ordinal])` is what makes "contiguous 1..N" a
+/// constraint rather than an intention. Reorder and delete rewrite the ordinals
+/// inside one transaction — in two phases, because a straight rewrite collides
+/// against this index mid-statement — and never re-read or re-process a byte.
+///
+/// `storagePath` is derived from `id` alone and never from client input; that
+/// is the path-traversal control (AD-15). The columns below the state are null
+/// exactly while the row is `Uploading`, and are written by ingest in the same
+/// update that promotes it to `Ready`.
+model PageImage {
+  id           String         @id @default(uuid())
+  sourceTestId String
+  ordinal      Int
+  state        PageImageState @default(Uploading)
+  /// Derived from `id`. Never supplied or influenced by the client, and never
+  /// served as a static file.
+  storagePath  String?
+  /// The stored format — always the re-encoded one, never what was declared.
+  mimeType     String?
+  width        Int?
+  height       Int?
+  byteSize     Int?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  sourceTest SourceTest @relation(fields: [sourceTestId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceTestId, ordinal])
+  @@index([sourceTestId])
+  @@map("page_image")
 }

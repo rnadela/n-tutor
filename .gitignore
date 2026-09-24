@@ -29,3 +29,4 @@ blob-report/
 
 # Seed build output
 apps/api/.seed/
+.uploads/

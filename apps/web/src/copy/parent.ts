@@ -108,6 +108,8 @@ export const parentCopy = {
     ceilingLabel: 'The PIN is required again after',
     changePin: 'Change PIN',
     students: 'Student Profiles',
+    /** The way in to page management; the surface itself is titled "Pages". */
+    capture: 'Upload a test',
     loading: 'Loading Parent View…',
 
     /**
@@ -186,6 +188,81 @@ export const parentCopy = {
     restored: (name: string) => `${name} is active again.`,
 
     failed: 'That change could not be saved. Try again.',
+    back: 'Back to Parent View',
+  },
+  /**
+   * The page-management strip, before a Source Test is submitted.
+   *
+   * The visible strings are the capture mockup's own. The ordinal is a
+   * parameter everywhere it appears — in the visible label and in every
+   * icon-control's accessible name alike — because the strip's whole
+   * accessibility rule is that a control names the page it acts on.
+   *
+   * Not one figure is stated: the page ceiling arrives on every Source Test
+   * read as `maxPages`.
+   */
+  capture: {
+    title: 'Pages',
+    orderLabel: 'Order',
+    /** The mockup's caption, with both figures supplied by the API. */
+    countLine: (count: number, max: number) =>
+      `Pages are used in this order. ${count} of ${max} page images.`,
+    /**
+     * The number the strip shows in text on every row. It is the row's whole
+     * visible identity: this story renders no thumbnail, because stored image
+     * bytes are never served.
+     */
+    pageLabel: (ordinal: number) => `Page ${ordinal}`,
+    childLabel: 'Child',
+    loading: 'Loading the pages…',
+    empty: 'There are no pages yet. Add the first one below.',
+    noProfiles: 'There is no profile to upload for yet. Add one first.',
+
+    addPage: 'Add page',
+    adding: 'Adding the page…',
+    /** Says why the add control is gone, rather than leaving it unexplained. */
+    limitReached: (max: number) => `This upload already holds ${max} pages.`,
+
+    moveUp: 'Move up',
+    moveDown: 'Move down',
+    /** Icon-only controls name the page ordinal they act on. */
+    moveUpFor: (ordinal: number) => `Move page ${ordinal} up`,
+    moveDownFor: (ordinal: number) => `Move page ${ordinal} down`,
+    retake: 'Retake',
+    retakeFor: (ordinal: number) => `Retake page ${ordinal}`,
+    delete: 'Delete',
+    deleteFor: (ordinal: number) => `Delete page ${ordinal}`,
+    deleteConfirm: (ordinal: number, total: number) =>
+      ordinal < total
+        ? `Delete page ${ordinal}? The pages after it are renumbered. The photo is removed.`
+        : `Delete page ${ordinal}? The photo is removed.`,
+
+    submit: 'Check pages',
+    submitting: 'Checking…',
+    /**
+     * Shown beside the disabled submit control. The button being disabled is a
+     * courtesy; this sentence is what makes the refusal legible, and the server
+     * refuses a zero-page submission whatever the browser did.
+     */
+    submitBlocked: 'Add at least one page before submitting.',
+
+    added: (ordinal: number) => `Page ${ordinal} was added.`,
+    deleted: (ordinal: number, total: number) =>
+      ordinal < total
+        ? `Page ${ordinal} was deleted. The pages after it are renumbered.`
+        : `Page ${ordinal} was deleted.`,
+    retaken: (ordinal: number) => `Page ${ordinal} was replaced.`,
+    moved: (from: number, to: number) => `Page ${from} is now page ${to}.`,
+    submitted: 'The pages were submitted.',
+    /**
+     * A submitted upload is shown rather than hidden — the work did not vanish
+     * — and the sentence says plainly why nothing on it can be changed.
+     */
+    submittedNote: 'These pages were submitted. Nothing on this upload can be changed now.',
+
+    failed: 'That change could not be saved. Try again.',
+    addFailed: 'That page could not be added. Try again with another photo.',
+    submitFailed: 'The pages could not be submitted. Try again.',
     back: 'Back to Parent View',
   },
   errors: {

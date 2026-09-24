@@ -241,8 +241,10 @@ describe('save when the profile is removed between the check and the write', () 
 describe('the sweep', () => {
   it('deletes only the batch it selected, never an unqualified sweep', async () => {
     const ids = Array.from({ length: 5 }, (_, index) => ({ id: `dead-${index}` }));
-    const findMany = vi.fn(async (_args: unknown) => ids);
-    const deleteMany = vi.fn(async (_args: unknown) => ({ count: ids.length }));
+    const findMany = vi.fn<(args: unknown) => Promise<typeof ids>>(async () => ids);
+    const deleteMany = vi.fn<(args: unknown) => Promise<{ count: number }>>(async () => ({
+      count: ids.length,
+    }));
     const prisma = {
       uncommittedState: { findMany, deleteMany },
     } as unknown as PrismaService;
