@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import type {
   AiFailureKind,
@@ -14,8 +21,15 @@ import {
   type ExtractionForGeneration,
   type ExtractionReader,
 } from '../extraction/extraction-reader.js';
-import { isRichText, plainTextOf, type RichText } from '../extraction/rich-text.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  RICH_TEXT_EMPTY,
+  isRichText,
+  plainTextOf,
+  richTextFromPlainText,
+  type RichText,
+} from '../extraction/rich-text.js';
+import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
+import { renumbered } from '../sourcetest/source-test-policy.js';
 import { SOURCE_TEST_READER, type SourceTestReader } from '../sourcetest/source-test-reader.js';
 import {
   EXTRACTION_NOT_READY,
@@ -41,9 +55,15 @@ import {
   type GenerationWeighting,
 } from './practice-test-policy.js';
 import {
+  ANSWER_FORBIDDEN,
+  CHOICES_FORBIDDEN,
+  CHOICES_MISMATCHED,
+  EditedQuestionInvalid,
   GenerationPayloadInvalid,
   normalizePrompt,
+  validateEditedQuestion,
   validateGenerationPayload,
+  type EditedQuestion,
   type NormalizedPracticeTest,
 } from './practice-test-payload.js';
 import { buildGenerationPrompt } from './practice-test-prompt.js';
@@ -523,76 +543,292 @@ export class PracticeTestService {
    * would head the screen "draft 2 of 1".
    */
   async draftFor(parentAccountId: string, practiceTestId: string): Promise<PracticeTestDraftView> {
-    const { draft, siblingCount } = await this.prisma.withTransaction(async (tx) => {
-      const row = await tx.practiceTest.findFirst({
-        where: { id: practiceTestId, parentAccountId, status: 'Draft' },
+    return this.prisma.withTransaction((tx) =>
+      this.draftViewIn(tx, parentAccountId, practiceTestId),
+    );
+  }
+
+  /**
+   * The draft view, read inside whatever transaction the caller is in.
+   *
+   * One reader for the read and for both mutations, rather than a second mapper
+   * written beside each write: an edit that answered with a differently-shaped
+   * draft than the read does would put the screen's re-render and its first load
+   * out of step on exactly the rows that were just changed.
+   *
+   * `Draft` is in the `where` beside the account, so a `Released`, `Discarded`,
+   * foreign or unknown id all answer the same 404 **by construction** rather
+   * than by a check somebody has to remember to make (AD-18).
+   */
+  private async draftViewIn(
+    tx: TransactionClient,
+    parentAccountId: string,
+    practiceTestId: string,
+  ): Promise<PracticeTestDraftView> {
+    const draft = await tx.practiceTest.findFirst({
+      where: { id: practiceTestId, parentAccountId, status: 'Draft' },
+      select: DRAFT_SELECT,
+    });
+    // The one sentence all three refusals share. Nothing about the answer
+    // says which of them it was. Thrown inside the transaction, which — on the
+    // read path — reads and writes nothing there is anything to roll back.
+    if (draft === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+
+    const siblingCount = await tx.practiceTest.count({
+      where: { parentAccountId, generationJobId: draft.generationJobId, status: 'Draft' },
+    });
+    return draftViewOf(draft, siblingCount);
+  }
+
+  /**
+   * Rewrites one Question of a draft: its prompt, its free-text answer, its
+   * option bodies, and which option is correct.
+   *
+   * The edited text **is** the Question. There is no second "original" column,
+   * no revision history and no shadow copy: what is stored here is exactly what
+   * the student will later be graded against, which is the whole reason a human
+   * quality gate is worth having.
+   *
+   * Two things happen before a row is written. The plain text a parent typed
+   * goes through `richTextFromPlainText` — the one inverse of `plainTextOf`
+   * (AD-32) — so a fraction stays structure; and the *merged* result, stored
+   * columns and edit together, goes through `validateEditedQuestion`, the same
+   * invariants a generated payload satisfies. A Multiple Choice question that
+   * would be left with no correct option is refused with the module's own
+   * existing sentence, and nothing is written.
+   *
+   * `format` is not editable and Topics are not editable (AD-11, Epic 7), and
+   * neither the Practice Test's `status` nor its `chargedAt` is touched: an
+   * edit is not a transition and not a charge.
+   */
+  async editQuestion(
+    parentAccountId: string,
+    practiceTestId: string,
+    questionId: string,
+    input: EditQuestionInput,
+  ): Promise<PracticeTestDraftView> {
+    const view = await this.prisma.withTransaction(async (tx) => {
+      const stored = await tx.practiceTestQuestion.findFirst({
+        // The pair must match, and the Practice Test must be this account's own
+        // draft: a valid question id belonging to a different Practice Test is
+        // refused exactly as an unknown one is.
+        where: {
+          id: questionId,
+          practiceTestId,
+          practiceTest: { parentAccountId, status: 'Draft' },
+        },
         select: {
           id: true,
-          sourceTestId: true,
-          studentProfileId: true,
-          status: true,
-          generationJobId: true,
-          ordinal: true,
-          questionCount: true,
-          createdAt: true,
-          questions: {
-            orderBy: { ordinal: 'asc' },
-            select: {
-              id: true,
-              ordinal: true,
-              format: true,
-              prompt: true,
-              answer: true,
-              choices: {
-                orderBy: { ordinal: 'asc' },
-                select: { ordinal: true, body: true, isCorrect: true },
-              },
-              topics: {
-                orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-                select: { label: true },
-              },
-            },
-          },
+          format: true,
+          prompt: true,
+          answer: true,
+          choices: { orderBy: { ordinal: 'asc' }, select: { ordinal: true, body: true } },
         },
       });
-      // The one sentence all three refusals share. Nothing about the answer
-      // says which of them it was. Thrown inside the transaction, which reads
-      // and writes nothing there is anything to roll back.
-      if (row === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      if (stored === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
 
+      const multipleChoice = stored.format === 'MultipleChoice';
+      // Shape refusals that do not need the merged question to be built first,
+      // in the module's own sentences rather than a new one each.
+      if (multipleChoice && input.answer !== undefined) refuseEdit(ANSWER_FORBIDDEN);
+      if (!multipleChoice && (input.choices !== undefined || input.correctOrdinal !== undefined)) {
+        refuseEdit(CHOICES_FORBIDDEN);
+      }
+
+      const storedOrdinals = stored.choices.map((choice) => choice.ordinal);
+      const bodies = new Map(input.choices?.map((choice) => [choice.ordinal, choice.body]) ?? []);
+      // An edit that names an ordinal twice is a restatement that contradicts
+      // itself; the Map would silently keep the last one.
+      if (bodies.size !== (input.choices?.length ?? 0)) refuseEdit(CHOICES_MISMATCHED);
+
+      const edited = validatedEdit(
+        {
+          format: stored.format,
+          prompt: input.prompt === undefined ? storedRichText(stored.prompt) : parsed(input.prompt),
+          answer: multipleChoice
+            ? null
+            : input.answer === undefined
+              ? stored.answer === null
+                ? null
+                : storedRichText(stored.answer)
+              : parsed(input.answer),
+          choices: stored.choices.map((choice) => ({
+            ordinal: choice.ordinal,
+            body:
+              bodies.get(choice.ordinal) === undefined
+                ? storedRichText(choice.body)
+                : parsed(bodies.get(choice.ordinal)!),
+            // Absent `correctOrdinal` on a Multiple Choice edit leaves no
+            // option flagged and is refused below: an edit of the options
+            // states which one is right, rather than inheriting an answer that
+            // may no longer belong to the body it was flagged on.
+            isCorrect: choice.ordinal === input.correctOrdinal,
+          })),
+        },
+        // Restated in full or not at all — but only when it was restated: an
+        // edit that touches no option leaves every stored body where it is.
+        input.choices === undefined ? storedOrdinals : [...bodies.keys()],
+      );
+
+      const writtenQuestion = await tx.practiceTestQuestion.updateMany({
+        where: { id: stored.id },
+        data: {
+          prompt: edited.prompt,
+          // `DbNull` rather than a bare `null`, for the reason `land` states:
+          // on a nullable Json column Prisma refuses an ambiguous `null`.
+          answer: edited.answer ?? Prisma.DbNull,
+        },
+      });
+      // Deleted between the read above and this statement: the same 404 the
+      // choices loop below gives a removed option, not Prisma's own fault.
+      if (writtenQuestion.count !== 1) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      for (const choice of edited.choices) {
+        const written = await tx.practiceTestChoice.updateMany({
+          where: { questionId: stored.id, ordinal: choice.ordinal },
+          data: { body: choice.body, isCorrect: choice.isCorrect },
+        });
+        // A row that was not there to write is an option removed between the
+        // read above and this statement. Answering 200 on a write that landed
+        // nowhere would tell a parent their option was rewritten when it was
+        // not, so the whole edit rolls back on the module's one sentence.
+        if (written.count !== 1) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      }
+
+      return this.draftViewIn(tx, parentAccountId, practiceTestId);
+    });
+
+    // After the commit, never inside it: a log line written in the transaction
+    // survives a rollback and would assert an edit that never landed.
+    // Identifiers only — not a word of the prompt, the option or the Topic that
+    // was just rewritten (AD-20).
+    this.logger.log(`Practice test ${practiceTestId} had question ${questionId} edited.`);
+    return view;
+  }
+
+  /**
+   * Deletes one Question of a draft, renumbers what is left, and discards the
+   * Practice Test when nothing is left at all.
+   *
+   * One transaction, and it has to be: the delete, the renumber and the
+   * `questionCount` rewrite are one fact about the draft, and committing any
+   * two of them without the third leaves the stored count disagreeing with the
+   * list, or leaves a gap in the heading numbers a parent reads as a Question
+   * that vanished.
+   *
+   * Deleting the **last** Question sets `Discarded` here and by no other path —
+   * the acceptance criterion names it, and `Released` has no path in this story
+   * at all. `chargedAt` is neither cleared nor rewritten: a discard does not
+   * refund (AD-14).
+   */
+  async deleteQuestion(
+    parentAccountId: string,
+    practiceTestId: string,
+    questionId: string,
+  ): Promise<PracticeTestDraftView> {
+    const { view, discarded } = await this.prisma.withTransaction(async (tx) => {
+      const removed = await tx.practiceTestQuestion.deleteMany({
+        where: {
+          id: questionId,
+          practiceTestId,
+          practiceTest: { parentAccountId, status: 'Draft' },
+        },
+      });
+      // Nothing removed is the one refusal every other id shape gets: an
+      // unknown question, one of another draft, a released draft, a foreign
+      // account (AD-18). Scoped inside the statement, never checked before it.
+      if (removed.count !== 1) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+
+      const survivors = await tx.practiceTestQuestion.findMany({
+        where: { practiceTestId },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      });
+      await this.rewriteQuestionOrdinals(
+        tx,
+        practiceTestId,
+        survivors.map((question) => question.id),
+      );
+
+      await tx.practiceTest.update({
+        where: { id: practiceTestId },
+        data: {
+          questionCount: survivors.length,
+          // The last Question taken away leaves a Practice Test with nothing in
+          // it, which is not a thing to release. `chargedAt` is absent on
+          // purpose: a discard does not refund (AD-14).
+          ...(survivors.length === 0 ? { status: 'Discarded' as PracticeTestStatus } : {}),
+        },
+        select: { id: true },
+      });
+
+      if (survivors.length > 0) {
+        return {
+          view: await this.draftViewIn(tx, parentAccountId, practiceTestId),
+          discarded: false,
+        };
+      }
+
+      // The draft is no longer a draft, so the `Draft`-scoped read above would
+      // refuse it — correctly, and with the same sentence an unknown id gets.
+      // The view is built here instead, carrying `status: 'Discarded'` and no
+      // questions, because that is the honest answer to what just happened: the
+      // screen reads the status and goes back to Pending drafts rather than
+      // having to read a refusal as a success. A later read of the same id does
+      // answer the ordinary 404, which is the acceptance criterion.
+      const row = await tx.practiceTest.findFirst({
+        where: { id: practiceTestId, parentAccountId },
+        select: DRAFT_SELECT,
+      });
+      // The row this same transaction just discarded, gone by the time it is
+      // read back: the module's one sentence, not Prisma's own missing-row fault.
+      if (row === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
       return {
-        draft: row,
-        siblingCount: await tx.practiceTest.count({
-          where: { parentAccountId, generationJobId: row.generationJobId, status: 'Draft' },
-        }),
+        view: draftViewOf(
+          row,
+          await tx.practiceTest.count({
+            where: { parentAccountId, generationJobId: row.generationJobId, status: 'Draft' },
+          }),
+        ),
+        discarded: true,
       };
     });
 
-    return {
-      id: draft.id,
-      sourceTestId: draft.sourceTestId,
-      studentProfileId: draft.studentProfileId,
-      status: draft.status,
-      ordinal: draft.ordinal,
-      siblingCount,
-      questionCount: draft.questionCount,
-      createdAt: draft.createdAt.toISOString(),
-      questions: draft.questions.map((question) => ({
-        id: question.id,
-        ordinal: question.ordinal,
-        format: question.format,
-        prompt: storedRichText(question.prompt),
-        // A MultipleChoice question's column is SQL NULL, and Prisma reads it
-        // back as `null` — the flagged choice is the answer.
-        answer: question.answer === null ? null : storedRichText(question.answer),
-        choices: question.choices.map((choice) => ({
-          ordinal: choice.ordinal,
-          body: storedRichText(choice.body),
-          isCorrect: choice.isCorrect,
-        })),
-        topics: question.topics.map((topic) => topic.label),
-      })),
-    };
+    // Identifiers and counts. Never a word of what was deleted (AD-20).
+    this.logger.log(
+      discarded
+        ? `Practice test ${practiceTestId} was discarded: its last question ${questionId} was deleted.`
+        : `Practice test ${practiceTestId} had question ${questionId} deleted.`,
+    );
+    return view;
+  }
+
+  /**
+   * The two-phase ordinal rewrite `@@unique([practiceTestId, ordinal])` forces,
+   * exactly as `source-test.service.ts` does it for pages.
+   *
+   * A straight rewrite collides mid-statement — moving question 3 to 2 hits the
+   * row still sitting at 2 — so every ordinal is first moved out of the
+   * positive range in one statement, then written back as `1..N`. Both phases
+   * are inside the caller's transaction, so no other reader ever observes the
+   * negative interval and the contiguity invariant holds at every committed
+   * boundary.
+   */
+  private async rewriteQuestionOrdinals(
+    tx: TransactionClient,
+    practiceTestId: string,
+    orderedIds: readonly string[],
+  ): Promise<void> {
+    if (orderedIds.length === 0) return;
+    await tx.$executeRaw`UPDATE "practice_test_question" SET "ordinal" = -"ordinal" WHERE "practiceTestId" = ${practiceTestId}`;
+    for (const { id, ordinal } of renumbered(orderedIds)) {
+      // `updateMany`, not `update`: a row removed between the read above and
+      // this statement would make `update` throw Prisma's missing-row fault,
+      // which would escape as a 500 rather than as this module's own answer.
+      await tx.practiceTestQuestion.updateMany({
+        where: { id, practiceTestId },
+        data: { ordinal },
+      });
+    }
   }
 
   /**
@@ -1106,6 +1342,138 @@ function viewOf(job: JobRow): GenerationJobView {
  */
 function storedRichText(value: Prisma.JsonValue): RichText {
   return value as unknown as RichText;
+}
+
+/**
+ * Everything the review screen reads a draft by, selected in one place.
+ *
+ * One `select` for the read and for both mutations, so an edit's answer and a
+ * first load are the same shape by construction rather than by two lists being
+ * kept in step by hand.
+ */
+const DRAFT_SELECT = {
+  id: true,
+  sourceTestId: true,
+  studentProfileId: true,
+  status: true,
+  generationJobId: true,
+  ordinal: true,
+  questionCount: true,
+  createdAt: true,
+  questions: {
+    orderBy: { ordinal: 'asc' },
+    select: {
+      id: true,
+      ordinal: true,
+      format: true,
+      prompt: true,
+      answer: true,
+      choices: {
+        orderBy: { ordinal: 'asc' },
+        select: { ordinal: true, body: true, isCorrect: true },
+      },
+      topics: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { label: true },
+      },
+    },
+  },
+} as const satisfies Prisma.PracticeTestSelect;
+
+type DraftRow = Prisma.PracticeTestGetPayload<{ select: typeof DRAFT_SELECT }>;
+
+/**
+ * The stored draft as the screen reads it.
+ *
+ * The stored `Json` travels out as it is stored. It was parsed by
+ * `parseRichText` on the way in — by generation, or by the edit path's single
+ * inverse — and re-parsing on the way out would be a second chance for the two
+ * readings to disagree about a row neither of them wrote.
+ */
+function draftViewOf(draft: DraftRow, siblingCount: number): PracticeTestDraftView {
+  return {
+    id: draft.id,
+    sourceTestId: draft.sourceTestId,
+    studentProfileId: draft.studentProfileId,
+    status: draft.status,
+    ordinal: draft.ordinal,
+    siblingCount,
+    questionCount: draft.questionCount,
+    createdAt: draft.createdAt.toISOString(),
+    questions: draft.questions.map((question) => ({
+      id: question.id,
+      ordinal: question.ordinal,
+      format: question.format,
+      prompt: storedRichText(question.prompt),
+      // A MultipleChoice question's column is SQL NULL, and Prisma reads it
+      // back as `null` — the flagged choice is the answer.
+      answer: question.answer === null ? null : storedRichText(question.answer),
+      choices: question.choices.map((choice) => ({
+        ordinal: choice.ordinal,
+        body: storedRichText(choice.body),
+        isCorrect: choice.isCorrect,
+      })),
+      topics: question.topics.map((topic) => topic.label),
+    })),
+  };
+}
+
+/**
+ * One edit's whole payload, as the controller hands it over: plain text, and
+ * nothing already turned into segments.
+ *
+ * Every field is optional and an absent field means "leave what is stored",
+ * which is what makes editing one option body a one-field request rather than a
+ * restatement of the whole Question.
+ *
+ * **One exception, and it is deliberate.** A Multiple Choice edit must always
+ * restate `correctOrdinal`: an absent one leaves no option flagged and is
+ * refused `ONE_CORRECT_CHOICE_REQUIRED`. Inheriting the stored flag would mean
+ * an edit that rewrote the option bodies could silently leave "correct" on a
+ * body that no longer says what it said when it was flagged.
+ */
+export interface EditQuestionInput {
+  prompt?: string;
+  answer?: string;
+  choices?: { ordinal: number; body: string }[];
+  correctOrdinal?: number;
+}
+
+/** A fixed sentence of this module's own, as the 400 a parent's edit gets. */
+function refuseEdit(message: string): never {
+  throw new BadRequestException(message);
+}
+
+/**
+ * Plain text as the segments it will be stored as (AD-32).
+ *
+ * An empty field, a whitespace-only field and a zero denominator all throw out
+ * of `parseRichText`, and each is a thing a parent typed rather than a fault of
+ * this server — so each becomes a 400 carrying the rich-text module's own
+ * sentence, and nothing is written.
+ */
+function parsed(text: string): RichText {
+  try {
+    return richTextFromPlainText(text);
+  } catch (cause) {
+    throw new BadRequestException(cause instanceof Error ? cause.message : RICH_TEXT_EMPTY);
+  }
+}
+
+/**
+ * The shared Question invariants, answered as the 400 an edit gets.
+ *
+ * The rules are the payload module's — one set for a generated payload and a
+ * parent edit alike — and only the *fault* differs: nothing here is retried,
+ * because no provider is at fault.
+ */
+function validatedEdit(edited: EditedQuestion, storedOrdinals: readonly number[]): EditedQuestion {
+  try {
+    return validateEditedQuestion(edited, storedOrdinals);
+  } catch (cause) {
+    if (cause instanceof EditedQuestionInvalid) throw new BadRequestException(cause.message);
+    throw cause;
+  }
 }
 
 /**

@@ -37,6 +37,15 @@ const {
   resetTaxonomy,
   setPinFor,
 } = await import('./harness.js');
+const {
+  ANSWER_FORBIDDEN,
+  ANSWER_REQUIRED,
+  CHOICES_FORBIDDEN,
+  CHOICES_MISMATCHED,
+  MAX_CHOICES,
+  ONE_CORRECT_CHOICE_REQUIRED,
+} = await import('../src/practicetest/practice-test-payload.js');
+const { Prisma } = await import('../src/generated/prisma/client.js');
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 
@@ -1592,6 +1601,483 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       // Identifiers and counts only (AD-20): no Question text, no Topic label,
       // no allowance figure, no tier, no model.
       expect(PRACTICE_TEST_NOT_FOUND).not.toMatch(/gpt|Free|Allowance|topic/iu);
+    });
+  });
+
+  describe('draft editing', () => {
+    /** A parent standing on one landed draft, with its id. */
+    async function withOneDraft(): Promise<Ready & { practiceTestId: string }> {
+      const ready = await generatable();
+      await server()
+        .post(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests`)
+        .set('Authorization', bearer(ready.token))
+        .send({ count: 1 })
+        .expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      // Scoped to this parent's own draft and ordered explicitly: an unscoped
+      // `findFirstOrThrow` would be relying on the table being empty and on
+      // insertion order, and would pick the wrong row the moment a case ahead
+      // of it leaves one behind.
+      const stored = await h.prisma.practiceTest.findFirstOrThrow({
+        where: { parentAccountId: ready.parentAccountId, sourceTestId: ready.sourceTestId },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      });
+      return { ...ready, practiceTestId: stored.id };
+    }
+
+    function editQuestion(token: string, id: string, questionId: string) {
+      return server()
+        .patch(`/api/parent/practice-tests/${id}/questions/${questionId}`)
+        .set('Authorization', bearer(token));
+    }
+
+    function deleteQuestion(token: string, id: string, questionId: string) {
+      return server()
+        .delete(`/api/parent/practice-tests/${id}/questions/${questionId}`)
+        .set('Authorization', bearer(token));
+    }
+
+    /** The draft's questions as the API states them, in stored order. */
+    async function questionsOf(token: string, id: string) {
+      const response = await server()
+        .get(`/api/parent/practice-tests/${id}`)
+        .set('Authorization', bearer(token))
+        .expect(200);
+      return response.body.questions as {
+        id: string;
+        ordinal: number;
+        format: string;
+        prompt: unknown[];
+        answer: unknown[] | null;
+        choices: { ordinal: number; body: unknown[]; isCorrect: boolean }[];
+      }[];
+    }
+
+    /** Writes a free-text question onto a landed draft and returns its id. */
+    async function addFreeText(practiceTestId: string, ordinal: number): Promise<string> {
+      const written = await h.prisma.practiceTestQuestion.create({
+        data: {
+          practiceTestId,
+          ordinal,
+          format: 'ShortAnswer',
+          prompt: [{ kind: 'text', value: 'What is half of four?' }],
+          answer: [{ kind: 'text', value: 'two' }],
+          topics: { create: [{ label: 'Fractions' }] },
+        },
+        select: { id: true },
+      });
+      await h.prisma.practiceTest.update({
+        where: { id: practiceTestId },
+        data: { questionCount: { increment: 1 } },
+      });
+      return written.id;
+    }
+
+    it('stores an edited free-text prompt as the parsed segments, and answers with the draft', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const questionId = await addFreeText(ready.practiceTestId, before.length + 1);
+
+      const response = await editQuestion(ready.token, ready.practiceTestId, questionId)
+        .send({ prompt: 'What is 1/2 of 8?' })
+        .expect(200);
+
+      const edited = response.body.questions.find((q: { id: string }) => q.id === questionId);
+      // Text, then the fraction as structure, then text — never one "1/2"
+      // string, which is the shape AD-32 exists to prevent.
+      expect(edited.prompt).toEqual([
+        { kind: 'text', value: 'What is ' },
+        { kind: 'fraction', whole: null, numerator: 1, denominator: 2 },
+        { kind: 'text', value: ' of 8?' },
+      ]);
+      // Stored exactly as it was answered: no second "original" column, no
+      // revision row, no shadow copy.
+      const stored = await h.prisma.practiceTestQuestion.findUniqueOrThrow({
+        where: { id: questionId },
+        select: { prompt: true },
+      });
+      expect(stored.prompt).toEqual(edited.prompt);
+      // And the whole draft comes back, so the screen re-renders from the
+      // server's own account of what is stored.
+      expect(response.body.id).toBe(ready.practiceTestId);
+      expect(response.body.questions).toHaveLength(before.length + 1);
+    });
+
+    it('stores a mixed number as one fraction carrying its whole part', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const questionId = await addFreeText(ready.practiceTestId, before.length + 1);
+
+      const response = await editQuestion(ready.token, ready.practiceTestId, questionId)
+        .send({ answer: '2 3/4' })
+        .expect(200);
+
+      const edited = response.body.questions.find((q: { id: string }) => q.id === questionId);
+      expect(edited.answer).toEqual([{ kind: 'fraction', whole: 2, numerator: 3, denominator: 4 }]);
+    });
+
+    it('rewrites option bodies and moves which option is correct, keeping the answer null', async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.format === 'MultipleChoice',
+      )!;
+      expect(question.choices.length).toBeGreaterThanOrEqual(3);
+
+      const response = await editQuestion(ready.token, ready.practiceTestId, question.id)
+        .send({
+          choices: question.choices.map((choice, index) => ({
+            ordinal: choice.ordinal,
+            body: index < 2 ? `Rewritten option ${index + 1}` : `Option ${choice.ordinal}`,
+          })),
+          correctOrdinal: 3,
+        })
+        .expect(200);
+
+      const edited = response.body.questions.find((q: { id: string }) => q.id === question.id);
+      expect(edited.answer).toBeNull();
+      expect(edited.choices.map((c: { ordinal: number }) => c.ordinal)).toEqual(
+        question.choices.map((choice) => choice.ordinal),
+      );
+      expect(edited.choices[0].body).toEqual([{ kind: 'text', value: 'Rewritten option 1' }]);
+      const flagged = edited.choices.filter((c: { isCorrect: boolean }) => c.isCorrect);
+      expect(flagged).toHaveLength(1);
+      expect(flagged[0].ordinal).toBe(3);
+    });
+
+    it('refuses an edit that would leave a Multiple Choice question without one correct option', async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.format === 'MultipleChoice',
+      )!;
+
+      // No `correctOrdinal` at all.
+      const none = await editQuestion(ready.token, ready.practiceTestId, question.id)
+        .send({ prompt: 'A rewritten multiple choice prompt.' })
+        .expect(400);
+      expect(none.body.message).toBe(ONE_CORRECT_CHOICE_REQUIRED);
+
+      // And one that is not any option's ordinal.
+      const foreign = await editQuestion(ready.token, ready.practiceTestId, question.id)
+        .send({ correctOrdinal: question.choices.length + 5 })
+        .expect(400);
+      expect(foreign.body.message).toBe(ONE_CORRECT_CHOICE_REQUIRED);
+
+      // Nothing was written by either refusal.
+      const after = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.id === question.id,
+      )!;
+      expect(after.prompt).toEqual(question.prompt);
+      expect(after.choices).toEqual(question.choices);
+    });
+
+    it('refuses an answer on a Multiple Choice question, and options on one that has none', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const multipleChoice = before.find((q) => q.format === 'MultipleChoice')!;
+      const freeTextId = await addFreeText(ready.practiceTestId, before.length + 1);
+
+      const answered = await editQuestion(ready.token, ready.practiceTestId, multipleChoice.id)
+        .send({ answer: 'Four', correctOrdinal: 1 })
+        .expect(400);
+      expect(answered.body.message).toBe(ANSWER_FORBIDDEN);
+
+      const optioned = await editQuestion(ready.token, ready.practiceTestId, freeTextId)
+        .send({ choices: [{ ordinal: 1, body: 'Four' }] })
+        .expect(400);
+      expect(optioned.body.message).toBe(CHOICES_FORBIDDEN);
+    });
+
+    it('refuses an edit that does not restate exactly the stored options', async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.format === 'MultipleChoice',
+      )!;
+
+      const partial = await editQuestion(ready.token, ready.practiceTestId, question.id)
+        .send({ choices: [{ ordinal: 1, body: 'Only this one' }], correctOrdinal: 1 })
+        .expect(400);
+      expect(partial.body.message).toBe(CHOICES_MISMATCHED);
+    });
+
+    it('refuses a restatement that names one ordinal twice', async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.format === 'MultipleChoice',
+      )!;
+      expect(question.choices).toHaveLength(3);
+
+      // The set comparison alone would pass this: four entries collapse to
+      // three distinct ordinals, and the last write of the repeated one would
+      // silently win over the first.
+      const refusal = await editQuestion(ready.token, ready.practiceTestId, question.id)
+        .send({
+          choices: [
+            { ordinal: 1, body: 'Option one' },
+            { ordinal: 2, body: 'Option two' },
+            { ordinal: 3, body: 'Option three as C' },
+            { ordinal: 3, body: 'Option three as D' },
+          ],
+          correctOrdinal: 1,
+        })
+        .expect(400);
+      expect(refusal.body.message).toBe(CHOICES_MISMATCHED);
+
+      // And nothing was written: every stored body is exactly what it was.
+      const after = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.id === question.id,
+      )!;
+      expect(after.choices).toEqual(question.choices);
+    });
+
+    it('refuses a restatement beyond this module own ceiling on choices', async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.format === 'MultipleChoice',
+      )!;
+
+      await editQuestion(ready.token, ready.practiceTestId, question.id)
+        .send({
+          choices: Array.from({ length: MAX_CHOICES + 1 }, (_, index) => ({
+            ordinal: index + 1,
+            body: `Option ${index + 1}`,
+          })),
+          correctOrdinal: 1,
+        })
+        .expect(400);
+
+      // And nothing was written: every stored body is exactly what it was.
+      const after = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.id === question.id,
+      )!;
+      expect(after.choices).toEqual(question.choices);
+    });
+
+    it('refuses an empty or whitespace-only field, writing nothing', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const questionId = await addFreeText(ready.practiceTestId, before.length + 1);
+
+      await editQuestion(ready.token, ready.practiceTestId, questionId)
+        .send({ prompt: '   ' })
+        .expect(400);
+      const after = (await questionsOf(ready.token, ready.practiceTestId)).find(
+        (q) => q.id === questionId,
+      )!;
+      expect(after.prompt).toEqual([{ kind: 'text', value: 'What is half of four?' }]);
+    });
+
+    it('refuses a field beyond the module ceilings, whole', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const questionId = await addFreeText(ready.practiceTestId, before.length + 1);
+
+      await editQuestion(ready.token, ready.practiceTestId, questionId)
+        .send({ prompt: 'x'.repeat(5_001) })
+        .expect(400);
+    });
+
+    it('refuses a free-text question left with no answer at all', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const questionId = await addFreeText(ready.practiceTestId, before.length + 1);
+      // A row whose answer column is somehow already null: the edit must not
+      // be the thing that lets it through.
+      await h.prisma.practiceTestQuestion.update({
+        where: { id: questionId },
+        data: { answer: Prisma.DbNull },
+      });
+
+      const refusal = await editQuestion(ready.token, ready.practiceTestId, questionId)
+        .send({ prompt: 'A rewritten prompt.' })
+        .expect(400);
+      expect(refusal.body.message).toBe(ANSWER_REQUIRED);
+    });
+
+    it('deletes one Question, renumbers the survivors from 1, and rewrites the stored count', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      expect(before.length).toBeGreaterThanOrEqual(2);
+      const removed = before[1]!;
+
+      const response = await deleteQuestion(ready.token, ready.practiceTestId, removed.id).expect(
+        200,
+      );
+
+      expect(response.body.status).toBe('Draft');
+      expect(response.body.questions.map((q: { id: string }) => q.id)).toEqual(
+        before.filter((q) => q.id !== removed.id).map((q) => q.id),
+      );
+      // Contiguous from one, in one transaction with the delete — a gap would
+      // read as a Question that vanished.
+      expect(response.body.questions.map((q: { ordinal: number }) => q.ordinal)).toEqual(
+        Array.from({ length: before.length - 1 }, (_unused, index) => index + 1),
+      );
+      // And the stored column agrees with the list, rather than drifting.
+      expect(response.body.questionCount).toBe(before.length - 1);
+      const stored = await h.prisma.practiceTest.findUniqueOrThrow({
+        where: { id: ready.practiceTestId },
+        select: { questionCount: true, status: true },
+      });
+      expect(stored.questionCount).toBe(before.length - 1);
+      expect(stored.status).toBe('Draft');
+      const storedOrdinals = await h.prisma.practiceTestQuestion.findMany({
+        where: { practiceTestId: ready.practiceTestId },
+        orderBy: { ordinal: 'asc' },
+        select: { ordinal: true },
+      });
+      expect(storedOrdinals.map((row) => row.ordinal)).toEqual(
+        Array.from({ length: before.length - 1 }, (_unused, index) => index + 1),
+      );
+    });
+
+    it('discards the Practice Test when the last Question is deleted, refunding nothing', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const charged = await h.prisma.practiceTest.findUniqueOrThrow({
+        where: { id: ready.practiceTestId },
+        select: { chargedAt: true },
+      });
+      const usedBefore = await generationUsed(ready.parentAccountId);
+
+      // Down to one, then the last.
+      for (const question of before.slice(0, -1)) {
+        await deleteQuestion(ready.token, ready.practiceTestId, question.id).expect(200);
+      }
+      const last = before[before.length - 1]!;
+      const response = await deleteQuestion(ready.token, ready.practiceTestId, last.id).expect(200);
+
+      expect(response.body.status).toBe('Discarded');
+      expect(response.body.questions).toEqual([]);
+      const stored = await h.prisma.practiceTest.findUniqueOrThrow({
+        where: { id: ready.practiceTestId },
+        select: { status: true, questionCount: true, chargedAt: true },
+      });
+      expect(stored.status).toBe('Discarded');
+      expect(stored.questionCount).toBe(0);
+      // Never cleared and never rewritten: a discard does not refund (AD-14).
+      expect(stored.chargedAt).toEqual(charged.chargedAt);
+      expect(await generationUsed(ready.parentAccountId)).toBe(usedBefore);
+
+      // And its id now answers the same 404 an unknown id gets.
+      const refusal = await server()
+        .get(`/api/parent/practice-tests/${ready.practiceTestId}`)
+        .set('Authorization', bearer(ready.token))
+        .expect(404);
+      expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+    });
+
+    it('refuses both mutations on a released or discarded draft, as though it did not exist', async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId))[0]!;
+      await h.prisma.practiceTest.update({
+        where: { id: ready.practiceTestId },
+        data: { status: 'Released' },
+      });
+
+      const edit = await editQuestion(ready.token, ready.practiceTestId, question.id)
+        .send({ prompt: 'A rewritten prompt.' })
+        .expect(404);
+      const removal = await deleteQuestion(ready.token, ready.practiceTestId, question.id).expect(
+        404,
+      );
+      const unknown = await server()
+        .get(`/api/parent/practice-tests/${randomUUID()}`)
+        .set('Authorization', bearer(ready.token))
+        .expect(404);
+      // The released-state write barrier, and it is the *same sentence* an
+      // unknown id gets — nothing about the answer says which it was.
+      expect(edit.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      expect(removal.body.message).toBe(unknown.body.message);
+      // And the row is untouched by either refusal.
+      const stored = await h.prisma.practiceTestQuestion.findUniqueOrThrow({
+        where: { id: question.id },
+        select: { prompt: true },
+      });
+      expect(stored.prompt).toEqual(question.prompt);
+    });
+
+    it("refuses both mutations on another account's draft", async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId))[0]!;
+
+      const stranger = await createSignedInParent(h);
+      await setPinFor(h, stranger.cookie, PIN);
+      const strangerToken = await elevate(h, stranger.cookie, PIN);
+
+      const edit = await editQuestion(strangerToken, ready.practiceTestId, question.id)
+        .send({ prompt: 'A rewritten prompt.' })
+        .expect(404);
+      await deleteQuestion(strangerToken, ready.practiceTestId, question.id).expect(404);
+      expect(edit.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      // Still there, and still what it was.
+      expect(await h.prisma.practiceTestQuestion.count({ where: { id: question.id } })).toBe(1);
+    });
+
+    it('refuses a Question that belongs to a different Practice Test', async () => {
+      const ready = await generatable();
+      await server()
+        .post(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests`)
+        .set('Authorization', bearer(ready.token))
+        .send({ count: 2 })
+        .expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      const [first, second] = await h.prisma.practiceTest.findMany({
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      });
+      const foreign = await h.prisma.practiceTestQuestion.findFirstOrThrow({
+        where: { practiceTestId: second!.id },
+        select: { id: true },
+      });
+
+      // A valid question id and a valid Practice Test id that are not a pair.
+      const edit = await editQuestion(ready.token, first!.id, foreign.id)
+        .send({ prompt: 'A rewritten prompt.' })
+        .expect(404);
+      await deleteQuestion(ready.token, first!.id, foreign.id).expect(404);
+      expect(edit.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      expect(await h.prisma.practiceTestQuestion.count({ where: { id: foreign.id } })).toBe(1);
+    });
+
+    it('refuses a malformed id on shape, before any row is read', async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId))[0]!;
+      await editQuestion(ready.token, 'not-a-uuid', question.id).send({ prompt: 'x' }).expect(400);
+      await editQuestion(ready.token, ready.practiceTestId, 'not-a-uuid')
+        .send({ prompt: 'x' })
+        .expect(400);
+      await deleteQuestion(ready.token, 'not-a-uuid', question.id).expect(400);
+      await deleteQuestion(ready.token, ready.practiceTestId, 'not-a-uuid').expect(400);
+    });
+
+    it('refuses both mutations without an elevation token', async () => {
+      const ready = await withOneDraft();
+      const question = (await questionsOf(ready.token, ready.practiceTestId))[0]!;
+
+      await server()
+        .patch(`/api/parent/practice-tests/${ready.practiceTestId}/questions/${question.id}`)
+        .send({ prompt: 'A rewritten prompt.' })
+        .expect(401);
+      await server()
+        .delete(`/api/parent/practice-tests/${ready.practiceTestId}/questions/${question.id}`)
+        .expect(401);
+      // Nothing was written by either refusal.
+      expect(await h.prisma.practiceTestQuestion.count({ where: { id: question.id } })).toBe(1);
+    });
+
+    it('never puts Question content in a refusal either mutation answers with', async () => {
+      // Identifiers and fixed sentences only (AD-20).
+      for (const sentence of [
+        PRACTICE_TEST_NOT_FOUND,
+        ONE_CORRECT_CHOICE_REQUIRED,
+        ANSWER_FORBIDDEN,
+        ANSWER_REQUIRED,
+        CHOICES_FORBIDDEN,
+        CHOICES_MISMATCHED,
+      ]) {
+        expect(sentence).not.toMatch(/gpt|Allowance|Free tier|Practice 1\.1|Fractions/iu);
+      }
     });
   });
 });

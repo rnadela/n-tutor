@@ -589,8 +589,9 @@ describe('Student Mode and the device binding', () => {
           ],
         },
       },
-      select: { id: true },
+      select: { id: true, questions: { select: { id: true } } },
     });
+    const questionId = draft.questions[0]!.id;
 
     // Every shape that draft could be reached by from the student side — by
     // its own id, not a guess. The student-scoped API is one read of the bound
@@ -613,6 +614,26 @@ describe('Student Mode and the device binding', () => {
     // elevation bearer, and a cookie is not one.
     await server().get('/api/parent/practice-tests/drafts').set('Cookie', cookie).expect(401);
     await server().get(`/api/parent/practice-tests/${draft.id}`).set('Cookie', cookie).expect(401);
+
+    // And neither of the two **writes** Story 4.4 added. A student credential
+    // reaching an edit or a delete would not merely leak a draft, it would let
+    // the device change what it is graded against — so both are probed against
+    // that draft's real question id rather than a guess, and the row is checked
+    // to be exactly where it was afterwards.
+    await server()
+      .patch(`/api/parent/practice-tests/${draft.id}/questions/${questionId}`)
+      .set('Cookie', cookie)
+      .send({ prompt: 'A rewritten prompt.' })
+      .expect(401);
+    await server()
+      .delete(`/api/parent/practice-tests/${draft.id}/questions/${questionId}`)
+      .set('Cookie', cookie)
+      .expect(401);
+    const untouched = await h.prisma.practiceTestQuestion.findUniqueOrThrow({
+      where: { id: questionId },
+      select: { prompt: true },
+    });
+    expect(untouched.prompt).toEqual([{ kind: 'text', value: 'What is half of four?' }]);
 
     const session = await readStudentSession(cookie).expect(200);
     // One read, the bound profile, and nothing else on it.

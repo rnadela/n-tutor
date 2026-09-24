@@ -559,6 +559,72 @@ export const parentCopy = {
       fraction.whole === null
         ? `${fraction.numerator} over ${fraction.denominator}`
         : `${fraction.whole} and ${fraction.numerator} over ${fraction.denominator}`,
+
+    // --- Editing one Question -------------------------------------------
+    //
+    // What a parent is offered on a draft they have read and found something
+    // wrong in. Plain fact throughout: nothing here congratulates, warns
+    // twice, or names an allowance figure, a tier or a model.
+
+    /** The control that opens one Question for editing, named by its place. */
+    edit: (ordinal: number) => `Edit question ${ordinal}`,
+    /** Each field's own label inside the editor. */
+    editPrompt: 'Question',
+    editAnswer: 'Correct answer',
+    editOption: (ordinal: number) => `Option ${ordinal}`,
+    /** The radio group that says which option is the right one. */
+    editCorrectLegend: 'Which option is correct',
+    editCorrectOption: (ordinal: number) => `Option ${ordinal} is correct`,
+    /**
+     * What editing does, said once, before it is done. It is the sentence the
+     * whole gate rests on: what is saved here is what the child sees.
+     */
+    editHint: 'What is saved here is what the student sees and is marked against.',
+    save: 'Save the changes',
+    cancel: 'Cancel',
+    /** Said after a save, in the same words the screen shows (UX-DR: a11y). */
+    edited: (ordinal: number) => `Question ${ordinal} was saved.`,
+    editFailed: 'That question could not be saved. Try again.',
+
+    // --- Deleting one Question ------------------------------------------
+
+    delete: (ordinal: number) => `Delete question ${ordinal}`,
+    deleteTitle: 'Delete this question',
+    /**
+     * Names what is destroyed **before** it is, by its place in the draft and
+     * by how many are left afterwards. There is no undo and no history, so the
+     * confirmation is the only place this can be said.
+     */
+    deleteBody: (ordinal: number, remaining: number) =>
+      `Question ${ordinal} will be deleted. ${
+        remaining === 1
+          ? '1 question will be left in this practice test.'
+          : `${remaining} questions will be left in this practice test.`
+      } This cannot be undone.`,
+    /**
+     * The last Question, which is a different thing entirely: the Practice Test
+     * goes away with it. The epic requires both facts in words before the
+     * action — that it is discarded, and that the Generation Allowance already
+     * spent on it is not given back.
+     */
+    deleteLastTitle: 'Delete the only question',
+    deleteLastBody:
+      'This is the only question left. Deleting it discards the whole practice test, and the Generation Allowance already used on it is not given back. This cannot be undone.',
+    deleteConfirm: 'Delete the question',
+    /** Said after a delete, naming what is left rather than what is gone. */
+    deleted: (remaining: number) =>
+      remaining === 1
+        ? '1 question is left in this practice test.'
+        : `${remaining} questions are left in this practice test.`,
+    /** Said when the last one went, on the way back to the list. */
+    discarded: 'The practice test was discarded.',
+    deleteFailed: 'That question could not be deleted. Try again.',
+
+    /**
+     * Beside a restored edit. A parent who was put back through the PIN should
+     * know why the field does not match what is stored below it.
+     */
+    editRestored: 'An edit that was not saved has been put back.',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

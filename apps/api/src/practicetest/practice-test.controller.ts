@@ -1,18 +1,20 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ParentElevationGuard, type ElevatedRequest } from '../identity/parent-elevation.guard.js';
-import { RequestPracticeTestsDto } from './dto/practice-test.dto.js';
+import { EditDraftQuestionDto, RequestPracticeTestsDto } from './dto/practice-test.dto.js';
 import {
   PracticeTestService,
   type GenerationAllowanceView,
@@ -34,6 +36,17 @@ import {
  * *other* half — they exist because the gate is being built, and they are
  * parent-only, elevation-guarded and `Draft`-scoped precisely so that building
  * it cannot amount to bypassing it. Nothing student-scoped reaches them.
+ *
+ * Since Story 4.4 the module also **writes** what a parent reviewed: one
+ * Question edited, one Question deleted. A gate that could only be looked
+ * through was not a gate, so the two mutations below are what make a bad
+ * generated Question something a parent can do anything about — and they are
+ * still the gate precisely because of the released-state write barrier they
+ * carry. Both are scoped to `Draft` in the statement that reads or mutates, so
+ * a `Released` or `Discarded` Practice Test refuses them with the same 404 an
+ * unknown id gets, whatever any UI offered. A timer changed or a Question
+ * rewritten after release would retroactively change how past Attempts were
+ * graded, which is why the refusal is the API's and not a screen's.
  *
  * Every route is behind `ParentElevationGuard`, and the account is taken from
  * `req.elevated` and never from the path or the body (AD-18). A Source Test id
@@ -148,5 +161,48 @@ export class PracticeTestController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PracticeTestDraftView> {
     return this.practiceTests.draftFor(req.elevated!.parentAccountId, id);
+  }
+
+  /**
+   * Rewrites one Question of a draft, and answers with the whole draft as it
+   * now stands.
+   *
+   * The whole view rather than the one Question, so the screen re-renders from
+   * the server's own account of what is stored rather than from what it hoped
+   * it had just written — the same reason the progress read returns the job
+   * rather than an acknowledgement.
+   *
+   * Both ids go through `ParseUUIDPipe`, so a malformed one is refused on shape
+   * before a row is read; the pair must then match, and the Practice Test must
+   * be this account's own `Draft`, or it is the one 404 (AD-18).
+   */
+  @Patch('practice-tests/:id/questions/:questionId')
+  editQuestion(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('questionId', ParseUUIDPipe) questionId: string,
+    @Body() dto: EditDraftQuestionDto,
+  ): Promise<PracticeTestDraftView> {
+    return this.practiceTests.editQuestion(req.elevated!.parentAccountId, id, questionId, dto);
+  }
+
+  /**
+   * Deletes one Question of a draft, and answers with the draft as it now
+   * stands — renumbered, and with its stored count rewritten.
+   *
+   * Deleting the **last** Question discards the Practice Test. That answer
+   * carries `status: 'Discarded'` and no questions rather than a refusal — the
+   * screen reads the status and goes back to Pending drafts — while a *later*
+   * read of the same id gets the ordinary 404, because it is no longer a draft.
+   * The confirmation said in words that this would happen and that the spent
+   * Generation Allowance is not refunded (AD-14); nothing here refunds it.
+   */
+  @Delete('practice-tests/:id/questions/:questionId')
+  deleteQuestion(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('questionId', ParseUUIDPipe) questionId: string,
+  ): Promise<PracticeTestDraftView> {
+    return this.practiceTests.deleteQuestion(req.elevated!.parentAccountId, id, questionId);
   }
 }

@@ -611,8 +611,9 @@ export const parentApi = {
   // point of the mechanism: a device that has fallen back to Student Mode holds
   // no trace of the work.
   //
-  // No screen calls these yet. Story 1.6 is the mechanism; the epics that add a
-  // `kind` add the callers.
+  // Story 1.6 shipped the mechanism with no caller. `DraftEdit` has one since
+  // Story 4.4: a parent's typed-but-unsaved edit of a draft Question, held here
+  // so an idle expiry does not eat their work.
 
   saveUncommittedState: (
     token: string,
@@ -852,6 +853,62 @@ export const parentApi = {
       `/parent/practice-tests/${encodeURIComponent(practiceTestId)}`,
       { headers: elevated(token) },
       parentCopy.drafts.openFailed,
+    ),
+
+  /**
+   * Rewrites one Question of a draft and answers with the whole draft as it now
+   * stands.
+   *
+   * **Plain text goes up, segments come back.** A fraction is structure in the
+   * column (AD-32) and the server owns the one conversion, so nothing here
+   * builds a segment array — it sends what the parent typed and re-renders from
+   * the view that comes back, which is the only account of what is stored.
+   *
+   * Every field is optional and an absent field leaves what is stored, with one
+   * deliberate exception: a Multiple Choice edit must always restate
+   * `correctOrdinal`, because an absent one leaves no option flagged and the
+   * API refuses it. Inheriting the stored flag would leave "correct" on a body
+   * that no longer says what it said when it was flagged.
+   *
+   * A 404 covers an unknown id, another account's, a Question of a different
+   * draft, and — the released-state write barrier — a Practice Test that is no
+   * longer a draft.
+   */
+  editDraftQuestion: (
+    token: string,
+    practiceTestId: string,
+    questionId: string,
+    input: {
+      prompt?: string;
+      answer?: string;
+      choices?: { ordinal: number; body: string }[];
+      correctOrdinal?: number;
+    },
+  ) =>
+    call<PracticeTestDraftView>(
+      `/parent/practice-tests/${encodeURIComponent(practiceTestId)}/questions/${encodeURIComponent(
+        questionId,
+      )}`,
+      { method: 'PATCH', headers: elevated(token), body: JSON.stringify(input) },
+      parentCopy.drafts.editFailed,
+    ),
+
+  /**
+   * Deletes one Question of a draft and answers with the draft as it now
+   * stands — renumbered from 1, with its stored count rewritten.
+   *
+   * Deleting the **last** Question discards the Practice Test, and the answer
+   * says so: it carries `status: 'Discarded'` and no questions, which is what
+   * the screen reads to go back to Pending drafts. Nothing is refunded (AD-14),
+   * and the confirmation said so before this call was ever made.
+   */
+  deleteDraftQuestion: (token: string, practiceTestId: string, questionId: string) =>
+    call<PracticeTestDraftView>(
+      `/parent/practice-tests/${encodeURIComponent(practiceTestId)}/questions/${encodeURIComponent(
+        questionId,
+      )}`,
+      { method: 'DELETE', headers: elevated(token) },
+      parentCopy.drafts.deleteFailed,
     ),
 };
 

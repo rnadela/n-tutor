@@ -1,6 +1,17 @@
-import { Transform } from 'class-transformer';
-import { IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { MAX_TOPIC_LABEL_LENGTH } from '../practice-test-policy.js';
+import { MAX_CHOICES, MAX_TEXT_LENGTH } from '../practice-test-payload.js';
 
 /**
  * How many Practice Tests one request asks for.
@@ -44,4 +55,64 @@ export class RequestPracticeTestsDto {
   @IsNotEmpty()
   @MaxLength(MAX_TOPIC_LABEL_LENGTH)
   weightedTopic?: string;
+}
+
+/**
+ * One option of a Multiple Choice question as an edit restates it.
+ *
+ * `ordinal` names which stored option this is — never an index into whatever
+ * order the browser happened to render — and `body` is the plain text a parent
+ * typed. It is text on the wire and structure in the column: the server owns
+ * the one conversion (AD-32), so no browser ever decides what a fraction is.
+ */
+export class EditDraftChoiceDto {
+  @IsInt()
+  @Min(1)
+  ordinal!: number;
+
+  @IsString()
+  @MaxLength(MAX_TEXT_LENGTH)
+  body!: string;
+}
+
+/**
+ * A parent's edit of one draft Question: its prompt, its free-text answer, its
+ * option bodies and which option is correct.
+ *
+ * Shape and ceilings only. **Every row-dependent rule stays in the service** —
+ * whether this question is Multiple Choice, whether the ordinals named are the
+ * ones stored, whether the result leaves exactly one correct option — exactly
+ * as `RequestPracticeTestsDto` leaves affordability to the write path. A rule
+ * stated here would be this file claiming to know what is in a row it has not
+ * read, and would have to be restated in the service anyway.
+ *
+ * `format` is absent on purpose and is not editable: changing it would change
+ * which invariants the Question must satisfy, and a Multiple Choice question
+ * that became a Short Answer one would leave its options behind as rows nothing
+ * owns. Topics are absent for the same reason they are stored raw — Epic 7
+ * (AD-11).
+ */
+export class EditDraftQuestionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_TEXT_LENGTH)
+  prompt?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_TEXT_LENGTH)
+  answer?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_CHOICES)
+  @ValidateNested({ each: true })
+  @Type(() => EditDraftChoiceDto)
+  choices?: EditDraftChoiceDto[];
+
+  /** Which option the edit leaves correct, by its stored ordinal. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  correctOrdinal?: number;
 }

@@ -52,6 +52,15 @@ export const CHOICES_NOT_DISTINCT = 'A multiple-choice question repeats one of i
 export const CHOICE_BODY_EMPTY = 'A multiple-choice option has no text once normalized.';
 export const TOPIC_LABEL_TOO_LONG = 'A topic label is longer than a topic label can plausibly be.';
 export const PAYLOAD_TOO_LARGE = 'The payload is larger than a practice test can plausibly be.';
+/**
+ * An edit names a set of options that is not the stored one.
+ *
+ * Editing an option's body is a rewrite of what is already there; adding or
+ * removing one is not this story's, and a partial restatement would silently
+ * leave an option untouched that the parent believed they had replaced.
+ */
+export const CHOICES_MISMATCHED =
+  'An edit must restate every option of a multiple-choice question, and only those.';
 
 /**
  * Ceilings, stated here because the wire schema cannot carry them.
@@ -272,4 +281,99 @@ export function validateGenerationPayload(
   }
 
   return { questions };
+}
+
+// --- The edit path -------------------------------------------------------
+
+/**
+ * A parent's edit does not satisfy what a Question is.
+ *
+ * A separate class from `GenerationPayloadInvalid` because the *fault* is
+ * different — a parent typed something, no provider is at fault and nothing is
+ * retried — while the **rules** are deliberately the same ones, read from the
+ * same constants above. A parent edit and a generated payload obeying two
+ * copies of the Question invariants is how an edit comes to store the malformed
+ * Multiple Choice question the post-hoc pass exists to catch.
+ *
+ * Carries no Question text, no option body and no Topic label: the message is
+ * one of this module's own fixed sentences and nothing else (AD-20).
+ */
+export class EditedQuestionInvalid extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EditedQuestionInvalid';
+  }
+}
+
+/** An edit that restates every option of a Multiple Choice question. */
+export interface EditedChoice {
+  ordinal: number;
+  body: RichText;
+  isCorrect: boolean;
+}
+
+/** One Question as an edit would leave it, merged over what is stored. */
+export interface EditedQuestion {
+  format: QuestionFormat;
+  prompt: RichText;
+  answer: RichText | null;
+  choices: EditedChoice[];
+}
+
+function refuseEdit(message: string): never {
+  throw new EditedQuestionInvalid(message);
+}
+
+/**
+ * Checks one edited Question against the invariants every Question holds,
+ * before a row is written.
+ *
+ * `storedOrdinals` is what makes "no option is added and none is removed" a
+ * rule rather than a hope: an edit either names every stored option exactly
+ * once or it is refused whole, the same way a page reorder is an explicit
+ * permutation rather than a move.
+ *
+ * Format is never edited, so it is taken from the stored row and only ever read
+ * here — which is what lets the two shapes be checked against each other: a
+ * Multiple Choice question keeps a null `answer` and its options, and every
+ * other format keeps a non-null `answer` and none.
+ */
+export function validateEditedQuestion(
+  edited: EditedQuestion,
+  storedOrdinals: readonly number[],
+): EditedQuestion {
+  if (!validRichText(edited.prompt)) refuseEdit(RICH_TEXT_INVALID);
+  if (normalizePrompt(plainTextOf(edited.prompt)) === '') refuseEdit(PROMPT_EMPTY);
+
+  if (edited.format === 'MultipleChoice') {
+    // The flagged option is the answer. A second copy of it in the answer
+    // column is two answers that can disagree, with nothing deciding which wins.
+    if (edited.answer !== null) refuseEdit(ANSWER_FORBIDDEN);
+    if (edited.choices.length < 3) refuseEdit(CHOICES_REQUIRED);
+    if (edited.choices.length > MAX_CHOICES) refuseEdit(PAYLOAD_TOO_LARGE);
+
+    const wanted = [...storedOrdinals].sort((a, b) => a - b);
+    const given = edited.choices.map((choice) => choice.ordinal).sort((a, b) => a - b);
+    if (wanted.length !== given.length || wanted.some((value, index) => value !== given[index])) {
+      refuseEdit(CHOICES_MISMATCHED);
+    }
+
+    const bodies = new Set<string>();
+    let correct = 0;
+    for (const choice of edited.choices) {
+      if (!validRichText(choice.body)) refuseEdit(RICH_TEXT_INVALID);
+      const key = normalizePrompt(plainTextOf(choice.body));
+      if (key === '') refuseEdit(CHOICE_BODY_EMPTY);
+      if (bodies.has(key)) refuseEdit(CHOICES_NOT_DISTINCT);
+      bodies.add(key);
+      if (choice.isCorrect) correct += 1;
+    }
+    if (correct !== 1) refuseEdit(ONE_CORRECT_CHOICE_REQUIRED);
+    return edited;
+  }
+
+  if (edited.choices.length > 0) refuseEdit(CHOICES_FORBIDDEN);
+  if (edited.answer === null) refuseEdit(ANSWER_REQUIRED);
+  if (!validRichText(edited.answer)) refuseEdit(RICH_TEXT_INVALID);
+  return edited;
 }

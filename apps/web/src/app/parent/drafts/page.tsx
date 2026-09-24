@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import NextLink, { type LinkProps } from 'next/link';
 import type { Route } from 'next';
 import Alert from '@mui/material/Alert';
@@ -60,6 +60,28 @@ function DraftLink(props: LinkProps<`/parent/drafts/${string}`>) {
  * its job's drafts, how many questions, when it landed. The questions are the
  * review screen's, one draft at a time.
  */
+/**
+ * What the review screen was not around to say.
+ *
+ * Deleting the last Question of a draft discards the whole practice test, and
+ * the screen that knows is the one being navigated away from — a live region
+ * unmounted mid-announcement says nothing at all. So the fact travels in the
+ * URL and is stated here, by the screen the parent actually lands on.
+ *
+ * Its own component behind `Suspense` because `useSearchParams` opts a route
+ * out of static prerendering otherwise, and this list is static but for this
+ * one sentence.
+ */
+function DiscardedNotice() {
+  const discarded = useSearchParams().get('discarded') === '1';
+  if (!discarded) return null;
+  return (
+    <Alert severity="info" role="status" variant="outlined" data-testid="drafts-discarded">
+      {parentCopy.drafts.discarded}
+    </Alert>
+  );
+}
+
 export default function PendingDraftsPage() {
   const router = useRouter();
   const { elevation, clearElevation } = useElevation();
@@ -159,6 +181,10 @@ export default function PendingDraftsPage() {
       <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
         {parentCopy.drafts.listTitle}
       </Typography>
+
+      <Suspense fallback={null}>
+        <DiscardedNotice />
+      </Suspense>
 
       {error !== null && (
         <Alert

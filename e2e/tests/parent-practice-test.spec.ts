@@ -408,9 +408,10 @@ test.describe('generating practice tests', () => {
     const reading = await fraction.getAttribute('aria-label');
     expect(reading).toMatch(/^\d+( and \d+)? over \d+$/u);
 
-    // Nothing here changes a draft: no edit, no delete, no release, no discard
-    // and no timer. Those are Stories 4.4 to 4.6.
-    for (const name of [/edit/iu, /delete/iu, /release/iu, /discard/iu, /timer/iu]) {
+    // Release, discard and the timer are Stories 4.5 and 4.6: no control for
+    // any of them exists here. Edit and delete do — they are this screen's
+    // whole point since Story 4.4, and they are exercised below.
+    for (const name of [/release/iu, /discard/iu, /timer/iu]) {
       await expect(page.getByRole('button', { name })).toHaveCount(0);
     }
 
@@ -441,5 +442,161 @@ test.describe('generating practice tests', () => {
     await expect(page.getByTestId('generate-cost')).toHaveText(
       'This uses 5 practice tests of the Generation Allowance. The allowance on this account is unlimited.',
     );
+  });
+
+  test('edits a question in place, and deletes one so the survivors renumber', async ({ page }) => {
+    // An upload, an extraction and a draft, then two mutations on it.
+    test.setTimeout(150_000);
+    const email = uniqueParentEmail('draft-edit');
+    await uploadAndRead(page, email);
+    await enterGenerate(page);
+
+    await countRow(page, 1).getByRole('radio').check();
+    await page.getByTestId('generate-start').click();
+    await page.getByTestId('generate-confirm').click();
+    await expect(page.getByTestId('generate-progress-line')).toHaveText(
+      '1 practice test is ready.',
+      { timeout: 60_000 },
+    );
+    await page.getByTestId('generate-to-drafts').click();
+    await page
+      .locator('[data-testid="draft-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+
+    const questions = page.locator('[data-testid="draft-question"]');
+    const before = await questions.count();
+    expect(before).toBeGreaterThanOrEqual(2);
+
+    // --- Edit the first question's prompt, in place ------------------------
+    // A question of a known format, so the radio-group path is genuinely
+    // exercised rather than skipped whenever the generator happens not to
+    // produce options.
+    const first = questions.nth(0);
+    await expect(first).toHaveAttribute('data-format', 'MultipleChoice');
+    await first.getByTestId('draft-edit-open').click();
+    await expect(first).toHaveAttribute('data-editing', 'true');
+    // Opening the editor puts focus in the field, rather than leaving it on a
+    // control that no longer exists.
+    const prompt = first.getByTestId('draft-edit-prompt');
+    await expect(prompt).toBeFocused();
+    await prompt.fill('What is 1/2 of 8?');
+    // A multiple-choice question states which option is right on every save.
+    const corrects = first.locator('[data-testid="draft-edit-correct"]');
+    await expect(corrects).toHaveCount(3);
+    await corrects.nth(2).check();
+    await first.getByTestId('draft-edit-save').click();
+
+    // Back to the read view, on the same row, with no navigation.
+    await expect(first).toHaveAttribute('data-editing', 'false');
+    await expect(page.getByTestId('draft-notice')).toHaveText('Question 1 was saved.');
+    // Focus comes back to the control that opened the editor.
+    await expect(first.getByTestId('draft-edit-open')).toBeFocused();
+    // The option that was marked correct is the third, in words.
+    await expect(first.locator('[data-testid="draft-choice"][data-correct="true"]')).toHaveCount(1);
+    await expect(first.locator('[data-testid="draft-choice"]').nth(2)).toContainText('Correct');
+    await expect(first.getByTestId('draft-question-prompt')).toContainText('What is');
+    // The fraction is stored as structure, not as the glyph the schema avoids:
+    // it comes back drawn, with its own spoken reading.
+    const fraction = first.locator('[data-testid="rich-text-fraction"]').first();
+    await expect(fraction).toBeVisible();
+    await expect(fraction).toHaveAttribute('aria-label', '1 over 2');
+
+    // And it is what is stored: the return through the app re-reads the draft.
+    await page.getByRole('link', { name: 'Back to the pending practice tests' }).click();
+    await page
+      .locator('[data-testid="draft-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    await expect(page.locator('[data-testid="draft-question"]').nth(0)).toContainText('What is');
+    await expect(
+      page
+        .locator('[data-testid="draft-question"]')
+        .nth(0)
+        .locator('[data-testid="rich-text-fraction"]'),
+    ).toHaveAttribute('aria-label', '1 over 2');
+
+    // --- Delete the second, and read the renumbering off the DOM -----------
+    const second = page.locator('[data-testid="draft-question"]').nth(1);
+    await second.getByTestId('draft-delete-open').click();
+    // Named before anything is destroyed, with what would be left.
+    await expect(page.getByTestId('draft-delete-body')).toContainText(
+      'Question 2 will be deleted.',
+    );
+    // Cancel leaves the draft exactly as it was.
+    await page.getByTestId('draft-delete-cancel').click();
+    await expect(page.locator('[data-testid="draft-question"]')).toHaveCount(before);
+
+    await second.getByTestId('draft-delete-open').click();
+    await page.getByTestId('draft-delete-confirm').click();
+
+    await expect(page.locator('[data-testid="draft-question"]')).toHaveCount(before - 1);
+    await expect(page.getByTestId('draft-question-total')).toHaveText(
+      before - 1 === 1 ? '1 question' : `${before - 1} questions`,
+    );
+    // Contiguous from 1: the survivors were renumbered, not left with a gap.
+    for (let index = 0; index < before - 1; index += 1) {
+      await expect(page.locator('[data-testid="draft-question"]').nth(index)).toHaveAttribute(
+        'data-ordinal',
+        String(index + 1),
+      );
+    }
+  });
+
+  test('deletes the last question, which discards the practice test', async ({ page }) => {
+    test.setTimeout(150_000);
+    const email = uniqueParentEmail('draft-discard');
+    await uploadAndRead(page, email);
+    await enterGenerate(page);
+
+    await countRow(page, 1).getByRole('radio').check();
+    await page.getByTestId('generate-start').click();
+    await page.getByTestId('generate-confirm').click();
+    await expect(page.getByTestId('generate-progress-line')).toHaveText(
+      '1 practice test is ready.',
+      { timeout: 60_000 },
+    );
+    await page.getByTestId('generate-to-drafts').click();
+    await page
+      .locator('[data-testid="draft-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+
+    const questions = page.locator('[data-testid="draft-question"]');
+    // Down to one, through the screen rather than through the database: what is
+    // under test is the confirmation a parent actually reads.
+    while ((await questions.count()) > 1) {
+      await questions.last().getByTestId('draft-delete-open').click();
+      await page.getByTestId('draft-delete-confirm').click();
+      await expect(page.getByTestId('draft-notice')).not.toBeEmpty();
+    }
+    await expect(questions).toHaveCount(1);
+
+    await questions.first().getByTestId('draft-delete-open').click();
+    // Both facts, in words, **before** anything is destroyed: that the practice
+    // test goes with it, and that the allowance already spent is not refunded.
+    const body = page.getByTestId('draft-delete-body');
+    await expect(body).toContainText('discards the whole practice test');
+    await expect(body).toContainText('Generation Allowance already used on it is not given back');
+    // Cancel leaves the draft exactly as it was.
+    await page.getByTestId('draft-delete-cancel').click();
+    await expect(questions).toHaveCount(1);
+
+    await questions.first().getByTestId('draft-delete-open').click();
+    await page.getByTestId('draft-delete-confirm').click();
+
+    // The parent lands on Pending drafts, and is told what happened there —
+    // the screen that knew was the one being navigated away from.
+    await expect(page.getByRole('heading', { name: 'Pending practice tests' })).toBeVisible();
+    await expect(page.getByTestId('drafts-discarded')).toHaveText(
+      'The practice test was discarded.',
+    );
+    // And it is gone from the list, not merely emptied.
+    await expect(page.getByTestId('drafts-empty')).toBeVisible();
   });
 });

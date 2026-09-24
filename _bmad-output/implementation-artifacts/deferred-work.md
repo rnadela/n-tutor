@@ -829,3 +829,27 @@ source_spec: `spec-4-3-draft-review.md`
 severity: low
 reason: `capture/page.tsx` and `generate/[sourceTestId]/page.tsx` both drive the `LiveRegion` through the `Announcement`/`seq` machinery in `apps/web/src/lib/parent-view.ts`. The loading-to-loaded, error and draft-is-gone transitions here announce nothing beyond what the `role="alert"`/`role="status"` alerts carry on their own.
 status: open
+
+### DW-105: The two Parent View draft screens are covered by specs that grep their own source text rather than render them, so no executing test drives the edit, delete or slot-restore states in a DOM.
+origin: spec-deferred cf2f6a26a114
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.spec.tsx
+source_spec: `spec-4-4-draft-editing.md`
+severity: medium
+reason: `apps/web/src/app/parent/drafts/[practiceTestId]/page.spec.tsx` asserts with `expect(PAGE_SOURCE).toContain(...)` against `readFileSync(page.tsx)`. Inverting the slot filter to `slot.kind === 'DraftEdit'` would leave every searched string in place and ship green with restore entirely dead. `apps/web/vitest.config.ts` sets `environment: 'node'` and no testing-library dependency exists under `apps/web`, so a real render test needs a DOM the web tier does not have. Carried from Story 4.3; this story adds more instances of it. The Playwright pass is the compensating surface.
+status: open
+
+### DW-106: Two deletes committing concurrently on one draft can collide on the ordinal renumber rather than serialising.
+origin: spec-deferred 314454a0b7ca
+location: apps/api/src/practicetest/practice-test.service.ts (deleteQuestion)
+source_spec: `spec-4-4-draft-editing.md`
+severity: medium
+reason: `deleteQuestion` reads the survivors and rewrites their ordinals without locking the parent `practice_test` row first, so two overlapping transactions can both negate and both renumber; the loser surfaces a unique-constraint violation as a 500 rather than as this module's own answer. The window needs two in-flight deletes from one elevated parent, which the screen does not produce (its controls disable while a mutation is in flight), and the fix is a `SELECT ... FOR UPDATE` on the parent row whose interaction with the charging fence deserves its own pass.
+status: open
+
+### DW-107: The `DraftEdit` slot's restore, debounced save and discard mechanism, and the screen's error path on a failed edit or delete, run through no test that actually renders or executes them.
+origin: spec-deferred 305ba0351c52
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.tsx (restore effect, debounced slot save, discardSlot/discardEverySlot); apps/web/src/app/parent/drafts/[practiceTestId]/page.spec.tsx
+source_spec: `spec-4-4-draft-editing.md`
+severity: medium
+reason: `page.spec.tsx`'s slot-restore cases (e.g. "holds a typed-but-unsaved edit in the DraftEdit slot", "restores the held edits once per draft id", "checks every field of a restored slot", "debounces the slot write") are all `expect(PAGE_SOURCE).toContain(...)` assertions against the raw source text, same as the general gap already deferred above. Neither of the new Playwright specs in `e2e/tests/parent-practice-test.spec.ts` leaves an editor open and reloads to observe a restore, or forces a 4xx/network failure to observe `data-testid="draft-action-error"`. Swapping the merge-precedence spread at `setEdits((open) => ({ ...restored, ...open }))` to `{ ...open, ...restored }` -- which would let a slow slot fetch clobber text a parent is actively typing, exactly the race the surrounding comment says the ordering prevents -- would not fail any test in this diff.
+status: open

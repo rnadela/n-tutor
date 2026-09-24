@@ -334,6 +334,57 @@ describe('the draft reads', () => {
     expect(url).toContain(`/parent/practice-tests/${ID}`);
   });
 
+  it('edits one question with plain text, and re-reads the draft from the answer', async () => {
+    const fetchMock = respondWith(200, { id: ID, status: 'Draft', questions: [] });
+
+    await parentApi.editDraftQuestion('token', ID, 'q1', {
+      prompt: 'What is 1/2 of 8?',
+      choices: [{ ordinal: 1, body: 'Four' }],
+      correctOrdinal: 1,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/parent/practice-tests/${ID}/questions/q1`);
+    expect(init.method).toBe('PATCH');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer token');
+    // Plain text up, segments back: the browser never builds a fraction, and
+    // the server owns the one conversion (AD-32).
+    expect(JSON.parse(String(init.body))).toEqual({
+      prompt: 'What is 1/2 of 8?',
+      choices: [{ ordinal: 1, body: 'Four' }],
+      correctOrdinal: 1,
+    });
+  });
+
+  it('deletes one question and reads the draft back from the answer', async () => {
+    const fetchMock = respondWith(200, { id: ID, status: 'Draft', questions: [] });
+
+    const view = await parentApi.deleteDraftQuestion('token', ID, 'q1');
+    expect(view.status).toBe('Draft');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/parent/practice-tests/${ID}/questions/q1`);
+    expect(init.method).toBe('DELETE');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer token');
+  });
+
+  it('carries the discard back as a status rather than as a refusal', async () => {
+    // Deleting the last question takes the practice test with it. The screen
+    // reads the status and goes back to the pending drafts.
+    respondWith(200, { id: ID, status: 'Discarded', questions: [] });
+    const view = await parentApi.deleteDraftQuestion('token', ID, 'q1');
+    expect(view.status).toBe('Discarded');
+    expect(view.questions).toEqual([]);
+  });
+
+  it('surfaces the released-state write barrier as the 404 it is', async () => {
+    respondWith(404, { message: 'That practice test could not be found.' });
+    const failure = await parentApi
+      .editDraftQuestion('token', ID, 'q1', { prompt: 'x' })
+      .catch((cause: unknown) => cause as ParentApiError);
+    expect((failure as ParentApiError).status).toBe(404);
+  });
+
   it('surfaces a 404 as a 404 rather than flattening it into a generic failure', async () => {
     // The screen renders a missing draft as a state and offers the way back;
     // it can only do that if the status survives the call.

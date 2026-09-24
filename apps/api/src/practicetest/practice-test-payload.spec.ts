@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { QuestionFormat } from '../generated/prisma/enums.js';
+import type { RichText } from '../extraction/rich-text.js';
 import {
   ANSWER_FORBIDDEN,
   MAX_CHOICES,
@@ -24,8 +25,12 @@ import {
   TOPIC_LABEL_TOO_LONG,
   TOPIC_REQUIRED,
   WEIGHTED_TOPIC_UNDERWEIGHT,
+  CHOICES_MISMATCHED,
+  EditedQuestionInvalid,
   normalizePrompt,
+  validateEditedQuestion,
   validateGenerationPayload,
+  type EditedQuestion,
 } from './practice-test-payload.js';
 import { weightedTopicFloor, weightingFor } from './practice-test-policy.js';
 
@@ -526,5 +531,163 @@ describe('weighted topic floor', () => {
       weighted(3, 'Fractions'),
       WEIGHTED_TOPIC_UNDERWEIGHT,
     );
+  });
+});
+
+describe('an edited question', () => {
+  /** The same helper as above, typed, so an override is checked rather than cast. */
+  const seg = (value: string): RichText => [{ kind: 'text', value }];
+
+  /** One Multiple Choice question as an edit would leave it. */
+  function edited(overrides: Partial<EditedQuestion> = {}): EditedQuestion {
+    return {
+      format: 'MultipleChoice' as QuestionFormat,
+      prompt: seg('What is two plus two?'),
+      answer: null,
+      choices: [
+        { ordinal: 1, body: seg('Four'), isCorrect: true },
+        { ordinal: 2, body: seg('Five'), isCorrect: false },
+        { ordinal: 3, body: seg('Six'), isCorrect: false },
+      ],
+      ...overrides,
+    } as EditedQuestion;
+  }
+
+  const ORDINALS = [1, 2, 3];
+
+  it('takes an edit that leaves the invariants intact', () => {
+    expect(() => validateEditedQuestion(edited(), ORDINALS)).not.toThrow();
+  });
+
+  it('refuses an edit that leaves no option correct', () => {
+    expect(() =>
+      validateEditedQuestion(
+        edited({
+          choices: [
+            { ordinal: 1, body: seg('Four'), isCorrect: false },
+            { ordinal: 2, body: seg('Five'), isCorrect: false },
+            { ordinal: 3, body: seg('Six'), isCorrect: false },
+          ],
+        }),
+        ORDINALS,
+      ),
+    ).toThrow(ONE_CORRECT_CHOICE_REQUIRED);
+  });
+
+  it('refuses an edit that leaves two options correct', () => {
+    expect(() =>
+      validateEditedQuestion(
+        edited({
+          choices: [
+            { ordinal: 1, body: seg('Four'), isCorrect: true },
+            { ordinal: 2, body: seg('Five'), isCorrect: true },
+            { ordinal: 3, body: seg('Six'), isCorrect: false },
+          ],
+        }),
+        ORDINALS,
+      ),
+    ).toThrow(ONE_CORRECT_CHOICE_REQUIRED);
+  });
+
+  it('refuses a free-text answer on a Multiple Choice question', () => {
+    // The flagged option is the answer. A second copy of it can disagree, and
+    // nothing decides which wins.
+    expect(() => validateEditedQuestion(edited({ answer: seg('Four') }), ORDINALS)).toThrow(
+      ANSWER_FORBIDDEN,
+    );
+  });
+
+  it('refuses options on a question that has none', () => {
+    expect(() =>
+      validateEditedQuestion(
+        edited({ format: 'FillInTheBlank' as QuestionFormat, answer: seg('four') }),
+        ORDINALS,
+      ),
+    ).toThrow(CHOICES_FORBIDDEN);
+  });
+
+  it('requires a free-text answer where there are no options', () => {
+    expect(() =>
+      validateEditedQuestion(
+        edited({ format: 'ShortAnswer' as QuestionFormat, answer: null, choices: [] }),
+        [],
+      ),
+    ).toThrow(ANSWER_REQUIRED);
+  });
+
+  it('refuses an edit that does not restate exactly the stored options', () => {
+    // No option is added and none is removed by this story: a partial
+    // restatement would silently leave an option a parent believed replaced.
+    expect(() => validateEditedQuestion(edited(), [1, 2, 3, 4])).toThrow(CHOICES_MISMATCHED);
+  });
+
+  it('refuses an empty prompt, an empty option body and a repeated one', () => {
+    // Whitespace alone is a field claimed and not filled, and it is refused by
+    // the rich-text rule before the prompt rule is ever reached.
+    expect(() => validateEditedQuestion(edited({ prompt: seg('   ') }), ORDINALS)).toThrow(
+      RICH_TEXT_INVALID,
+    );
+    // A prompt that is nothing but punctuation survives the rich-text rule and
+    // is caught by the one that asks whether anything was actually asked.
+    expect(() => validateEditedQuestion(edited({ prompt: seg('...') }), ORDINALS)).toThrow(
+      PROMPT_EMPTY,
+    );
+    expect(() =>
+      validateEditedQuestion(
+        edited({
+          choices: [
+            { ordinal: 1, body: seg('Four'), isCorrect: true },
+            { ordinal: 2, body: seg('...'), isCorrect: false },
+            { ordinal: 3, body: seg('Six'), isCorrect: false },
+          ],
+        }),
+        ORDINALS,
+      ),
+    ).toThrow(CHOICE_BODY_EMPTY);
+    expect(() =>
+      validateEditedQuestion(
+        edited({
+          choices: [
+            { ordinal: 1, body: seg('Four'), isCorrect: true },
+            { ordinal: 2, body: seg('Four'), isCorrect: false },
+            { ordinal: 3, body: seg('Six'), isCorrect: false },
+          ],
+        }),
+        ORDINALS,
+      ),
+    ).toThrow(CHOICES_NOT_DISTINCT);
+  });
+
+  it('refuses a field beyond this module own ceilings', () => {
+    expect(() =>
+      validateEditedQuestion(edited({ prompt: seg('x'.repeat(MAX_TEXT_LENGTH + 1)) }), ORDINALS),
+    ).toThrow(RICH_TEXT_INVALID);
+  });
+
+  it('is its own fault class, so nothing retries a parent typing', () => {
+    // A generated payload's rejection is the provider's fault and is re-issued;
+    // an edit is not made better by asking for it again.
+    let thrown: unknown;
+    try {
+      validateEditedQuestion(edited({ answer: seg('Four') }), ORDINALS);
+    } catch (cause) {
+      thrown = cause;
+    }
+    expect(thrown).toBeInstanceOf(EditedQuestionInvalid);
+    expect(thrown).not.toBeInstanceOf(GenerationPayloadInvalid);
+  });
+
+  it('carries no question text, option body or topic label in any refusal', () => {
+    // Identifiers and fixed sentences only (AD-20).
+    for (const sentence of [
+      CHOICES_MISMATCHED,
+      ONE_CORRECT_CHOICE_REQUIRED,
+      ANSWER_FORBIDDEN,
+      ANSWER_REQUIRED,
+      CHOICES_FORBIDDEN,
+      CHOICE_BODY_EMPTY,
+    ]) {
+      expect(sentence).not.toMatch(/gpt|Allowance|Free|Fractions/iu);
+    }
   });
 });
