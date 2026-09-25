@@ -917,3 +917,59 @@ source_spec: `spec-4-5-release-or-discard.md`
 severity: low
 reason: `confirmTransition` guards with `if (token === null || transition === null) return;` — no `setActionError`, no `leave()`, no dialog dismissal. The window is narrow (elevation expiry mid-confirmation) and Cancel still works, so this is a rough edge rather than a lost action, and is not new to this story's pattern of guarding on `token === null`.
 status: open
+
+### DW-116: The draft review screen's timer block, like every other control on that screen, is covered by a spec that greps the page's own source text rather than rendering it, so no executing unit test drives
+origin: spec-deferred 8a1bc20b108f
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.spec.tsx
+source_spec: `spec-4-6-optional-timer-configuration.md`
+severity: medium
+reason: `apps/web/src/app/parent/drafts/[practiceTestId]/page.spec.tsx` asserts with `expect(PAGE_SOURCE).toContain(...)` against `readFileSync(page.tsx)`. The new timer cases assert the presence of literals such as `setTimerOn(storedTimer !== null)` — a refactor that preserves behaviour fails them, and a behavioural inversion that keeps the literal passes. `apps/web/vitest.config.ts` sets `environment: 'node'` and no testing-library dependency exists under `apps/web`, so a real render test needs a DOM the web tier does not have. Carried from Stories 4.3, 4.4 and 4.5; this story adds more instances of it. The Playwright pass is the compensating surface and it does drive the timer end to end, including the off path, the disabled-save gate and the survive-a-delete case.
+status: open
+
+### DW-117: The api integration specs fail 1-2 non-deterministic tests per run, a different test each time, and the flake now also appears on single-file runs rather than only on a full parallel run.
+origin: spec-deferred f118c50e6dbf
+location: apps/api/vitest.config.ts; apps/api/test/harness.ts
+source_spec: `spec-4-6-optional-timer-configuration.md`
+severity: medium
+reason: Observed this pass as `topic weighting > offers the other topics for the remaining questions` (404 where 202) and `release and discard > leaves a discarded test out of the read entirely` on separate runs of `vitest run test/practice-test.int-spec.ts` alone, and as `Student Mode and the device binding > binds to the named profile on the deliberate exit` on one run of `test/student-mode.int-spec.ts`. Every one passed on the next run and in isolation. Two consecutive full-file runs at baseline `b6acc34` (99 tests, this story's 13 absent) were green, so the longer file widens an existing window rather than introducing a fault: the cause is the shared-Postgres reset pattern recorded on Story 4.5, not product code. Needs a per-file schema or database, or `fileParallelism: false` for the integration specs.
+status: open
+
+### DW-118: Nothing on the pending-drafts list says whether a draft carries a time limit, so a parent holding several drafts must open each one to find out.
+origin: spec-deferred bae7e1cf324d
+location: apps/api/src/practicetest/practice-test.service.ts (draftsFor); apps/web/src/app/parent/drafts/page.tsx
+source_spec: `spec-4-6-optional-timer-configuration.md`
+severity: low
+reason: `PracticeTestDraftSummary` carries id, source test, profile, ordinal, sibling count, question count and made-at, and this story deliberately did not widen it — the timer is read and written on the draft it belongs to, which is where FR-15 puts it. No story currently owns a timer marker on the list, which is why this is recorded rather than built. Harmless with a handful of drafts; a real omission once a parent holds a dozen.
+status: open
+
+### DW-119: A timer save with nothing changed is still a full write: a transaction, a log line and an announcement for a row that already read that way.
+origin: spec-deferred 6e21dded6050
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.tsx (saveTimer)
+source_spec: `spec-4-6-optional-timer-configuration.md`
+severity: low
+reason: `saveTimer` gates on `timerSavable` and `busy` but compares nothing against `storedTimer`, so clicking save on an untimed draft with the box unticked issues `PUT { minutes: null }` and announces "There is no time limit …" for a no-op. Idempotent and harmless, and the same shape the edit save already has, so it is a rough edge rather than a defect.
+status: open
+
+### DW-120: The 1-180 minute bound lives only in the DTO, so any future writer that is not that route can store a duration Epic 5 would derive a nonsensical deadline from.
+origin: spec-deferred f46ef489895e
+location: apps/api/prisma/schema.prisma (PracticeTest.timerMinutes)
+source_spec: `spec-4-6-optional-timer-configuration.md`
+severity: low
+reason: The migration adds a bare `INTEGER` with no CHECK, and `student-mode.int-spec.ts` demonstrates the gap by writing `timerMinutes: 25` straight through Prisma. This story deliberately located enforcement in the DTO because `practicetest` is the sole writer (AD-17) and the one route is the only path; a database CHECK would make the invariant a property of the column instead. Worth taking with Epic 5's own migration rather than a migration of its own.
+status: open
+
+### DW-121: The timer save button and every other mutation button on this screen only gate on `busy !== null`, so a click that lands while the elevation token is null, or a second click in the same tick before
+origin: spec-deferred c576b3ecd57b
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.tsx (saveTimer and sibling action buttons)
+source_spec: `spec-4-6-optional-timer-configuration.md`
+severity: low
+reason: `saveTimer` returns early on `token === null || busy !== null`, but the button's own `disabled` prop (`disabled={busy !== null || !timerSavable}`) never checks `token`, and the same shape (`disabled={busy !== null}` with no token check) appears on every other action button in `page.tsx` (:1245, :1258, :1294, :1301, :1345, :1353, :1361) — a pre-existing pattern this story only repeats rather than introduces. A double-click before React commits `setBusy` is the same shared gap.
+status: open
+
+### DW-122: The minutes field's `aria-describedby` wiring — the one accessibility property genuinely new to this story — is asserted only by a source-text grep, and the Playwright pass that is this screen's
+origin: spec-deferred eb1863be63f4
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.tsx (minutes TextField); e2e/tests/parent-practice-test.spec.ts
+source_spec: `spec-4-6-optional-timer-configuration.md`
+severity: low
+reason: `page.spec.tsx`'s "ties both explanatory sentences to the minutes field itself" test greps `PAGE_SOURCE` for the id constants and the `aria-describedby` template string; it does not render the component. `e2e/tests/parent-practice-test.spec.ts` drives the timer block end to end but its only `aria-describedby` assertion (line 171) targets an unrelated control on the generate screen. So nothing executing confirms the minutes `<input>` actually carries `aria-describedby="draft-timer-hint draft-timer-suggestion"` at runtime — a wrong `slotProps` key or a mismatched id would ship undetected. A narrower instance of the pattern already recorded above (source-grepped page spec), called out separately because the general deferred item's claim that "the Playwright pass ... does drive the timer end to end" does not hold for this specific attribute.
+status: open

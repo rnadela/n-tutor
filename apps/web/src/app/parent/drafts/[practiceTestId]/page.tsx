@@ -9,6 +9,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import Checkbox from '@mui/material/Checkbox';
 import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import FormLabel from '@mui/material/FormLabel';
@@ -42,6 +43,18 @@ import { density } from '@/theme/tokens';
  * a parent who is interrupted mid-word loses at most the last moment of it.
  */
 const SLOT_DEBOUNCE_MS = 800;
+
+/**
+ * The two sentences that explain the timer, named so the minutes field can point
+ * at them.
+ *
+ * A control whose explanation is only *beside* it on screen has no explanation
+ * at all for anyone reading through the input: `aria-describedby` is what makes
+ * "a time limit is optional" and "20 minutes is suggested, nothing is saved yet"
+ * part of the field rather than adjacent to it.
+ */
+const TIMER_HINT_ID = 'draft-timer-hint';
+const TIMER_SUGGESTION_ID = 'draft-timer-suggestion';
 
 /**
  * Pending drafts, told that a practice test was just discarded.
@@ -157,7 +170,13 @@ function canSave(question: DraftQuestionView, edit: QuestionEdit): boolean {
  * identity table (AD-17). A name not in hand falls back to a neutral stand-in and
  * never blocks the release control.
  *
- * The timer is Story 4.6. There is no control here for it.
+ * Since Story 4.6 the draft also carries the one configuration that is not
+ * generated content: an optional time limit, off by default, set here beside the
+ * release control because FR-15 requires the parent to set it *while reviewing
+ * the draft it applies to*. The minutes field is pre-filled with the server's own
+ * suggestion and nothing is stored until it is saved; the state is re-derived
+ * from the returned view rather than from what this browser hoped it wrote. That
+ * it stops being settable after release is the API's answer, not this screen's.
  */
 export default function DraftReviewPage() {
   const router = useRouter();
@@ -210,6 +229,17 @@ export default function DraftReviewPage() {
   const [profiles, setProfiles] = useState<StudentProfileView[]>([]);
 
   /**
+   * Whether a time limit is on, and the minutes field beside it.
+   *
+   * Two pieces of screen state over **one** nullable stored column: off is
+   * `null`, not a second flag the server holds. Both are re-derived from the
+   * server's own figures by the effect below, so the screen never carries a
+   * configuration the row does not.
+   */
+  const [timerOn, setTimerOn] = useState(false);
+  const [timerMinutes, setTimerMinutes] = useState('');
+
+  /**
    * `slots` as it is right now, for a callback that must not read a stale map.
    *
    * Mirrored in an effect rather than assigned in the render body: a render
@@ -220,6 +250,48 @@ export default function DraftReviewPage() {
   useEffect(() => {
     liveSlots.current = slots;
   }, [slots]);
+
+  /** The two figures the timer block reads, held as primitives. */
+  const storedTimer = draft?.timerMinutes ?? null;
+  const suggestedTimer = draft?.suggestedTimerMinutes ?? null;
+
+  /**
+   * What the timer block was last seeded from, so it is seeded **once per draft**
+   * and then only when the *stored* figure moves.
+   *
+   * The same mechanism `restoredFor` uses below, and for the same reason. Every
+   * save and every delete replaces `draft`, and a delete moves
+   * `suggestedTimerMinutes` with the question count — so an effect that re-seeded
+   * whenever either figure changed would tick the box back off and overwrite a
+   * minutes figure the parent had typed, because they deleted a question. Keyed
+   * on the id **and** the stored value: the id is what makes a second draft seed
+   * at all, and the stored value is what makes a saved timer re-seed from the
+   * server's own answer rather than from what this browser sent.
+   */
+  const timerSeededFrom = useRef<{ practiceTestId: string; stored: number | null } | null>(null);
+
+  /**
+   * Puts the timer block in whatever state the server last said the row is in.
+   *
+   * Pre-filling is **not** configuring: a draft nothing has configured arrives
+   * with `timerMinutes: null`, so the control reads off and the field carries the
+   * server's suggestion — a figure this browser did not compute, and one nothing
+   * stores until the parent saves it.
+   */
+  useEffect(() => {
+    if (suggestedTimer === null) return;
+    const seeded = timerSeededFrom.current;
+    if (
+      seeded !== null &&
+      seeded.practiceTestId === practiceTestId &&
+      seeded.stored === storedTimer
+    ) {
+      return;
+    }
+    timerSeededFrom.current = { practiceTestId, stored: storedTimer };
+    setTimerOn(storedTimer !== null);
+    setTimerMinutes(String(storedTimer ?? suggestedTimer));
+  }, [practiceTestId, storedTimer, suggestedTimer]);
 
   /** The draft whose slots have already been restored, so it happens once. */
   const restoredFor = useRef<string | null>(null);
@@ -618,6 +690,61 @@ export default function DraftReviewPage() {
     router,
     announce,
   ]);
+
+  /**
+   * Whether what is typed is a figure worth sending.
+   *
+   * Shape only — a whole number of at least one — and deliberately **not** the
+   * ceiling: the bounds live on the server, which is where they are enforced, and
+   * restating a figure here would give this screen its own copy of it to
+   * disagree with. A duration the server refuses comes back as its own sentence.
+   */
+  const timerSavable =
+    !timerOn || (/^\d{1,15}$/u.test(timerMinutes.trim()) && Number(timerMinutes) >= 1);
+
+  /**
+   * Saves the time limit, or turns it off, and says which in the same words the
+   * screen shows.
+   *
+   * `null` is the whole of "off" — one restatement of one configuration, which is
+   * why there is no second control to clear it. The view that comes back is what
+   * the screen then reads: a figure the server stored, never the one this browser
+   * sent. Nothing is saved while another mutation is in flight.
+   */
+  const saveTimer = useCallback(() => {
+    if (token === null || busy !== null) return;
+    if (!timerSavable) {
+      // The save control is disabled for exactly this, so reaching here means the
+      // screen and the control disagreed — which is still a thing to say rather
+      // than a call that quietly does nothing. One rule, stated once, in
+      // `timerSavable`, rather than a second copy of it here.
+      setNotice(null);
+      setActionError(parentCopy.drafts.timerFailed);
+      return;
+    }
+    const minutes = timerOn ? Number(timerMinutes.trim()) : null;
+    setBusy(practiceTestId);
+    setActionError(null);
+    parentApi
+      .setPracticeTestTimer(token, practiceTestId, minutes)
+      .then((view) => {
+        setBusy(null);
+        // Re-rendered from the server's own account of what is stored.
+        setDraft(view);
+        announce(
+          view.timerMinutes === null
+            ? parentCopy.drafts.timerOffSaved
+            : parentCopy.drafts.timerSaved(view.timerMinutes),
+        );
+      })
+      .catch((cause: unknown) => {
+        setBusy(null);
+        // A stale success sentence beside a fresh failure is a screen saying two
+        // contradictory things at once.
+        setNotice(null);
+        failed(cause, parentCopy.drafts.timerFailed);
+      });
+  }, [token, busy, timerSavable, timerOn, timerMinutes, practiceTestId, announce, failed]);
 
   /**
    * Releases or discards the whole draft, whichever the confirmation named.
@@ -1026,6 +1153,87 @@ export default function DraftReviewPage() {
                   </Card>
                 );
               })}
+            </Box>
+
+            {/* The one configuration a Practice Test carries that is not
+                generated content, set here rather than on a screen of its own:
+                FR-15 requires it while the parent is reading the draft it
+                applies to. Off by default, and the field is pre-filled with the
+                server's suggestion — which stores nothing. Both controls are
+                real focusable elements with their own accessible names. */}
+            <Box
+              component="section"
+              aria-labelledby="draft-timer-legend"
+              data-testid="draft-timer"
+              sx={{ display: 'grid', gap: `${density.gap}px` }}
+            >
+              <Typography component="h2" id="draft-timer-legend" variant="label">
+                {parentCopy.drafts.timerLegend}
+              </Typography>
+              <Typography component="p" id={TIMER_HINT_ID} data-testid="draft-timer-hint">
+                {parentCopy.drafts.timerHint}
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={timerOn}
+                    id="draft-timer-on"
+                    onChange={(event) => {
+                      setNotice(null);
+                      setActionError(null);
+                      setTimerOn(event.target.checked);
+                    }}
+                  />
+                }
+                label={parentCopy.drafts.timerOn}
+              />
+              {timerOn && (
+                <>
+                  <TextField
+                    id="draft-timer-minutes"
+                    label={parentCopy.drafts.timerMinutesLabel}
+                    value={timerMinutes}
+                    slotProps={{
+                      htmlInput: {
+                        'data-testid': 'draft-timer-minutes',
+                        inputMode: 'numeric',
+                        // Both sentences belong to the field, not merely beside
+                        // it: read through the input, the explanation and the
+                        // "nothing is saved yet" caveat are otherwise silent.
+                        'aria-describedby': `${TIMER_HINT_ID} ${TIMER_SUGGESTION_ID}`,
+                      },
+                    }}
+                    onChange={(event) => {
+                      // What was last announced stops being true the moment the
+                      // figure beside it changes: "the student has 25 minutes"
+                      // over a field reading 40 is a screen saying two things.
+                      setNotice(null);
+                      setActionError(null);
+                      setTimerMinutes(event.target.value);
+                    }}
+                  />
+                  {/* Described as a suggestion, so a parent knows nothing was
+                      stored on their behalf by the field being filled in. */}
+                  <Typography
+                    component="p"
+                    id={TIMER_SUGGESTION_ID}
+                    data-testid="draft-timer-suggestion"
+                  >
+                    {parentCopy.drafts.timerSuggestion(draft.suggestedTimerMinutes)}
+                  </Typography>
+                </>
+              )}
+              <Box sx={{ display: 'flex', gap: `${density.gap}px` }}>
+                <Button
+                  type="button"
+                  variant="outlined"
+                  disabled={busy !== null || !timerSavable}
+                  data-testid="draft-timer-save"
+                  onClick={saveTimer}
+                >
+                  {parentCopy.drafts.timerSave}
+                </Button>
+              </Box>
             </Box>
 
             {/* The draft as a whole, in either direction. Per draft and never in

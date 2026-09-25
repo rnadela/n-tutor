@@ -2,15 +2,22 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsDefined,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { MAX_TOPIC_LABEL_LENGTH } from '../practice-test-policy.js';
+import {
+  MAX_TIMER_MINUTES,
+  MAX_TOPIC_LABEL_LENGTH,
+  MIN_TIMER_MINUTES,
+} from '../practice-test-policy.js';
 import { MAX_CHOICES, MAX_TEXT_LENGTH } from '../practice-test-payload.js';
 
 /**
@@ -115,4 +122,29 @@ export class EditDraftQuestionDto {
   @IsInt()
   @Min(1)
   correctOrdinal?: number;
+}
+
+/**
+ * The one configuration a Practice Test carries that is not generated content:
+ * how long the child gets, in whole minutes, or `null` for no timer at all.
+ *
+ * **`null` is a legitimate value and an absent field is not.** `@IsDefined()` is
+ * what keeps `{}` from reading as "turn it off": an empty body is a request that
+ * said nothing, and a mutation that treats silence as an instruction is how a
+ * timer disappears without anybody asking. `@ValidateIf` then lets `null`
+ * through while every non-null value has to be a whole number inside the bounds.
+ *
+ * Unlike `RequestPracticeTestsDto`'s deliberately unbounded `count`, the ceiling
+ * **does** belong here: a count above what an account can afford is an overreach
+ * to clamp, while a duration above the bound is simply a malformed request. The
+ * bound is enforced server-side or it is not enforced — the screen disabling a
+ * control is a courtesy, this is the control.
+ */
+export class SetPracticeTestTimerDto {
+  @IsDefined()
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(MIN_TIMER_MINUTES)
+  @Max(MAX_TIMER_MINUTES)
+  minutes!: number | null;
 }

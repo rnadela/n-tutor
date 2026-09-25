@@ -78,6 +78,32 @@ export const WEIGHTED_TOPIC_SHARE = 0.6;
  */
 export const MAX_TOPIC_LABEL_LENGTH = 200;
 
+/**
+ * The shortest countdown a parent may configure, in minutes.
+ *
+ * One, not zero: zero minutes is not a short test, it is a test that has already
+ * expired, and "no timer" already has a value of its own — `null`. A figure
+ * below this is a malformed request rather than a figure to clamp, which is why
+ * the DTO refuses it with a 400 while `RequestPracticeTestsDto`'s `count`
+ * deliberately has no ceiling at all.
+ */
+export const MIN_TIMER_MINUTES = 1;
+
+/**
+ * The longest countdown a parent may configure, in minutes.
+ *
+ * Three hours, which is longer than any homework practice test and short enough
+ * that a mistyped figure is caught rather than stored. Stated here alone so the
+ * DTO, the suggestion below and the screen cannot each hold their own ceiling.
+ */
+export const MAX_TIMER_MINUTES = 180;
+
+/** A minute per Question, in the suggestion below. */
+export const TIMER_MINUTES_PER_QUESTION = 1;
+
+/** Plus five, to read the paper and check the answers. */
+export const TIMER_MINUTES_OVERHEAD = 5;
+
 // --- Messages ------------------------------------------------------------
 //
 // Not one of them carries a provider string, a model name, a tier label or a
@@ -273,6 +299,26 @@ export function claimTimeoutMs(): number {
 export function remainingFor(used: number, limit: number | null): number {
   if (limit === null) return MAX_PER_REQUEST;
   return Math.max(0, limit - used);
+}
+
+/**
+ * The duration the screen pre-fills, derived from the stored question count.
+ *
+ * `questionCount + 5`, clamped to the bounds — a minute a Question plus five to
+ * read and check — chosen because it reproduces the PRD's own worked example
+ * (15 questions, 20 minutes, §UJ-2) rather than inventing a second figure beside
+ * it. Computed here and carried on the draft view so the screen, Epic 5's own
+ * surfaces and every test read one definition of "suggested".
+ *
+ * It is a **suggestion only**: nothing stores it. A parent who opens a draft,
+ * reads it and releases it without touching the timer has released an untimed
+ * test, and the stored `null` says so.
+ */
+export function suggestedTimerMinutes(questionCount: number): number {
+  if (!Number.isFinite(questionCount)) return MIN_TIMER_MINUTES;
+  const questions = Math.max(0, Math.floor(questionCount));
+  const suggested = questions * TIMER_MINUTES_PER_QUESTION + TIMER_MINUTES_OVERHEAD;
+  return Math.min(MAX_TIMER_MINUTES, Math.max(MIN_TIMER_MINUTES, suggested));
 }
 
 /**

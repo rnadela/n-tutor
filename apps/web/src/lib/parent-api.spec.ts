@@ -412,6 +412,55 @@ describe('the draft reads', () => {
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer token');
   });
 
+  it('sets a time limit with an explicit figure, and reads the view back', async () => {
+    const fetchMock = respondWith(200, {
+      id: ID,
+      status: 'Draft',
+      timerMinutes: 20,
+      suggestedTimerMinutes: 20,
+      questions: [],
+    });
+
+    const view = await parentApi.setPracticeTestTimer('token', ID, 20);
+    expect(view.timerMinutes).toBe(20);
+    expect(view.suggestedTimerMinutes).toBe(20);
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/parent/practice-tests/${ID}/timer`);
+    // `PUT`: there is one duration and this restates it whole.
+    expect(init.method).toBe('PUT');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer token');
+    expect(JSON.parse(String(init.body))).toEqual({ minutes: 20 });
+  });
+
+  it('turns the timer off by stating null, never by omitting the field', async () => {
+    // An absent field is a request that said nothing, and the API answers 400 for
+    // it. Off is `{ minutes: null }`, explicitly.
+    const fetchMock = respondWith(200, {
+      id: ID,
+      status: 'Draft',
+      timerMinutes: null,
+      suggestedTimerMinutes: 12,
+      questions: [],
+    });
+
+    const view = await parentApi.setPracticeTestTimer('token', ID, null);
+    expect(view.timerMinutes).toBeNull();
+
+    const [, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body).toEqual({ minutes: null });
+    expect('minutes' in body).toBe(true);
+  });
+
+  it('surfaces the timer’s own released-state refusal as the 404 it is', async () => {
+    respondWith(404, { message: 'That practice test could not be found.' });
+    const failure = await parentApi
+      .setPracticeTestTimer('token', ID, 20)
+      .catch((cause: unknown) => cause as ParentApiError);
+    expect((failure as ParentApiError).status).toBe(404);
+  });
+
   it('surfaces a second release as the 404 the one-way transition answers with', async () => {
     // Release is one-way in v0, and the API states one sentence for an unknown id,
     // a foreign id and an already-released one. This app has nothing to tell apart.

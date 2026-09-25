@@ -13,12 +13,15 @@ const {
   GENERATION_UPSTREAM_REJECTED,
   MAX_JOB_ATTEMPTS,
   MAX_PER_REQUEST,
+  MAX_TIMER_MINUTES,
   MAX_TOPIC_LABEL_LENGTH,
+  MIN_TIMER_MINUTES,
   NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
   PRACTICE_TEST_NOT_FOUND,
   WEIGHTED_TOPIC_UNKNOWN,
   claimTimeoutMs,
+  suggestedTimerMinutes,
   weightedTopicFloor,
   resetPracticeTestRuntime,
 } = await import('../src/practicetest/practice-test-policy.js');
@@ -2102,6 +2105,238 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
   // Practice Test. Every row here was landed by the real runner through the real
   // generator, because "the practice test is visible to that child" is a claim
   // about a row generation actually wrote.
+
+  describe('timer configuration', () => {
+    /** A parent standing on one landed draft, with its id. */
+    async function withTimerDraft(): Promise<Ready & { draftId: string }> {
+      const ready = await generatable();
+      await server()
+        .post(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests`)
+        .set('Authorization', bearer(ready.token))
+        .send({ count: 1 })
+        .expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      const stored = await h.prisma.practiceTest.findMany({
+        where: { parentAccountId: ready.parentAccountId, sourceTestId: ready.sourceTestId },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      });
+      expect(stored).toHaveLength(1);
+      return { ...ready, draftId: stored[0]!.id };
+    }
+
+    function setTimer(token: string, id: string, body: unknown) {
+      return server()
+        .put(`/api/parent/practice-tests/${id}/timer`)
+        .set('Authorization', bearer(token))
+        .send(body as object);
+    }
+
+    function readDraft(token: string, id: string) {
+      return server().get(`/api/parent/practice-tests/${id}`).set('Authorization', bearer(token));
+    }
+
+    /** The whole row the barrier has to leave alone. */
+    function storedRow(id: string) {
+      return h.prisma.practiceTest.findUniqueOrThrow({
+        where: { id },
+        select: { status: true, chargedAt: true, questionCount: true, timerMinutes: true },
+      });
+    }
+
+    it('reads a freshly generated draft as untimed, with the suggestion beside it', async () => {
+      const ready = await withTimerDraft();
+      const before = await storedRow(ready.draftId);
+      // Nothing configured it, so nothing is stored — the suggestion is a
+      // suggestion and generation writes no timer.
+      expect(before.timerMinutes).toBeNull();
+
+      const response = await readDraft(ready.token, ready.draftId).expect(200);
+      expect(response.body.timerMinutes).toBeNull();
+      // The server's own figure, from the stored count: `questionCount + 5`,
+      // clamped. Asserted against the formula's one definition rather than a
+      // second copy of it here.
+      expect(response.body.suggestedTimerMinutes).toBe(suggestedTimerMinutes(before.questionCount));
+      expect(response.body.suggestedTimerMinutes).toBe(before.questionCount + 5);
+      expect(response.body.suggestedTimerMinutes).toBeLessThanOrEqual(MAX_TIMER_MINUTES);
+      expect(response.body.suggestedTimerMinutes).toBeGreaterThanOrEqual(MIN_TIMER_MINUTES);
+    });
+
+    it('reproduces the PRD worked example, and never suggests above the ceiling', async () => {
+      // 15 questions, 20 minutes (§UJ-2) — the example the formula was chosen to
+      // reproduce rather than a second figure beside it.
+      expect(suggestedTimerMinutes(15)).toBe(20);
+      expect(suggestedTimerMinutes(MAX_TIMER_MINUTES)).toBe(MAX_TIMER_MINUTES);
+      expect(suggestedTimerMinutes(10_000)).toBe(MAX_TIMER_MINUTES);
+      expect(suggestedTimerMinutes(0)).toBe(5);
+    });
+
+    it('stores a duration, answers with the whole view, and moves neither status nor charge', async () => {
+      const ready = await withTimerDraft();
+      const before = await storedRow(ready.draftId);
+      const usedBefore = await generationUsed(ready.parentAccountId);
+
+      const response = await setTimer(ready.token, ready.draftId, { minutes: 20 }).expect(200);
+
+      // The whole draft view, exactly as every other mutation in this module
+      // answers with — the screen re-renders from this rather than from what it
+      // hoped it wrote.
+      expect(response.body.id).toBe(ready.draftId);
+      expect(response.body.timerMinutes).toBe(20);
+      expect(response.body.status).toBe('Draft');
+      expect(response.body.questions.length).toBe(before.questionCount);
+
+      const after = await storedRow(ready.draftId);
+      expect(after.timerMinutes).toBe(20);
+      // Setting a timer is not a transition and not a charge (AD-14).
+      expect(after.status).toBe('Draft');
+      expect(after.chargedAt).toEqual(before.chargedAt);
+      expect(await generationUsed(ready.parentAccountId)).toBe(usedBefore);
+      // And the ordinary read agrees with the mutation's own answer.
+      const reread = await readDraft(ready.token, ready.draftId).expect(200);
+      expect(reread.body.timerMinutes).toBe(20);
+    });
+
+    it('turns the timer back off, and off is null rather than a flag', async () => {
+      const ready = await withTimerDraft();
+      await setTimer(ready.token, ready.draftId, { minutes: 20 }).expect(200);
+
+      const off = await setTimer(ready.token, ready.draftId, { minutes: null }).expect(200);
+      expect(off.body.timerMinutes).toBeNull();
+      expect((await storedRow(ready.draftId)).timerMinutes).toBeNull();
+      // The suggestion is still offered; nothing about turning it off stores one.
+      expect(off.body.suggestedTimerMinutes).toBeGreaterThanOrEqual(MIN_TIMER_MINUTES);
+    });
+
+    it('lets the figure be changed any number of times while it is a draft', async () => {
+      const ready = await withTimerDraft();
+      for (const minutes of [10, 45, 1, MAX_TIMER_MINUTES]) {
+        const response = await setTimer(ready.token, ready.draftId, { minutes }).expect(200);
+        expect(response.body.timerMinutes).toBe(minutes);
+      }
+      expect((await storedRow(ready.draftId)).timerMinutes).toBe(MAX_TIMER_MINUTES);
+    });
+
+    it('refuses a figure below the floor, above the ceiling, or not a whole number', async () => {
+      const ready = await withTimerDraft();
+      for (const minutes of [
+        MIN_TIMER_MINUTES - 1,
+        -5,
+        MAX_TIMER_MINUTES + 1,
+        12.5,
+        'twenty',
+        true,
+      ]) {
+        await setTimer(ready.token, ready.draftId, { minutes }).expect(400);
+      }
+      // Refused on shape, before a row was read: nothing was written by any of
+      // them.
+      expect((await storedRow(ready.draftId)).timerMinutes).toBeNull();
+    });
+
+    it('refuses a numeric string: the app does no implicit coercion on the way in', async () => {
+      const ready = await withTimerDraft();
+      // Pinned rather than assumed. The global pipe is
+      // `{ whitelist, forbidNonWhitelisted, transform }` with no
+      // `enableImplicitConversion`, and this DTO asks for no `@Type(() => Number)`
+      // — so `'20'` reaches `@IsInt()` as a string and is refused. Recorded here
+      // because a later pipe option that silently coerced it would change what
+      // this route accepts without changing a line of this module.
+      await setTimer(ready.token, ready.draftId, { minutes: '20' }).expect(400);
+      expect((await storedRow(ready.draftId)).timerMinutes).toBeNull();
+    });
+
+    it('refuses a body carrying a second duration-ish field beside the minutes', async () => {
+      const ready = await withTimerDraft();
+      // There is **one** nullable column and no `enabled` flag, so there is no
+      // second field for a flag to arrive in: `forbidNonWhitelisted` refuses the
+      // whole request rather than storing the duration and dropping the flag,
+      // which is what would let a caller believe the two were both honoured.
+      for (const body of [
+        { minutes: 20, timerEnabled: true },
+        { minutes: 20, timerSeconds: 1200 },
+        { minutes: null, timerEnabled: false },
+      ]) {
+        await setTimer(ready.token, ready.draftId, body).expect(400);
+      }
+      expect((await storedRow(ready.draftId)).timerMinutes).toBeNull();
+    });
+
+    it('refuses an absent field — null is explicit, and silence is not an instruction', async () => {
+      const ready = await withTimerDraft();
+      await setTimer(ready.token, ready.draftId, { minutes: 20 }).expect(200);
+
+      // `{}` is a request that said nothing. A mutation that read it as "off" is
+      // how a timer disappears without anybody asking.
+      await setTimer(ready.token, ready.draftId, {}).expect(400);
+      expect((await storedRow(ready.draftId)).timerMinutes).toBe(20);
+    });
+
+    it('refuses the write once the practice test has been released, and writes nothing', async () => {
+      const ready = await withTimerDraft();
+      await setTimer(ready.token, ready.draftId, { minutes: 20 }).expect(200);
+      await server()
+        .post(`/api/parent/practice-tests/${ready.draftId}/release`)
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      const before = await storedRow(ready.draftId);
+
+      const refused = await setTimer(ready.token, ready.draftId, { minutes: 90 }).expect(404);
+      // The same sentence an unknown id gets: `Draft` is in the `where` of the
+      // statement that mutates, so "never after release" is a property of the
+      // statement (AD-18).
+      expect(refused.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      const unknown = await setTimer(ready.token, randomUUID(), { minutes: 90 }).expect(404);
+      expect(unknown.body.message).toBe(refused.body.message);
+      // A timer changed after release would retroactively change how expiry
+      // graded past Attempts. Nothing moved — not the figure, not the status,
+      // not the charge.
+      const after = await storedRow(ready.draftId);
+      expect(after.timerMinutes).toBe(before.timerMinutes);
+      expect(after.status).toBe('Released');
+      expect(after.chargedAt).toEqual(before.chargedAt);
+      // And turning it off after release is refused exactly the same way.
+      await setTimer(ready.token, ready.draftId, { minutes: null }).expect(404);
+      expect((await storedRow(ready.draftId)).timerMinutes).toBe(before.timerMinutes);
+    });
+
+    it('refuses the write once the practice test has been discarded, and writes nothing', async () => {
+      const ready = await withTimerDraft();
+      await server()
+        .post(`/api/parent/practice-tests/${ready.draftId}/discard`)
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      const before = await storedRow(ready.draftId);
+
+      const refused = await setTimer(ready.token, ready.draftId, { minutes: 30 }).expect(404);
+      expect(refused.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      const after = await storedRow(ready.draftId);
+      expect(after.timerMinutes).toBeNull();
+      expect(after.status).toBe('Discarded');
+      expect(after.chargedAt).toEqual(before.chargedAt);
+    });
+
+    it('refuses another account’s draft as though it did not exist', async () => {
+      const mine = await withTimerDraft();
+      const theirs = await withTimerDraft();
+
+      const refused = await setTimer(mine.token, theirs.draftId, { minutes: 20 }).expect(404);
+      expect(refused.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      // Never 403, and nothing written: an id a parent may not write to is an id
+      // that does not exist (AD-18).
+      expect((await storedRow(theirs.draftId)).timerMinutes).toBeNull();
+    });
+
+    it('refuses a malformed id on shape, and an unelevated call at the guard', async () => {
+      const ready = await withTimerDraft();
+      await setTimer(ready.token, 'not-a-uuid', { minutes: 20 }).expect(400);
+      await server()
+        .put(`/api/parent/practice-tests/${ready.draftId}/timer`)
+        .send({ minutes: 20 })
+        .expect(401);
+      expect((await storedRow(ready.draftId)).timerMinutes).toBeNull();
+    });
+  });
 
   describe('release and discard', () => {
     /** A parent standing on `count` landed drafts, with their ids in stored order. */

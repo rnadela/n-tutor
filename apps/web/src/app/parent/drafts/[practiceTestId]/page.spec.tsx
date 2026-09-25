@@ -121,22 +121,16 @@ describe('the draft review screen', () => {
     expect(PAGE_SOURCE).toContain('elevation?.token ?? null');
   });
 
-  it('offers no timer, and no way back from either terminal state', () => {
-    // Story 4.6 owns the timer. Release is one-way in v0: there is no unrelease,
-    // no recall, no undo and no soft-restore anywhere on this screen, and the
-    // status it writes is never read back off a local guess.
+  it('offers no way back from either terminal state', () => {
+    // Release is one-way in v0: there is no unrelease, no recall, no undo and no
+    // soft-restore anywhere on this screen, and the status it writes is never
+    // read back off a local guess.
     // On the code, not the prose: the screen is required to explain in a comment
     // that there is no recall and no undo.
     for (const forbidden of ['unrelease', 'recall', 'undo']) {
       expect(PAGE_CODE).not.toContain(forbidden);
     }
-    for (const forbidden of [
-      'durationMinutes',
-      'timerMinutes',
-      'restoreDraft',
-      "status: 'Released'",
-      "status: 'Draft'",
-    ]) {
+    for (const forbidden of ['restoreDraft', "status: 'Released'", "status: 'Draft'"]) {
       expect(PAGE_SOURCE).not.toContain(forbidden);
     }
     // Exactly the calls these stories add, and nothing more. Every member read off
@@ -152,6 +146,7 @@ describe('the draft review screen', () => {
       'practiceTestDraft',
       'releasePracticeTest',
       'saveUncommittedState',
+      'setPracticeTestTimer',
       'students',
       'uncommittedState',
     ]);
@@ -198,9 +193,9 @@ describe('the draft review screen', () => {
     // of what is stored, and it is what the list is drawn from.
     expect(PAGE_SOURCE).toContain('.editDraftQuestion(token, practiceTestId, question.id,');
     expect(PAGE_SOURCE).toContain('.deleteDraftQuestion(token, practiceTestId, question.id)');
-    // The read, the edit and the delete: three writes of the same state, each
-    // from a view the server authored.
-    expect(PAGE_SOURCE.match(/setDraft\(view\)/g)).toHaveLength(3);
+    // The read, the edit, the delete and the timer save: four writes of the same
+    // state, each from a view the server authored.
+    expect(PAGE_SOURCE.match(/setDraft\(view\)/g)).toHaveLength(4);
     // No navigation on an edit or an ordinary delete.
     expect(PAGE_SOURCE).not.toContain('router.push(');
   });
@@ -218,7 +213,15 @@ describe('the draft review screen', () => {
     // a checkbox each, which would let two be marked correct.
     expect(PAGE_SOURCE).toContain('<RadioGroup');
     expect(PAGE_SOURCE).toContain('parentCopy.drafts.editCorrectLegend');
-    expect(PAGE_SOURCE).not.toContain('Checkbox');
+    // No checkbox *inside the option list*, which would let two options be
+    // marked correct at once. The timer's own on/off control is a checkbox, and
+    // has to be: it is one independent fact, not a choice of exactly one.
+    const optionEditor = PAGE_SOURCE.slice(
+      PAGE_SOURCE.indexOf('<RadioGroup'),
+      PAGE_SOURCE.indexOf('</RadioGroup>'),
+    );
+    expect(optionEditor).not.toContain('Checkbox');
+    expect(optionEditor.match(/<Checkbox/g)).toBeNull();
   });
 
   it('confirms every delete, and names the discard and the non-refund on the last one', () => {
@@ -363,6 +366,100 @@ describe('the draft review screen', () => {
     expect(PAGE_SOURCE).not.toMatch(/allowanceFor|maxPerRequest/u);
   });
 
+  it('offers the timer on the draft it applies to, beside the release control', () => {
+    // FR-15 requires the parent to set it *while reviewing the draft it applies
+    // to*, not by leaving that context for a screen of its own.
+    expect(PAGE_SOURCE).toContain('data-testid="draft-timer"');
+    expect(PAGE_SOURCE).toContain('data-testid="draft-timer-save"');
+    expect(PAGE_SOURCE).toContain('.setPracticeTestTimer(token, practiceTestId, minutes)');
+    expect(PAGE_SOURCE).not.toContain("router.push('/parent/drafts/timer");
+  });
+
+  it('pre-fills the suggestion the server supplied, and computes none of its own', () => {
+    // A figure the server supplied, never one this browser derived: two
+    // definitions of "suggested" is one too many, and the screen showing it
+    // stores nothing.
+    expect(PAGE_SOURCE).toContain('draft?.suggestedTimerMinutes ?? null');
+    expect(PAGE_SOURCE).toContain('setTimerMinutes(String(storedTimer ?? suggestedTimer))');
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.timerSuggestion(draft.suggestedTimerMinutes)');
+    // No local arithmetic on the question count, and no bound of its own: the
+    // server holds both figures. Named rather than by the bare literal, which
+    // any unrelated pixel width or id fragment would trip.
+    expect(PAGE_SOURCE).not.toContain('questionCount + 5');
+    expect(PAGE_SOURCE).not.toMatch(/MAX_TIMER_MINUTES|MIN_TIMER_MINUTES/u);
+  });
+
+  it('reads the timer off the stored column, with null as off and no second flag', () => {
+    expect(PAGE_SOURCE).toContain('setTimerOn(storedTimer !== null)');
+    expect(PAGE_SOURCE).toContain('const minutes = timerOn ? Number(timerMinutes.trim()) : null;');
+    expect(PAGE_SOURCE).not.toContain('timerEnabled');
+  });
+
+  it('seeds the timer once per draft, and re-seeds only on the stored figure', () => {
+    // A delete moves `suggestedTimerMinutes` with the question count, so an
+    // effect keyed on the suggestion would untick the box and overwrite a typed
+    // figure because a parent deleted a question. Keyed on the id and the stored
+    // value, the same way `restoredFor` guards the slot restore.
+    expect(PAGE_SOURCE).toContain('timerSeededFrom.current');
+    expect(PAGE_SOURCE).toContain('seeded.practiceTestId === practiceTestId');
+    expect(PAGE_SOURCE).toContain('seeded.stored === storedTimer');
+    expect(PAGE_SOURCE).toContain('}, [practiceTestId, storedTimer, suggestedTimer]);');
+  });
+
+  it('ties both explanatory sentences to the minutes field itself', () => {
+    // Beside the input is not part of the input: read through the field, the
+    // "optional" sentence and the "nothing is saved yet" caveat are otherwise
+    // silent.
+    expect(PAGE_SOURCE).toContain('`${TIMER_HINT_ID} ${TIMER_SUGGESTION_ID}`');
+    expect(PAGE_SOURCE).toContain('id={TIMER_HINT_ID}');
+    expect(PAGE_SOURCE).toContain('id={TIMER_SUGGESTION_ID}');
+  });
+
+  it('clears a stale timer sentence the moment either control changes', () => {
+    // "The student has 25 minutes" beside a field reading 40 is a screen saying
+    // two contradictory things, so both the tick and the field clear it.
+    const timerBlock = PAGE_SOURCE.slice(
+      PAGE_SOURCE.indexOf('data-testid="draft-timer"'),
+      PAGE_SOURCE.indexOf('data-testid="draft-release-open"'),
+    );
+    expect(timerBlock.match(/setNotice\(null\);/g)).toHaveLength(2);
+    expect(timerBlock.match(/setActionError\(null\);/g)).toHaveLength(2);
+  });
+
+  it('says something rather than nothing when a save it cannot make is asked for', () => {
+    // No silent no-op: the control is disabled for exactly this, so reaching the
+    // call means the screen and the control disagreed — which is a thing to say.
+    expect(PAGE_SOURCE).toContain('if (!timerSavable) {');
+    expect(PAGE_SOURCE).toContain('setActionError(parentCopy.drafts.timerFailed);');
+    expect(PAGE_SOURCE).not.toContain('!Number.isInteger(minutes)) return;');
+  });
+
+  it('bounds the digit string so an absurd figure cannot overflow to Infinity', () => {
+    // `Number()` on a long enough digit string returns `Infinity`, which
+    // `JSON.stringify` then serializes as `null` — a figure the parent typed
+    // silently turning the timer *off* instead of failing shape validation.
+    // A length bound closes that before `Number()` ever runs.
+    expect(PAGE_SOURCE).toContain('/^\\d{1,15}$/u.test(timerMinutes.trim())');
+  });
+
+  it('re-derives the timer from the returned view, not from what it sent', () => {
+    expect(PAGE_SOURCE).toContain('view.timerMinutes === null');
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.timerSaved(view.timerMinutes)');
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.timerOffSaved');
+  });
+
+  it('will not save a timer while another mutation is in flight', () => {
+    expect(PAGE_SOURCE).toContain('if (token === null || busy !== null) return;');
+    expect(PAGE_SOURCE).toContain('disabled={busy !== null || !timerSavable}');
+  });
+
+  it('renders no countdown, no threshold and no auto-submit — all Epic 5’s', () => {
+    expect(PAGE_SOURCE).not.toContain('role="timer"');
+    expect(PAGE_SOURCE).not.toContain('setInterval');
+    expect(PAGE_SOURCE).not.toContain('deadlineAt');
+    expect(PAGE_SOURCE).not.toMatch(/autoSubmit|countdown|remainingMs/u);
+  });
+
   it('takes its input through real form controls, never a contenteditable', () => {
     // Restored from the read-only version of this screen: an editor is fields
     // and buttons, each a real focusable control with its own label.
@@ -412,6 +509,40 @@ describe('its copy', () => {
       'Question 2 will be deleted. 4 questions will be left in this practice test. This cannot be undone.',
     );
     expect(parentCopy.drafts.deleteBody(2, 1)).toContain('1 question will be left');
+  });
+
+  it('says the timer is optional, and calls the pre-filled figure a suggestion', () => {
+    // Pre-filling is not configuring: a parent has to know nothing was stored on
+    // their behalf by the field arriving filled in.
+    expect(parentCopy.drafts.timerHint).toContain('optional');
+    const suggestion = parentCopy.drafts.timerSuggestion(20);
+    expect(suggestion).toContain('20');
+    expect(suggestion).toContain('suggested');
+    expect(suggestion).toContain('Nothing is saved');
+  });
+
+  it('announces the saved timer in the third person, parameterized, as plain fact', () => {
+    expect(parentCopy.drafts.timerSaved(20)).toBe(
+      'The student has 20 minutes for this practice test.',
+    );
+    expect(parentCopy.drafts.timerSaved(1)).toContain('1 minute for');
+    expect(parentCopy.drafts.timerOffSaved).toBe('There is no time limit on this practice test.');
+    for (const line of [
+      parentCopy.drafts.timerLegend,
+      parentCopy.drafts.timerHint,
+      parentCopy.drafts.timerOn,
+      parentCopy.drafts.timerMinutesLabel,
+      parentCopy.drafts.timerSave,
+      parentCopy.drafts.timerSaved(20),
+      parentCopy.drafts.timerOffSaved,
+      parentCopy.drafts.timerFailed,
+      parentCopy.drafts.timerSuggestion(20),
+    ]) {
+      // Plain fact: no exclamation, no cheerleading, no upsell, no error code,
+      // and no allowance figure, tier or model name.
+      expect(line).not.toContain('!');
+      expect(line).not.toMatch(/upgrade|buy|plan|allowance|tier|gpt-/iu);
+    }
   });
 
   it('reads a fraction aloud rather than spelling it as a glyph', () => {

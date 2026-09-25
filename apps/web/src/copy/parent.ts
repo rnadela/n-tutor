@@ -660,6 +660,41 @@ export const parentCopy = {
       `This practice test will be discarded and ${studentName} will never see it. The Generation Allowance already used on it is not given back. This cannot be undone.`,
     discardConfirm: 'Discard it',
     discardFailed: 'That practice test could not be discarded. Try again.',
+
+    // --- The timer -------------------------------------------------------
+    //
+    // Optional and off by default (FR-15), set while reading the draft it
+    // applies to, and settable at any point up to release and never after.
+    // Third person about the student, plain fact, every figure parameterized —
+    // no exclamation marks, no cheerleading, no error codes, and no allowance
+    // figure, tier or model name anywhere near it.
+
+    /** The block's own heading, beside the release and discard controls. */
+    timerLegend: 'Time limit',
+    /**
+     * What the timer is, said once, before it is set. It states the default in
+     * words so a parent who does nothing knows what they have left behind.
+     */
+    timerHint: 'A time limit is optional. Without one the student takes as long as they need.',
+    /** The on/off control. Named by what turning it on does. */
+    timerOn: 'Set a time limit',
+    /** The minutes field. Minutes, because minutes are what a parent enters. */
+    timerMinutesLabel: 'Minutes',
+    /**
+     * The pre-filled figure, described **as a suggestion** so a parent knows
+     * nothing was stored on their behalf by the screen showing it.
+     */
+    timerSuggestion: (minutes: number) =>
+      `${minutes} minutes is suggested for this practice test. Nothing is saved until it is saved below.`,
+    timerSave: 'Save the time limit',
+    /** Said after a save, in the same words the screen shows. */
+    timerSaved: (minutes: number) =>
+      minutes === 1
+        ? 'The student has 1 minute for this practice test.'
+        : `The student has ${minutes} minutes for this practice test.`,
+    /** Said after the timer is turned off, naming the state rather than the act. */
+    timerOffSaved: 'There is no time limit on this practice test.',
+    timerFailed: 'That time limit could not be saved. Try again.',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

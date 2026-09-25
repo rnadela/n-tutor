@@ -298,6 +298,19 @@ export interface PracticeTestDraftView {
   siblingCount: number;
   questionCount: number;
   createdAt: string;
+  /**
+   * The countdown the parent configured, in whole minutes, or `null` for none.
+   *
+   * `null` is off, and it is what a draft nobody has configured reads as.
+   */
+  timerMinutes: number | null;
+  /**
+   * The duration to pre-fill the minutes field with, from the server.
+   *
+   * A figure the server supplied, never one this browser computed: the screen
+   * shows it and stores nothing until the parent saves.
+   */
+  suggestedTimerMinutes: number;
   questions: DraftQuestionView[];
 }
 
@@ -966,6 +979,25 @@ export const parentApi = {
       `/parent/practice-tests/${encodeURIComponent(practiceTestId)}/discard`,
       { method: 'POST', headers: elevated(token) },
       parentCopy.drafts.discardFailed,
+    ),
+
+  /**
+   * Sets or clears the draft's countdown, and answers with the whole view.
+   *
+   * `minutes: null` turns the timer off and is stated explicitly — there is one
+   * duration and this restates it whole, which is why it is a `PUT` and why an
+   * empty body is not an option. The bounds are the API's: a figure outside them
+   * is a 400, and this app disabling a control is a courtesy on top of that.
+   *
+   * Refused with the module's ordinary 404 on a released or discarded id: the
+   * timer is editable up to release and never after, and the API is where that
+   * is decided.
+   */
+  setPracticeTestTimer: (token: string, practiceTestId: string, minutes: number | null) =>
+    call<PracticeTestDraftView>(
+      `/parent/practice-tests/${encodeURIComponent(practiceTestId)}/timer`,
+      { method: 'PUT', headers: elevated(token), body: JSON.stringify({ minutes }) },
+      parentCopy.drafts.timerFailed,
     ),
 };
 

@@ -408,10 +408,12 @@ test.describe('generating practice tests', () => {
     const reading = await fraction.getAttribute('aria-label');
     expect(reading).toMatch(/^\d+( and \d+)? over \d+$/u);
 
-    // The timer is Story 4.6: no control for it exists here yet. Release and
-    // discard do since Story 4.5, and edit and delete since 4.4 — each exactly
-    // one control, per draft, with no batch anything.
-    await expect(page.getByRole('button', { name: /timer/iu })).toHaveCount(0);
+    // The timer since Story 4.6, release and discard since 4.5, edit and delete
+    // since 4.4 — each exactly one control, per draft, with no batch anything.
+    // The timer is configuration only: nothing here counts down (Epic 5 owns
+    // that), so there is no element exposed as a timer on this screen.
+    await expect(page.getByTestId('draft-timer')).toHaveCount(1);
+    await expect(page.getByRole('timer')).toHaveCount(0);
     await expect(page.getByTestId('draft-release-open')).toHaveCount(1);
     await expect(page.getByTestId('draft-discard-open')).toHaveCount(1);
 
@@ -519,6 +521,16 @@ test.describe('generating practice tests', () => {
         .locator('[data-testid="rich-text-fraction"]'),
     ).toHaveAttribute('aria-label', '1 over 2');
 
+    // --- A typed-but-unsaved time limit survives a delete -------------------
+    // Deleting a question moves the *suggested* duration with the question
+    // count. A screen that re-seeded the timer from the suggestion would untick
+    // the box and overwrite the figure a parent had typed, because they deleted
+    // a question — so the state is set up here and checked after the delete
+    // below.
+    const timerOn = page.getByRole('checkbox', { name: 'Set a time limit' });
+    await timerOn.check();
+    await page.getByTestId('draft-timer-minutes').fill('42');
+
     // --- Delete the second, and read the renumbering off the DOM -----------
     const second = page.locator('[data-testid="draft-question"]').nth(1);
     await second.getByTestId('draft-delete-open').click();
@@ -544,6 +556,12 @@ test.describe('generating practice tests', () => {
         String(index + 1),
       );
     }
+
+    // And the unsaved time limit is exactly where the parent left it, even though
+    // the suggestion the field was seeded from has moved with the count.
+    await expect(timerOn).toBeChecked();
+    await expect(page.getByTestId('draft-timer-minutes')).toHaveValue('42');
+    await expect(page.getByTestId('draft-timer-suggestion')).toContainText(String(before - 1 + 5));
   });
 
   test('deletes the last question, which discards the practice test', async ({ page }) => {
@@ -623,8 +641,88 @@ test.describe('generating practice tests', () => {
     // --- Release the first ------------------------------------------------
     await rows.first().getByRole('link', { name: 'Read it' }).click();
     await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+    // Waited for rather than counted straight away: the heading renders while the
+    // draft is still loading, so a bare `.count()` here can read zero and every
+    // later comparison against it would then be a comparison against nothing.
+    await expect(page.locator('[data-testid="draft-question"]').first()).toBeVisible();
     const questionCount = await page.locator('[data-testid="draft-question"]').count();
     expect(questionCount).toBeGreaterThanOrEqual(1);
+    const draftUrl = page.url();
+
+    // --- The timer, set while reading the draft it applies to --------------
+    // Off by default (FR-15), with the server's suggestion already in the field
+    // and nothing stored: a parent who releases without touching this has
+    // released an untimed test.
+    const timerOn = page.getByRole('checkbox', { name: 'Set a time limit' });
+    await expect(timerOn).not.toBeChecked();
+    await timerOn.check();
+    const minutesField = page.getByTestId('draft-timer-minutes');
+    // `questionCount + 5`, from the server. Asserted as the figure the draft
+    // actually holds rather than a constant, so it still says something for a
+    // draft of any size.
+    await expect(minutesField).toHaveValue(String(questionCount + 5));
+    await expect(page.getByTestId('draft-timer-suggestion')).toContainText('suggested');
+
+    // A time limit that is on with no figure in it is not a request worth
+    // sending, and the control says so rather than the parent finding out from
+    // the server.
+    const timerSave = page.getByTestId('draft-timer-save');
+    await minutesField.fill('');
+    await expect(timerSave).toBeDisabled();
+    await minutesField.fill('25');
+    await expect(timerSave).toBeEnabled();
+
+    await timerSave.click();
+    // Announced in the same words the screen shows, third person about the
+    // student.
+    await expect(page.getByTestId('draft-notice')).toHaveText(
+      'The student has 25 minutes for this practice test.',
+    );
+
+    // --- And turning it back off is the same statement, with null -----------
+    // This is the only layer that chooses `null` at all: with the screen never
+    // driven through the off path, `timerOn ? Number(...) : null` could invert
+    // and every other test would still pass.
+    await timerOn.uncheck();
+    await timerSave.click();
+    await expect(page.getByTestId('draft-notice')).toHaveText(
+      'There is no time limit on this practice test.',
+    );
+
+    // --- And it survives a reload -----------------------------------------
+    // The elevation bearer is in memory, so a reload goes through the PIN gate
+    // and back in by the list. What comes back is the stored row, not anything
+    // this browser was holding.
+    await page.reload();
+    await page.locator('#parent-pin').fill(PIN);
+    await page.getByRole('button', { name: 'Enter Parent View' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
+    ).toBeVisible();
+    await page.getByRole('link', { name: 'Pending practice tests' }).click();
+    await page
+      .locator('[data-testid="draft-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+    await expect(page.locator('[data-testid="draft-question"]').first()).toBeVisible();
+    // The same draft, by its own URL: a different row here would be a different
+    // practice test and this assertion is what says so.
+    expect(page.url()).toBe(draftUrl);
+    // Off came back as off, and off is `null`: the field falls back to the
+    // server's suggestion rather than to the 25 that was there before.
+    const timerOnAgain = page.getByRole('checkbox', { name: 'Set a time limit' });
+    await expect(timerOnAgain).not.toBeChecked();
+    await timerOnAgain.check();
+    await expect(page.getByTestId('draft-timer-minutes')).toHaveValue(String(questionCount + 5));
+
+    // Set again, so what is released is a timed practice test.
+    await page.getByTestId('draft-timer-minutes').fill('25');
+    await page.getByTestId('draft-timer-save').click();
+    await expect(page.getByTestId('draft-notice')).toHaveText(
+      'The student has 25 minutes for this practice test.',
+    );
 
     await page.getByTestId('draft-release-open').click();
     // Both facts, in words, **before** anything happens: the child can see it
@@ -648,6 +746,11 @@ test.describe('generating practice tests', () => {
     await expect(page.getByTestId('drafts-released')).toHaveText('The practice test was released.');
     // And the released draft has left the list.
     await expect(page.locator('[data-testid="draft-row"]')).toHaveCount(1);
+    // With it goes every way of changing its timer. "Editable at any point up to
+    // release and never after" is the `Draft` in the API's own `where`; in a
+    // browser it looks like this — the released test is reachable from no parent
+    // screen, so there is no timer control for it anywhere.
+    await expect(page.getByTestId('draft-timer')).toHaveCount(0);
 
     // --- Read it back as the child ----------------------------------------
     // The one account has one child, so the exit binds straight to them rather
@@ -726,6 +829,9 @@ test.describe('generating practice tests', () => {
       .click();
     await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
     const draftUrl = page.url();
+    // As above: the heading is on screen before the questions are, so the count
+    // every later assertion compares against is waited for rather than sampled.
+    await expect(page.locator('[data-testid="draft-question"]').first()).toBeVisible();
     const questionCount = await page.locator('[data-testid="draft-question"]').count();
 
     // Refused at the network, so the screen meets a real failure rather than a
@@ -753,6 +859,23 @@ test.describe('generating practice tests', () => {
     // rest of the session.
     await expect(page.getByTestId('draft-release-open')).toBeEnabled();
     await expect(page.getByTestId('draft-discard-open')).toBeEnabled();
+
+    // The timer's sentence is its own too, and its own control comes back from a
+    // failure rather than being dead for the rest of the session.
+    await page.route('**/practice-tests/*/timer', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+    );
+    await page.getByRole('checkbox', { name: 'Set a time limit' }).check();
+    await page.getByTestId('draft-timer-save').click();
+    await expect(page.getByTestId('draft-action-error')).toHaveText(
+      'That time limit could not be saved. Try again.',
+    );
+    // Nothing was announced as a success, and the draft is still whole.
+    await expect(page.getByTestId('draft-notice')).toBeEmpty();
+    await expect(page.locator('[data-testid="draft-question"]')).toHaveCount(questionCount);
+    await expect(page.getByTestId('draft-timer-save')).toBeEnabled();
+    await expect(page.getByTestId('draft-release-open')).toBeEnabled();
+    await page.unroute('**/practice-tests/*/timer');
 
     // The discard's sentence is its own, not the release's.
     await page.unroute('**/practice-tests/*/release');

@@ -648,6 +648,33 @@ describe('Student Mode and the device binding', () => {
     expect(releasedBody).not.toContain('half of four');
     expect(releasedBody).not.toContain('Fractions');
 
+    // And a **timed** released test carries no minute figure onto this surface.
+    // The timer is a parent-only configuration (FR-15, Story 4.6): a child is
+    // shown the time they have by Epic 5's own Attempt surface, and this list is
+    // exactly `{ id, questionCount }` whether a timer was configured or not.
+    // Asserted with `toEqual` on the whole body rather than a substring search,
+    // so a `timerMinutes` field appearing here is a failure by construction.
+    const timed = await h.prisma.practiceTest.create({
+      data: {
+        parentAccountId: parent.parentAccountId,
+        sourceTestId: sourceTest.id,
+        studentProfileId: profile.id,
+        generationJobId: job.id,
+        ordinal: 2,
+        questionCount: 3,
+        timerMinutes: 25,
+        status: 'Released',
+        chargedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    const withTimer = await server()
+      .get('/api/student/practice-tests')
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(withTimer.body).toEqual([{ id: timed.id, questionCount: 3 }]);
+    expect(Object.keys(withTimer.body[0] as object)).toEqual(['id', 'questionCount']);
+
     const session = await readStudentSession(cookie).expect(200);
     // One read, the bound profile, and nothing else on it.
     expect(Object.keys(session.body)).toEqual(['profile']);

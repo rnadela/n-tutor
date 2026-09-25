@@ -51,6 +51,7 @@ import {
   formatTargets,
   normalizeTopicLabel,
   remainingFor,
+  suggestedTimerMinutes,
   weightingFor,
   type GenerationWeighting,
 } from './practice-test-policy.js';
@@ -277,6 +278,22 @@ export interface PracticeTestDraftView {
   siblingCount: number;
   questionCount: number;
   createdAt: string;
+  /**
+   * The countdown the parent configured, in whole minutes, or `null` for none.
+   *
+   * `null` is off, and it is what every draft nobody configured reads as (FR-15).
+   */
+  timerMinutes: number | null;
+  /**
+   * What the screen pre-fills the minutes field with, derived from the stored
+   * question count.
+   *
+   * Computed here rather than in the browser so one definition of "suggested"
+   * serves the screen, Epic 5 and every test — and a **suggestion only**: it is
+   * never stored by anything but an explicit parent write, so a draft nobody
+   * configured stays `null` however often this figure was shown.
+   */
+  suggestedTimerMinutes: number;
   /** Every Question the draft holds, in stored `ordinal` order. Never a page. */
   questions: DraftQuestionView[];
 }
@@ -896,6 +913,61 @@ export class PracticeTestService {
   }
 
   /**
+   * Sets or clears the countdown a draft carries, in whole minutes.
+   *
+   * `null` turns it off, and is a restatement of the same configuration rather
+   * than a different verb on a different resource — there is one duration and the
+   * parent restates it whole. Nothing is stored on a parent's behalf: the
+   * suggestion the screen pre-fills is carried on the view and never written
+   * here, so a draft nobody configured stays `null`.
+   *
+   * `Draft` is in the `where`, exactly as it is for both transitions and both
+   * 4.4 mutations. That is the released-state write barrier: a `Released` id, a
+   * `Discarded` id, a foreign id and an unknown id all answer the module's one
+   * sentence, so "editable up to release, never after" is a property of this
+   * statement rather than a check a screen has to remember. A timer changed
+   * after release would retroactively change how expiry graded past Attempts.
+   *
+   * Not a transition and not a charge: `status` and `chargedAt` are untouched
+   * (AD-14), and the derived allowance count is unaffected. The bounds are the
+   * DTO's — a figure outside them never reaches here.
+   */
+  async setTimer(
+    parentAccountId: string,
+    practiceTestId: string,
+    minutes: number | null,
+  ): Promise<PracticeTestDraftView> {
+    const view = await this.prisma.withTransaction(async (tx) => {
+      // `updateMany` with the state in the `where`, not `update` after a check: a
+      // row released by another tab between a read and this statement would make
+      // the check stale, and `update` would surface Prisma's own missing-row
+      // fault as a 500 rather than as this module's own answer.
+      const set = await tx.practiceTest.updateMany({
+        where: { id: practiceTestId, parentAccountId, status: 'Draft' },
+        // `status` and `chargedAt` absent on purpose: configuring a timer is
+        // neither a transition nor a charge.
+        data: { timerMinutes: minutes },
+      });
+      if (set.count !== 1) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      // Still a draft, so the ordinary reader serves the answer — the whole view,
+      // as every other mutation in this module answers with, and no second
+      // mapper of its own.
+      return this.draftViewIn(tx, parentAccountId, practiceTestId);
+    });
+
+    // After the commit, never inside it: a log line written in the transaction
+    // survives a rollback and would assert a configuration that never landed.
+    // Identifiers and the minute figure only — no Question text, no Topic label,
+    // no allowance figure, no tier, no model name (AD-20).
+    this.logger.log(
+      minutes === null
+        ? `Practice test ${practiceTestId} had its timer turned off.`
+        : `Practice test ${practiceTestId} had its timer set to ${minutes} minutes.`,
+    );
+    return view;
+  }
+
+  /**
    * The one shape both terminal transitions have, written once.
    *
    * `updateMany` with the state in the `where`, and not `update` after a check: a
@@ -1511,6 +1583,7 @@ const DRAFT_SELECT = {
   generationJobId: true,
   ordinal: true,
   questionCount: true,
+  timerMinutes: true,
   createdAt: true,
   questions: {
     orderBy: { ordinal: 'asc' },
@@ -1551,6 +1624,11 @@ function draftViewOf(draft: DraftRow, siblingCount: number): PracticeTestDraftVi
     ordinal: draft.ordinal,
     siblingCount,
     questionCount: draft.questionCount,
+    timerMinutes: draft.timerMinutes,
+    // Derived from the *stored* count on every read, so a deleted Question moves
+    // the suggestion with it — and never stored, so showing it configures
+    // nothing.
+    suggestedTimerMinutes: suggestedTimerMinutes(draft.questionCount),
     createdAt: draft.createdAt.toISOString(),
     questions: draft.questions.map((question) => ({
       id: question.id,

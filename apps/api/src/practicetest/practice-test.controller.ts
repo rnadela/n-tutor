@@ -9,12 +9,17 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ParentElevationGuard, type ElevatedRequest } from '../identity/parent-elevation.guard.js';
-import { EditDraftQuestionDto, RequestPracticeTestsDto } from './dto/practice-test.dto.js';
+import {
+  EditDraftQuestionDto,
+  RequestPracticeTestsDto,
+  SetPracticeTestTimerDto,
+} from './dto/practice-test.dto.js';
 import {
   PracticeTestService,
   type GenerationAllowanceView,
@@ -46,7 +51,10 @@ import {
  * a `Released` or `Discarded` Practice Test refuses them with the same 404 an
  * unknown id gets, whatever any UI offered. A timer changed or a Question
  * rewritten after release would retroactively change how past Attempts were
- * graded, which is why the refusal is the API's and not a screen's.
+ * graded, which is why the refusal is the API's and not a screen's. Since Story
+ * 4.6 that barrier has the mutation it was written about: the timer route below
+ * carries the same `Draft` in the same `where`, which is the whole of "editable
+ * at any point up to release and never after".
  *
  * Since Story 4.5 the gate also **opens**. Release makes a draft visible to the
  * child it was made for; discard removes it from everywhere a child or a
@@ -262,5 +270,37 @@ export class PracticeTestController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PracticeTestDraftView> {
     return this.practiceTests.discard(req.elevated!.parentAccountId, id);
+  }
+
+  /**
+   * Sets or clears how long the child gets, in whole minutes (FR-15).
+   *
+   * `PUT` and not `PATCH`: there is one duration and the parent restates it
+   * whole. `{ minutes: null }` turns the timer off and is a legitimate body —
+   * turning it off is the same statement with a different value, not a different
+   * verb on a different resource, which is why there is no `DELETE` here. An
+   * *absent* field is a 400: an empty body is a request that said nothing, and a
+   * mutation that treats silence as an instruction is how a timer disappears
+   * without anybody asking.
+   *
+   * Bounded server-side by the DTO, because a screen disabling a control is a
+   * courtesy and this is the control. Scoped to `Draft` in the statement that
+   * mutates, so a `Released` or `Discarded` id answers the identical 404 an
+   * unknown id gets — the barrier this file has described since Story 4.4.
+   * Neither `status` nor `chargedAt` is touched: configuring a timer is not a
+   * transition and not a charge (AD-14).
+   */
+  @Put('practice-tests/:id/timer')
+  // 200, not 201: nothing is created, and the answer is the whole draft view as
+  // it now stands — the same shape every other mutation here answers with, so
+  // the screen re-renders from the server's account rather than from what it
+  // hoped it wrote.
+  @HttpCode(HttpStatus.OK)
+  setTimer(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetPracticeTestTimerDto,
+  ): Promise<PracticeTestDraftView> {
+    return this.practiceTests.setTimer(req.elevated!.parentAccountId, id, dto.minutes);
   }
 }

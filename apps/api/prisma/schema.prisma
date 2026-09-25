@@ -861,6 +861,25 @@ model PracticeTest {
   /// When the Generation Allowance was spent on this row. Nullable only so the
   /// column can exist; every row this module writes sets it.
   chargedAt        DateTime?
+  /// The countdown the parent configured, in whole minutes, or null for none.
+  ///
+  /// `null` **is** off: the timer is optional and off by default (FR-15), so
+  /// every row that was never configured — including every row written before
+  /// this column existed — already reads as untimed with no backfill and no
+  /// second `enabled` flag that could disagree with a duration.
+  ///
+  /// Minutes rather than seconds because minutes are what a parent enters; a
+  /// unit converted twice is a unit two surfaces can disagree about. Epic 5
+  /// derives a deadline from it.
+  ///
+  /// Editable at any point up to release and never after — a property of the
+  /// statement that writes it, which carries `status: 'Draft'` in its `where`,
+  /// not of any screen. A timer changed after release would retroactively
+  /// change how expiry graded past Attempts.
+  ///
+  /// No index: it is only ever read as part of a row already being read by
+  /// primary key.
+  timerMinutes     Int?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
