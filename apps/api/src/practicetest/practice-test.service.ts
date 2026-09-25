@@ -216,6 +216,22 @@ export interface PracticeTestDraftSummary {
   createdAt: string;
 }
 
+/**
+ * One row of the student-scoped list of released Practice Tests.
+ *
+ * An identifier and a count, and deliberately nothing else. "Becomes visible in
+ * Student Mode" is a claim about visibility, and this epic ends there: taking
+ * the test is Epic 5. A student-scoped read that already carried prompts,
+ * options and *correct answers* would hand a child the answer key before any
+ * surface existed to grade an Attempt against — the exact leak the human quality
+ * gate exists to prevent. No prompt, no answer, no option body, no Topic label,
+ * no allowance figure, no tier and no model name (AD-20, AD-26).
+ */
+export interface PracticeTestReleasedSummary {
+  id: string;
+  questionCount: number;
+}
+
 /** One generated option, in the order it is to be shown. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -521,6 +537,49 @@ export class PracticeTestService {
   }
 
   /**
+   * The Practice Tests one child can see: released, theirs, most recently *made*
+   * first.
+   *
+   * The **only** cross-boundary read of a Practice Test that exists, and the
+   * whole of what Student Home is drawn from. Both ids come from the binding the
+   * Student Mode guard verified, never from a parameter, a query or a path — so
+   * a device bound to one child cannot address another's release at all.
+   *
+   * `status: 'Released'` is in the `where` of the statement, which is how
+   * discard's exclusion from every downstream surface is structural rather than
+   * remembered: a `Discarded` row is not something a later reader must filter,
+   * it is something this read cannot reach (AD-17).
+   *
+   * An identifier and a count per row. Not a prompt, not an answer, not an
+   * option body, not a Topic label, and no allowance figure, tier or model name
+   * — none of those is a student-scoped fact (AD-20, AD-26).
+   *
+   * Ordered server-side, `createdAt desc` with `id desc` breaking the tie, the
+   * same rule `draftsFor` states and for the same reason: two rows made in one
+   * millisecond must not be left in whatever order Postgres returned.
+   *
+   * `createdAt` is when the Practice Test was **generated**, not when it was
+   * released, and the distinction is real: a test generated last week and released
+   * today sorts below one generated this morning. There is no `releasedAt` column
+   * and this story adds none — no new table, no new column, no migration — so the
+   * made-at instant is the only stable ordering available, and it is stated as what
+   * it is rather than described as release order it cannot express. Epic 5 owns the
+   * list a student actually works from, and whatever sort band that surface needs
+   * is its call to make, with whatever column it decides to carry.
+   */
+  async releasedFor(
+    parentAccountId: string,
+    studentProfileId: string,
+  ): Promise<PracticeTestReleasedSummary[]> {
+    const rows = await this.prisma.practiceTest.findMany({
+      where: { parentAccountId, studentProfileId, status: 'Released' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, questionCount: true },
+    });
+    return rows.map((row) => ({ id: row.id, questionCount: row.questionCount }));
+  }
+
+  /**
    * One draft, whole — every Question in stored order, each with its answer,
    * its options and its Topics.
    *
@@ -798,6 +857,99 @@ export class PracticeTestService {
       discarded
         ? `Practice test ${practiceTestId} was discarded: its last question ${questionId} was deleted.`
         : `Practice test ${practiceTestId} had question ${questionId} deleted.`,
+    );
+    return view;
+  }
+
+  /**
+   * Releases a draft: the gate opens, and the child it was made for can see it.
+   *
+   * One-way in v0. There is no route, flag or parameter anywhere that returns a
+   * `Released` row to `Draft`, and the irreversibility is not a promise about
+   * that — it is the `where` of the statement below. A second release matches no
+   * row and answers the module's one sentence, indistinguishable from the answer
+   * an unknown id, a foreign id or an already-discarded id gets (AD-18).
+   *
+   * `chargedAt` is untouched and no allowance figure is written: the derived
+   * usage count counts rows that have *ever* reached draft, so neither
+   * transition changes it (AD-14).
+   */
+  async release(parentAccountId: string, practiceTestId: string): Promise<PracticeTestDraftView> {
+    return this.transitionTo(parentAccountId, practiceTestId, 'Released');
+  }
+
+  /**
+   * Discards a draft: the child never sees it, and nothing downstream can reach
+   * it.
+   *
+   * No refund (AD-14) — the confirmation said so in words before this was ever
+   * called — and no `chargedAt` rewrite. Exclusion from Analytics is inherited
+   * rather than implemented: `practicetest` owns these tables (AD-17) and the one
+   * cross-boundary read of a Practice Test scopes `status: 'Released'`, so a
+   * discarded row is unreachable rather than filtered.
+   *
+   * A `Released` row is refused here too: release is terminal, and discarding
+   * something a child has already been shown is not a state this story owns.
+   */
+  async discard(parentAccountId: string, practiceTestId: string): Promise<PracticeTestDraftView> {
+    return this.transitionTo(parentAccountId, practiceTestId, 'Discarded');
+  }
+
+  /**
+   * The one shape both terminal transitions have, written once.
+   *
+   * `updateMany` with the state in the `where`, and not `update` after a check: a
+   * row released by another tab between a read and this statement would make the
+   * check stale, and `update` would surface Prisma's own missing-row fault as a
+   * 500 rather than as this module's own answer.
+   *
+   * The answer is the full draft view carrying the **new** status, built here
+   * exactly as `deleteQuestion`'s discard branch already builds it for a row that
+   * is no longer a draft — the screen reads the status rather than inferring
+   * success from a bare 204.
+   */
+  private async transitionTo(
+    parentAccountId: string,
+    practiceTestId: string,
+    to: Extract<PracticeTestStatus, 'Released' | 'Discarded'>,
+  ): Promise<PracticeTestDraftView> {
+    const view = await this.prisma.withTransaction(async (tx) => {
+      const moved = await tx.practiceTest.updateMany({
+        where: { id: practiceTestId, parentAccountId, status: 'Draft' },
+        // `chargedAt` is absent on purpose: neither transition refunds (AD-14).
+        data: { status: to },
+      });
+      // Not a draft any more is indistinguishable from never having been this
+      // account's, which is the whole point: a second sentence for one rule
+      // would let the outside enumerate which of another account's ids exist.
+      if (moved.count !== 1) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+
+      // The row is no longer a draft, so the `Draft`-scoped reader would refuse
+      // it — correctly. The view is built here instead, as `deleteQuestion`'s
+      // discard branch already does.
+      const row = await tx.practiceTest.findFirst({
+        where: { id: practiceTestId, parentAccountId },
+        select: DRAFT_SELECT,
+      });
+      // The row this same transaction just moved, gone by the time it is read
+      // back: the module's one sentence, not Prisma's own missing-row fault.
+      if (row === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      return draftViewOf(
+        row,
+        await tx.practiceTest.count({
+          where: { parentAccountId, generationJobId: row.generationJobId, status: 'Draft' },
+        }),
+      );
+    });
+
+    // After the commit, never inside it: a log line written in the transaction
+    // survives a rollback and would assert a transition that never landed.
+    // Identifiers only — no Question text, no Topic label, no allowance figure,
+    // no tier, no model name (AD-20).
+    this.logger.log(
+      to === 'Released'
+        ? `Practice test ${practiceTestId} was released.`
+        : `Practice test ${practiceTestId} was discarded.`,
     );
     return view;
   }

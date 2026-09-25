@@ -63,21 +63,33 @@ function DraftLink(props: LinkProps<`/parent/drafts/${string}`>) {
 /**
  * What the review screen was not around to say.
  *
- * Deleting the last Question of a draft discards the whole practice test, and
- * the screen that knows is the one being navigated away from — a live region
- * unmounted mid-announcement says nothing at all. So the fact travels in the
- * URL and is stated here, by the screen the parent actually lands on.
+ * Three things can take a draft off that screen — deleting its last Question,
+ * releasing it, and discarding it — and in every case the screen that knows is
+ * the one being navigated away from, where a live region unmounted
+ * mid-announcement says nothing at all. So the outcome travels in the URL and is
+ * stated here, by the screen the parent actually lands on.
+ *
+ * One alert either way, and never two: the review screen sends exactly one
+ * outcome, and a release read as a discard would be the most consequential thing
+ * this app could get wrong in a sentence.
  *
  * Its own component behind `Suspense` because `useSearchParams` opts a route
  * out of static prerendering otherwise, and this list is static but for this
  * one sentence.
  */
-function DiscardedNotice() {
-  const discarded = useSearchParams().get('discarded') === '1';
-  if (!discarded) return null;
+function OutcomeNotice() {
+  const params = useSearchParams();
+  const released = params.get('released') === '1';
+  const discarded = params.get('discarded') === '1';
+  if (!released && !discarded) return null;
   return (
-    <Alert severity="info" role="status" variant="outlined" data-testid="drafts-discarded">
-      {parentCopy.drafts.discarded}
+    <Alert
+      severity="info"
+      role="status"
+      variant="outlined"
+      data-testid={released ? 'drafts-released' : 'drafts-discarded'}
+    >
+      {released ? parentCopy.drafts.released : parentCopy.drafts.discarded}
     </Alert>
   );
 }
@@ -183,7 +195,7 @@ export default function PendingDraftsPage() {
       </Typography>
 
       <Suspense fallback={null}>
-        <DiscardedNotice />
+        <OutcomeNotice />
       </Suspense>
 
       {error !== null && (

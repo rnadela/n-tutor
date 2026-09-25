@@ -48,6 +48,18 @@ import {
  * rewritten after release would retroactively change how past Attempts were
  * graded, which is why the refusal is the API's and not a screen's.
  *
+ * Since Story 4.5 the gate also **opens**. Release makes a draft visible to the
+ * child it was made for; discard removes it from everywhere a child or a
+ * downstream reader can see. Both are `Draft`-only in the statement that
+ * mutates, which is what makes release irreversible: a second release matches no
+ * row and answers the identical 404 an unknown id gets, so irreversibility is a
+ * property of the statement rather than a promise beside it. There is
+ * deliberately no `ALREADY_RELEASED` and no 409 — a second sentence for one rule
+ * would let anything outside enumerate which of another account's ids exist by
+ * reading which refusal came back. Neither transition touches `chargedAt`
+ * (AD-14), and neither is reachable without a parent's confirmation, which the
+ * screen states in words *before* it fires.
+ *
  * Every route is behind `ParentElevationGuard`, and the account is taken from
  * `req.elevated` and never from the path or the body (AD-18). A Source Test id
  * belonging to another account therefore matches nothing and answers 404, never
@@ -152,8 +164,9 @@ export class PracticeTestController {
    *
    * Same guard and same account as everything else here, and the same
    * 404-not-403 rule (AD-18) — with one addition: a `Released` or `Discarded`
-   * id answers that identical 404 too. Those are Story 4.5's states, and this
-   * story does not own a surface for them.
+   * id answers that identical 404 too. A released Practice Test is read from the
+   * student surface, as a summary with no content on it; there is no parent read
+   * of one, and no path from either terminal state back to `Draft`.
    */
   @Get('practice-tests/:id')
   draft(
@@ -204,5 +217,50 @@ export class PracticeTestController {
     @Param('questionId', ParseUUIDPipe) questionId: string,
   ): Promise<PracticeTestDraftView> {
     return this.practiceTests.deleteQuestion(req.elevated!.parentAccountId, id, questionId);
+  }
+
+  /**
+   * Releases the draft: the child it was made for can see it from this moment,
+   * and it can no longer be changed.
+   *
+   * **One-way.** A second call on the same id answers 404 with the module's one
+   * sentence, identical to the one an unknown id gets, because `Draft` is in the
+   * `where` of the statement that mutates. That identical refusal *is* the
+   * irreversibility — there is no route, flag or parameter here that returns a
+   * `Released` row to `Draft`, and after this call the draft read and both 4.4
+   * mutations refuse the id too.
+   *
+   * 200 with the full view rather than a bare 204: the screen reads the new
+   * `status` rather than inferring success from an empty answer. `chargedAt` is
+   * untouched and no allowance figure is written (AD-14).
+   */
+  @Post('practice-tests/:id/release')
+  // 200, not 201: nothing is created. A transition answers with the row as it now
+  // stands, which is the same thing the read and both 4.4 mutations answer with.
+  @HttpCode(HttpStatus.OK)
+  release(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PracticeTestDraftView> {
+    return this.practiceTests.release(req.elevated!.parentAccountId, id);
+  }
+
+  /**
+   * Discards the draft: the child never sees it, and no downstream reader can
+   * reach it.
+   *
+   * Scoped to `Draft` exactly as release is, so a `Released` id is refused with
+   * that same 404 — release is terminal. Nothing is refunded (AD-14); the
+   * confirmation said so in words before this was called.
+   */
+  @Post('practice-tests/:id/discard')
+  // 200, not 201: nothing is created. A transition answers with the row as it now
+  // stands, which is the same thing the read and both 4.4 mutations answer with.
+  @HttpCode(HttpStatus.OK)
+  discard(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PracticeTestDraftView> {
+    return this.practiceTests.discard(req.elevated!.parentAccountId, id);
   }
 }

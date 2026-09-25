@@ -28,6 +28,7 @@ import {
   ParentApiError,
   type DraftQuestionView,
   type PracticeTestDraftView,
+  type StudentProfileView,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
 import { canSaveField, plainTextOf } from '@/lib/rich-text';
@@ -50,6 +51,16 @@ const SLOT_DEBOUNCE_MS = 800;
  * so the sentence is stated by the screen the parent actually lands on.
  */
 const DISCARDED_DRAFTS_HREF = '/parent/drafts?discarded=1' as Route;
+
+/**
+ * Pending drafts, told that a practice test was just released.
+ *
+ * The same mechanism and the same reason: both transitions leave this screen on a
+ * URL whose read now 404s, so rather than render the missing state — which reads
+ * as a fault — the outcome travels in the URL and is stated by the screen the
+ * parent actually lands on.
+ */
+const RELEASED_DRAFTS_HREF = '/parent/drafts?released=1' as Route;
 
 /** One Question's editor, as the parent has it on screen right now. */
 interface QuestionEdit {
@@ -133,8 +144,20 @@ function canSave(question: DraftQuestionView, edit: QuestionEdit): boolean {
  * by Question id. Nothing goes to any browser storage API: a device that has
  * fallen back to Student Mode must hold no trace of the work.
  *
- * Release, discard as an action of its own, and the timer are Stories 4.5 and
- * 4.6. There is no control here for any of them, and no path to `Released`.
+ * Since Story 4.5 the gate can be **closed in either direction**: the draft as a
+ * whole is released — visible to that child straight away, and unchangeable
+ * thereafter — or discarded, which the child never sees. Each sits behind a
+ * confirmation that states its consequence in words *before* it fires, because
+ * there is no undo, no recall and no refund for either. On success the parent
+ * lands on Pending drafts with the outcome in the URL, since the URL they are
+ * standing on now 404s by construction.
+ *
+ * The child's display name on the confirmation is joined in the browser from the
+ * Student Profile read, exactly as Pending drafts does it: `practicetest` reads no
+ * identity table (AD-17). A name not in hand falls back to a neutral stand-in and
+ * never blocks the release control.
+ *
+ * The timer is Story 4.6. There is no control here for it.
  */
 export default function DraftReviewPage() {
   const router = useRouter();
@@ -167,8 +190,24 @@ export default function DraftReviewPage() {
   const [pendingDelete, setPendingDelete] = useState<DraftQuestionView | null>(null);
   /** What just happened, in the same words the screen shows. */
   const [notice, setNotice] = useState<string | null>(null);
-  /** A failed edit or delete, held apart from the read's own failure. */
+  /** A failed edit, delete or transition, held apart from the read's own failure. */
   const [actionError, setActionError] = useState<string | null>(null);
+  /**
+   * Which terminal transition has been asked for and not yet confirmed.
+   *
+   * One piece of state for both, so the two dialogs cannot be open at once and
+   * the confirm control always knows which consequence was the one stated.
+   */
+  const [pendingTransition, setPendingTransition] = useState<'release' | 'discard' | null>(null);
+  /**
+   * The account's student profiles, for the child's name on the confirmation.
+   *
+   * Joined here because `practicetest` does not read an identity table (AD-17),
+   * and read independently of the draft: a name that could not be looked up is a
+   * name this screen does without, and it must never be what stops a parent
+   * releasing something they have finished reading.
+   */
+  const [profiles, setProfiles] = useState<StudentProfileView[]>([]);
 
   /**
    * `slots` as it is right now, for a callback that must not read a stale map.
@@ -307,6 +346,19 @@ export default function DraftReviewPage() {
               ? cause.message
               : parentCopy.drafts.openFailed,
         );
+      }),
+    );
+
+    // Settled **independently** of the draft read, and deliberately not as one
+    // `Promise.all`. The draft is the screen; the profile read only puts a name on
+    // the confirmation. Failing them together would blank a draft that came back
+    // perfectly well because a name could not be looked up — and would leave the
+    // neutral stand-in below unreachable in practice. An expiry is the one failure
+    // it still acts on, because that is not about the profiles.
+    parentApi.students(token).then(
+      applyIfCurrent(current.current, issued, setProfiles),
+      applyIfCurrent(current.current, issued, (cause: unknown) => {
+        if (endsParentView(cause)) leave();
       }),
     );
   }, [token, practiceTestId, attempt, leave, router]);
@@ -567,7 +619,50 @@ export default function DraftReviewPage() {
     announce,
   ]);
 
+  /**
+   * Releases or discards the whole draft, whichever the confirmation named.
+   *
+   * Both leave this screen on a URL whose read now 404s by construction, so both
+   * hand the outcome to Pending drafts rather than rendering the missing state —
+   * which would read as a fault for something the parent just chose. And both drop
+   * every slot the draft was holding: left alone they would sit out their TTL and
+   * come back as restored edits of a practice test nobody can reach.
+   */
+  const confirmTransition = useCallback(() => {
+    const transition = pendingTransition;
+    if (token === null || transition === null) return;
+    setBusy(practiceTestId);
+    setActionError(null);
+    const call =
+      transition === 'release' ? parentApi.releasePracticeTest : parentApi.discardPracticeTest;
+    call(token, practiceTestId)
+      .then(() => {
+        setBusy(null);
+        setPendingTransition(null);
+        discardEverySlot();
+        router.replace(transition === 'release' ? RELEASED_DRAFTS_HREF : DISCARDED_DRAFTS_HREF);
+      })
+      .catch((cause: unknown) => {
+        setBusy(null);
+        setPendingTransition(null);
+        // A stale success sentence beside a fresh failure is a screen saying two
+        // contradictory things at once.
+        setNotice(null);
+        failed(
+          cause,
+          transition === 'release'
+            ? parentCopy.drafts.releaseFailed
+            : parentCopy.drafts.discardFailed,
+        );
+      });
+  }, [pendingTransition, token, practiceTestId, discardEverySlot, failed, router]);
+
   const lastQuestion = draft !== null && draft.questions.length === 1;
+
+  /** The child this draft was made for, or a neutral stand-in if not in hand. */
+  const studentName =
+    profiles.find((profile) => profile.id === draft?.studentProfileId)?.displayName ??
+    parentCopy.drafts.unknownStudent;
 
   return (
     <Screen>
@@ -932,6 +1027,37 @@ export default function DraftReviewPage() {
                 );
               })}
             </Box>
+
+            {/* The draft as a whole, in either direction. Per draft and never in
+                a batch: a released practice test appears on Student Home on its
+                own, as each one is released. Both are real focusable buttons, and
+                neither acts until the confirmation beside it has been read. */}
+            <Box sx={{ display: 'flex', gap: `${density.gap}px` }}>
+              <PrimaryButton
+                disabled={busy !== null}
+                data-testid="draft-release-open"
+                onClick={() => {
+                  setNotice(null);
+                  setActionError(null);
+                  setPendingTransition('release');
+                }}
+              >
+                {parentCopy.drafts.release}
+              </PrimaryButton>
+              <Button
+                type="button"
+                variant="outlined"
+                disabled={busy !== null}
+                data-testid="draft-discard-open"
+                onClick={() => {
+                  setNotice(null);
+                  setActionError(null);
+                  setPendingTransition('discard');
+                }}
+              >
+                {parentCopy.drafts.discard}
+              </Button>
+            </Box>
           </>
         )
       )}
@@ -982,6 +1108,64 @@ export default function DraftReviewPage() {
                   pendingDelete.ordinal,
                   (draft?.questions.length ?? 1) - 1,
                 )}
+        </Typography>
+      </AppDialog>
+
+      {/*
+        The same ordinary `AppDialog`, and for the same reason: re-asking for the
+        account credential here would train a parent to type it at a dialog that
+        does not need it.
+
+        It names the consequence **before** the action, because neither has one
+        afterwards: release, that the child can see it straight away and it can no
+        longer be changed; discard, that the child never sees it and the Generation
+        Allowance already spent is not given back. Cancel leaves the draft exactly
+        as it was.
+      */}
+      <AppDialog
+        open={pendingTransition !== null}
+        title={
+          pendingTransition === 'release'
+            ? parentCopy.drafts.releaseTitle
+            : parentCopy.drafts.discardTitle
+        }
+        onClose={() => setPendingTransition(null)}
+        actions={
+          <>
+            <Button
+              type="button"
+              disabled={busy !== null}
+              data-testid="draft-transition-cancel"
+              onClick={() => setPendingTransition(null)}
+            >
+              {parentCopy.drafts.cancel}
+            </Button>
+            {pendingTransition === 'release' ? (
+              <PrimaryButton
+                disabled={busy !== null}
+                data-testid="draft-release-confirm"
+                onClick={confirmTransition}
+              >
+                {parentCopy.drafts.releaseConfirm}
+              </PrimaryButton>
+            ) : (
+              <DestructiveButton
+                disabled={busy !== null}
+                data-testid="draft-discard-confirm"
+                onClick={confirmTransition}
+              >
+                {parentCopy.drafts.discardConfirm}
+              </DestructiveButton>
+            )}
+          </>
+        }
+      >
+        <Typography component="p" data-testid="draft-transition-body">
+          {pendingTransition === null
+            ? ''
+            : pendingTransition === 'release'
+              ? parentCopy.drafts.releaseBody(studentName)
+              : parentCopy.drafts.discardBody(studentName)}
         </Typography>
       </AppDialog>
 

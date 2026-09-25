@@ -385,6 +385,43 @@ describe('the draft reads', () => {
     expect((failure as ParentApiError).status).toBe(404);
   });
 
+  it('releases one practice test and reads the new status off the answer', async () => {
+    const fetchMock = respondWith(200, { id: ID, status: 'Released', questions: [] });
+
+    const view = await parentApi.releasePracticeTest('token', ID);
+    expect(view.status).toBe('Released');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/parent/practice-tests/${ID}/release`);
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer token');
+    // Nothing is sent: the id in the path is the whole request. A body would be a
+    // second place a status could be asked for.
+    expect(init.body ?? null).toBeNull();
+  });
+
+  it('discards one practice test and reads the new status off the answer', async () => {
+    const fetchMock = respondWith(200, { id: ID, status: 'Discarded', questions: [] });
+
+    const view = await parentApi.discardPracticeTest('token', ID);
+    expect(view.status).toBe('Discarded');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/parent/practice-tests/${ID}/discard`);
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer token');
+  });
+
+  it('surfaces a second release as the 404 the one-way transition answers with', async () => {
+    // Release is one-way in v0, and the API states one sentence for an unknown id,
+    // a foreign id and an already-released one. This app has nothing to tell apart.
+    respondWith(404, { message: 'That practice test could not be found.' });
+    const failure = await parentApi
+      .releasePracticeTest('token', ID)
+      .catch((cause: unknown) => cause as ParentApiError);
+    expect((failure as ParentApiError).status).toBe(404);
+  });
+
   it('surfaces a 404 as a 404 rather than flattening it into a generic failure', async () => {
     // The screen renders a missing draft as a state and offers the way back;
     // it can only do that if the status survives the call.
@@ -393,6 +430,41 @@ describe('the draft reads', () => {
       .practiceTestDraft('token', ID)
       .catch((cause: unknown) => cause as ParentApiError);
     expect((failure as ParentApiError).status).toBe(404);
+  });
+});
+
+describe('the student-scoped read of released practice tests', () => {
+  it('carries the binding cookie and no bearer at all', async () => {
+    const fetchMock = respondWith(200, [{ id: 'p1', questionCount: 8 }]);
+
+    const tests = await parentApi.studentPracticeTests();
+    expect(tests).toEqual([{ id: 'p1', questionCount: 8 }]);
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/student/practice-tests');
+    // The binding is an httpOnly cookie `credentials: 'include'` already carries.
+    // An elevation bearer here would be the wrong audience for the surface.
+    expect(new Headers(init.headers).has('authorization')).toBe(false);
+    expect(init.credentials).toBe('include');
+    // A read, and nothing else: there is no student-scoped write of any kind.
+    expect(init.method ?? 'GET').toBe('GET');
+  });
+
+  it('treats an empty list as the state it is, not as an absence', async () => {
+    respondWith(200, []);
+    await expect(parentApi.studentPracticeTests()).resolves.toEqual([]);
+  });
+
+  it('carries the guard’s own refusal through as an unbound device', async () => {
+    // The one 401 that means "this device was never set up", rather than "something
+    // went wrong" — which is what keeps a dropped connection from routing a child
+    // to sign-in.
+    respondWith(401, { message: 'This device is not set up for a student yet.', bound: false });
+    const failure = await parentApi
+      .studentPracticeTests()
+      .catch((cause: unknown) => cause as ParentApiError);
+    expect((failure as ParentApiError).status).toBe(401);
+    expect((failure as ParentApiError).notBound).toBe(true);
   });
 });
 

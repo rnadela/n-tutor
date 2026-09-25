@@ -247,6 +247,20 @@ export interface PracticeTestDraftSummary {
   createdAt: string;
 }
 
+/**
+ * One row of Student Home's released practice tests, exactly as the API states
+ * it.
+ *
+ * An identifier and a count, and nothing else exists on it: no prompt, no
+ * answer, no option body, no Topic label, and no allowance figure, tier or model
+ * name — none of those is a student-scoped fact (AD-20, AD-26). Taking the test
+ * is Epic 5's, and this story ships visibility.
+ */
+export interface StudentPracticeTestSummary {
+  id: string;
+  questionCount: number;
+}
+
 /** One generated option, in the order the API states it. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -603,6 +617,20 @@ export const parentApi = {
    */
   studentSession: () => call<StudentSession>('/student/session', {}, studentCopy.failed),
 
+  /**
+   * The practice tests the bound child can see, ordered by the server: most
+   * recently made first, which is generation time and not release time — there is
+   * no `releasedAt` column for it to be anything else.
+   *
+   * No bearer, exactly as the session read: the binding travels as its own
+   * httpOnly cookie, and the profile is named by that cookie server-side rather
+   * than by anything this browser holds. An empty list is the ordinary answer for
+   * a child with nothing released yet — a state Student Home renders as a plain
+   * sentence, never an error.
+   */
+  studentPracticeTests: () =>
+    call<StudentPracticeTestSummary[]>('/student/practice-tests', {}, studentCopy.failed),
+
   // --- Uncommitted parent state ------------------------------------------
   //
   // Server-side only, and behind the elevation bearer like every other
@@ -909,6 +937,35 @@ export const parentApi = {
       )}`,
       { method: 'DELETE', headers: elevated(token) },
       parentCopy.drafts.deleteFailed,
+    ),
+
+  /**
+   * Releases the whole draft, and answers with the view carrying its new status.
+   *
+   * **One-way.** A second call on the same id answers the module's ordinary 404,
+   * identical to the one an unknown id gets, because the API scopes `Draft` in
+   * the statement that mutates — so this app has nothing to tell apart and no
+   * unrelease to offer. Nothing is refunded, and the confirmation stated both
+   * consequences before this call was ever made.
+   */
+  releasePracticeTest: (token: string, practiceTestId: string) =>
+    call<PracticeTestDraftView>(
+      `/parent/practice-tests/${encodeURIComponent(practiceTestId)}/release`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.drafts.releaseFailed,
+    ),
+
+  /**
+   * Discards the whole draft, and answers with the view carrying its new status.
+   *
+   * Refused with that same 404 on an already-released id: release is terminal.
+   * Nothing is given back (AD-14).
+   */
+  discardPracticeTest: (token: string, practiceTestId: string) =>
+    call<PracticeTestDraftView>(
+      `/parent/practice-tests/${encodeURIComponent(practiceTestId)}/discard`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.drafts.discardFailed,
     ),
 };
 

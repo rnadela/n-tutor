@@ -104,9 +104,26 @@ describe('the pending drafts list', () => {
     expect(PAGE_SOURCE).not.toContain('gpt-');
   });
 
+  it('states either outcome on arrival, from the URL, as one alert', () => {
+    // Three things take a draft off the review screen — a delete-to-zero, a release
+    // and a discard — and in every case the screen that knew is the one being
+    // navigated away from, where a live region unmounted mid-announcement says
+    // nothing. One alert either way: a release read as a discard would be the most
+    // consequential thing this app could get wrong in a sentence.
+    expect(PAGE_SOURCE).toContain("params.get('released') === '1'");
+    expect(PAGE_SOURCE).toContain("params.get('discarded') === '1'");
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.released');
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.discarded');
+    expect(PAGE_SOURCE).toContain('if (!released && !discarded) return null;');
+    // Behind `Suspense`, or `useSearchParams` opts the whole route out of static
+    // prerendering for the sake of one sentence.
+    expect(PAGE_SOURCE).toContain('<Suspense fallback={null}>');
+  });
+
   it('offers no control that changes a draft', () => {
-    // Editing is Story 4.4's, release and discard 4.5's, the timer 4.6's. The
-    // list reads and links, and does nothing else.
+    // Editing, release and discard all act on one draft, on the review screen.
+    // Release and discard are per draft — no batch control here, and no
+    // "release all". The list reads, states an outcome, and links.
     for (const forbidden of ['TextField', 'onSubmit', 'Checkbox', 'method:']) {
       expect(PAGE_SOURCE).not.toContain(forbidden);
     }

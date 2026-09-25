@@ -18,6 +18,20 @@ export const studentCopy = {
   gradeLevel: (name: string) => `You are in ${name}.`,
   /** Nothing is here yet, and saying so is better than an empty screen. */
   empty: 'There is nothing to practise yet. Your practice tests will show up here.',
+  /** The released list's own heading. Second person, like everything here. */
+  practiceTestsTitle: 'Your practice tests',
+  /**
+   * One row of the list.
+   *
+   * The question count arrives from the API rather than being written here, and
+   * it is the only figure on the row: there is nothing to open yet, because
+   * taking a practice test is Epic 5's. Seeing that it is there is the whole of
+   * what this story ships to a child.
+   */
+  practiceTest: (questionCount: number) =>
+    questionCount === 1
+      ? 'A practice test with 1 question'
+      : `A practice test with ${questionCount} questions`,
   loading: 'Loading…',
   /** The one control out of Student Mode. It leads to the PIN, never past it. */
   parent: 'Parent',

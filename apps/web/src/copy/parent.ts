@@ -625,6 +625,41 @@ export const parentCopy = {
      * know why the field does not match what is stored below it.
      */
     editRestored: 'An edit that was not saved has been put back.',
+
+    // --- Releasing or discarding the whole draft --------------------------
+    //
+    // The two terminal transitions, and the only place on either screen where a
+    // consequence has to be stated *in advance*: there is no undo, no recall and
+    // no refund, so the confirmation is the last moment anything can be said.
+    // Third person about the student throughout, plain fact, no exclamation
+    // marks, no cheerleading, no upsell and no error codes.
+
+    /** The control that opens the release confirmation. */
+    release: 'Release it',
+    releaseTitle: 'Release this practice test',
+    /**
+     * Both facts, before the action: the child can see it from this moment, and
+     * it can no longer be changed. Named by the child, because "which child"
+     * is the one thing a parent holding several drafts must not have to infer.
+     */
+    releaseBody: (studentName: string) =>
+      `${studentName} will be able to see this practice test straight away, and it can no longer be changed. This cannot be undone.`,
+    releaseConfirm: 'Release it',
+    /** Said on arrival at the pending list, by the screen the parent lands on. */
+    released: 'The practice test was released.',
+    releaseFailed: 'That practice test could not be released. Try again.',
+
+    /** The control that opens the discard confirmation, for the whole draft. */
+    discard: 'Discard it',
+    discardTitle: 'Discard this practice test',
+    /**
+     * Both facts, before the action: the child never sees it, and the allowance
+     * already spent is not given back (AD-14).
+     */
+    discardBody: (studentName: string) =>
+      `This practice test will be discarded and ${studentName} will never see it. The Generation Allowance already used on it is not given back. This cannot be undone.`,
+    discardConfirm: 'Discard it',
+    discardFailed: 'That practice test could not be discarded. Try again.',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

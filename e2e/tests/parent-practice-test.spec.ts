@@ -408,12 +408,12 @@ test.describe('generating practice tests', () => {
     const reading = await fraction.getAttribute('aria-label');
     expect(reading).toMatch(/^\d+( and \d+)? over \d+$/u);
 
-    // Release, discard and the timer are Stories 4.5 and 4.6: no control for
-    // any of them exists here. Edit and delete do — they are this screen's
-    // whole point since Story 4.4, and they are exercised below.
-    for (const name of [/release/iu, /discard/iu, /timer/iu]) {
-      await expect(page.getByRole('button', { name })).toHaveCount(0);
-    }
+    // The timer is Story 4.6: no control for it exists here yet. Release and
+    // discard do since Story 4.5, and edit and delete since 4.4 — each exactly
+    // one control, per draft, with no batch anything.
+    await expect(page.getByRole('button', { name: /timer/iu })).toHaveCount(0);
+    await expect(page.getByTestId('draft-release-open')).toHaveCount(1);
+    await expect(page.getByTestId('draft-discard-open')).toHaveCount(1);
 
     // The review position is the URL and nothing else. A reload would drop the
     // in-memory bearer, so this is the return a parent makes through the app —
@@ -598,5 +598,194 @@ test.describe('generating practice tests', () => {
     );
     // And it is gone from the list, not merely emptied.
     await expect(page.getByTestId('drafts-empty')).toBeVisible();
+  });
+
+  test('releases one draft into Student Mode, and discards the other', async ({ page }) => {
+    // Two drafts, an upload, an extraction, both transitions and a crossing of the
+    // mode boundary: the criterion is about what a child can see, which only a
+    // browser leaving Parent View can prove.
+    test.setTimeout(180_000);
+    const email = uniqueParentEmail('draft-release');
+    await uploadAndRead(page, email);
+    await enterGenerate(page);
+
+    await countRow(page, 2).getByRole('radio').check();
+    await page.getByTestId('generate-start').click();
+    await page.getByTestId('generate-confirm').click();
+    await expect(page.getByTestId('generate-progress-line')).toHaveText(
+      '2 practice tests are ready.',
+      { timeout: 60_000 },
+    );
+    await page.getByTestId('generate-to-drafts').click();
+    const rows = page.locator('[data-testid="draft-row"]');
+    await expect(rows).toHaveCount(2);
+
+    // --- Release the first ------------------------------------------------
+    await rows.first().getByRole('link', { name: 'Read it' }).click();
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+    const questionCount = await page.locator('[data-testid="draft-question"]').count();
+    expect(questionCount).toBeGreaterThanOrEqual(1);
+
+    await page.getByTestId('draft-release-open').click();
+    // Both facts, in words, **before** anything happens: the child can see it
+    // straight away, and it can no longer be changed. The child is named.
+    const releaseBody = page.getByTestId('draft-transition-body');
+    await expect(releaseBody).toContainText('straight away');
+    await expect(releaseBody).toContainText('can no longer be changed');
+    // By name. The name is joined in the browser from the Student Profile read, so
+    // without this the whole join could degrade to the neutral stand-in ("A student
+    // profile") for every parent and nothing would fail.
+    await expect(releaseBody).toContainText('Noah');
+    // Cancel leaves the draft exactly as it was.
+    await page.getByTestId('draft-transition-cancel').click();
+    await expect(page.locator('[data-testid="draft-question"]')).toHaveCount(questionCount);
+
+    await page.getByTestId('draft-release-open').click();
+    await page.getByTestId('draft-release-confirm').click();
+    // The parent lands on Pending drafts and is told there, by the screen they are
+    // actually standing on.
+    await expect(page.getByRole('heading', { name: 'Pending practice tests' })).toBeVisible();
+    await expect(page.getByTestId('drafts-released')).toHaveText('The practice test was released.');
+    // And the released draft has left the list.
+    await expect(page.locator('[data-testid="draft-row"]')).toHaveCount(1);
+
+    // --- Read it back as the child ----------------------------------------
+    // The one account has one child, so the exit binds straight to them rather
+    // than asking a question with a single answer.
+    await page.getByRole('button', { name: 'Back to Student Mode' }).click();
+    await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
+    const tests = page.locator('[data-testid="student-practice-test"]');
+    await expect(tests).toHaveCount(1);
+    await expect(tests.first()).toHaveText(
+      questionCount === 1
+        ? 'A practice test with 1 question'
+        : `A practice test with ${questionCount} questions`,
+    );
+    // The "nothing yet" sentence is gone, and the draft still waiting is not here.
+    await expect(page.getByTestId('student-empty')).toHaveCount(0);
+
+    // --- Discard the other ------------------------------------------------
+    await page.getByRole('link', { name: 'Parent' }).click();
+    await page.locator('#parent-pin').fill(PIN);
+    await page.getByRole('button', { name: 'Enter Parent View' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
+    ).toBeVisible();
+    // Client-side, because the elevation bearer is in memory: a `page.goto` would
+    // reload the app, destroy it, and send the parent straight back to the PIN.
+    await page.getByRole('link', { name: 'Pending practice tests' }).click();
+    const remaining = page.locator('[data-testid="draft-row"]');
+    await expect(remaining).toHaveCount(1);
+    await remaining.first().getByRole('link', { name: 'Read it' }).click();
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+
+    await page.getByTestId('draft-discard-open').click();
+    // Both facts again, before the act: the child never sees it, and the allowance
+    // already spent is not given back.
+    const discardBody = page.getByTestId('draft-transition-body');
+    await expect(discardBody).toContainText('never see it');
+    await expect(discardBody).toContainText('not given back');
+    await expect(discardBody).toContainText('Noah');
+    await page.getByTestId('draft-discard-confirm').click();
+
+    await expect(page.getByTestId('drafts-discarded')).toHaveText(
+      'The practice test was discarded.',
+    );
+    // Gone from Pending drafts, and the list is empty rather than merely shorter.
+    await expect(page.getByTestId('drafts-empty')).toBeVisible();
+
+    // And the child still sees exactly the one that was released — a discard
+    // reaches no student-facing surface.
+    await page.getByRole('button', { name: 'Back to Student Mode' }).click();
+    await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
+    await expect(page.locator('[data-testid="student-practice-test"]')).toHaveCount(1);
+  });
+
+  test('leaves the parent on the draft, told why, when a release is refused', async ({ page }) => {
+    // The failure path of the most consequential control in the epic. Without a
+    // case that drives it, omitting `setBusy(null)` from the catch — which leaves
+    // every control on the screen permanently disabled — ships green, and so does
+    // swapping the two failure sentences.
+    test.setTimeout(150_000);
+    const email = uniqueParentEmail('draft-release-fail');
+    await uploadAndRead(page, email);
+    await enterGenerate(page);
+
+    await countRow(page, 1).getByRole('radio').check();
+    await page.getByTestId('generate-start').click();
+    await page.getByTestId('generate-confirm').click();
+    await expect(page.getByTestId('generate-progress-line')).toHaveText(
+      '1 practice test is ready.',
+      { timeout: 60_000 },
+    );
+    await page.getByTestId('generate-to-drafts').click();
+    await page
+      .locator('[data-testid="draft-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+    const draftUrl = page.url();
+    const questionCount = await page.locator('[data-testid="draft-question"]').count();
+
+    // Refused at the network, so the screen meets a real failure rather than a
+    // mocked client. The retryable case first, because the 404 branch replaces the
+    // screen with the missing state and there is no way back to this draft's URL
+    // once the bearer is gone — the PIN gate always lands on Parent View.
+    await page.route('**/practice-tests/*/release', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+    );
+
+    await page.getByTestId('draft-release-open').click();
+    await page.getByTestId('draft-release-confirm').click();
+
+    // Stated as this screen's own action error, in the release's own words.
+    await expect(page.getByTestId('draft-action-error')).toHaveText(
+      'That practice test could not be released. Try again.',
+    );
+    // The parent is still reading the draft, and it is still whole.
+    expect(page.url()).toBe(draftUrl);
+    await expect(page.getByTestId('draft-missing')).toHaveCount(0);
+    await expect(page.locator('[data-testid="draft-question"]')).toHaveCount(questionCount);
+    // Nothing was announced as a success.
+    await expect(page.getByTestId('draft-notice')).toBeEmpty();
+    // `busy` was released: the controls work again rather than being dead for the
+    // rest of the session.
+    await expect(page.getByTestId('draft-release-open')).toBeEnabled();
+    await expect(page.getByTestId('draft-discard-open')).toBeEnabled();
+
+    // The discard's sentence is its own, not the release's.
+    await page.unroute('**/practice-tests/*/release');
+    await page.route('**/practice-tests/*/discard', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+    );
+    await page.getByTestId('draft-discard-open').click();
+    await page.getByTestId('draft-discard-confirm').click();
+    await expect(page.getByTestId('draft-action-error')).toHaveText(
+      'That practice test could not be discarded. Try again.',
+    );
+    await expect(page.getByTestId('draft-discard-open')).toBeEnabled();
+
+    // And a 404 — the draft moved out from under the screen, which is what a second
+    // tab releasing it looks like — is the missing state with the way back, not a
+    // fault and not a navigation.
+    await page.unroute('**/practice-tests/*/discard');
+    await page.route('**/practice-tests/*/release', (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ statusCode: 404, message: 'Nope.' }),
+      }),
+    );
+    await page.getByTestId('draft-release-open').click();
+    await page.getByTestId('draft-release-confirm').click();
+
+    await expect(page.getByTestId('draft-missing')).toBeVisible();
+    expect(page.url()).toBe(draftUrl);
+    await expect(page.getByTestId('draft-notice')).toBeEmpty();
+    // The way back is offered in that state, as it is in every other.
+    await expect(
+      page.getByRole('link', { name: 'Back to the pending practice tests' }),
+    ).toBeVisible();
   });
 });

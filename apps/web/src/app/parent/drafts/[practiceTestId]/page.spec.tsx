@@ -121,35 +121,76 @@ describe('the draft review screen', () => {
     expect(PAGE_SOURCE).toContain('elevation?.token ?? null');
   });
 
-  it('offers no release, no discard of its own, and no timer', () => {
-    // Stories 4.5 and 4.6 own those, and `Discarded` is reached here by
-    // deleting the last Question and by no other path. No call, no copy key
-    // and no state of any of them exists on this screen.
+  it('offers no timer, and no way back from either terminal state', () => {
+    // Story 4.6 owns the timer. Release is one-way in v0: there is no unrelease,
+    // no recall, no undo and no soft-restore anywhere on this screen, and the
+    // status it writes is never read back off a local guess.
+    // On the code, not the prose: the screen is required to explain in a comment
+    // that there is no recall and no undo.
+    for (const forbidden of ['unrelease', 'recall', 'undo']) {
+      expect(PAGE_CODE).not.toContain(forbidden);
+    }
     for (const forbidden of [
-      'releaseDraft',
-      'discardDraft',
-      'parentCopy.drafts.release',
-      'parentCopy.drafts.discard',
       'durationMinutes',
       'timerMinutes',
+      'restoreDraft',
       "status: 'Released'",
+      "status: 'Draft'",
     ]) {
       expect(PAGE_SOURCE).not.toContain(forbidden);
     }
-    // Exactly the calls this story adds, and nothing more. Matched on the
-    // method name rather than on `parentApi.x`, because a wrapped call puts
-    // the two on different lines.
-    const called = [...PAGE_SOURCE.matchAll(/parentApi\s*\.\s*(\w+)\(\s*token[,)]/g)].map(
-      (match) => match[1],
-    );
+    // Exactly the calls these stories add, and nothing more. Every member read off
+    // `parentApi`, whether it is called there or held first: the two transitions
+    // are selected by name and invoked through one call site, so a regex anchored
+    // on `(token` would not see either of them.
+    const called = [...PAGE_CODE.matchAll(/parentApi\s*\.\s*(\w+)/g)].map((match) => match[1]);
     expect([...new Set(called)].sort()).toEqual([
       'deleteDraftQuestion',
+      'discardPracticeTest',
       'discardUncommittedState',
       'editDraftQuestion',
       'practiceTestDraft',
+      'releasePracticeTest',
       'saveUncommittedState',
+      'students',
       'uncommittedState',
     ]);
+  });
+
+  it('releases and discards the whole draft, each behind its own confirmation', () => {
+    // The consequence is stated before the action, because neither has one
+    // afterwards: no undo, no recall, no refund.
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.releaseBody(studentName)');
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.discardBody(studentName)');
+    // The open control only records which transition; the confirm control is what
+    // calls the API.
+    expect(PAGE_SOURCE).toContain("setPendingTransition('release')");
+    expect(PAGE_SOURCE).toContain("setPendingTransition('discard')");
+    expect(PAGE_SOURCE).toContain('onClick={confirmTransition}');
+    // Cancel leaves the draft untouched — it clears the pending transition and
+    // nothing else.
+    expect(PAGE_SOURCE).toContain('onClick={() => setPendingTransition(null)}');
+    // Per draft. No batch control and no "release all" anywhere.
+    expect(PAGE_SOURCE).not.toMatch(/releaseAll|selectedDrafts|bulk/iu);
+  });
+
+  it('joins the child’s name here, and never lets a missing one block the release', () => {
+    // `practicetest` reads no identity table (AD-17), so the name comes from the
+    // Student Profile read — settled on its own, with a neutral stand-in when it
+    // is not in hand.
+    expect(PAGE_SOURCE).toContain('parentApi.students(token)');
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.unknownStudent');
+    expect(PAGE_SOURCE).not.toContain('Promise.all([');
+  });
+
+  it('hands either outcome to the pending drafts rather than rendering a fault', () => {
+    // Both transitions leave this screen on a URL whose read now 404s, and the
+    // missing state would read as a fault for something the parent just chose.
+    expect(PAGE_SOURCE).toContain("'/parent/drafts?released=1'");
+    expect(PAGE_SOURCE).toContain('router.replace(transition === ');
+    // And that screen states either one.
+    expect(LIST_SOURCE).toContain('parentCopy.drafts.released');
+    expect(LIST_SOURCE).toContain("params.get('released') === '1'");
   });
 
   it('edits and deletes in place, re-rendering from the view the server answers with', () => {
@@ -208,7 +249,15 @@ describe('the draft review screen', () => {
     expect(PAGE_SOURCE).toContain('router.replace(DISCARDED_DRAFTS_HREF)');
     // And that screen states it.
     expect(LIST_SOURCE).toContain('parentCopy.drafts.discarded');
-    expect(LIST_SOURCE).toContain("useSearchParams().get('discarded') === '1'");
+    expect(LIST_SOURCE).toContain("params.get('discarded') === '1'");
+  });
+
+  it('drops every slot the draft held on either transition, and on delete-to-zero', () => {
+    // Left alone they sit out their TTL and come back as restored edits of a
+    // practice test nobody can reach. One call site per path that ends the draft:
+    // the delete-to-zero branch, and the one both transitions share.
+    expect(PAGE_SOURCE.match(/discardEverySlot\(\)/g)).toHaveLength(2);
+    expect(PAGE_SOURCE).toContain('const confirmTransition = useCallback');
   });
 
   it('drops every slot the draft held when the draft itself is discarded', () => {
@@ -329,6 +378,24 @@ describe('its copy', () => {
     expect(PAGE_SOURCE).toContain('parentCopy.drafts.questionHeading(question.ordinal)');
     expect(PAGE_SOURCE).toContain('parentCopy.drafts.topicsLabel');
     expect(PAGE_SOURCE).toContain('parentCopy.drafts.correctAnswerLabel');
+  });
+
+  it('states both release consequences before the action, naming the child', () => {
+    const body = parentCopy.drafts.releaseBody('Noah');
+    expect(body).toContain('Noah');
+    expect(body).toMatch(/straight away|immediately/u);
+    expect(body).toContain('can no longer be changed');
+    expect(body).not.toContain('!');
+    expect(body).not.toMatch(/upgrade|buy|plan/iu);
+  });
+
+  it('states both discard consequences before the action, including the non-refund', () => {
+    const body = parentCopy.drafts.discardBody('Noah');
+    expect(body).toContain('Noah');
+    expect(body).toContain('never see it');
+    expect(body).toContain('not given back');
+    expect(body).not.toContain('!');
+    expect(body).not.toMatch(/upgrade|buy|plan/iu);
   });
 
   it('says the discard and the non-refund in plain words, before the action', () => {

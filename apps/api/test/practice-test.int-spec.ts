@@ -27,6 +27,7 @@ const { AiService } = await import('../src/ai/ai.service.js');
 const { SOURCE_TEST_NOT_FOUND } = await import('../src/sourcetest/source-test-policy.js');
 const {
   bearer,
+  bindDevice,
   createGradeLevel,
   createHarness,
   createSignedInParent,
@@ -93,6 +94,15 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
     parentAccountId: string;
     token: string;
     sourceTestId: string;
+    /**
+     * The child every draft of this account is made for.
+     *
+     * Carried on the fixture since Story 4.5: the student-scoped read is scoped
+     * by the *bound profile*, not by the account, so a case that releases a test
+     * has to be able to bind the device to the profile it was released for — and
+     * to a sibling, to prove the scoping is real.
+     */
+    studentProfileId: string;
   }
 
   /**
@@ -145,7 +155,12 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
     expect(await h.extractionRunner.runOnce()).toBe(true);
     h.ai.reset();
 
-    return { parentAccountId: parent.parentAccountId, token, sourceTestId };
+    return {
+      parentAccountId: parent.parentAccountId,
+      token,
+      sourceTestId,
+      studentProfileId: profile.id,
+    };
   }
 
   /** How many Practice Tests the derived allowance count says were charged. */
@@ -2078,6 +2093,432 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       ]) {
         expect(sentence).not.toMatch(/gpt|Allowance|Free tier|Practice 1\.1|Fractions/iu);
       }
+    });
+  });
+
+  // --- Release or discard --------------------------------------------------
+  //
+  // The two terminal transitions, and the first student-scoped read of a
+  // Practice Test. Every row here was landed by the real runner through the real
+  // generator, because "the practice test is visible to that child" is a claim
+  // about a row generation actually wrote.
+
+  describe('release and discard', () => {
+    /** A parent standing on `count` landed drafts, with their ids in stored order. */
+    async function withLandedDrafts(count: number): Promise<Ready & { draftIds: string[] }> {
+      const ready = await generatable();
+      await server()
+        .post(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests`)
+        .set('Authorization', bearer(ready.token))
+        .send({ count })
+        .expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      // Scoped to this parent's own source test and ordered explicitly: an
+      // unscoped read would be relying on the table being empty and on insertion
+      // order, and would pick the wrong row the moment a case ahead of it leaves
+      // one behind.
+      const stored = await h.prisma.practiceTest.findMany({
+        where: { parentAccountId: ready.parentAccountId, sourceTestId: ready.sourceTestId },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      });
+      expect(stored).toHaveLength(count);
+      return { ...ready, draftIds: stored.map((row) => row.id) };
+    }
+
+    function release(token: string, id: string) {
+      return server()
+        .post(`/api/parent/practice-tests/${id}/release`)
+        .set('Authorization', bearer(token));
+    }
+
+    function discard(token: string, id: string) {
+      return server()
+        .post(`/api/parent/practice-tests/${id}/discard`)
+        .set('Authorization', bearer(token));
+    }
+
+    function readDraft(token: string, id: string) {
+      return server().get(`/api/parent/practice-tests/${id}`).set('Authorization', bearer(token));
+    }
+
+    /** The student-scoped read, carrying a binding cookie and no bearer. */
+    function readReleased(cookie: string) {
+      return server().get('/api/student/practice-tests').set('Cookie', cookie);
+    }
+
+    /** One draft's stored state and charge marker, read straight from the row. */
+    function storedRow(id: string) {
+      return h.prisma.practiceTest.findUniqueOrThrow({
+        where: { id },
+        select: { status: true, chargedAt: true, questionCount: true },
+      });
+    }
+
+    it('releases a draft, answers with the whole view, and leaves the charge alone', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      const before = await storedRow(id);
+      const usedBefore = await generationUsed(ready.parentAccountId);
+
+      const response = await release(ready.token, id).expect(200);
+
+      // The screen reads the status rather than inferring success from a 204.
+      expect(response.body.id).toBe(id);
+      expect(response.body.status).toBe('Released');
+      expect(response.body.questions.length).toBe(before.questionCount);
+      const after = await storedRow(id);
+      expect(after.status).toBe('Released');
+      // Neither transition refunds, and neither writes an allowance figure: the
+      // derived count counts rows that have ever reached draft (AD-14).
+      expect(after.chargedAt).toEqual(before.chargedAt);
+      expect(await generationUsed(ready.parentAccountId)).toBe(usedBefore);
+    });
+
+    it('refuses a second release with the same sentence an unknown id gets', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      await release(ready.token, id).expect(200);
+
+      const again = await release(ready.token, id).expect(404);
+      const unknown = await release(ready.token, randomUUID()).expect(404);
+      // That identical refusal *is* the irreversibility: `Draft` is in the
+      // `where` of the statement that mutates, so not being a draft any more is
+      // indistinguishable from never having been this account's (AD-18).
+      expect(again.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      expect(unknown.body.message).toBe(again.body.message);
+      // And nothing was written by the refusal.
+      expect((await storedRow(id)).status).toBe('Released');
+    });
+
+    it('discards a draft, answers with the new status, and gives nothing back', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      const before = await storedRow(id);
+      const usedBefore = await generationUsed(ready.parentAccountId);
+
+      const response = await discard(ready.token, id).expect(200);
+
+      expect(response.body.status).toBe('Discarded');
+      const after = await storedRow(id);
+      expect(after.status).toBe('Discarded');
+      expect(after.chargedAt).toEqual(before.chargedAt);
+      expect(await generationUsed(ready.parentAccountId)).toBe(usedBefore);
+    });
+
+    it('refuses to discard a released test — release is terminal', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      await release(ready.token, id).expect(200);
+
+      const refusal = await discard(ready.token, id).expect(404);
+      expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      expect((await storedRow(id)).status).toBe('Released');
+    });
+
+    it('refuses every parent route on a released id, with one identical sentence', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      const { id: questionId, prompt: storedPrompt } =
+        await h.prisma.practiceTestQuestion.findFirstOrThrow({
+          where: { practiceTestId: id },
+          orderBy: { ordinal: 'asc' },
+          select: { id: true, prompt: true },
+        });
+      await release(ready.token, id).expect(200);
+
+      // The read, the write barrier this story adds the tests for, and both
+      // transitions: five refusals, one sentence, and nothing distinguishable
+      // about any of them.
+      const unknown = await readDraft(ready.token, randomUUID()).expect(404);
+      for (const refusal of [
+        await readDraft(ready.token, id).expect(404),
+        await server()
+          .patch(`/api/parent/practice-tests/${id}/questions/${questionId}`)
+          .set('Authorization', bearer(ready.token))
+          .send({ prompt: 'A rewritten prompt.' })
+          .expect(404),
+        await server()
+          .delete(`/api/parent/practice-tests/${id}/questions/${questionId}`)
+          .set('Authorization', bearer(ready.token))
+          .expect(404),
+        await release(ready.token, id).expect(404),
+        await discard(ready.token, id).expect(404),
+      ]) {
+        expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+        expect(refusal.body.message).toBe(unknown.body.message);
+      }
+      // No row was written by any of them: the Question is exactly where it was.
+      const untouched = await h.prisma.practiceTestQuestion.findUniqueOrThrow({
+        where: { id: questionId },
+        select: { prompt: true },
+      });
+      expect(untouched.prompt).toEqual(storedPrompt);
+      expect((await storedRow(id)).status).toBe('Released');
+    });
+
+    it('refuses every parent route on a discarded id too, with that same sentence', async () => {
+      // The controller and the service both assert that the two terminal states
+      // behave identically. Proving it for `Released` alone would leave "a
+      // `Released` *or* `Discarded` row answers the one 404" half-tested, and the
+      // half that is about a row a parent deliberately threw away untested.
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      const { id: questionId, prompt: storedPrompt } =
+        await h.prisma.practiceTestQuestion.findFirstOrThrow({
+          where: { practiceTestId: id },
+          orderBy: { ordinal: 'asc' },
+          select: { id: true, prompt: true },
+        });
+      await discard(ready.token, id).expect(200);
+
+      const unknown = await readDraft(ready.token, randomUUID()).expect(404);
+      for (const refusal of [
+        await readDraft(ready.token, id).expect(404),
+        await server()
+          .patch(`/api/parent/practice-tests/${id}/questions/${questionId}`)
+          .set('Authorization', bearer(ready.token))
+          .send({ prompt: 'A rewritten prompt.' })
+          .expect(404),
+        await server()
+          .delete(`/api/parent/practice-tests/${id}/questions/${questionId}`)
+          .set('Authorization', bearer(ready.token))
+          .expect(404),
+        await release(ready.token, id).expect(404),
+        await discard(ready.token, id).expect(404),
+      ]) {
+        expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+        expect(refusal.body.message).toBe(unknown.body.message);
+      }
+      // Nothing was written by any of them, and a discard is never walked back.
+      const untouched = await h.prisma.practiceTestQuestion.findUniqueOrThrow({
+        where: { id: questionId },
+        select: { prompt: true },
+      });
+      expect(untouched.prompt).toEqual(storedPrompt);
+      expect((await storedRow(id)).status).toBe('Discarded');
+    });
+
+    it('takes a released row out of Pending drafts, and the sibling count with it', async () => {
+      const ready = await withLandedDrafts(2);
+      const [first, second] = ready.draftIds;
+      await release(ready.token, first!).expect(200);
+
+      const list = await server()
+        .get('/api/parent/practice-tests/drafts')
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      expect(list.body).toHaveLength(1);
+      expect(list.body[0].id).toBe(second);
+      // "of 2" was true while both were drafts. The remaining draft's figure
+      // reflects the smaller set rather than the job's original size.
+      expect(list.body[0].siblingCount).toBe(1);
+    });
+
+    it('takes a discarded row out of Pending drafts too, and the sibling count with it', async () => {
+      // The same acceptance criterion as release's — "appears on no parent draft
+      // surface" — proven for the other terminal state rather than assumed from it.
+      const ready = await withLandedDrafts(2);
+      const [first, second] = ready.draftIds;
+      await discard(ready.token, first!).expect(200);
+
+      const list = await server()
+        .get('/api/parent/practice-tests/drafts')
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      expect(list.body).toHaveLength(1);
+      expect(list.body[0].id).toBe(second);
+      expect(list.body[0].siblingCount).toBe(1);
+    });
+
+    it('refuses either transition on another account’s draft as though it were not there', async () => {
+      const mine = await withLandedDrafts(1);
+      const theirs = await withLandedDrafts(1);
+
+      const releaseRefusal = await release(mine.token, theirs.draftIds[0]!).expect(404);
+      const discardRefusal = await discard(mine.token, theirs.draftIds[0]!).expect(404);
+      expect(releaseRefusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      expect(discardRefusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      // Nothing about the other account is in the answer, and their draft is
+      // still a draft.
+      expect(JSON.stringify(releaseRefusal.body)).not.toContain(theirs.parentAccountId);
+      expect((await storedRow(theirs.draftIds[0]!)).status).toBe('Draft');
+    });
+
+    it('refuses a malformed id on shape, before a row is read', async () => {
+      const ready = await withLandedDrafts(1);
+      await release(ready.token, 'not-a-uuid').expect(400);
+      await discard(ready.token, 'not-a-uuid').expect(400);
+      expect((await storedRow(ready.draftIds[0]!)).status).toBe('Draft');
+    });
+
+    it('refuses both transitions without an elevation bearer', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      await server().post(`/api/parent/practice-tests/${id}/release`).expect(401);
+      await server().post(`/api/parent/practice-tests/${id}/discard`).expect(401);
+      expect((await storedRow(id)).status).toBe('Draft');
+    });
+
+    it('carries no content in the body either transition actually refuses with', async () => {
+      // Swept off the **responses**, not off the constant: the constant is not
+      // changed by this story, so a check on it could not fail for any reason
+      // related to release or discard. What matters is what a refused transition
+      // puts on the wire.
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      // Read the real content first, so the sweep is against the very strings this
+      // draft holds rather than against a guess at what a generator writes.
+      const question = await h.prisma.practiceTestQuestion.findFirstOrThrow({
+        where: { practiceTestId: id },
+        orderBy: { ordinal: 'asc' },
+        select: {
+          prompt: true,
+          answer: true,
+          choices: { select: { body: true } },
+          topics: { select: { label: true } },
+        },
+      });
+      const plain = (value: unknown): string[] =>
+        JSON.stringify(value ?? '').match(/[A-Za-z][A-Za-z ']{3,}/gu) ?? [];
+      const content = [
+        ...plain(question.prompt),
+        ...plain(question.answer),
+        ...question.choices.flatMap((choice) => plain(choice.body)),
+        ...question.topics.map((topic) => topic.label),
+      ].filter((text) => text.trim().length > 3);
+      expect(content.length).toBeGreaterThan(0);
+
+      // Release once so the second release and the discard are both refusals.
+      await release(ready.token, id).expect(200);
+      for (const refusal of [
+        await release(ready.token, id).expect(404),
+        await discard(ready.token, id).expect(404),
+      ]) {
+        const serialized = JSON.stringify(refusal.body);
+        // Not a fragment of the Question, an option body or a Topic label.
+        for (const text of content) expect(serialized).not.toContain(text);
+        // And no allowance figure, tier label or model name (AD-20).
+        expect(serialized).not.toMatch(/allowance|tier|free|unlimited|gpt|model/iu);
+        // Identifiers only: the account is not named either.
+        expect(serialized).not.toContain(ready.parentAccountId);
+        // And no second sentence that would let the outside tell the refusals
+        // apart — nothing says *which* state it was in.
+        expect(serialized).not.toMatch(/released|discarded|already/iu);
+      }
+    });
+
+    // --- The student-scoped read -------------------------------------------
+
+    it('shows the bound child their released tests, as an id and a count and nothing else', async () => {
+      const ready = await withLandedDrafts(2);
+      const [released, stillDraft] = ready.draftIds;
+      const view = await release(ready.token, released!).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleased(cookie).expect(200);
+
+      expect(response.body).toHaveLength(1);
+      expect(response.body[0].id).toBe(released);
+      expect(response.body[0].questionCount).toBe(view.body.questions.length);
+      // An identifier and a count. Nothing else at all — not a field name, not a
+      // prompt, not an option, not a Topic, not a figure about spending.
+      expect(Object.keys(response.body[0]).sort()).toEqual(['id', 'questionCount']);
+      const serialized = JSON.stringify(response.body);
+      for (const forbidden of [
+        'prompt',
+        'answer',
+        'choices',
+        'topics',
+        'allowance',
+        'tier',
+        'gpt',
+        'Practice 1.1',
+      ]) {
+        expect(serialized).not.toContain(forbidden);
+      }
+      // And the draft is not on it: a draft never appears in Student Mode.
+      expect(serialized).not.toContain(stillDraft!);
+    });
+
+    it('answers an empty list, not a 404, when the account holds drafts only', async () => {
+      const ready = await withLandedDrafts(1);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+      // Having nothing yet is a state Student Home renders, never a refusal.
+      await readReleased(cookie).expect(200).expect([]);
+    });
+
+    it('scopes the read by the bound profile, not by the account', async () => {
+      const ready = await withLandedDrafts(1);
+      await release(ready.token, ready.draftIds[0]!).expect(200);
+      // A sibling on the same account. The release was made for the other child,
+      // and this device is bound to this one.
+      const grade = await createGradeLevel(h);
+      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+        gradeLevelId: grade.id,
+      });
+      const cookie = await bindDevice(h, ready.token, sibling.id);
+
+      await readReleased(cookie).expect(200).expect([]);
+    });
+
+    it('leaves a discarded test out of the read entirely', async () => {
+      const ready = await withLandedDrafts(2);
+      const [discarded, released] = ready.draftIds;
+      await discard(ready.token, discarded!).expect(200);
+      await release(ready.token, released!).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleased(cookie).expect(200);
+      // Discard's exclusion from every downstream surface is structural:
+      // `status: 'Released'` is in the `where`, so a discarded row is not
+      // something a later reader must filter — it is one this read cannot reach.
+      expect(response.body.map((row: { id: string }) => row.id)).toEqual([released]);
+    });
+
+    it('breaks a tie on the made-at instant with the id, descending', async () => {
+      const ready = await withLandedDrafts(2);
+      await release(ready.token, ready.draftIds[0]!).expect(200);
+      await release(ready.token, ready.draftIds[1]!).expect(200);
+      // Both rows forced to **one literal instant**, which is the only state in
+      // which the `id: 'desc'` clause is reached at all: two drafts of one job can
+      // land inside the same millisecond, and without the tiebreak the order is
+      // whatever the planner happened to return. Left with distinct `createdAt`
+      // values this case would pass with that clause deleted.
+      await h.prisma.practiceTest.updateMany({
+        where: { id: { in: ready.draftIds } },
+        data: { createdAt: new Date('2026-01-01T00:00:00.000Z') },
+      });
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleased(cookie).expect(200);
+      // Expected in the test's own terms, from the two ids it already holds — not
+      // from a second query carrying the service's own `orderBy`, which would
+      // agree with the implementation whatever the implementation said.
+      expect(response.body.map((row: { id: string }) => row.id)).toEqual(
+        [...ready.draftIds].sort().reverse(),
+      );
+    });
+
+    it('refuses the read on an unbound device, and on one carrying the parent’s bearer', async () => {
+      const ready = await withLandedDrafts(1);
+      await release(ready.token, ready.draftIds[0]!).expect(200);
+
+      // No cookie at all: the guard's own refusal, which is what Student Home
+      // reads as "this device is not set up for a child".
+      const unbound = await server().get('/api/student/practice-tests').expect(401);
+      expect(unbound.body.bound).toBe(false);
+      // A stale binding is the same refusal.
+      await server()
+        .get('/api/student/practice-tests')
+        .set('Cookie', 'student_mode=not-a-token')
+        .expect(401);
+      // And the elevation bearer is the wrong audience for this surface: the
+      // guard never reads `Authorization`, so it cannot even be presented.
+      await server()
+        .get('/api/student/practice-tests')
+        .set('Authorization', bearer(ready.token))
+        .expect(401);
     });
   });
 });

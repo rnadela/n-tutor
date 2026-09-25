@@ -73,6 +73,12 @@ test.describe('Student Mode and the handover', () => {
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
     await expect(page.getByText('Hello, Noah.')).toBeVisible();
     await expect(page.getByText(`You are in ${grade.name}.`)).toBeVisible();
+    // Nothing has been released for this child, and the screen says so as a plain
+    // sentence rather than showing an empty space. Asserted *visible* on purpose:
+    // the repo's only other reference to this test id is a `toHaveCount(0)` in a
+    // non-empty state, which the sentence never rendering at all would satisfy.
+    await expect(page.getByTestId('student-empty')).toBeVisible();
+    await expect(page.locator('[data-testid="student-practice-test"]')).toHaveCount(0);
 
     // Nothing about the binding is readable by the page itself.
     const residue = await page.evaluate(() => ({

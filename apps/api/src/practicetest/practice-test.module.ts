@@ -6,8 +6,10 @@ import { requireParentJwtSecret } from '../common/env.js';
 import { ExtractionModule } from '../extraction/extraction.module.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
+import { StudentModeGuard } from '../identity/student-mode.guard.js';
 import { SourceTestModule } from '../sourcetest/source-test.module.js';
 import { PracticeTestController } from './practice-test.controller.js';
+import { StudentPracticeTestController } from './student-practice-test.controller.js';
 import { PracticeTestRunner } from './practice-test.runner.js';
 import { PracticeTestService } from './practice-test.service.js';
 import { practiceTestRuntime } from './practice-test-policy.js';
@@ -33,6 +35,12 @@ import { practiceTestRuntime } from './practice-test-policy.js';
  * enhancers in that controller's injector, so the parent secret is resolved
  * here through `requireParentJwtSecret()` and stays out of `admin`'s injector
  * entirely (AD-25).
+ *
+ * `StudentModeGuard` is constructed here for exactly that reason too, since Story
+ * 4.5 added the first student-scoped **read** of a Practice Test. Its three
+ * dependencies are already in reach with nothing new imported: `IdentityModule`
+ * exports `ParentAccountService` and `StudentProfileService`, and the `JwtModule`
+ * above already registers the parent secret the binding cookie is signed with.
  */
 @Module({
   imports: [
@@ -45,8 +53,8 @@ import { practiceTestRuntime } from './practice-test-policy.js';
     SourceTestModule,
     ExtractionModule,
   ],
-  controllers: [PracticeTestController],
-  providers: [PracticeTestService, PracticeTestRunner, ParentElevationGuard],
+  controllers: [PracticeTestController, StudentPracticeTestController],
+  providers: [PracticeTestService, PracticeTestRunner, ParentElevationGuard, StudentModeGuard],
   exports: [PracticeTestService, PracticeTestRunner],
 })
 export class PracticeTestModule {

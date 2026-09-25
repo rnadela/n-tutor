@@ -853,3 +853,67 @@ source_spec: `spec-4-4-draft-editing.md`
 severity: medium
 reason: `page.spec.tsx`'s slot-restore cases (e.g. "holds a typed-but-unsaved edit in the DraftEdit slot", "restores the held edits once per draft id", "checks every field of a restored slot", "debounces the slot write") are all `expect(PAGE_SOURCE).toContain(...)` assertions against the raw source text, same as the general gap already deferred above. Neither of the new Playwright specs in `e2e/tests/parent-practice-test.spec.ts` leaves an editor open and reloads to observe a restore, or forces a 4xx/network failure to observe `data-testid="draft-action-error"`. Swapping the merge-precedence spread at `setEdits((open) => ({ ...restored, ...open }))` to `{ ...open, ...restored }` -- which would let a slow slot fetch clobber text a parent is actively typing, exactly the race the surrounding comment says the ordering prevents -- would not fail any test in this diff.
 status: open
+
+### DW-108: The release and discard controls, their confirmations and the new Student Home list are covered by specs that grep their own source text rather than render them, so no executing unit test drives
+origin: spec-deferred a5ad18184523
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.spec.tsx; apps/web/src/app/student/page.spec.tsx
+source_spec: `spec-4-5-release-or-discard.md`
+severity: medium
+reason: `apps/web/src/app/parent/drafts/[practiceTestId]/page.spec.tsx` and `apps/web/src/app/student/page.spec.tsx` assert with `expect(SOURCE).toContain(...)` against `readFileSync(page.tsx)`. Swapping `RELEASED_DRAFTS_HREF` and `DISCARDED_DRAFTS_HREF` at the one `router.replace(transition === ...)` call site -- which would tell a parent a release was a discard, and the reverse -- leaves every searched string in place and ships green. `apps/web/vitest.config.ts` sets `environment: 'node'` and no testing-library dependency exists under `apps/web`, so a real render test needs a DOM the web tier does not have. Carried from Stories 4.3 and 4.4; this story adds more instances of it. The Playwright pass is the compensating surface, and it does assert both landing sentences by their own test ids.
+status: open
+
+### DW-109: The api test suite fails 1-2 non-deterministic tests on a full parallel run, at the baseline revision as well as on this story, always as a 404 on an unrelated parent or admin route.
+origin: spec-deferred 870c1a7ad9b9
+location: apps/api/vitest.config.ts; apps/api/test/harness.ts
+source_spec: `spec-4-5-release-or-discard.md`
+severity: medium
+reason: Reproduced at `cf36aab` by stashing this story's changes: two consecutive full runs of `pnpm --filter api test` failed two tests each, a different pair every time (`the request > answers 404 for a Source Test belonging to another account`, `topic weighting > judges the label itself, not the padding around it`, `validation.int-spec.ts > rejects a missing name with 400`, `source-test.int-spec.ts > keeps a Subject the new Grade Level still offers`). The stack is always the same shape: a setup call such as `setPinFor` (harness.ts:544) answering 404 where it expects 204, i.e. the account it just created is gone. Every failing spec passes in isolation. The cause is test isolation, not product code: spec files run in parallel against one Postgres database and several call `resetParentAccounts`/`resetTaxonomy` in `beforeEach`, so one file's reset deletes rows another file's in-flight case depends on. Needs either a per-file schema or database, or `fileParallelism: false` for the integration
+status: open
+
+### DW-110: `releasedFor` is unbounded and has no index matching its own predicate, so a child's Student Home read grows without limit as releases accumulate.
+origin: spec-deferred 55ece1e24c97
+location: apps/api/src/practicetest/practice-test.service.ts (releasedFor); apps/api/prisma/schema.prisma
+source_spec: `spec-4-5-release-or-discard.md`
+severity: low
+reason: The query filters `(parentAccountId, studentProfileId, status)` and sorts `createdAt desc, id desc` with no `take`. The only relevant index on `practice_test` is `@@index([studentProfileId])`; the allowance index `@@index([parentAccountId, chargedAt])` does not serve this shape. A composite index and a cap belong with the first cross-boundary read, but both require a migration, which this story's intent excludes. Harmless at v0 volumes and a real cost once a child has a year of releases.
+status: open
+
+### DW-111: A transition's response `siblingCount` counts the drafts that remain, so it can contradict the `ordinal` beside it.
+origin: spec-deferred c9557d1d7498
+location: apps/api/src/practicetest/practice-test.service.ts (transitionTo)
+source_spec: `spec-4-5-release-or-discard.md`
+severity: low
+reason: `transitionTo` recomputes `count({ generationJobId, status: 'Draft' })` after the row has left `Draft`, so releasing the only draft of a job answers `ordinal: 1, siblingCount: 0` — which `parentCopy.drafts.position` would render as "Draft 1 of 0". Unobserved only because the screen navigates away on success and never draws the returned view. This is the identical shape Story 4.4's `deleteQuestion` discard branch already ships, so fixing it is a change to the view contract both transitions and the delete share, not a local repair.
+status: open
+
+### DW-112: No parent-visible surface lists what a child can now see, so after an irreversible release the only confirmation is a transient sentence on Pending drafts.
+origin: spec-deferred 6191195541d9
+location: apps/web/src/app/parent/drafts/page.tsx
+source_spec: `spec-4-5-release-or-discard.md`
+severity: low
+reason: `draftsFor` scopes `status: 'Draft'` and the parent draft read 404s a released id, by design. Nothing in Story 4.5's acceptance criteria asks for a parent-side released list and Epic 5's Story 5.1 owns only the student's, so no story currently owns it — which is why it is recorded here rather than built. A parent who reloads after `?released=1` has no way to confirm what was released.
+status: open
+
+### DW-113: The comment-stripping regexes the web page specs use to build their searchable source can eat string literals, silently weakening the word bans built on them.
+origin: spec-deferred 0f3cbdc53d34
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.spec.tsx; apps/web/src/app/student/page.spec.tsx
+source_spec: `spec-4-5-release-or-discard.md`
+severity: low
+reason: `.replace(/\/\/.*$/gm, '')` deletes everything after any `//` on a line, including one inside a string such as a URL, and `/\/\*[\s\S]*?\*\//g` can span string boundaries. A banned word sitting after such a sequence stops being checked, so the "ban on the code, not the prose" guarantee is weaker than it reads. Pre-existing across the drafts and student page specs rather than introduced here; this story adds callers of it.
+status: open
+
+### DW-114: No test drives an elevation bearer expiring in the exact window between the release/discard confirmation opening and the parent confirming it, so the 401/403-on-expiry path for these two new actions
+origin: spec-deferred 4f3e91957baf
+location: e2e/tests/parent-practice-test.spec.ts; apps/web/src/app/parent/drafts/[practiceTestId]/page.tsx (confirmTransition)
+source_spec: `spec-4-5-release-or-discard.md`
+severity: low
+reason: `e2e/tests/parent-practice-test.spec.ts` covers a 500 and a 404 on each transition but not a 401/403. The `endsParentView`/expiry handling itself is pre-existing and shared by edit and delete, and those actions carry no such test either, so this is a gap in the established pattern rather than something this story introduced alone.
+status: open
+
+### DW-115: If the elevation token becomes null in the narrow window between opening a release/discard confirmation and clicking confirm, `confirmTransition` silently returns with the dialog left open, no error
+origin: spec-deferred 9ccd7eb4177d
+location: apps/web/src/app/parent/drafts/[practiceTestId]/page.tsx (confirmTransition)
+source_spec: `spec-4-5-release-or-discard.md`
+severity: low
+reason: `confirmTransition` guards with `if (token === null || transition === null) return;` — no `setActionError`, no `leave()`, no dialog dismissal. The window is narrow (elevation expiry mid-confirmation) and Cancel still works, so this is a rough edge rather than a lost action, and is not new to this story's pattern of guarding on `token === null`.
+status: open

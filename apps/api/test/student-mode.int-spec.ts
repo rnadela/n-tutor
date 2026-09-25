@@ -594,10 +594,9 @@ describe('Student Mode and the device binding', () => {
     const questionId = draft.questions[0]!.id;
 
     // Every shape that draft could be reached by from the student side — by
-    // its own id, not a guess. The student-scoped API is one read of the bound
-    // profile, and it stays that.
+    // its own id, not a guess. The student-scoped API is the bound profile's own
+    // reads, and nothing beyond them.
     for (const path of [
-      '/api/student/practice-tests',
       '/api/student/practice-tests/drafts',
       `/api/student/practice-tests/${draft.id}`,
       `/api/student/session/practice-tests/${draft.id}`,
@@ -634,6 +633,20 @@ describe('Student Mode and the device binding', () => {
       select: { prompt: true },
     });
     expect(untouched.prompt).toEqual([{ kind: 'text', value: 'What is half of four?' }]);
+
+    // The one student-scoped practice-test path that *does* exist since Story 4.5
+    // serves released tests only. It is probed against a real `Draft` in this very
+    // account rather than an empty one: an empty list from an empty account would
+    // pass with the `status: 'Released'` scoping deleted, which is the one failure
+    // this case exists to rule out.
+    const released = await server().get('/api/student/practice-tests').set('Cookie', cookie);
+    expect(released.status).toBe(200);
+    expect(released.body).toEqual([]);
+    const releasedBody = JSON.stringify(released.body);
+    // Not the draft, and not a word of what it holds.
+    expect(releasedBody).not.toContain(draft.id);
+    expect(releasedBody).not.toContain('half of four');
+    expect(releasedBody).not.toContain('Fractions');
 
     const session = await readStudentSession(cookie).expect(200);
     // One read, the bound profile, and nothing else on it.
