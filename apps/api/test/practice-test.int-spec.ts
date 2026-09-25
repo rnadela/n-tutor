@@ -2382,6 +2382,11 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       return server().get('/api/student/practice-tests').set('Cookie', cookie);
     }
 
+    /** One released test, whole, as the child's Take Test screen reads it. */
+    function readReleasedTest(cookie: string, id: string) {
+      return server().get(`/api/student/practice-tests/${id}`).set('Cookie', cookie);
+    }
+
     /** One draft's stored state and charge marker, read straight from the row. */
     function storedRow(id: string) {
       return h.prisma.practiceTest.findUniqueOrThrow({
@@ -2754,6 +2759,283 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
         .get('/api/student/practice-tests')
         .set('Authorization', bearer(ready.token))
         .expect(401);
+    });
+
+    // --- The student-scoped read of one test -------------------------------
+
+    it('hands the bound child every Question in stored order, and no correct answer', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      // Read what is actually stored first, so the sweep below is against this
+      // draft's own strings rather than a guess at what the generator writes.
+      const stored = await h.prisma.practiceTestQuestion.findMany({
+        where: { practiceTestId: id },
+        orderBy: { ordinal: 'asc' },
+        select: {
+          id: true,
+          ordinal: true,
+          format: true,
+          answer: true,
+          choices: { orderBy: { ordinal: 'asc' }, select: { ordinal: true, isCorrect: true } },
+        },
+      });
+      expect(stored.length).toBeGreaterThan(0);
+      await release(ready.token, id).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleasedTest(cookie, id).expect(200);
+
+      expect(Object.keys(response.body).sort()).toEqual(['id', 'questionCount', 'questions']);
+      expect(response.body.id).toBe(id);
+      expect(response.body.questionCount).toBe(stored.length);
+      expect(response.body.questions).toHaveLength(stored.length);
+      // Ascending ordinal, questions and choices alike — the order the child works
+      // in is the stored one, not whatever the planner returned.
+      expect(response.body.questions.map((q: { ordinal: number }) => q.ordinal)).toEqual(
+        stored.map((question) => question.ordinal),
+      );
+      expect(response.body.questions.map((q: { id: string }) => q.id)).toEqual(
+        stored.map((question) => question.id),
+      );
+      for (const [index, question] of response.body.questions.entries()) {
+        expect(Object.keys(question).sort()).toEqual([
+          'choices',
+          'format',
+          'id',
+          'ordinal',
+          'prompt',
+        ]);
+        expect(question.format).toBe(stored[index]!.format);
+        expect(question.choices.map((c: { ordinal: number }) => c.ordinal)).toEqual(
+          stored[index]!.choices.map((choice) => choice.ordinal),
+        );
+        for (const choice of question.choices) {
+          expect(Object.keys(choice).sort()).toEqual(['body', 'ordinal']);
+        }
+        // A Multiple Choice question keeps all of its options — the child chooses
+        // between them — and nothing on the wire says which one is right.
+        if (stored[index]!.format === 'MultipleChoice') {
+          expect(question.choices.length).toBeGreaterThan(1);
+        }
+      }
+
+      // Over the raw JSON, not field by field: a field-by-field check passes on
+      // exactly the shape it was written against and says nothing about a key a
+      // later edit adds.
+      const serialized = JSON.stringify(response.body);
+      // No key of any of these names, anywhere in the tree. Matched as a *key*
+      // rather than as a substring for the ones a prompt could legitimately say
+      // in passing — a generated prompt really does name its Topic in its text,
+      // and a bare `not.toContain('topic')` would be failing about content the
+      // child is meant to read rather than about a field that leaked.
+      for (const key of [
+        'answer',
+        'isCorrect',
+        'topics',
+        'topic',
+        'cost',
+        'tier',
+        'model',
+        'allowance',
+        'timerMinutes',
+        'status',
+        'chargedAt',
+        'studentProfileId',
+        'parentAccountId',
+      ]) {
+        expect(serialized).not.toMatch(new RegExp(`"${key}"\\s*:`, 'iu'));
+      }
+      // `isCorrect` is not even a word on the wire, key or otherwise.
+      expect(serialized).not.toContain('isCorrect');
+      // A free-text answer sweep does not belong here: every Question the fake
+      // extractor produces is MultipleChoice, whose `answer` column is null, so
+      // a loop over it would run zero times and protect nothing. The case below
+      // rewrites a draft into all three Formats and sweeps there, where there is
+      // something to sweep.
+      //
+      // The flag itself is the thing a Multiple Choice question's answer *is*,
+      // and the child's view is the same options with no way to tell them apart:
+      // as many options as are stored, and nothing marking one of them.
+      const flagged = stored.flatMap((question) =>
+        question.choices.filter((choice) => choice.isCorrect),
+      );
+      expect(flagged.length).toBeGreaterThan(0);
+      // The account is not named either: identifiers this child's device already
+      // addressed, and nothing else.
+      expect(serialized).not.toContain(ready.parentAccountId);
+    });
+
+    it('serves all three Formats, and the answer to none of them', async () => {
+      // The fake extractor reads only Multiple Choice off a page, so a draft
+      // generated through the real pipeline exercises one third of this route.
+      // The stored rows are rewritten into the other two Formats first — exactly
+      // the shape generation stores them in, a free-text `answer` and no choices
+      // — so the sweep below has something to sweep and the route is actually
+      // asked for a Question whose answer is a column rather than a flag.
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      const generated = await h.prisma.practiceTestQuestion.findMany({
+        where: { practiceTestId: id },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true, ordinal: true },
+      });
+      expect(generated.length).toBeGreaterThanOrEqual(2);
+      const second = generated[1]!;
+
+      await h.prisma.practiceTestChoice.deleteMany({ where: { questionId: second.id } });
+      await h.prisma.practiceTestQuestion.update({
+        where: { id: second.id },
+        data: {
+          format: 'FillInTheBlank',
+          answer: [{ kind: 'text', value: 'three quarters of the whole' }],
+        },
+      });
+      const thirdOrdinal = generated.length + 1;
+      await h.prisma.practiceTestQuestion.create({
+        data: {
+          practiceTestId: id,
+          ordinal: thirdOrdinal,
+          format: 'ShortAnswer',
+          prompt: [{ kind: 'text', value: 'Explain how you worked that out.' }],
+          answer: [{ kind: 'text', value: 'Any reasoning that reaches it' }],
+          topics: { create: [{ label: 'Fractions' }] },
+        },
+      });
+      await h.prisma.practiceTest.update({
+        where: { id },
+        data: { questionCount: thirdOrdinal },
+      });
+
+      await release(ready.token, id).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleasedTest(cookie, id).expect(200);
+
+      expect(response.body.questionCount).toBe(thirdOrdinal);
+      expect(response.body.questions).toHaveLength(thirdOrdinal);
+      const byFormat = new Map<string, { format: string; choices: unknown[] }>(
+        response.body.questions.map((question: { format: string }) => [question.format, question]),
+      );
+      // All three arrive, each with the options its Format has and no others: a
+      // Multiple Choice question is a choice between stored options, and the other
+      // two are a blank the child fills in.
+      expect([...byFormat.keys()].sort()).toEqual([
+        'FillInTheBlank',
+        'MultipleChoice',
+        'ShortAnswer',
+      ]);
+      expect(byFormat.get('MultipleChoice')!.choices.length).toBeGreaterThan(1);
+      expect(byFormat.get('FillInTheBlank')!.choices).toEqual([]);
+      expect(byFormat.get('ShortAnswer')!.choices).toEqual([]);
+
+      // Not one stored free-text answer, in its own words. The segment *values*
+      // are swept rather than the stringified column, because the column's
+      // structural keys (`kind`, `text`, `value`) are on this wire legitimately
+      // — every prompt is made of them.
+      const stored = await h.prisma.practiceTestQuestion.findMany({
+        where: { practiceTestId: id },
+        select: { answer: true },
+      });
+      const answerText = stored
+        .flatMap((question) => (question.answer ?? []) as { kind: string; value?: string }[])
+        .flatMap((segment) => (segment.kind === 'text' ? [segment.value ?? ''] : []))
+        .filter((text) => text.trim().length > 3);
+      // Non-vacuous by assertion, not by hope: a sweep with nothing to sweep is a
+      // test that passes because it did nothing.
+      expect(answerText.length).toBeGreaterThan(0);
+      const serialized = JSON.stringify(response.body);
+      for (const text of answerText) expect(serialized).not.toContain(text);
+      expect(serialized).not.toContain('isCorrect');
+      expect(serialized).not.toMatch(/"answers?"\s*:/iu);
+      expect(serialized).not.toContain('Fractions');
+    });
+
+    it('answers a draft, a discarded row and an unknown id with one identical sentence', async () => {
+      const ready = await withLandedDrafts(2);
+      const [stillDraft, discarded] = ready.draftIds;
+      await discard(ready.token, discarded!).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const unknown = await readReleasedTest(cookie, randomUUID()).expect(404);
+      for (const refusal of [
+        await readReleasedTest(cookie, stillDraft!).expect(404),
+        await readReleasedTest(cookie, discarded!).expect(404),
+        unknown,
+      ]) {
+        expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+        expect(refusal.body.message).toBe(unknown.body.message);
+        // Nothing distinguishes the three: not a second sentence, not a hint at
+        // which state it was in.
+        const serialized = JSON.stringify(refusal.body);
+        expect(serialized).not.toMatch(/draft|released|discarded|already/iu);
+      }
+      // And neither row moved: a refused read writes nothing.
+      expect((await storedRow(stillDraft!)).status).toBe('Draft');
+      expect((await storedRow(discarded!)).status).toBe('Discarded');
+    });
+
+    it('refuses a sibling’s released test as though it were not there', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      await release(ready.token, id).expect(200);
+      // The release was made for one child; this device is bound to the other.
+      const grade = await createGradeLevel(h);
+      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+        gradeLevelId: grade.id,
+      });
+      const cookie = await bindDevice(h, ready.token, sibling.id);
+
+      const refusal = await readReleasedTest(cookie, id).expect(404);
+      expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      // The profile is the binding's, never the path's: one child holding another's
+      // id learns only that there is nothing there.
+      expect(JSON.stringify(refusal.body)).not.toContain(ready.studentProfileId);
+    });
+
+    it('refuses another account’s released test with that same sentence', async () => {
+      const mine = await withLandedDrafts(1);
+      const theirs = await withLandedDrafts(1);
+      await release(theirs.token, theirs.draftIds[0]!).expect(200);
+      const cookie = await bindDevice(h, mine.token, mine.studentProfileId);
+
+      const refusal = await readReleasedTest(cookie, theirs.draftIds[0]!).expect(404);
+      const unknown = await readReleasedTest(cookie, randomUUID()).expect(404);
+      expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      expect(refusal.body.message).toBe(unknown.body.message);
+      expect(JSON.stringify(refusal.body)).not.toContain(theirs.parentAccountId);
+    });
+
+    it('refuses the detail read on an unbound device, and on one carrying the bearer', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      await release(ready.token, id).expect(200);
+
+      const unbound = await server().get(`/api/student/practice-tests/${id}`).expect(401);
+      expect(unbound.body.bound).toBe(false);
+      await server()
+        .get(`/api/student/practice-tests/${id}`)
+        .set('Cookie', 'student_mode=not-a-token')
+        .expect(401);
+      // The elevation bearer is the wrong audience for this surface: the guard
+      // never reads `Authorization`, so it cannot even be presented.
+      await server()
+        .get(`/api/student/practice-tests/${id}`)
+        .set('Authorization', bearer(ready.token))
+        .expect(401);
+    });
+
+    it('answers a malformed id with that same 404, not a refusal of its own', async () => {
+      const ready = await withLandedDrafts(1);
+      await release(ready.token, ready.draftIds[0]!).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      // Deliberately not the parent routes' 400-on-shape: a second kind of
+      // refusal on this surface would tell a child *something*, and the whole
+      // discipline here is that every refusal is the one sentence.
+      const refusal = await readReleasedTest(cookie, 'not-a-uuid').expect(404);
+      const unknown = await readReleasedTest(cookie, randomUUID()).expect(404);
+      expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      expect(refusal.body.message).toBe(unknown.body.message);
     });
   });
 });

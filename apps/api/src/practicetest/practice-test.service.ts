@@ -233,6 +233,49 @@ export interface PracticeTestReleasedSummary {
   questionCount: number;
 }
 
+/**
+ * One option a child chooses between, in the order it is to be shown.
+ *
+ * There is **no `isCorrect`**, and that is the whole shape of it. A student view
+ * carrying the flag would be an answer key served to the person being tested,
+ * whatever a screen then chose to render (AD-20).
+ */
+export interface StudentChoiceView {
+  ordinal: number;
+  /** The stored segments, exactly as stored (AD-32). Never re-parsed on the way out. */
+  body: RichText;
+}
+
+/**
+ * One Question as the child working through it sees it.
+ *
+ * A prompt, a format and — for Multiple Choice — the option bodies. There is no
+ * `answer` field and no Topic label: neither is a student-scoped fact, and the
+ * first is the answer key itself (AD-20, AD-26).
+ */
+export interface StudentQuestionView {
+  id: string;
+  ordinal: number;
+  format: QuestionFormat;
+  prompt: RichText;
+  /** Empty for every format but MultipleChoice. */
+  choices: StudentChoiceView[];
+}
+
+/**
+ * One released Practice Test, whole, as the Take Test screen reads it.
+ *
+ * Every Question in stored `ordinal` order and never a page: the screen walks
+ * the whole test, and a second call could show half of one. It carries no
+ * `status` — the only status this read can reach is `Released`, by construction
+ * — and no timer, which is Story 5.3's.
+ */
+export interface StudentPracticeTestView {
+  id: string;
+  questionCount: number;
+  questions: StudentQuestionView[];
+}
+
 /** One generated option, in the order it is to be shown. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -594,6 +637,40 @@ export class PracticeTestService {
       select: { id: true, questionCount: true },
     });
     return rows.map((row) => ({ id: row.id, questionCount: row.questionCount }));
+  }
+
+  /**
+   * One released Practice Test, whole, for the bound child to work through.
+   *
+   * **All three ids and the status sit in one `where`.** `parentAccountId` and
+   * `studentProfileId` come from the binding the Student Mode guard verified —
+   * never from the path, which names *which* test and never *whose* — and
+   * `status: 'Released'` sits beside them. That single statement is what makes a
+   * `Draft`, a `Discarded` row, a sibling's release, another account's test and
+   * an id that never existed answer the **same** sentence by construction rather
+   * than by five checks somebody has to remember to write (AD-17, AD-18).
+   *
+   * What comes back carries **no correct answer of any kind**: no `answer`
+   * column, no `isCorrect` flag, no Topic label, and no allowance figure, tier or
+   * model name (AD-20, AD-26). That is not the mapper's discipline — it is
+   * `STUDENT_TEST_SELECT`'s, which never names those columns at all.
+   *
+   * There is no Attempt and nothing is written: a child's answers are the
+   * screen's for now, and persisting them is Story 5.3's.
+   */
+  async releasedTestFor(
+    parentAccountId: string,
+    studentProfileId: string,
+    practiceTestId: string,
+  ): Promise<StudentPracticeTestView> {
+    const test = await this.prisma.practiceTest.findFirst({
+      where: { id: practiceTestId, parentAccountId, studentProfileId, status: 'Released' },
+      select: STUDENT_TEST_SELECT,
+    });
+    // The one sentence every refusal shares. Nothing in it says which case it
+    // was, and nothing could: the statement above cannot tell them apart either.
+    if (test === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+    return studentTestViewOf(test);
   }
 
   /**
@@ -1566,6 +1643,66 @@ function viewOf(job: JobRow): GenerationJobView {
  */
 function storedRichText(value: Prisma.JsonValue): RichText {
   return value as unknown as RichText;
+}
+
+/**
+ * Everything the Take Test screen reads a released Practice Test by, written
+ * **from scratch**.
+ *
+ * Deliberately not derived from `DRAFT_SELECT` — not by spread, not by `Omit`,
+ * not by deleting keys. `DRAFT_SELECT` selects `answer` and `isCorrect`, and
+ * deriving from it would make the absence of the answer key a subtraction
+ * somebody has to keep performing correctly on every later edit. Written as its
+ * own literal, the answer key is an *addition* nobody can forget: a column that
+ * is not named here cannot reach a child however the mapper below changes.
+ *
+ * No `answer`, no `isCorrect`, no `topics`, no `status`, no `timerMinutes`, no
+ * `chargedAt` (AD-20, AD-26). Questions and choices are ordered explicitly, so
+ * the order the child works in is the stored one rather than whatever the
+ * planner returned.
+ */
+const STUDENT_TEST_SELECT = {
+  id: true,
+  questionCount: true,
+  questions: {
+    orderBy: { ordinal: 'asc' },
+    select: {
+      id: true,
+      ordinal: true,
+      format: true,
+      prompt: true,
+      choices: {
+        orderBy: { ordinal: 'asc' },
+        select: { ordinal: true, body: true },
+      },
+    },
+  },
+} as const satisfies Prisma.PracticeTestSelect;
+
+type StudentTestRow = Prisma.PracticeTestGetPayload<{ select: typeof STUDENT_TEST_SELECT }>;
+
+/**
+ * The released Practice Test as the child's screen reads it.
+ *
+ * The stored `Json` travels out as it is stored, for the reason `draftViewOf`
+ * gives: it was parsed on the way in, and a second parse is a second chance for
+ * the two readings to disagree.
+ */
+function studentTestViewOf(test: StudentTestRow): StudentPracticeTestView {
+  return {
+    id: test.id,
+    questionCount: test.questionCount,
+    questions: test.questions.map((question) => ({
+      id: question.id,
+      ordinal: question.ordinal,
+      format: question.format,
+      prompt: storedRichText(question.prompt),
+      choices: question.choices.map((choice) => ({
+        ordinal: choice.ordinal,
+        body: storedRichText(choice.body),
+      })),
+    })),
+  };
 }
 
 /**

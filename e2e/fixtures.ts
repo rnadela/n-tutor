@@ -382,3 +382,89 @@ export async function countPracticeTestsFor(parentEmail: string): Promise<number
     await client.end();
   }
 }
+
+/**
+ * Spreads the newest draft's Questions across all three Formats.
+ *
+ * The fake Extraction reads only Multiple Choice questions off a page, so every
+ * generated draft is Multiple Choice throughout — and the Take Test screen's
+ * other two controls would never be reached by a test that drove the real
+ * pipeline and nothing else. This rewrites the stored rows directly, which is
+ * honest about what it is: the API's contract says a Question carries one of
+ * three Formats, and this is how a browser test gets a draft that holds all of
+ * them.
+ *
+ * Nothing about the *student* path is faked — the row is stored exactly as
+ * generation would store it, and everything the test then asserts goes through
+ * the real release, the real binding and the real read.
+ */
+export async function spreadPracticeTestFormatsFixture(parentEmail: string): Promise<number> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const draft = await client.query<{ id: string }>(
+      `SELECT p."id"
+         FROM "practice_test" p
+         JOIN "parent_account" a ON a."id" = p."parentAccountId"
+        WHERE a."email" = $1 AND p."status" = 'Draft'
+        ORDER BY p."createdAt" DESC, p."id" DESC
+        LIMIT 1`,
+      [parentEmail],
+    );
+    const practiceTestId = draft.rows[0]?.id;
+    if (practiceTestId === undefined) throw new Error('No draft practice test to spread.');
+
+    const questions = await client.query<{ id: string; ordinal: number }>(
+      `SELECT "id", "ordinal" FROM "practice_test_question"
+        WHERE "practiceTestId" = $1 ORDER BY "ordinal" ASC`,
+      [practiceTestId],
+    );
+    if (questions.rows.length < 2) throw new Error('A draft with fewer than two Questions.');
+
+    // The second becomes the fill-in-the-blank: its options go, and the free-text
+    // answer arrives — the shape every non-MultipleChoice Question is stored in.
+    const second = questions.rows[1]!;
+    await client.query('DELETE FROM "practice_test_choice" WHERE "questionId" = $1', [second.id]);
+    await client.query(
+      `UPDATE "practice_test_question"
+          SET "format" = 'FillInTheBlank',
+              "prompt" = $2::jsonb,
+              "answer" = $3::jsonb
+        WHERE "id" = $1`,
+      [
+        second.id,
+        JSON.stringify([{ kind: 'text', value: 'What fraction of the whole is shaded?' }]),
+        JSON.stringify([{ kind: 'fraction', whole: null, numerator: 3, denominator: 4 }]),
+      ],
+    );
+
+    // A third is appended for short answer, so all three controls are on the
+    // path the test walks.
+    const thirdId = randomUUID();
+    const thirdOrdinal = questions.rows.length + 1;
+    await client.query(
+      `INSERT INTO "practice_test_question"
+         ("id", "practiceTestId", "ordinal", "format", "prompt", "answer", "createdAt")
+       VALUES ($1, $2, $3, 'ShortAnswer', $4::jsonb, $5::jsonb, now())`,
+      [
+        thirdId,
+        practiceTestId,
+        thirdOrdinal,
+        JSON.stringify([{ kind: 'text', value: 'Explain how you worked that out.' }]),
+        JSON.stringify([{ kind: 'text', value: 'Any reasoning that reaches it.' }]),
+      ],
+    );
+    await client.query(
+      'INSERT INTO "practice_test_question_topic" ("id", "questionId", "label", "createdAt") VALUES ($1, $2, $3, now())',
+      [randomUUID(), thirdId, 'Reading comprehension'],
+    );
+
+    await client.query('UPDATE "practice_test" SET "questionCount" = $2 WHERE "id" = $1', [
+      practiceTestId,
+      thirdOrdinal,
+    ]);
+    return thirdOrdinal;
+  } finally {
+    await client.end();
+  }
+}

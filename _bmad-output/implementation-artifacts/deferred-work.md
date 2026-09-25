@@ -973,3 +973,83 @@ source_spec: `spec-4-6-optional-timer-configuration.md`
 severity: low
 reason: `page.spec.tsx`'s "ties both explanatory sentences to the minutes field itself" test greps `PAGE_SOURCE` for the id constants and the `aria-describedby` template string; it does not render the component. `e2e/tests/parent-practice-test.spec.ts` drives the timer block end to end but its only `aria-describedby` assertion (line 171) targets an unrelated control on the generate screen. So nothing executing confirms the minutes `<input>` actually carries `aria-describedby="draft-timer-hint draft-timer-suggestion"` at runtime — a wrong `slotProps` key or a mismatched id would ship undetected. A narrower instance of the pattern already recorded above (source-grepped page spec), called out separately because the general deferred item's claim that "the Playwright pass ... does drive the timer end to end" does not hold for this specific attribute.
 status: open
+
+### DW-123: The `generatable()` fixture in the practice-test integration spec fails randomly, roughly one run in two, at a different assertion each time.
+origin: spec-deferred 3d7fcd2ba24e
+location: apps/api/test/practice-test.int-spec.ts:140-160
+source_spec: `spec-5-2-answering-a-question.md`
+severity: medium
+reason: Page upload answers 404, 401 or 200-instead-of-201, or `/submit` answers 400 or 404, always inside `generatable()` and never inside the assertion the failing test is named for. Reproduced on baseline d9f21c2ea98bc4a54cb9d0ce69b4d245093e5a90 with this story's test changes stashed: 3 failures in 5 runs there, same signature. The statuses crossing (a 200 where a 201 was expected) point at responses landing on the wrong assertion rather than at any one route.
+status: open
+
+### DW-124: The product cannot produce a Fill-in-the-Blank or Short Answer Question through its own pipeline, so two of the three input controls are only ever exercised against hand-written rows.
+origin: spec-deferred e43f4d7074fe
+location: apps/api/src/extraction/extraction-schema.ts
+source_spec: `spec-5-2-answering-a-question.md`
+severity: medium
+reason: The fake Extraction emits `format: 'MultipleChoice'` for every question, and generation's format histogram is asserted to match the source. Both `spreadPracticeTestFormatsFixture` in e2e and the new integration case have to rewrite stored rows directly to reach the other two formats. The rendering rule is verified; the end-to-end claim "a Question's Format decides its control" is not reachable through the real path.
+status: open
+
+### DW-125: The unbound-device redirect on Take Test is verified only by a regex over `page.tsx`'s source text, never by an executed render or request.
+origin: spec-deferred f9cf7a3ff24a
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx:118-121; apps/web/src/app/student/tests/[practiceTestId]/page.spec.tsx:18-27
+source_spec: `spec-5-2-answering-a-question.md`
+severity: medium
+reason: `page.spec.tsx` reads the file, strips comments, and asserts the literal substring `if (deviceIsUnbound(cause)) { router.replace(...)` is present. It never renders `TakeTestPage` or mocks a rejected `studentPracticeTest` call, so an inverted condition, a wrong `cause` binding, or an unreachable branch would still match the same source text and pass. `apps/web`'s vitest runs in `environment: 'node'` (`renderToStaticMarkup` only, no effects), so proving this needs either a DOM-capable render or an e2e case that revokes the binding mid-session — neither exists today.
+status: open
+
+### DW-126: The cross-test navigation reset (answers/index/map cleared when `practiceTestId` changes) is verified only by slicing `page.tsx`'s source text, never by rendering two different tests in sequence.
+origin: spec-deferred fefe41a24219
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx:93-100; apps/web/src/app/student/tests/[practiceTestId]/page.spec.tsx:45-59
+source_spec: `spec-5-2-answering-a-question.md`
+severity: medium
+reason: `page.spec.tsx` asserts the reset block's source text contains `setTest(null)`, `setAnswers({})`, etc., but never mounts the page, navigates from one practice test id to another, and checks the resulting screen. A mis-keyed condition (e.g. on `attempt` instead of `practiceTestId`) would leave a stale `index`/`answers` state and the same source-text assertions would still pass.
+status: open
+
+### DW-127: The I/O matrix's "one Question" row (Back and Next both disabled, counter reads "Question 1 of 1") is proven only by a source-text regex, never by loading a real single-question released test.
+origin: spec-deferred b972b24b45e9
+location: apps/web/src/app/student/tests/[practiceTestId]/page.spec.tsx:127-136
+source_spec: `spec-5-2-answering-a-question.md`
+severity: low
+reason: `page.spec.tsx` checks `disabled={index === 0}` and `disabled={index >= questions.length - 1}` appear literally in the source; `QuestionMap.spec.tsx` covers the one-cell-map part of the row behaviorally, but no integration or e2e case ever loads an actual one-Question released test through the screen and asserts both buttons are simultaneously disabled with the counter text.
+status: open
+
+### DW-128: The I/O matrix's "read fails transiently" row (500 / 429 / dropped connection) is only exercised via a 404, never via an actual transient-failure status.
+origin: spec-deferred 69463ec22097
+location: e2e/tests/student-take-test.spec.ts
+source_spec: `spec-5-2-answering-a-question.md`
+severity: low
+reason: The e2e case for this branch (`student-take-test.spec.ts`) requests a well-formed but nonexistent id, which is a permanent-absence 404, not a 500/429/dropped-connection. The code path is shared with genuine transient failures, so the claim is plausible, but nothing in the diff simulates a 5xx, a 429, or an aborted connection through this route.
+status: open
+
+### DW-129: Take Test moves no focus and announces nothing when Back, Next, or a map jump changes the active Question.
+origin: spec-deferred 745a9fd48b38
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx
+source_spec: `spec-5-2-answering-a-question.md`
+severity: medium
+reason: Neither `page.tsx` nor `QuestionMap.tsx` sets focus to the new prompt or uses a live region on navigation. A screen-reader user advancing through the test has no signal that the on-screen content changed, beyond re-reading the whole column on their own.
+status: open
+
+### DW-130: A released Practice Test with zero Questions is indistinguishable from a genuinely broken read: both render the generic retryable-error alert.
+origin: spec-deferred afa42a2244ea
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx:169
+source_spec: `spec-5-2-answering-a-question.md`
+severity: low
+reason: `questions[index]` is `undefined` when the array is empty, which falls into the same branch used for a failed fetch. Not in the story's I/O matrix and likely unreachable given the generation pipeline, but nothing guards or tests the distinction.
+status: open
+
+### DW-131: No test exercises real keyboard operation of the map cells or the radio group — only clicks, via e2e, and static markup, via component specs.
+origin: spec-deferred d32ab294f2b1
+location: e2e/tests/student-take-test.spec.ts
+source_spec: `spec-5-2-answering-a-question.md`
+severity: low
+reason: The spec's Always list requires keyboard-navigable map cells (UX-DR20). Real `<button>`/`<input type="radio">` elements are keyboard-operable by construction, but no test presses Tab or Space/Enter to confirm it end to end.
+status: open
+
+### DW-132: The `ignoreRestSiblings` eslint rule change is justified in-comment by one consumer, with no lint-rule test guarding against the pattern later being used elsewhere to swallow a genuinely unused
+origin: spec-deferred 423def8705fd
+location: apps/web/eslint.config.mjs
+source_spec: `spec-5-2-answering-a-question.md`
+severity: low
+reason: `apps/web/eslint.config.mjs`'s comment names `apps/parent/drafts/[practiceTestId]/page.tsx` as the reason for the rule, but the rule itself applies workspace-wide.
+status: open

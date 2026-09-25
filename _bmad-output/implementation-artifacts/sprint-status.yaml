@@ -70,7 +70,7 @@ development_status:
 
   epic-5: backlog
   5-1-student-s-test-list: backlog
-  5-2-answering-a-question: backlog
+  5-2-answering-a-question: done
   5-3-attempt-resilience-interruption-offline: backlog
   5-4-submitting-an-attempt: backlog
   5-5-grading-engine-four-grade-states: backlog

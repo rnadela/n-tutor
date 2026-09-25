@@ -261,6 +261,48 @@ export interface StudentPracticeTestSummary {
   questionCount: number;
 }
 
+/**
+ * One option a child chooses between, exactly as the API states it.
+ *
+ * There is **no `isCorrect`** — not because this type omits it, but because the
+ * student-scoped read never selects it. Nothing in Student Mode has ever held a
+ * correct answer, and this type is the shape of that fact (AD-20).
+ */
+export interface StudentChoiceView {
+  ordinal: number;
+  body: RichTextSegment[];
+}
+
+/**
+ * One Question as the child working through it sees it.
+ *
+ * A prompt, a format and — for Multiple Choice — the option bodies. No `answer`
+ * field and no Topic label: neither is a student-scoped fact, and the first is
+ * the answer key itself (AD-20, AD-26).
+ */
+export interface StudentQuestionView {
+  id: string;
+  ordinal: number;
+  format: 'MultipleChoice' | 'FillInTheBlank' | 'ShortAnswer';
+  prompt: RichTextSegment[];
+  /** Empty for every format but MultipleChoice. */
+  choices: StudentChoiceView[];
+}
+
+/**
+ * One released practice test, whole, as the Take Test screen reads it.
+ *
+ * Every Question in stored ordinal order and never a page: the child walks the
+ * whole test, and a second call could show half of one. No status — the only
+ * status this read can reach is `Released`, by construction — and no time limit,
+ * which is Story 5.3's.
+ */
+export interface StudentPracticeTestView {
+  id: string;
+  questionCount: number;
+  questions: StudentQuestionView[];
+}
+
 /** One generated option, in the order the API states it. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -643,6 +685,22 @@ export const parentApi = {
    */
   studentPracticeTests: () =>
     call<StudentPracticeTestSummary[]>('/student/practice-tests', {}, studentCopy.failed),
+
+  /**
+   * One released practice test, whole, for the child to work through.
+   *
+   * No bearer, exactly as the other two student reads: the binding travels as its
+   * own httpOnly cookie, and **which child** is named by that cookie server-side.
+   * The id in the path names only *which* test — a draft, a discarded row, a
+   * sibling's test, another account's test and an id that never existed all answer
+   * the same 404, so there is nothing this browser could learn by asking.
+   */
+  studentPracticeTest: (id: string) =>
+    call<StudentPracticeTestView>(
+      `/student/practice-tests/${encodeURIComponent(id)}`,
+      {},
+      studentCopy.takeTest.failed,
+    ),
 
   // --- Uncommitted parent state ------------------------------------------
   //

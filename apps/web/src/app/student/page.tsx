@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NextLink from 'next/link';
+import type { Route } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
+import Link from '@mui/material/Link';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import { studentCopy } from '@/copy/student';
@@ -210,7 +212,20 @@ export default function StudentModePage() {
                         sx={{ listStyle: 'none' }}
                         data-testid="student-practice-test"
                       >
-                        {studentCopy.practiceTest(test.questionCount)}
+                        {/* The row *is* the link, and the sentence **is** its
+                            accessible name — no `aria-label` over the top of it.
+                            A label would read identically on every row, hiding
+                            the one thing that tells them apart, and would replace
+                            the visible words for anyone speaking them (WCAG
+                            2.5.3). A client-side navigation, because Take Test is
+                            inside Student Mode rather than past it. */}
+                        <Link
+                          component={NextLink}
+                          href={`/student/tests/${test.id}` as Route}
+                          sx={{ minHeight: comfortableDensity.tapTarget }}
+                        >
+                          {studentCopy.practiceTest(test.questionCount)}
+                        </Link>
                       </Typography>
                     ))}
                   </Box>

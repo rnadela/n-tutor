@@ -8,7 +8,15 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
-    rules: { '@typescript-eslint/no-explicit-any': 'error' },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      // `ignoreRestSiblings` exists for draft review's omit-by-destructuring:
+      // `apps/web/src/app/parent/drafts/[practiceTestId]/page.tsx` drops one key
+      // from a state map with `({ [id]: _dropped, ...rest })` rather than
+      // mutating it. The named sibling there *is* the omission, not a variable
+      // somebody forgot to use, and the default rule reads it as the latter.
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+    },
   },
   /**
    * UX-DR30 — "every control is a real control" — as a build failure rather

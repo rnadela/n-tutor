@@ -33,6 +33,71 @@ export const studentCopy = {
       ? 'A practice test with 1 question'
       : `A practice test with ${questionCount} questions`,
   loading: 'Loading…',
+  /**
+   * Take Test: the screen a child actually works on.
+   *
+   * Every sentence here is second person and none of them says anything about
+   * being right. There is no score word, no tally and no grade vocabulary in this
+   * object at all — correctness is something only submission can claim, and a
+   * screen that hinted at it before then would be marking the child's work while
+   * they were still doing it.
+   *
+   * The progress vocabulary is exactly two words, `Answered` and `Not answered`.
+   * Never `Unanswered`: that reads as a grade state, and nothing here grades.
+   */
+  takeTest: {
+    /** Where the child is in the test. Both figures are handed in. */
+    counter: (n: number, total: number) => `Question ${n} of ${total}`,
+    /**
+     * What kind of question this is, said plainly. Not a label the child has to
+     * act on — it tells them what the control below is going to be.
+     */
+    format: {
+      MultipleChoice: 'Multiple choice',
+      FillInTheBlank: 'Fill in the blank',
+      ShortAnswer: 'Short answer',
+    },
+    /** The label every answer control carries. A control with no label is not one. */
+    answerLabel: 'Your answer',
+    /**
+     * Said beside the fill-in-the-blank field, because the stacked form appearing
+     * next to what was typed is otherwise unexplained. It promises nothing about
+     * the answer being right — it explains a rendering, not a verdict.
+     */
+    fractionHelp: 'You can type a fraction like 3/4, or write your answer in words.',
+    back: 'Back',
+    next: 'Next',
+    /** The question map's own heading. */
+    mapHeading: 'Your questions',
+    /**
+     * The map's one-line summary. Two counts and no third: there is no score to
+     * state, and "how many are right" is not a question this screen can answer.
+     */
+    mapSummary: (answered: number, notAnswered: number) =>
+      `${answered} answered · ${notAnswered} not answered`,
+    /**
+     * One map cell's whole spoken sentence.
+     *
+     * Every cell says which question it is and where that question stands, so a
+     * cell read on its own is never just a number. The current cell says so in
+     * words as well as through `aria-current`.
+     */
+    cellState: (ordinal: number, answered: boolean, current: boolean) =>
+      `Question ${ordinal}, ${answered ? 'answered' : 'not answered'}${
+        current ? ', you are here' : ''
+      }`,
+    /** The on-screen legend, so the glyphs are never the only account of a state. */
+    legendAnswered: 'Answered',
+    legendNotAnswered: 'Not answered',
+    openMap: 'Your questions',
+    closeMap: 'Close',
+    loading: 'Loading…',
+    failed: 'That practice test could not be opened.',
+    // There is deliberately no link label here. Student Home's row *is* the
+    // link, and the sentence it already shows — "A practice test with 8
+    // questions" — is its accessible name. A second string over the top of it
+    // would read the same on every row and hide the count that tells them apart.
+  },
   /** The one control out of Student Mode. It leads to the PIN, never past it. */
   parent: 'Parent',
   notBound: 'This device is not set up for a student yet.',
