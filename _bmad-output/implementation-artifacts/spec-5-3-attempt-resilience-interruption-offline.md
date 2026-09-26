@@ -169,6 +169,8 @@ deferred: []
   3. Story 5.4 stays blocked until this story's commit exists. Resuming run `20260923-210321-45b5` before that commit reproduces the same step-01 halt.
   4. `sprint-status.yaml` (`backlog` here) is orchestrator-owned and was not edited by the resolution; it is reconciled by the scoped run, not by hand.
 
+- 2026-09-26 (queue order, human-decided): the restore run for this story is queued **after** Stories 3.1 and 3.4, whose implementations are missing the same way this one's was. Order: `3-1-multi-page-capture-camera-library`, `3-4-legibility-check-upload-commit`, this story, then `5-4-submitting-an-attempt`. Their snapshots are `refs/attempt-preserve-dirty/20260923-210321-45b5-b38a8047-2` (3.1 — note its spec exists only inside that ref; it is not on disk) and `refs/attempt-preserve-dirty/20260923-210321-45b5-9ce972f1-2` (3.4). Nothing in this story reads the source-test ingest path, so the ordering is a sequencing choice, not a dependency: this story's own restore is unaffected by it.
+
 ## Review Triage Log
 
 ## Design Notes

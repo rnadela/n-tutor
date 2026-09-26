@@ -147,6 +147,16 @@ deferred: []
 
 ## Spec Change Log
 
+- 2026-09-26 (`/bmad-loop-resolve`, human-decided): this spec is committed but **its implementation is not on disk**. Verified: no `apps/api/src/sourcetest/legibility.ts`, and no `_add_ai_call_and_page_legibility` migration — the only `AiCall` migration is `20260924111509_add_ai_call_and_extraction`, written later by Story 3.5. The spec rode into 3.5's commit (`68c702b`) without its code, so a present spec is not evidence of a done story. `sprint-status.yaml` correctly lists this story as `backlog`.
+
+  The dev session's tree was preserved at `refs/attempt-preserve-dirty/20260923-210321-45b5-9ce972f1-2` (`ef7d6f2`, 33 files, +3317/-90) — but it is parented on this spec's `baseline_revision` (`9ce972f`, Story 3.3), which is now **11 commits behind** HEAD. Do **not** restore it with `git checkout <ref> -- .`: that would clobber Stories 3.5, 3.6 and all of Epics 4-5. Apply it as a diff and expect conflicts, because Story 3.5 rewrote files this snapshot also edits (`apps/api/prisma/schema.prisma`, `apps/api/src/ai/ai.service.ts`, `apps/api/src/sourcetest/page-ingest.service.ts`):
+
+  ```
+  git diff 9ce972f refs/attempt-preserve-dirty/20260923-210321-45b5-9ce972f1-2 | git apply -3
+  ```
+
+  The snapshot is **unverified** — the session timed out mid-dev, no Verification command was confirmed green and no review pass ran. Treat it as an in-progress tree and as evidence of intent where it conflicts; this spec's own contract stays authoritative. Queue order for the three stories in this state: this story and 3.1 first, then 5.3, then 5.4.
+
 ## Review Triage Log
 
 ## Design Notes

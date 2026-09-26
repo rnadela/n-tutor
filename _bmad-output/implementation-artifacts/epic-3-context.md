@@ -58,6 +58,16 @@ Give a parent standing over a returned paper test a path from physical pages to 
 - Accessibility: parent-tier tap targets; the capture strip is exposed as an ordered list naming each page's ordinal and legibility state; icon-only strip controls name the page ordinal they act on; every control is focusable with a visible focus ring; reduced motion honored.
 - Reference mock for this flow: the capture mockup in the UX design's `mockups/` directory covers continuous capture, page management, the batch legibility check, and the generate step.
 
+## Open Implementation Gaps (as of 2026-09-26)
+
+Recorded by `/bmad-loop-resolve`; both stories are `backlog` in `sprint-status.yaml` and both are correct to be.
+
+**Story 3.1 (Multi-Page Capture) — no spec on disk, implementation missing.** `apps/web/src/app/parent/capture/page.tsx` exists, but Story 3.2 wrote it for its own needs; 3.1's acceptance criteria are unmet: no format decision by byte inspection, no HEIC/HEIF conversion, no EXIF-orientation handling, no library multi-select, no camera-unavailable/denied guidance. The deferred dev session's tree is at `refs/attempt-preserve-dirty/20260923-210321-45b5-b38a8047-2` and its spec exists **only** inside that ref. That snapshot is parented on `b38a804` (Story 1.7), **13 commits behind** HEAD and predating the entire rest of Epic 3, so it is evidence of intent, not a restore candidate: re-plan and re-implement this story, reading the snapshot for what it attempted.
+
+**Story 3.4 (Legibility Check & Upload Commit) — spec committed, implementation missing.** See that spec's own Spec Change Log for the verified gap and the diff-apply procedure for its snapshot (`...-9ce972f1-2`, 11 commits behind, conflicts expected against Story 3.5's rewrites).
+
+**Queue order** (human-decided): 3.1 and 3.4, then Story 5.3, then Story 5.4. Story 5.4 stays blocked until 5.3 is committed.
+
 ## Cross-Story Dependencies
 
 - Story 3.3 depends on Epic 2's Subject / Grade Level taxonomy (only Admin-enabled Subject × Grade Level combinations are offered) and on Epic 1's Student Profile carrying a Grade Level to default from.
