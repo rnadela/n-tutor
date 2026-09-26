@@ -225,10 +225,89 @@ export const parentCopy = {
     empty: 'There are no pages yet. Add the first one below.',
     noProfiles: 'There is no profile to upload for yet. Add one first.',
 
-    addPage: 'Add page',
     adding: 'Adding the page…',
     /** Says why the add control is gone, rather than leaving it unexplained. */
     limitReached: (max: number) => `This upload already holds ${max} pages.`,
+
+    /**
+     * The camera and the photo library — the two ways a page arrives.
+     *
+     * Nothing here names which control added a page: the two are one action
+     * from the parent's side, and the strip records only the order. Not one
+     * figure is a literal either; the ceiling and the count both arrive on the
+     * Source Test read.
+     */
+    camera: {
+      /** The mockup's heading for the capture surface. */
+      heading: 'Capture pages',
+      /** The viewfinder's accessible name: a live camera view is not decorative. */
+      viewfinderLabel: 'Camera view of the page in front of the camera',
+      /**
+       * Which page the parent is being asked to frame. The ordinal is the page
+       * the shot will become, so it moves as pages are added.
+       */
+      framing: (ordinal: number) => `Fill the frame with page ${ordinal}`,
+      /** The mockup's live counter, above the shutter. */
+      captured: (count: number, max: number) => `Pages captured: ${count} of ${max}`,
+      shutter: 'Take photo',
+      /** Closes the viewfinder. The pages already added stay. */
+      done: 'Done',
+      /** Opens it. Named for what it does rather than for the hardware. */
+      useCamera: 'Use the camera',
+
+      /**
+       * The photo library beside the camera — several pages in one action.
+       *
+       * Not "camera roll": there is no camera roll on Android or on a desktop,
+       * and this control is the same control on all three. It is named for what
+       * the parent is choosing from rather than for what one platform calls it.
+       */
+      libraryLabel: 'Choose from your photos',
+
+      /**
+       * The camera being unavailable is never a dead end: the guidance names
+       * how to re-enable it, and the library control beside it stays usable.
+       */
+      cameraUnavailable: 'The camera cannot be used on this device.',
+      cameraDenied:
+        'This site is not allowed to use the camera. Allow camera access in this browser’s site settings for this page, then try again.',
+      cameraFallback: 'Pages can still be added from this device’s photos.',
+    },
+
+    /**
+     * Announced after an add, from the server's answer.
+     *
+     * A count of zero or less is a sentence of its own rather than "0 pages were
+     * added": the delta is the difference between two server reads, so a failed
+     * first file, a request that changed nothing, or a read that went backwards
+     * all arrive here as zero, and every one of them means nothing landed.
+     */
+    addedCount: (count: number) =>
+      count <= 0
+        ? 'No pages were added.'
+        : count === 1
+          ? 'One page was added.'
+          : `${count} pages were added.`,
+    /**
+     * Said alongside `addedCount` when a selection was larger than the slots
+     * left. The parent is told what did not happen, not only what did.
+     */
+    rejectedCount: (count: number) =>
+      count === 1
+        ? 'One photo was not added — this upload is full.'
+        : `${count} photos were not added — this upload is full.`,
+    /**
+     * Both halves of an add's outcome, as one sentence for one live region.
+     *
+     * The screen announces into a single polite region, so two messages would
+     * mean the parent only ever hears the second: told "3 pages were added", they
+     * would never learn that two photos were turned away. Joined here rather than
+     * at the call site so the two clauses cannot drift apart.
+     */
+    addOutcome: (added: number, rejected: number) =>
+      rejected > 0
+        ? `${parentCopy.capture.addedCount(added)} ${parentCopy.capture.rejectedCount(rejected)}`
+        : parentCopy.capture.addedCount(added),
 
     moveUp: 'Move up',
     moveDown: 'Move down',
@@ -260,7 +339,6 @@ export const parentCopy = {
         )
         .join(' '),
 
-    added: (ordinal: number) => `Page ${ordinal} was added.`,
     deleted: (ordinal: number, total: number) =>
       ordinal < total
         ? `Page ${ordinal} was deleted. The pages after it are renumbered.`

@@ -33,7 +33,8 @@ import {
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
 import { density } from '@/theme/tokens';
-import { controlSx, ORDER_HEADING_ID, PageStrip } from './PageStrip';
+import { AddPages } from './AddPages';
+import { ORDER_HEADING_ID, PageStrip } from './PageStrip';
 import { ThinExtractionWarning } from './ThinExtractionWarning';
 
 /**
@@ -59,8 +60,9 @@ type Pending = 'add' | 'retake' | 'move' | 'delete' | 'submit' | 'classify' | nu
  * four things a parent may do to it before submitting.
  *
  * The camera viewfinder, the continuous-capture loop and the photo-library
- * multi-select are Story 3.1's. The page-add affordance here is a plain file
- * input, and it exists so that everything below it is exercisable.
+ * multi-select belong to `AddPages`. The screen owns only the mutation: one
+ * `write` per parent action, whatever that action was and whichever control it
+ * came from.
  */
 export default function CapturePage() {
   const router = useRouter();
@@ -470,12 +472,51 @@ export default function CapturePage() {
     );
   }
 
-  function addPage(file: File): void {
-    if (!isDraft) return;
+  /**
+   * One parent action's worth of pages, as exactly one `write`.
+   *
+   * `write` drops a call while another is pending, so a per-file loop over it
+   * would silently lose every page after the first. The files are posted in
+   * order inside a single `run` instead, which both fixes the ordinals and keeps
+   * the strip locked for the whole run; the announcement is phrased from the
+   * last view the server answered with, so it states the total that actually
+   * landed rather than the count that was attempted.
+   *
+   * A failure part-way through stops the run but is not allowed to hide it. The
+   * pages already accepted are rows on the server, so the run returns the last
+   * answer it got rather than throwing: `write`'s own `catch` never calls
+   * `setSourceTest`, and throwing from here would leave the strip showing the
+   * list from before the add while the server held more pages than that. The
+   * error is set from inside the run — after `write` has cleared it — so the
+   * parent gets the refusal *and* the count that landed, instead of a refusal
+   * that implies nothing did.
+   *
+   * `rejectedCount` is the selection the library trimmed before anything was
+   * posted. It is announced here, in one sentence with the count that landed,
+   * because the screen has one polite region and a second message into it would
+   * replace the first.
+   */
+  function addPages(files: readonly File[], rejectedCount: number): void {
+    if (!isDraft || files.length === 0) return;
+    const before = pages.length;
     void write(
       'add',
-      () => parentApi.addSourceTestPage(token!, sourceTest!.id, file),
-      (after) => parentCopy.capture.added(after.pages.length),
+      async () => {
+        let after = sourceTest!;
+        for (const file of files) {
+          try {
+            after = await parentApi.addSourceTestPage(token!, sourceTest!.id, file);
+          } catch (cause) {
+            // Parent View ending is not a page failure: it has to reach `write`,
+            // which is the only thing that knows how to leave.
+            if (endsParentView(cause)) throw cause;
+            setError(cause instanceof Error ? cause.message : parentCopy.capture.addFailed);
+            return after;
+          }
+        }
+        return after;
+      },
+      (after) => parentCopy.capture.addOutcome(after.pages.length - before, rejectedCount),
     );
   }
 
@@ -774,33 +815,25 @@ export default function CapturePage() {
 
                 {isDraft && (
                   <>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}>
-                      <Typography component="label" htmlFor="capture-add-page">
-                        {parentCopy.capture.addPage}
+                    {/* The camera, the photo library, and the guidance when the
+                        camera cannot be used. One call back per parent action,
+                        with the files in the order they were added. */}
+                    <AddPages
+                      pageCount={pages.length}
+                      maxPages={maxPages}
+                      editable={isDraft}
+                      busy={busy}
+                      onAdd={addPages}
+                      onAnnounce={announce}
+                    />
+                    {/* Ingest re-encodes before each row leaves `Uploading`,
+                        which is long enough that silence reads as a dead
+                        control. */}
+                    {pending === 'add' && (
+                      <Typography component="span" data-testid="adding">
+                        {parentCopy.capture.adding}
                       </Typography>
-                      <Box
-                        component="input"
-                        id="capture-add-page"
-                        type="file"
-                        accept="image/*"
-                        disabled={busy || !addable}
-                        aria-label={parentCopy.capture.addPage}
-                        sx={controlSx}
-                        onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = '';
-                          if (file) addPage(file);
-                        }}
-                      />
-                      {/* Ingest re-encodes before the row leaves `Uploading`,
-                          which is long enough that silence reads as a dead
-                          control. */}
-                      {pending === 'add' && (
-                        <Typography component="span" data-testid="adding">
-                          {parentCopy.capture.adding}
-                        </Typography>
-                      )}
-                    </Box>
+                    )}
                     {!addable && (
                       <Typography component="p">
                         {parentCopy.capture.limitReached(maxPages)}

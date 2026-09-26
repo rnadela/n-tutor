@@ -1053,3 +1053,75 @@ source_spec: `spec-5-2-answering-a-question.md`
 severity: low
 reason: `apps/web/eslint.config.mjs`'s comment names `apps/parent/drafts/[practiceTestId]/page.tsx` as the reason for the rule, but the rule itself applies workspace-wide.
 status: open
+
+### DW-133: The retake file input in PageStrip still offers the `image/*` wildcard, while the page-add input now offers the explicit four-format list.
+origin: spec-deferred ff4a9aa0da31
+location: apps/web/src/app/parent/capture/PageStrip.tsx:130
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: low
+reason: `ACCEPTED_IMAGE_TYPES` exists because `image/*` lets a parent pick a GIF or TIFF the server then refuses, and because some iOS pickers report no usable type for HEIC. `apps/web/src/app/parent/capture/PageStrip.tsx` keeps the wildcard, so half the photo-choosing surface on this screen behaves the way the new module calls wrong. Pre-existing: it shipped with Story 3.2, and Story 3.1's intent constrains how the server decides a format, not what the retake picker offers.
+status: open
+
+### DW-134: The HEIF branch discards the source colour profile, so a Display P3 HEIC is reinterpreted as sRGB.
+origin: spec-deferred 7a9cd049a79a
+location: apps/api/src/sourcetest/page-ingest.service.ts
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: low
+reason: libheif returns raw RGBA with no ICC profile attached, and `sharp` treats raw input as sRGB. iPhone HEICs are commonly Display P3, so colour shifts on exactly the format the branch exists to support. The ordinary `sharp(buffer)` branch keeps its profile. Low impact for extraction, which reads text rather than colour.
+status: open
+
+### DW-135: The disabled shutter drops below the 3:1 contrast floor on the inverted ground.
+origin: spec-deferred 3558360933d6
+location: apps/web/src/app/parent/capture/CameraViewfinder.tsx
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: low
+reason: `'&:disabled': { opacity: 0.5 }` over `primaryOnInverted` on `backgroundInverted` halves a 7.70:1 pair, and no token or test covers the disabled appearance. Every other colour decision on this surface was measured; this one was not.
+status: open
+
+### DW-136: No Playwright coverage drives the camera or a multi-file library selection, so the stream lifecycle and the capture encode are verified only structurally.
+origin: spec-deferred e98a99431c8e
+location: e2e/tests/parent-capture.spec.ts
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: medium
+reason: `apps/web` runs `environment: 'node'`, so the double-press guard, the `getUserMedia` race, the track-ended handler, and the canvas-to-JPEG encode are asserted against source text rather than driven. `e2e/tests/parent-capture.spec.ts` contains no occurrence of `camera`, `getUserMedia`, or `viewfinder`, and every `setInputFiles` call there passes exactly one file. Pinning these needs a browser launched with fake media devices and a granted camera permission.
+status: open
+
+### DW-137: The api unit specs cannot run without Postgres, because they share a vitest project with the integration tier.
+origin: spec-deferred 4db8474c1cbc
+location: apps/api/vitest.config.ts
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: low
+reason: `apps/api/vitest.config.ts` includes both `src/**/*.spec.ts` and `test/**/*.int-spec.ts`, and `test/global-setup.ts` connects to Postgres and runs `prisma migrate deploy` for either. The new pure `normalize` spec is among the fastest tests in the repo and among the slowest to start. Pre-existing and repo-wide.
+status: open
+
+### DW-138: A captured frame's canvas size is unbounded, so a high-resolution camera can post a page well past the sizes the library path implicitly stays under.
+origin: spec-deferred c6b87711fa01
+location: apps/web/src/app/parent/capture/AddPages.tsx
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: low
+reason: `CAPTURE_IDEAL_WIDTH`/`CAPTURE_IDEAL_HEIGHT` in `AddPages.tsx` are `ideal` hints, not a cap, and `capture()` sizes the canvas straight from `video.videoWidth`/`videoHeight` with no client-side check against `MAX_PAGE_BYTES` or `MAX_DECODED_PIXELS`. A device reporting a much higher native resolution would still post, and only the server's own limits would catch it.
+status: open
+
+### DW-139: `CameraViewfinder`'s shutter gate mirrors the page cap but not `editable`, so the shutter is not provably disabled if the upload stops being editable while the viewfinder is still open.
+origin: spec-deferred b0cc3acd8c07
+location: apps/web/src/app/parent/capture/CameraViewfinder.tsx
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: low
+reason: `AddPages` computes `addable = editable && !full` to gate opening the camera and the library input, but `CameraViewfinder` receives only `busy`/`pageCount`/`maxPages` and derives its own `full = pageCount >= maxPages`, with no `editable` input at all. No test drives a viewfinder that is already open at the moment `editable` turns false, so whether that transition is reachable from the surrounding screen, and what the shutter does if it is, is unverified.
+status: open
+
+### DW-140: If the attached stream never produces a frame, the shutter silently no-ops with no guidance shown.
+origin: spec-deferred ee290aa3c760
+location: apps/web/src/app/parent/capture/AddPages.tsx
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: low
+reason: `capture()` returns early when `video.videoWidth`/`videoHeight` are both `0`, which is correct — it stops a blank page from being posted — but nothing tells the parent why the shutter did nothing in that state, and no test exercises a stream that opens but never produces a frame.
+status: open
+
+### DW-141: `decodeHeic` has no timeout, so a pathological HEIC container could hang the ingest request indefinitely.
+origin: spec-deferred 5ac279bba936
+location: apps/api/src/sourcetest/page-ingest.service.ts
+source_spec: `spec-3-1-multi-page-capture-camera-library.md`
+severity: low
+reason: `decodedPipeline` awaits `decodeHeic({ buffer })` directly; a crafted or corrupt container that causes libheif to loop rather than throw would hold the request open with nothing to bound it. Lower risk than an unauthenticated surface would carry, since only a signed-in parent can reach this route, but the code path is new with this story.
+status: open

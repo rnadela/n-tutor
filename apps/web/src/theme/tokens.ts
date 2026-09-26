@@ -27,6 +27,28 @@ export const colorTokens = {
   divider: { light: '#7C8894', dark: '#6A747E' },
   tintHover: { light: '#EEF3F5', dark: '#1C2836' },
   tintSelected: { light: '#E8F1F2', dark: '#0D2A33' },
+
+  /*
+   * Camera chrome: the one inverted surface in the product (UX-DR4).
+   *
+   * All four are identical in light and dark on purpose — a viewfinder is dark
+   * in both schemes, because the photograph is the content and the chrome
+   * around it must not compete with it. There is deliberately no fifth token
+   * that tracks the scheme.
+   *
+   * DELIBERATE DUPLICATE. `backgroundInverted` repeats light `textPrimary`,
+   * `primaryOnInverted` repeats dark `primaryParent`, `dividerOnInverted`
+   * repeats dark `divider`, and `textOnInverted` repeats light `onPrimary`.
+   * Never alias, collapse or "tidy" any of them into the token they happen to
+   * equal: the light parent primary measures ~2.5:1 on this ground and white
+   * measures 16.56:1, so a future change to the parent palette must not reach
+   * the camera, and "correcting" the duplication is a contrast regression
+   * rather than a cleanup.
+   */
+  backgroundInverted: { light: '#10202E', dark: '#10202E' },
+  primaryOnInverted: { light: '#7FB6E8', dark: '#7FB6E8' },
+  dividerOnInverted: { light: '#6A747E', dark: '#6A747E' },
+  textOnInverted: { light: '#FFFFFF', dark: '#FFFFFF' },
 } as const satisfies Record<string, TokenPair>;
 
 export type ColorTokenName = keyof typeof colorTokens;

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest';
 import { parentCopy } from '@/copy/parent';
 import type { PageImageView } from '@/lib/parent-api';
 import { parentTheme } from '@/theme/theme';
-import { density } from '@/theme/tokens';
+import { colorTokens, density } from '@/theme/tokens';
+import { CameraGuidance, type CameraStatus } from './AddPages';
+import { CameraViewfinder, type CameraViewfinderProps } from './CameraViewfinder';
 import { PageStrip, type PageStripProps } from './PageStrip';
 import { ThinExtractionWarning, type ThinExtractionWarningProps } from './ThinExtractionWarning';
 
@@ -222,7 +224,6 @@ function disabledNames(row: string): string[] {
 
 describe('the announcements the screen makes', () => {
   it('names the page each one is about, by ordinal', () => {
-    expect(parentCopy.capture.added(3)).toBe('Page 3 was added.');
     expect(parentCopy.capture.deleted(2, 3)).toBe(
       'Page 2 was deleted. The pages after it are renumbered.',
     );
@@ -617,5 +618,565 @@ describe('the generate step and the gate on the way into it', () => {
       expect(source).not.toMatch(/usableQuestionCount\s*[<>]/);
       expect(source).not.toMatch(/pageCount\s*\*/);
     }
+  });
+});
+
+/**
+ * Story 3.1's surfaces: the inverted viewfinder, the guidance each camera
+ * status renders, and the library control that never goes away.
+ *
+ * `apps/web` runs without a DOM, so what can be rendered here is the two
+ * hook-free components; the rules that only the stateful component and the
+ * screen can hold are asserted against their source, the way every other rule
+ * on this screen that needs a router is.
+ */
+const ADD_PAGES_SOURCE = readFileSync(path.resolve(DIR, 'AddPages.tsx'), 'utf8');
+const VIEWFINDER_SOURCE = readFileSync(path.resolve(DIR, 'CameraViewfinder.tsx'), 'utf8');
+
+/** The web app's whole source tree, for the rules that are about absence. */
+const WEB_SRC = path.resolve(DIR, '../../..');
+
+/** Every TypeScript source file under a directory, recursively. */
+function sourceFilesUnder(root: string): string[] {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.resolve(root, entry.name);
+    if (entry.isDirectory()) return sourceFilesUnder(full);
+    return /\.tsx?$/.test(entry.name) ? [full] : [];
+  });
+}
+
+function renderViewfinder(overrides: Partial<CameraViewfinderProps> = {}): string {
+  const props: CameraViewfinderProps = {
+    pageCount: 2,
+    maxPages: 10,
+    busy: false,
+    onCapture: () => undefined,
+    onClose: () => undefined,
+    ...overrides,
+  };
+  return renderToStaticMarkup(
+    createElement(ThemeProvider, { theme: parentTheme }, createElement(CameraViewfinder, props)),
+  );
+}
+
+function renderGuidance(status: CameraStatus): string {
+  return renderToStaticMarkup(
+    createElement(ThemeProvider, { theme: parentTheme }, createElement(CameraGuidance, { status })),
+  );
+}
+
+/**
+ * The markup without the theme's global stylesheet.
+ *
+ * `ThemeProvider` emits every palette token as a CSS custom property on
+ * `:root`, the light parent primary among them — so "this surface does not reach
+ * for the parent primary" is a statement about the surface's own rules and not
+ * about the variables the theme declares for the rest of the app.
+ */
+function withoutGlobalStyles(markup: string): string {
+  return markup.replace(/<style data-emotion="css-global[^]*?<\/style>/g, '');
+}
+
+/**
+ * One `<button>` element's own markup, so an assertion about the shutter cannot
+ * be satisfied by Done's attributes — or by the stylesheet rendered beside them.
+ */
+function buttonFor(markup: string, testId: string): string {
+  const segment = markup
+    .split('<button')
+    .slice(1)
+    .find((candidate) => candidate.includes(`data-testid="${testId}"`));
+  if (segment === undefined) throw new Error(`No button for ${testId}.`);
+  return segment.slice(0, segment.indexOf('</button>'));
+}
+
+/**
+ * The CSS emotion actually generated for one control, and for nothing else.
+ *
+ * The declarations are not on the element — emotion emits a `<style>` block and
+ * puts only its class on the tag — so "the shutter meets the tap-target floor"
+ * cannot be read off the element's own markup, and matching the whole document
+ * for the floor would be satisfied by the theme's global stylesheet instead. This
+ * resolves the control's generated class and returns every rule written for it,
+ * base and pseudo-class alike.
+ */
+function stylesFor(markup: string, testId: string): string {
+  const generated = /\bcss-([A-Za-z0-9_-]+)\b/.exec(buttonFor(markup, testId));
+  if (generated === null) throw new Error(`No generated class on ${testId}.`);
+  const rules = [
+    ...markup.matchAll(new RegExp(`\\.css-${generated[1]!}\\b[^{]*\\{([^}]*)\\}`, 'g')),
+  ];
+  if (rules.length === 0) throw new Error(`No rules emitted for ${testId}.`);
+  return rules.map((rule) => rule[1]!).join(';');
+}
+
+describe('the viewfinder is the one inverted surface', () => {
+  it('paints its ground, border, accent and text from the on-inverted tokens', () => {
+    // Through the same filter the negative test uses. `ThemeProvider` emits every
+    // palette token — all four of these among them — into its global stylesheet,
+    // so read off the raw markup this assertion would pass even if
+    // `CameraViewfinder` reached for none of them.
+    const markup = withoutGlobalStyles(renderViewfinder());
+    for (const value of [
+      colorTokens.backgroundInverted.light,
+      colorTokens.dividerOnInverted.light,
+      colorTokens.primaryOnInverted.light,
+      colorTokens.textOnInverted.light,
+    ]) {
+      expect(markup).toContain(value);
+    }
+  });
+
+  it('never reaches for the light parent primary, which fails on this ground', () => {
+    const markup = withoutGlobalStyles(renderViewfinder());
+    // ~2.5:1 on #10202E. The duplication in `tokens.ts` is what keeps a change
+    // to the parent palette out of the camera (UX-DR4).
+    expect(markup).not.toContain(colorTokens.primaryParent.light);
+    expect(markup).not.toContain(colorTokens.divider.light);
+  });
+
+  it('holds the four token values nowhere but the token module and this chrome', () => {
+    const names = [
+      'backgroundInverted',
+      'primaryOnInverted',
+      'dividerOnInverted',
+      'textOnInverted',
+    ] as const;
+    // The chrome reads every one of them by name.
+    for (const name of names) {
+      expect(VIEWFINDER_SOURCE).toContain(`colorTokens.${name}.light`);
+    }
+
+    // The closed exception, checked against the whole of `apps/web/src` rather
+    // than against the two files that happen to sit beside this one: the rule is
+    // that *nothing* else reads them, and a guard that only knew about `page.tsx`
+    // and `AddPages.tsx` would not notice a third file taking the accent.
+    const allowed = new Set([
+      path.resolve(WEB_SRC, 'theme/tokens.ts'),
+      path.resolve(DIR, 'CameraViewfinder.tsx'),
+      // This spec states the rule, so it necessarily names the tokens.
+      path.resolve(DIR, 'page.spec.tsx'),
+    ]);
+    const offenders: string[] = [];
+    for (const file of sourceFilesUnder(WEB_SRC)) {
+      if (allowed.has(file)) continue;
+      const text = readFileSync(file, 'utf8');
+      for (const name of names) {
+        // Both the token's name and the literal it resolves to: aliasing the
+        // value rather than the token would evade a name-only check.
+        if (text.includes(name) || text.includes(colorTokens[name].light)) {
+          offenders.push(`${path.relative(WEB_SRC, file)} (${name})`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps the light and dark value of every inverted token identical', () => {
+    for (const name of [
+      'backgroundInverted',
+      'primaryOnInverted',
+      'dividerOnInverted',
+      'textOnInverted',
+    ] as const) {
+      expect(colorTokens[name].light).toBe(colorTokens[name].dark);
+    }
+  });
+
+  it('writes no colour of its own as a literal', () => {
+    const code = VIEWFINDER_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toMatch(/#[0-9A-Fa-f]{6}/);
+  });
+});
+
+describe('what the viewfinder says and offers', () => {
+  it('gives the live camera view an accessible name', () => {
+    const markup = renderViewfinder();
+    expect(markup).toContain('<video');
+    expect(markup).toContain(`aria-label="${parentCopy.capture.camera.viewfinderLabel}"`);
+  });
+
+  it('names the page the next shot will become, from the count it is handed', () => {
+    // Two pages held: the parent is framing page three.
+    expect(renderViewfinder({ pageCount: 2 })).toContain(parentCopy.capture.camera.framing(3));
+    expect(renderViewfinder({ pageCount: 0 })).toContain(parentCopy.capture.camera.framing(1));
+  });
+
+  it('states the count and the ceiling from the figures the API supplied', () => {
+    const markup = renderViewfinder({ pageCount: 4, maxPages: 10 });
+    expect(markup).toContain(parentCopy.capture.camera.captured(4, 10));
+    // Neither figure is the component's own.
+    const code = VIEWFINDER_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toMatch(/maxPages\s*=\s*\d/);
+  });
+
+  it('names the surface by the heading it renders rather than repeating it', () => {
+    const markup = renderViewfinder();
+    expect(markup).toContain('aria-labelledby="capture-viewfinder-heading"');
+    expect(markup).toContain('id="capture-viewfinder-heading"');
+  });
+
+  it('meets the tap-target floor on the shutter and on Done, from the token', () => {
+    const markup = renderViewfinder();
+    expect(markup).toContain(parentCopy.capture.camera.shutter);
+    expect(markup).toContain(parentCopy.capture.camera.done);
+    // Scoped to each control's own generated rules rather than matched anywhere
+    // in the document: the theme's global stylesheet carries the same floor for
+    // the app's own controls, so an unscoped match would pass with a viewfinder
+    // whose buttons set no size at all.
+    for (const testId of ['viewfinder-shutter', 'viewfinder-done']) {
+      const rules = stylesFor(markup, testId);
+      expect(rules).toContain(`min-height:${density.tapTarget}px`);
+      expect(rules).toContain(`min-width:${density.tapTarget}px`);
+    }
+    const code = VIEWFINDER_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).toContain('controlSx');
+    expect(code).not.toMatch(/minHeight:\s*\d/);
+  });
+
+  it('locks the shutter while an add is in flight, but never the way out', () => {
+    const markup = renderViewfinder({ busy: true });
+    expect(buttonFor(markup, 'viewfinder-shutter')).toContain('disabled');
+    // Done stays usable: a locked viewfinder with no exit is a trap.
+    expect(buttonFor(markup, 'viewfinder-done')).not.toContain('disabled');
+  });
+
+  it('refuses the shutter once the upload is full', () => {
+    const markup = renderViewfinder({ pageCount: 10, maxPages: 10 });
+    expect(buttonFor(markup, 'viewfinder-shutter')).toContain('disabled');
+    // And offers it again the moment there is a slot.
+    expect(
+      buttonFor(renderViewfinder({ pageCount: 9, maxPages: 10 }), 'viewfinder-shutter'),
+    ).not.toContain('disabled');
+  });
+
+  it('states every one of its words from the copy module', () => {
+    const code = VIEWFINDER_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    for (const marker of [
+      'camera.heading',
+      'camera.viewfinderLabel',
+      'camera.framing',
+      'camera.captured',
+      'camera.shutter',
+      'camera.done',
+    ]) {
+      expect(code).toContain(marker);
+    }
+  });
+});
+
+describe('the camera being unusable is never a dead end', () => {
+  it('says nothing at all before the camera has been asked, or once it works', () => {
+    // Nothing but the theme's own stylesheet: no sentence, and no element
+    // carrying one.
+    for (const status of ['unknown', 'ready'] as const) {
+      const markup = renderGuidance(status);
+      expect(markup).not.toContain('data-testid');
+      expect(markup).not.toContain(parentCopy.capture.camera.cameraFallback);
+    }
+  });
+
+  it('names site settings when the permission was refused', () => {
+    const markup = renderGuidance('denied');
+    expect(markup).toContain('camera-denied');
+    expect(markup).toContain('site settings');
+    // And says the library is still there.
+    expect(markup).toContain(parentCopy.capture.camera.cameraFallback);
+  });
+
+  it('says the camera cannot be used when there is no camera to use', () => {
+    const markup = renderGuidance('unavailable');
+    expect(markup).toContain('camera-unavailable');
+    expect(markup).toContain(parentCopy.capture.camera.cameraUnavailable);
+    expect(markup).toContain(parentCopy.capture.camera.cameraFallback);
+  });
+
+  it('maps a refusal to `denied` and every other rejection to `unavailable`', () => {
+    expect(ADD_PAGES_SOURCE).toContain("cause.name === 'NotAllowedError'");
+    expect(ADD_PAGES_SOURCE).toContain("? 'denied'");
+    expect(ADD_PAGES_SOURCE).toContain(": 'unavailable'");
+    // A missing API is answered before it is called, not by catching a throw.
+    expect(ADD_PAGES_SOURCE).toContain("typeof devices.getUserMedia !== 'function'");
+  });
+
+  it('treats a blocked origin as denied too, since its remedy is the same', () => {
+    // `SecurityError` is what a blocked or insecure origin raises instead of
+    // `NotAllowedError`. Both are answered with the site-settings guidance,
+    // because in both cases that is where the parent has to go.
+    expect(ADD_PAGES_SOURCE).toContain("cause.name === 'SecurityError'");
+    const mapping = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('    } catch (cause) {'));
+    const denied = mapping.slice(0, mapping.indexOf(": 'unavailable'"));
+    expect(denied).toContain("'NotAllowedError'");
+    expect(denied).toContain("'SecurityError'");
+    // And the documented contract says so, rather than naming only one of them.
+    const doc = ADD_PAGES_SOURCE.slice(0, ADD_PAGES_SOURCE.indexOf('export type CameraStatus'));
+    expect(doc).toContain('SecurityError');
+  });
+
+  it('guards against a second open firing before the first getUserMedia call resolves', () => {
+    // `streamRef.current !== null` alone only blocks a second open once the
+    // first has already resolved into a stored stream — two clicks before the
+    // permission prompt settles would both pass that check and both call
+    // `getUserMedia`. `openingRef` closes that window.
+    const guard = ADD_PAGES_SOURCE.slice(
+      ADD_PAGES_SOURCE.indexOf('const openCamera = useCallback'),
+      ADD_PAGES_SOURCE.indexOf('const closeCamera = useCallback'),
+    );
+    expect(guard).toContain('if (streamRef.current !== null || openingRef.current) return;');
+    expect(guard).toContain('openingRef.current = true;');
+    expect(guard).toContain('openingRef.current = false;');
+  });
+
+  it('closes the viewfinder and asks for guidance when a track ends underneath it', () => {
+    // Permission revoked from the address bar, webcam unplugged, another app
+    // taking the device. Without this the viewfinder freezes on its last frame
+    // and the shutter keeps posting it.
+    expect(ADD_PAGES_SOURCE).toContain("track.addEventListener('ended', handleTrackEnded)");
+    const handler = ADD_PAGES_SOURCE.slice(
+      ADD_PAGES_SOURCE.indexOf('const handleTrackEnded = useCallback'),
+    );
+    const body = handler.slice(0, handler.indexOf('\n  }, ['));
+    expect(body).toContain('stopStream();');
+    expect(body).toContain('setOpen(false);');
+    expect(body).toContain("setStatus('unavailable');");
+  });
+
+  it('gates the library control on the cap alone and never on the camera', () => {
+    // The whole of the fallback rule: `addable` mentions no camera status, so
+    // no status can disable the input.
+    expect(ADD_PAGES_SOURCE).toContain('const addable = editable && !full;');
+    expect(ADD_PAGES_SOURCE).toContain('disabled={busy || !addable}');
+    expect(ADD_PAGES_SOURCE).not.toMatch(/disabled=\{[^}]*status/);
+  });
+});
+
+describe('the library control', () => {
+  it('takes several photos in one action and names every format ingest accepts', () => {
+    expect(ADD_PAGES_SOURCE).toContain('multiple');
+    expect(ADD_PAGES_SOURCE).toContain('accept={ACCEPTED_IMAGE_TYPES}');
+    // Never the wildcard the placeholder used, which admitted formats the
+    // server then refused.
+    expect(ADD_PAGES_SOURCE).not.toContain('accept="image/*"');
+    expect(PAGE_SOURCE).not.toContain('accept="image/*"');
+  });
+
+  it('trims against the remaining slots and hands the trim on to be announced', () => {
+    expect(ADD_PAGES_SOURCE).toContain('splitSelection(chosen, pageCount, maxPages)');
+    // Nothing is posted for a trimmed file: the accepted array is all that goes,
+    // and the count that did not fit rides along to be said in one sentence with
+    // the count that did.
+    expect(ADD_PAGES_SOURCE).toContain('onAdd(accepted, rejectedCount)');
+  });
+
+  it('says the trim itself only when nothing at all could be posted', () => {
+    // The one case with no server answer coming, so no combined sentence can be
+    // phrased later and this is the only chance to say anything.
+    const choose = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('function chooseFromLibrary'));
+    const body = choose.slice(0, choose.indexOf('\n  }'));
+    expect(body).toContain('if (accepted.length === 0) {');
+    expect(body).toContain('parentCopy.capture.rejectedCount(rejectedCount)');
+    // Exactly one announcement in the whole function: a second into the same
+    // region would replace the first.
+    expect(body.match(/onAnnounce\(/g)).toHaveLength(1);
+  });
+
+  it('names the control for what it offers rather than for one platform', () => {
+    // There is no camera roll on Android or on a desktop, and this is the same
+    // control on all three.
+    expect(parentCopy.capture.camera.libraryLabel).not.toMatch(/camera roll/i);
+    expect(parentCopy.capture.camera.libraryLabel).toMatch(/photos/i);
+  });
+
+  it('takes its accessible name from the visible label and not from both', () => {
+    // `htmlFor` already names the input. An `aria-label` carrying the same words
+    // would override the label with a copy of itself and be announced twice.
+    expect(ADD_PAGES_SOURCE).toContain('htmlFor="capture-add-page"');
+    const input = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('id="capture-add-page"'));
+    expect(input.slice(0, input.indexOf('/>'))).not.toContain('aria-label');
+  });
+
+  it('announces both halves of an outcome in one sentence', () => {
+    // One polite region: two messages mean the parent only ever hears the
+    // second, so a trim announced on its own would be lost behind the success.
+    const both = parentCopy.capture.addOutcome(1, 2);
+    expect(both).toBe('One page was added. 2 photos were not added — this upload is full.');
+    // And nothing is tacked on when nothing was turned away.
+    expect(parentCopy.capture.addOutcome(3, 0)).toBe('3 pages were added.');
+  });
+
+  it('never announces a count of zero pages as though it were a number', () => {
+    // The delta is the difference between two server reads, so a first file that
+    // failed arrives here as zero — and "0 pages were added" reads as a bug.
+    expect(parentCopy.capture.addedCount(0)).toBe('No pages were added.');
+    expect(parentCopy.capture.addedCount(-1)).toBe('No pages were added.');
+    expect(parentCopy.capture.addOutcome(0, 2)).toBe(
+      'No pages were added. 2 photos were not added — this upload is full.',
+    );
+  });
+});
+
+describe('the camera is asked for a frame worth extracting from', () => {
+  it('states an ideal resolution rather than taking the browser default', () => {
+    // A browser default is commonly 640×480 — a quarter of the detail the picker
+    // beside this control would have produced for the same page, and these pages
+    // are read by a vision model.
+    expect(ADD_PAGES_SOURCE).toContain('width: { ideal: CAPTURE_IDEAL_WIDTH }');
+    expect(ADD_PAGES_SOURCE).toContain('height: { ideal: CAPTURE_IDEAL_HEIGHT }');
+    // `ideal`, never `min`: a device that cannot reach it must still open.
+    const constraints = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('devices.getUserMedia({'));
+    expect(constraints.slice(0, constraints.indexOf('});'))).not.toContain('min:');
+  });
+
+  it('writes both figures as named constants rather than inline literals', () => {
+    const code = ADD_PAGES_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).toMatch(/const CAPTURE_IDEAL_WIDTH = \d+;/);
+    expect(code).toMatch(/const CAPTURE_IDEAL_HEIGHT = \d+;/);
+    // The constraint object names them; it does not restate the numbers.
+    const constraints = code.slice(code.indexOf('devices.getUserMedia({'));
+    expect(constraints.slice(0, constraints.indexOf('});'))).not.toMatch(/ideal: \d/);
+  });
+});
+
+describe('the stream this screen obtains', () => {
+  it('is stopped track by track, on close and on unmount alike', () => {
+    expect(ADD_PAGES_SOURCE).toContain('for (const track of stream.getTracks()) track.stop();');
+    // The same cleanup, registered as the effect's teardown — which is what
+    // Parent View ending runs when it unmounts this tree.
+    const unmount = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('mountedRef.current = true;'));
+    const teardown = unmount.slice(0, unmount.indexOf('}, [stopStream]);'));
+    expect(teardown).toContain('mountedRef.current = false;');
+    expect(teardown).toContain('stopStream();');
+    // And it is the only holder of a stream, so there is nowhere else a track
+    // can survive.
+    expect(PAGE_SOURCE).not.toContain('getUserMedia');
+    expect(PAGE_SOURCE).not.toContain('MediaStream');
+  });
+
+  it('stops a stream that arrives after nothing wants it any more', () => {
+    // `getUserMedia` resolves behind a permission prompt, so it can land seconds
+    // after the parent pressed Done or left the screen — by which time cleanup
+    // has run and `stopStream` can no longer reach a stream that was never
+    // stored. It is stopped on the spot instead.
+    const open = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('const openCamera = useCallback'));
+    const guard = open.slice(0, open.indexOf('streamRef.current = stream;'));
+    expect(guard).toContain('if (!mountedRef.current || openRequestRef.current !== request) {');
+    expect(guard).toContain('for (const track of stream.getTracks()) track.stop();');
+    expect(guard).toContain('return;');
+    // Closing supersedes an open still in flight, which is what makes the
+    // counter check above true for a stream nobody is waiting for.
+    const close = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('const closeCamera'));
+    expect(close.slice(0, close.indexOf('\n  }, ['))).toContain('openRequestRef.current += 1;');
+  });
+
+  it('refuses to open a second camera over a stream it already holds', () => {
+    // Overwriting `streamRef` would orphan the first stream's tracks: the camera
+    // would stay on with nothing left that could stop it.
+    const open = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('const openCamera = useCallback'));
+    const head = open.slice(0, open.indexOf('const devices'));
+    expect(head).toContain('if (streamRef.current !== null || openingRef.current) return;');
+  });
+});
+
+describe('the shutter takes one frame per press', () => {
+  it('ignores a second press while a frame is still becoming a file', () => {
+    // `canvas.toBlob` is asynchronous, so the screen's `busy` is still false and
+    // the control still enabled when a second press arrives. Two `onAdd` calls
+    // would reach one `write`, which drops the second without a word.
+    const capture = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('const capture = useCallback'));
+    const body = capture.slice(0, capture.indexOf('\n  }, ['));
+    expect(body).toContain('if (capturingRef.current) return;');
+    expect(body).toContain('capturingRef.current = true;');
+    // Cleared before the blob is inspected, so the null-blob path unlocks too
+    // rather than jamming the shutter for the rest of the session.
+    const callback = body.slice(body.indexOf('canvas.toBlob('));
+    expect(callback.indexOf('capturingRef.current = false;')).toBeLessThan(
+      callback.indexOf('if (blob === null) return;'),
+    );
+  });
+});
+
+describe('capture is continuous', () => {
+  it('leaves the viewfinder open after a page is taken', () => {
+    // The whole point of the surface: ten pages are ten shutter presses, not
+    // ten trips through opening the camera again.
+    const capture = ADD_PAGES_SOURCE.slice(ADD_PAGES_SOURCE.indexOf('const capture = useCallback'));
+    const body = capture.slice(0, capture.indexOf('\n  }, ['));
+    expect(body).toContain('onAdd(');
+    expect(body).not.toContain('setOpen(');
+    expect(body).not.toContain('stopStream(');
+  });
+
+  it('closes on the one control that exists to close it, and nowhere else', () => {
+    // `closeCamera` is Done's handler and the only thing that puts the surface
+    // away, so "still open" is a property of every other path by construction.
+    expect(ADD_PAGES_SOURCE).toContain('const closeCamera = useCallback(() => {');
+    expect(ADD_PAGES_SOURCE).toContain('onClose={closeCamera}');
+    expect(VIEWFINDER_SOURCE).toContain('onClose');
+  });
+});
+
+describe('what the screen does with the pages it is handed', () => {
+  it('renders the capture surface rather than a placeholder input of its own', () => {
+    expect(PAGE_SOURCE).toContain('<AddPages');
+    expect(PAGE_SOURCE).toContain('onAdd={addPages}');
+    expect(PAGE_SOURCE).not.toContain('type="file"');
+  });
+
+  it('posts a whole selection inside one write, in order', () => {
+    // `write` drops a call while one is pending, so a per-file loop over it
+    // would silently lose every page after the first.
+    expect(PAGE_SOURCE).toContain("'add',");
+    expect(PAGE_SOURCE).toContain('for (const file of files) {');
+    expect(PAGE_SOURCE).toContain('after = await parentApi.addSourceTestPage(');
+    // One `write('add'` in the whole screen.
+    expect(PAGE_SOURCE.match(/write\(\s*'add'/g)).toHaveLength(1);
+  });
+
+  it('announces the count the server ended up holding, not the count attempted', () => {
+    expect(PAGE_SOURCE).toContain(
+      'parentCopy.capture.addOutcome(after.pages.length - before, rejectedCount)',
+    );
+  });
+
+  it('keeps the strip honest when a file part-way through the run is refused', () => {
+    // `write`'s own catch never calls `setSourceTest`, so throwing out of the run
+    // would leave the strip showing the list from before the add while the server
+    // held the pages that did land. The run returns the last answer instead, and
+    // sets the error itself — after `write` has cleared it — so the parent gets
+    // the refusal *and* the count that landed.
+    const add = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('function addPages('));
+    const run = add.slice(0, add.indexOf('parentCopy.capture.addOutcome'));
+    expect(run).toContain('} catch (cause) {');
+    expect(run).toContain('return after;');
+    expect(run).toContain('setError(');
+    // Parent View ending is not a page failure and must still reach `write`,
+    // which is the only thing that knows how to leave.
+    expect(run).toContain('if (endsParentView(cause)) throw cause;');
+  });
+
+  it('phrases both announcements in pages rather than in photos or files', () => {
+    expect(parentCopy.capture.addedCount(1)).toBe('One page was added.');
+    expect(parentCopy.capture.addedCount(3)).toBe('3 pages were added.');
+    expect(parentCopy.capture.rejectedCount(1)).toContain('One photo was not added');
+    expect(parentCopy.capture.rejectedCount(2)).toContain('2 photos were not added');
+  });
+
+  it('keeps the cap the API’s, in the surface as well as the screen', () => {
+    expect(PAGE_SOURCE).toContain('maxPages={maxPages}');
+    expect(PAGE_SOURCE).toContain('parentCopy.capture.limitReached(maxPages)');
+    const code = ADD_PAGES_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toMatch(/maxPages\s*=\s*\d/);
   });
 });

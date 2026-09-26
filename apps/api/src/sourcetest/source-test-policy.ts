@@ -58,6 +58,24 @@ export const JPEG_QUALITY = 85;
  */
 export const MAX_PAGE_BYTES = 25 * 1024 * 1024;
 
+/**
+ * The largest decoded image ingest will encode, in pixels.
+ *
+ * The byte cap above does not bound this on its own: a HEIC is far denser than
+ * the image it decodes to, so bytes well inside `MAX_PAGE_BYTES` can decode to
+ * an arbitrarily large raster. `sharp` bounds its own decoders with
+ * `limitInputPixels`, but the HEIF branch hands it raw RGBA that has *already*
+ * been allocated by libheif, so that limit never sees those bytes and this
+ * ceiling is the only thing standing in front of the allocation.
+ *
+ * 64 megapixels: every photograph a phone actually produces fits — a 48MP
+ * iPhone frame is 8064×6048, under 49MP — while the worst case libheif may
+ * allocate stays bounded at four bytes a pixel, about 268MB. Stated as a page
+ * rule here beside the byte cap rather than in the service, because it decides
+ * which uploads are refused.
+ */
+export const MAX_DECODED_PIXELS = 64 * 1024 * 1024;
+
 /** Where page bytes live when nothing overrides it. Never served statically. */
 export const DEFAULT_UPLOAD_ROOT = path.resolve(process.cwd(), '.uploads');
 

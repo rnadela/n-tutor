@@ -3,15 +3,91 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import { fileTypeFromBuffer } from 'file-type';
-import sharp from 'sharp';
+import decodeHeic from 'heic-decode';
+import sharp, { type Sharp } from 'sharp';
 import { PageBytesUnavailable } from './source-test-reader.js';
 import {
   JPEG_QUALITY,
+  MAX_DECODED_PIXELS,
   STORED_MIME,
   isAllowedMime,
   storagePathFor,
   uploadRoot,
 } from './source-test-policy.js';
+
+/**
+ * The two members of the HEIF family an iPhone actually produces, and the one
+ * pair `sharp` cannot open on this platform: the prebuilt libvips decodes only
+ * AVIF out of that family. Stated here rather than in the policy because it is
+ * a fact about *this* decoder, not a product rule about which formats a parent
+ * may upload — the allow-list is the rule, and it lives in the policy.
+ */
+const HEIF_MIMES: readonly string[] = ['image/heic', 'image/heif'];
+
+function isHeif(mime: string): boolean {
+  return HEIF_MIMES.includes(mime);
+}
+
+/**
+ * Raised, not thrown as a plain `Error`, so `classNameOf` can tell a decoded
+ * image that was simply too big apart from a decoder that actually failed —
+ * the two would otherwise both log as `Error` and look like the same incident.
+ */
+class DecodedPixelCeilingExceeded extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DecodedPixelCeilingExceeded';
+  }
+}
+
+/**
+ * The sniffed bytes as a `sharp` pipeline ready to be encoded, with the one
+ * branch that exists in this service: HEIC/HEIF goes through libheif first.
+ *
+ * `rotate()` is applied on the ordinary branch and deliberately **not** on the
+ * HEIF one. `rotate()` with no argument means "honour the EXIF orientation",
+ * and there is no EXIF on the HEIF branch to honour: libheif has already
+ * applied the container's own `irot`/`imir` transforms while decoding, and raw
+ * RGBA carries no metadata at all. Calling it there would be a second rotation
+ * of an already-upright image.
+ *
+ * A HEIF decode that fails throws, and the caller's `catch` turns that into the
+ * same `UnsupportedImageFormat` an undecodable JPEG gets — this function never
+ * decides what a rejection says. An oversized one throws for the same reason and
+ * lands in the same place.
+ */
+async function decodedPipeline(mime: string, buffer: Buffer): Promise<Sharp> {
+  // `limitInputPixels` bounds every decoder sharp owns, so the ordinary branch
+  // is already covered and needs no ceiling of its own here.
+  if (!isHeif(mime)) return sharp(buffer).rotate();
+  const { width, height, data } = await decodeHeic({ buffer });
+  // Checked after libheif has allocated, because there is no earlier place to
+  // check it: the container's dimensions are not known until it is decoded. What
+  // this bounds is the *encode* that would follow — sharp never sees the raw
+  // bytes, so `limitInputPixels` would not stop them.
+  if (width * height > MAX_DECODED_PIXELS) {
+    throw new DecodedPixelCeilingExceeded('Decoded HEIF image exceeds the page pixel ceiling.');
+  }
+  return sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), {
+    raw: { width, height, channels: 4 },
+  });
+}
+
+/**
+ * What was thrown, named by its class and by nothing else.
+ *
+ * Deliberately not the message: a decoder's own text is outside this repo's
+ * control and could carry anything, and AD-20 keeps the buffer, the filename and
+ * the declared type out of every log line. A class name is a closed fact about
+ * our own process, which is what an operator needs to tell a bad photo apart
+ * from a broken decoder.
+ */
+function classNameOf(cause: unknown): string {
+  if (cause instanceof Error) return cause.name;
+  // A thrown non-Error — a wasm abort, a string, a rejected `undefined`. Its
+  // type is all there is to say about it.
+  return typeof cause;
+}
 
 /** What ingest produced: the bytes to store, and what they turned out to be. */
 export interface NormalizedPage {
@@ -54,16 +130,21 @@ export class UnsupportedImageFormat extends Error {
  * Nothing here crops. `rotate()` with no argument applies the EXIF orientation
  * and nothing else, and the dimensions are read off the **output** metadata
  * rather than the input's, so a 90°-rotated photo reports the size it is stored
- * at rather than the size it was taken at.
+ * at rather than the size it was taken at. The one exception is the HEIF branch,
+ * which arrives already upright and carries no EXIF at all — `decodedPipeline`
+ * says why.
  */
 @Injectable()
 export class PageIngestService {
   private readonly logger = new Logger(PageIngestService.name);
 
   /**
-   * Sniff → rotate → JPEG q85. Completes before the caller promotes the row
-   * out of `Uploading`, so no downstream consumer ever sees a format the vision
+   * Sniff → decode → JPEG q85. Completes before the caller promotes the row out
+   * of `Uploading`, so no downstream consumer ever sees a format the vision
    * model cannot read.
+   *
+   * HEIC/HEIF is *converted* here rather than refused — an ordinary iPhone
+   * photograph is HEIC, and refusing one would make the allow-list a lie.
    */
   async normalize(buffer: Buffer, unsupportedMessage: string): Promise<NormalizedPage> {
     if (buffer.length === 0) throw new UnsupportedImageFormat(unsupportedMessage);
@@ -73,14 +154,27 @@ export class PageIngestService {
 
     let output: { data: Buffer; info: { width: number; height: number; size: number } };
     try {
-      output = await sharp(buffer).rotate().jpeg({ quality: JPEG_QUALITY }).toBuffer({
+      const pipeline = await decodedPipeline(sniffed!.mime, buffer);
+      output = await pipeline.jpeg({ quality: JPEG_QUALITY }).toBuffer({
         resolveWithObject: true,
       });
-    } catch {
-      // A format the allow-list admits but this platform's libvips cannot
-      // decode — HEIC, most likely — is the same answer as an unlisted one: the
-      // parent is told the photo cannot be read, and no `Ready` row survives.
-      // Nothing about the buffer is logged.
+    } catch (cause) {
+      // A format the allow-list admits but neither libheif nor this platform's
+      // libvips can actually decode — truncated bytes, an exotic HEIF profile,
+      // a raster over the pixel ceiling — is the same answer as an unlisted one:
+      // the parent is told the photo cannot be read, and no `Ready` row
+      // survives.
+      //
+      // The parent's answer says nothing about why, but an operator gets the
+      // failure's class: a libheif wasm trap, an allocation failure and a
+      // decoder imported in the wrong shape are three different incidents that
+      // would otherwise be indistinguishable from an ordinary bad photo.
+      //
+      // The class and nothing else. Not the decoder's message — which is not
+      // ours to vouch for — and nothing about the buffer, the filename or the
+      // declared type (AD-20). The sniffed format is deliberately absent too: it
+      // is a fact read off the bytes, and this line stays free of those.
+      this.logger.warn(`Page ingest could not decode an allowed format: ${classNameOf(cause)}.`);
       throw new UnsupportedImageFormat(unsupportedMessage);
     }
 

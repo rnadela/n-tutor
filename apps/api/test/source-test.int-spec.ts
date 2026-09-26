@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import sharp from 'sharp';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -270,6 +271,53 @@ describe('Source Tests: page management before submit', () => {
       expect(page!.width).toBe(40);
       expect(page!.height).toBe(60);
       expect(page!.storagePath).toContain(page!.id);
+    });
+
+    it('converts a HEIC photograph through the route and stores it as JPEG', async () => {
+      // The format an ordinary iPhone produces, proven at the wire rather than
+      // only at the service: `sharp`'s prebuilt libvips decodes no HEIC on this
+      // platform, so before the `heic-decode` branch existed this request was a
+      // 415 and an iPhone photo could not be uploaded at all.
+      const draft = await openDraft();
+      const heic = await readFile(path.resolve(import.meta.dirname, 'fixtures/sample-page.heic'));
+
+      const response = await addPage(draft.token, draft.sourceTestId, heic, {
+        filename: 'page.heic',
+        contentType: 'image/heic',
+      }).expect(201);
+
+      expect(response.body.pages).toHaveLength(1);
+      expect(response.body.pages[0].state).toBe('Ready');
+      const [page] = await storedPages(draft.sourceTestId);
+      // Stored as the one format everything converges on, at the decoded size.
+      expect(page!.mimeType).toBe(STORED_MIME);
+      expect(page!.width).toBe(64);
+      expect(page!.height).toBe(64);
+      // And the bytes on disk really are a JPEG, not a HEIC under a JPEG's name.
+      expect(page!.storagePath).not.toBeNull();
+      const bytes = await readFile(page!.storagePath!);
+      expect((await sharp(bytes).metadata()).format).toBe('jpeg');
+    });
+
+    it('decides the format on the bytes, never on what the client declared', async () => {
+      // A PNG announced as a PDF. The declared type is not read anywhere above
+      // ingest, so the sniff admits it and the page lands — the mirror image of
+      // the refusal below, where a declared `image/jpeg` does not save bytes that
+      // are not an image.
+      const draft = await openDraft();
+
+      const response = await addPage(
+        draft.token,
+        draft.sourceTestId,
+        await photo({ width: 48, height: 64, format: 'png' }),
+        { filename: 'page.pdf', contentType: 'application/pdf' },
+      ).expect(201);
+
+      expect(response.body.pages[0].state).toBe('Ready');
+      const [page] = await storedPages(draft.sourceTestId);
+      expect(page!.mimeType).toBe(STORED_MIME);
+      expect(page!.width).toBe(48);
+      expect(page!.height).toBe(64);
     });
 
     it('refuses bytes that are not an allowed image, whatever the client declared', async () => {
