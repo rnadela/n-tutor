@@ -88,7 +88,13 @@ async function uploadAndRead(page: Page, email: string): Promise<void> {
     });
   }
 
+  // Two controls, not one: the batch legibility check charges nothing, and
+  // the commit it gates spends an Upload Allowance. A fixture that wants a
+  // submitted upload passes through both.
   await page.getByRole('button', { name: 'Check pages' }).click();
+  const commit = page.getByTestId('legibility-continue');
+  await expect(commit).toBeVisible({ timeout: 20_000 });
+  await commit.click();
   await expect(page.getByTestId('submitted-note')).toBeVisible();
   // The job outlives the request that enqueued it, so this waits on the worker.
   await expect(page.getByRole('button', { name: 'Continue to practice test' })).toBeVisible({

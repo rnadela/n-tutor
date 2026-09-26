@@ -1125,3 +1125,83 @@ source_spec: `spec-3-1-multi-page-capture-camera-library.md`
 severity: low
 reason: `decodedPipeline` awaits `decodeHeic({ buffer })` directly; a crafted or corrupt container that causes libheif to loop rather than throw would hold the request open with nothing to bound it. Lower risk than an unauthenticated surface would carry, since only a signed-in parent can reach this route, but the code path is new with this story.
 status: open
+
+### DW-142: The legibility check endpoint is free, uncapped and re-runnable, so an add-page / check / delete-page loop can bill unbounded provider calls.
+origin: spec-deferred a8b967099147
+location: apps/api/src/sourcetest/source-test.controller.ts
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: medium
+reason: `POST /parent/source-tests/:id/legibility` charges no allowance by design (AD-29) and becomes runnable again after any page add, retake or delete. There is no throttle on the route, no per-draft check counter and no `@Throttle` anywhere in the API. Allowance *enforcement* is Epic 9's, but a per-check ceiling is not the same thing as an allowance.
+status: open
+
+### DW-143: The Legibility call class is pinned to the cheap `luna` model, which ai-config itself documents as the non-vision pin, and images are sent at `detail: 'auto'`.
+origin: spec-deferred 4a487b289a74
+location: apps/api/src/ai/ai-config.ts
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: medium
+reason: `DEFAULT_MODEL_PINS.Legibility` is `gpt-5.6-luna`, described in the same file as "the cheap, fast pin for the two classes that answer a narrow question about something already read", while `sol` is documented as "the capable vision-and-reasoning pin ... which is what reading a photographed paper test needs". Story 3.4 is the first vision use of the class. The pin predates this story (shipped with the `ai` module), so either the pin or its rationale comment is now wrong.
+status: open
+
+### DW-144: A foreground, in-request call inherits the worker-sized 180s timeout and 3 attempts, so a worst case holds the parent's HTTP request open for ~9 minutes.
+origin: spec-deferred f6a315c872b9
+location: apps/api/src/ai/ai-config.ts
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: medium
+reason: `DEFAULT_AI_TIMEOUT_MS = 180_000` and `DEFAULT_AI_MAX_ATTEMPTS = 3` were sized for the asynchronous Extraction/Generation paths. Nothing gives the Legibility class a shorter timeout or a single attempt, and the web client sets no abort. Any sane proxy or browser timeout fires first, and the parent's retry pays for the tokens twice.
+status: open
+
+### DW-145: `allowance` now imports the whole `SourceTestModule` rather than the existing narrow `SOURCE_TEST_READER` seam, to run one count.
+origin: spec-deferred 1424b7aba131
+location: apps/api/src/allowance/allowance.module.ts
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: low
+reason: The spec's wording ("read by `allowance` through `SourceTestService`") is what was implemented, and it is followed exactly. But `sourcetest` already publishes a narrow reader token for cross-module reads (used by `practicetest`), and importing the full module drags the controller, `PageIngestService`, `AiModule` and the parent-JWT `JwtModule` registration behind every consumer of `AllowanceModule`, including `admin`. `countSubmittedIn` arguably belongs on the reader interface.
+status: open
+
+### DW-146: The combined `pnpm test` run is flaky: loading all 43 api spec files into one process intermittently yields 404s from a partially-booted app.
+origin: spec-deferred d0f06f8e2a3c
+location: apps/api/vitest.config.ts
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: medium
+reason: Four consecutive runs produced four disjoint failure sets, always in specs the story does not touch (extraction, parent-pin, rate-limit, practice-test, student-profile), with `POST /api/auth/sign-up` answering 404. Reproduced on the pre-change tree by stashing the whole diff: 1 failure in `practice-test.int-spec` out of 868. The same files are green split as `vitest run src` (439/439) and `test:int` (614/614). Pre-existing harness problem, not a regression from this story, but it makes the combined run unusable as a gate.
+status: open
+
+### DW-147: The capture screen's unit specs assert on component source text read with `readFileSync` rather than on rendered markup.
+origin: spec-deferred 89083013d90a
+location: apps/web/src/app/parent/capture/page.spec.tsx
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: low
+reason: `page.spec.tsx` pins behaviour with `PAGE_SOURCE.toContain("pending === 'check'")` and `panel.indexOf('legibility-cost') < panel.indexOf('legibility-continue')`. These break on a reformat and pass on a semantically broken refactor. The file used this pattern before this story and the same file already has a working `renderToStaticMarkup` helper for `PageStrip`, so the rendered half is reachable.
+status: open
+
+### DW-148: "No log line ever carries image bytes or page content" is asserted for the cost row and the HTTP body, but never for logs.
+origin: spec-deferred 9b262abff494
+location: apps/api/test/source-test.int-spec.ts
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: low
+reason: `source-test.int-spec.ts` pins the exact key set of the `ai_call` row and asserts the response body carries no `storagePath`, `.uploads` or base64. Nothing observes the log stream, and the test harness records the prompt without asserting on it.
+status: open
+
+### DW-149: The web copy constants `capture.submit` / `capture.submitting` now render the "Check pages" / "Checking…" control's label and pending text, while the actual commit control uses
+origin: spec-deferred 2a1cc8b12ce8
+location: apps/web/src/copy/parent.ts, apps/web/src/app/parent/capture/page.tsx
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: low
+reason: A prior review pass in this same story already fixed the functional half of this (the commit button briefly rendered "Checking…" because it read `capture.submitting` directly) by adding `capture.legibility.committing` for the commit control, but left `capture.submit` / `capture.submitting` bound to the check button under their original, now-misleading names. A future reader editing "submit" copy is likely to touch the wrong control.
+status: open
+
+### DW-150: Two genuinely concurrent legibility-check requests for the same page set can each dispatch a provider call before either sees the other's compare-and-set write, so a real double tap can spend two
+origin: spec-deferred 16ad2d9afa35
+location: apps/api/src/sourcetest/source-test.service.ts
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: medium
+reason: `checkLegibility` calls `this.ai.run(...)` before the transaction that performs the `pageSetStamp` compare-and-set. The loser of the race is answered the winner's stored result rather than a duplicate charge, so stored data and the parent-facing outcome stay correct, but the provider spend itself is not deduplicated. Closing this needs a claim/lock ahead of the provider call (e.g. an in-flight marker), which is a design change beyond this pass's patch scope. Sibling concern to the existing "free, uncapped, re-runnable" deferred item above, but specific to true request concurrency rather than sequential re-runs over time.
+status: open
+
+### DW-151: The new `source_test` composite index (`parentAccountId, status, submittedAt`) is created with a plain `CREATE INDEX`, not `CREATE INDEX CONCURRENTLY`, so replaying this migration against a populated
+origin: spec-deferred 6d48de11fe67
+location: apps/api/prisma/migrations/20260926090000_add_page_legibility/migration.sql
+source_spec: `spec-3-4-legibility-check-upload-commit.md`
+severity: low
+reason: `apps/api/prisma/migrations/20260926090000_add_page_legibility/migration.sql` adds the index inside the same transactional migration as the rest of the schema change. `CONCURRENTLY` cannot run inside a transaction, so avoiding the lock needs a non-transactional migration step, which is an operational/deployment decision, not a one-line fix. Low impact at current table size; worth revisiting before a production table is large enough for the lock duration to matter.
+status: open

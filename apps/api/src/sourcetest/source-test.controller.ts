@@ -266,8 +266,33 @@ export class SourceTestController {
   }
 
   /**
-   * Refused server-side while zero pages remain or either half of the
-   * classification is unset, whatever the client did.
+   * Runs the one batch legibility check over every page, and answers with the
+   * Source Test carrying the verdicts.
+   *
+   * No body: the page set *is* the request, and a body naming pages would be a
+   * second place the batch's membership is decided. Foreground and in-request
+   * by decision (AD-4) — the parent is still holding the paper, so the answer
+   * has to arrive while a retake is still possible.
+   *
+   * It runs once. A second, sequential call answers with the stored result
+   * and costs nothing. Two requests that race each other may each dispatch a
+   * provider call before either sees the other's write — only the winner's
+   * verdicts are stored, so a genuine double tap can still spend two provider
+   * calls (tracked as a deferred cost-control gap, not a correctness one).
+   */
+  @Post(':id/legibility')
+  @HttpCode(HttpStatus.OK)
+  checkLegibility(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SourceTestView> {
+    return this.sourceTests.checkLegibility(req.elevated!.parentAccountId, id);
+  }
+
+  /**
+   * Refused server-side while zero pages remain, either half of the
+   * classification is unset, or the legibility check has not run — whatever
+   * the client did.
    */
   @Post(':id/submit')
   @HttpCode(HttpStatus.OK)

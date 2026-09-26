@@ -30,6 +30,7 @@ const { AiService } = await import('../src/ai/ai.service.js');
 const { SOURCE_TEST_NOT_FOUND } = await import('../src/sourcetest/source-test-policy.js');
 const {
   bearer,
+  checkLegibility,
   bindDevice,
   createGradeLevel,
   createHarness,
@@ -151,6 +152,8 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
         .expect(201);
     }
 
+    // The submit gate: the batch check has to have run over this page set.
+    await checkLegibility(h, token, sourceTestId);
     await server()
       .post(`/api/parent/source-tests/${sourceTestId}/submit`)
       .set('Authorization', bearer(token))

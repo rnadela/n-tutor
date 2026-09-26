@@ -12,6 +12,11 @@ const GRADE_LEVEL = 'grade-level-1';
 const BOTH = { subjectId: SUBJECT, gradeLevelId: GRADE_LEVEL };
 const NEITHER = { subjectId: null, gradeLevelId: null };
 
+/** The instant the batch check ran. Its value is never read, only its presence. */
+const CHECKED = '2026-01-01T00:00:00.000Z';
+/** A classified, checked upload: the state every gate is satisfied in. */
+const READY = { ...BOTH, legibilityCheckedAt: CHECKED };
+
 describe('isClassified', () => {
   it('holds only when both references are set', () => {
     expect(isClassified(BOTH)).toBe(true);
@@ -22,31 +27,42 @@ describe('isClassified', () => {
 });
 
 describe('submitBlockedReasons', () => {
-  it('is empty when a classified upload holds a page that landed', () => {
-    expect(submitBlockedReasons(BOTH, 1)).toEqual([]);
+  it('is empty when a classified, checked upload holds a page that landed', () => {
+    expect(submitBlockedReasons(READY, 1)).toEqual([]);
   });
 
   it('names the pages alone when only they are missing', () => {
-    expect(submitBlockedReasons(BOTH, 0)).toEqual(['pages']);
+    expect(submitBlockedReasons(READY, 0)).toEqual(['pages']);
   });
 
   it('names the classification alone when only it is missing', () => {
-    expect(submitBlockedReasons({ subjectId: null, gradeLevelId: GRADE_LEVEL }, 2)).toEqual([
-      'classification',
-    ]);
+    expect(
+      submitBlockedReasons(
+        { subjectId: null, gradeLevelId: GRADE_LEVEL, legibilityCheckedAt: CHECKED },
+        2,
+      ),
+    ).toEqual(['classification']);
   });
 
-  it('names both, in reading order, when both are unmet', () => {
+  it('names the check alone when only it has not run', () => {
+    expect(submitBlockedReasons({ ...BOTH, legibilityCheckedAt: null }, 2)).toEqual(['legibility']);
+  });
+
+  it('names all three, in reading order, when none is met', () => {
     // A parent told only about the pages would fix them and be refused again
     // for a requirement nothing had mentioned.
-    expect(submitBlockedReasons(NEITHER, 0)).toEqual(['pages', 'classification']);
+    expect(submitBlockedReasons({ ...NEITHER, legibilityCheckedAt: null }, 0)).toEqual([
+      'pages',
+      'classification',
+      'legibility',
+    ]);
   });
 
   it('counts only the pages that landed, as the server’s gate does', () => {
     // The screen passes the `Ready` count; zero of those is zero pages
     // however many rows are still uploading.
-    expect(submitBlockedReasons(BOTH, 0)).toContain('pages');
-    expect(submitBlockedReasons(BOTH, 1)).not.toContain('pages');
+    expect(submitBlockedReasons(READY, 0)).toContain('pages');
+    expect(submitBlockedReasons(READY, 1)).not.toContain('pages');
   });
 });
 

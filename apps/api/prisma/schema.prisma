@@ -348,6 +348,21 @@ enum PageImageState {
   @@map("page_image_state")
 }
 
+/// How confidently one photographed page could be read (AD-29).
+///
+/// A per-page verdict, never a whole-test pass/fail: the check names the page
+/// that is blurry so the retake it offers can be scoped to that page alone.
+/// `Low` is the only failing verdict, and it is advisory — proceeding over one
+/// is always allowed, because the submit gate asserts the check *ran*, never
+/// what it said.
+enum PageLegibility {
+  Low
+  Medium
+  High
+
+  @@map("page_legibility")
+}
+
 /// One photographed paper test: 1–10 Page Images in an explicit order.
 ///
 /// Three rules define the row:
@@ -372,6 +387,16 @@ model SourceTest {
   expiresAt        DateTime
   /// Null until submission; set once, in the same transaction as the status.
   submittedAt      DateTime?
+
+  /// When the one batch legibility check ran over this exact page set (AD-29).
+  ///
+  /// Nullable because "not checked" is precisely the state the submit gate
+  /// refuses. It is the whole gate: submission is refused while this is null
+  /// and accepted whatever the verdicts say. Adding, retaking or deleting a
+  /// page clears it along with every page's verdict, because the batch no
+  /// longer covers the set that would be committed; reordering does not, since
+  /// the verdicts hang off the page rows and move with them.
+  legibilityCheckedAt DateTime?
 
   /// The classification, held as ids and never as copied labels: the names are
   /// resolved on read through `admin`'s TaxonomyService, exactly as a Student
@@ -420,6 +445,12 @@ model SourceTest {
   /// in the migration; without it "one draft per child" would rest on a read
   /// followed by a write, which two concurrent opens slip straight through.
   @@index([parentAccountId, studentProfileId, status])
+  /// The derived Upload Allowance count (AD-14): this account's Submitted rows
+  /// whose `submittedAt` falls in the period window. Indexed because the count
+  /// *is* the charge — there is no counter column to read instead — so it runs
+  /// on every surface that shows an allowance, and its three terms are exactly
+  /// the columns in this order: equality, equality, then the range.
+  @@index([parentAccountId, status, submittedAt])
   /// The expiry filter every read carries.
   @@index([expiresAt])
   /// The Grade Level a Source Test was classified under: the axis Epic 4's
@@ -452,6 +483,10 @@ model PageImage {
   width        Int?
   height       Int?
   byteSize     Int?
+  /// This page's own readability verdict from the one batch check (AD-29).
+  /// Null means the check has not run over the current page set — cleared
+  /// whenever the set or this page's bytes change.
+  legibility   PageLegibility?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 

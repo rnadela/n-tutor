@@ -11,8 +11,10 @@ import {
   canSubmit,
   expiryFrom,
   isAllowedMime,
+  isChecked,
   isClassified,
   isExpired,
+  isPageReadable,
   renumbered,
   reorderedOrThrow,
   storagePathFor,
@@ -146,5 +148,28 @@ describe('the classification gate', () => {
     // promise about the caller.
     const disabledLater = { subjectId: SUBJECT, gradeLevelId: GRADE_LEVEL, enabled: false };
     expect(isClassified(disabledLater)).toBe(true);
+  });
+});
+
+describe('the legibility rules', () => {
+  it('flags Low and nothing else', () => {
+    // The threshold between "readable" and "blurry" is stated exactly here,
+    // and the two passing verdicts are asserted rather than assumed: a rule
+    // that only ever tested Low would still pass if Medium started failing.
+    expect(isPageReadable('Low')).toBe(false);
+    expect(isPageReadable('Medium')).toBe(true);
+    expect(isPageReadable('High')).toBe(true);
+  });
+
+  it('reads an unchecked page as readable, not as flagged', () => {
+    // A page nobody has looked at is not a page somebody found wanting. The
+    // gate that cares whether the check ran is `isChecked`, and conflating the
+    // two would make a fresh draft look full of blurry pages.
+    expect(isPageReadable(null)).toBe(true);
+  });
+
+  it('gates the submit on the check having run, and on nothing it said', () => {
+    expect(isChecked({ legibilityCheckedAt: new Date('2026-09-27T10:00:00.000Z') })).toBe(true);
+    expect(isChecked({ legibilityCheckedAt: null })).toBe(false);
   });
 });

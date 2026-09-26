@@ -7,7 +7,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const {
   CLASSIFICATION_REQUIRED,
+  CLASSIFICATION_REQUIRED_FOR_CHECK,
   GRADE_LEVEL_ID_INVALID,
+  LEGIBILITY_CHECK_FAILED,
+  LEGIBILITY_CHECK_REQUIRED,
   MAX_PAGES,
   MAX_PAGE_BYTES,
   NOTHING_TO_CLASSIFY,
@@ -24,6 +27,8 @@ const {
   pageTooLarge,
   resetSourceTestRuntime,
 } = await import('../src/sourcetest/source-test-policy.js');
+const { AiService } = await import('../src/ai/ai.service.js');
+const { SourceTestService } = await import('../src/sourcetest/source-test.service.js');
 const { GRADE_LEVEL_NOT_SELECTABLE, PROFILE_NOT_FOUND } = await import(
   '../src/identity/student-profile.service.js'
 );
@@ -84,6 +89,8 @@ describe('Source Tests: page management before submit', () => {
     await resetTaxonomy(h.prisma);
     await resetParentAccounts(h.prisma);
     h.mail.reset();
+    // The captured seam, so every count below is of this test's own calls.
+    h.ai.reset();
   });
 
   /** A parent standing inside Parent View, with the bearer its routes take. */
@@ -158,6 +165,45 @@ describe('Source Tests: page management before submit', () => {
       .send({ subjectId: subject.id })
       .expect(200);
     return subject;
+  }
+
+  /**
+   * Runs the one batch legibility check through the real route.
+   *
+   * It is a submit gate, so every test whose subject is something *after* the
+   * commit has to get past it first — exactly as `classifyDraft` above exists
+   * for the classification gate.
+   */
+  function legibility(token: string, sourceTestId: string) {
+    return server()
+      .post(`/api/parent/source-tests/${sourceTestId}/legibility`)
+      .set('Authorization', bearer(token));
+  }
+
+  async function runCheck(token: string, sourceTestId: string): Promise<void> {
+    await legibility(token, sourceTestId).expect(200);
+  }
+
+  /** Every `ai_call` row this account has, newest last. Identifiers only. */
+  function costRows(parentAccountId?: string) {
+    return h.prisma.aiCall.findMany({
+      where: parentAccountId === undefined ? {} : { parentAccountId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /** The stored check instant and every page's stored verdict. */
+  async function storedCheck(sourceTestId: string) {
+    const row = await h.prisma.sourceTest.findUniqueOrThrow({
+      where: { id: sourceTestId },
+      select: { legibilityCheckedAt: true },
+    });
+    const pages = await h.prisma.pageImage.findMany({
+      where: { sourceTestId },
+      orderBy: { ordinal: 'asc' },
+      select: { ordinal: true, legibility: true },
+    });
+    return { legibilityCheckedAt: row.legibilityCheckedAt, pages };
   }
 
   /**
@@ -630,6 +676,8 @@ describe('Source Tests: page management before submit', () => {
       await classifyDraft(draft);
       await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
 
+      // The submit gate: the batch check has to have run over this page set.
+      await runCheck(draft.token, draft.sourceTestId);
       const response = await server()
         .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
         .set('Authorization', bearer(draft.token))
@@ -649,6 +697,8 @@ describe('Source Tests: page management before submit', () => {
       const draft = await openDraft();
       await classifyDraft(draft);
       await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
+      // The submit gate: the batch check has to have run over this page set.
+      await runCheck(draft.token, draft.sourceTestId);
       await server()
         .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
         .set('Authorization', bearer(draft.token))
@@ -686,6 +736,8 @@ describe('Source Tests: page management before submit', () => {
       await classifyDraft(draft);
       const seeded = await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
       const [pageId] = seeded.body.pages.map((page: { id: string }) => page.id);
+      // The submit gate: the batch check has to have run over this page set.
+      await runCheck(draft.token, draft.sourceTestId);
       await server()
         .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
         .set('Authorization', bearer(draft.token))
@@ -1272,6 +1324,8 @@ describe('Source Tests: page management before submit', () => {
         const subject = await createSubject(h, { gradeLevelId: draft.gradeLevelId });
         await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
         await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
+        // The submit gate: the batch check has to have run over this page set.
+        await runCheck(draft.token, draft.sourceTestId);
         await server()
           .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
           .set('Authorization', bearer(draft.token))
@@ -1350,6 +1404,8 @@ describe('Source Tests: page management before submit', () => {
         await classify(draft.token, draft.sourceTestId, { subjectId: subject.id }).expect(200);
         await addPage(draft.token, draft.sourceTestId, await photo()).expect(201);
 
+        // The submit gate: the batch check has to have run over this page set.
+        await runCheck(draft.token, draft.sourceTestId);
         const response = await server()
           .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
           .set('Authorization', bearer(draft.token))
@@ -1416,6 +1472,8 @@ describe('Source Tests: page management before submit', () => {
         expect(read.body.subjectName).toBe(subject.name);
 
         // And the gate asserts non-null, never enablement.
+        // The submit gate: the batch check has to have run over this page set.
+        await runCheck(draft.token, draft.sourceTestId);
         const submitted = await server()
           .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
           .set('Authorization', bearer(draft.token))
@@ -1447,6 +1505,526 @@ describe('Source Tests: page management before submit', () => {
         });
         expect(after).toEqual(before);
       });
+    });
+  });
+
+  /**
+   * The one batch legibility check (AD-4, AD-29), and the commit it gates.
+   *
+   * Every case runs on the `fake` transport (AD-22), which decides a page's
+   * verdict from its stored byte size: the deliberately tiny default photo
+   * reads `Low`, a larger one reads `High`. No env toggle and no per-test
+   * script arranges a flagged page.
+   */
+  describe('the legibility check', () => {
+    /** Below the fake's threshold: this page comes back flagged. */
+    const tiny = () => photo();
+    /** Comfortably above it: this page comes back readable. */
+    const legible = () => photo({ width: 600, height: 800 });
+
+    it('answers a verdict per page and writes exactly one cost row', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+
+      const response = await legibility(draft.token, draft.sourceTestId).expect(200);
+
+      // Per page, never a whole-test verdict: there is no field on the view
+      // that could carry one.
+      expect(response.body.pages.map((page: { legibility: string }) => page.legibility)).toEqual([
+        'High',
+        'Low',
+        'High',
+      ]);
+      expect(response.body.legibilityCheckedAt).not.toBeNull();
+
+      // One call for the whole batch, carrying all three pages.
+      expect(h.ai.sent).toHaveLength(1);
+      expect(h.ai.sent[0]).toMatchObject({
+        callClass: 'Legibility',
+        modality: 'vision',
+        imageCount: 3,
+      });
+
+      const rows = await costRows(draft.parentAccountId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.callClass).toBe('Legibility');
+      expect(rows[0]!.inputTokens).toBeGreaterThan(0);
+      expect(rows[0]!.costMicros).toBeGreaterThan(0);
+    });
+
+    it('answers the stored verdicts again without a second provider call', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      const first = await legibility(draft.token, draft.sourceTestId).expect(200);
+
+      const second = await legibility(draft.token, draft.sourceTestId).expect(200);
+
+      expect(second.body.legibilityCheckedAt).toBe(first.body.legibilityCheckedAt);
+      expect(second.body.pages).toEqual(first.body.pages);
+      expect(h.ai.sent).toHaveLength(1);
+      expect(await costRows(draft.parentAccountId)).toHaveLength(1);
+    });
+
+    it('refuses a draft with no pages and makes no provider call', async () => {
+      const draft = await openDraft();
+      const response = await legibility(draft.token, draft.sourceTestId).expect(400);
+
+      expect(messagesOf(response)).toContain(NO_PAGES_TO_SUBMIT);
+      expect(h.ai.sent).toHaveLength(0);
+      expect(await costRows()).toHaveLength(0);
+      expect(await storedCheck(draft.sourceTestId)).toMatchObject({ legibilityCheckedAt: null });
+    });
+
+    it('refuses to check an unclassified draft and makes no provider call', async () => {
+      // The disabled "Check pages" control on the screen is a courtesy, the
+      // same way the disabled submit control is: a direct call must not be
+      // able to spend a provider call on a Source Test the parent has not
+      // classified yet.
+      const draft = await openDraft();
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+
+      const response = await legibility(draft.token, draft.sourceTestId).expect(400);
+
+      expect(messagesOf(response)).toContain(CLASSIFICATION_REQUIRED_FOR_CHECK);
+      expect(h.ai.sent).toHaveLength(0);
+      expect(await costRows()).toHaveLength(0);
+      expect(await storedCheck(draft.sourceTestId)).toMatchObject({ legibilityCheckedAt: null });
+    });
+
+    it('stores nothing and stays retryable on a transport fault', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      h.ai.failNext('transport');
+
+      const response = await legibility(draft.token, draft.sourceTestId).expect(503);
+      expect(messagesOf(response)).toContain(LEGIBILITY_CHECK_FAILED);
+      expect(await storedCheck(draft.sourceTestId)).toEqual({
+        legibilityCheckedAt: null,
+        pages: [{ ordinal: 1, legibility: null }],
+      });
+      // A fault that produced no usable answer is not a charge.
+      expect(await costRows()).toHaveLength(0);
+
+      // And the same call succeeds afterwards: nothing was stored, so nothing
+      // has to be undone first.
+      await legibility(draft.token, draft.sourceTestId).expect(200);
+      expect(await costRows(draft.parentAccountId)).toHaveLength(1);
+    });
+
+    it('stores nothing on a schema-invalid payload', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      h.ai.failNext('schema');
+
+      const response = await legibility(draft.token, draft.sourceTestId).expect(503);
+      expect(messagesOf(response)).toContain(LEGIBILITY_CHECK_FAILED);
+      expect(await storedCheck(draft.sourceTestId)).toEqual({
+        legibilityCheckedAt: null,
+        pages: [{ ordinal: 1, legibility: null }],
+      });
+      expect(await costRows()).toHaveLength(0);
+    });
+
+    it('rejects a payload naming an ordinal the Source Test does not hold', async () => {
+      // The AD-30 case: a schema-valid payload about a page set that is not
+      // this one. Driven at the seam, because no transport produces it by
+      // itself — and the whole payload is refused, not the stray verdict.
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+
+      const ai = h.moduleRef.get(AiService);
+      const real = ai.run.bind(ai);
+      ai.run = (async (req: { schema: unknown }) => {
+        await real(req as never);
+        return {
+          payload: {
+            pages: [
+              { ordinal: 1, confidence: 'High' },
+              { ordinal: 9, confidence: 'Low' },
+            ],
+          },
+          usage: {
+            model: 'x',
+            inputTokens: 1,
+            outputTokens: 1,
+            costMicros: 1,
+            latencyMs: 1,
+          },
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }) as any;
+      try {
+        const response = await legibility(draft.token, draft.sourceTestId).expect(503);
+        expect(messagesOf(response)).toContain(LEGIBILITY_CHECK_FAILED);
+      } finally {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ai.run = real as any;
+      }
+
+      expect(await storedCheck(draft.sourceTestId)).toEqual({
+        legibilityCheckedAt: null,
+        pages: [
+          { ordinal: 1, legibility: null },
+          { ordinal: 2, legibility: null },
+        ],
+      });
+    });
+
+    /**
+     * Drives one check with `mutate` running *between* the provider answering
+     * and the transaction that would store its verdicts — the window a real
+     * parent opens by tapping "add", "retake" or "delete" while the call is in
+     * flight.
+     *
+     * `mutate` goes through `SourceTestService` rather than over HTTP: a
+     * second supertest request issued while the outer one is still open binds
+     * a second listener to the same server, and the same write path is
+     * exercised either way.
+     */
+    async function checkWith(
+      draft: { token: string; sourceTestId: string },
+      mutate: (sourceTests: InstanceType<typeof SourceTestService>) => Promise<void>,
+    ) {
+      const sourceTests = h.moduleRef.get(SourceTestService);
+      const ai = h.moduleRef.get(AiService);
+      const real = ai.run.bind(ai);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ai.run = (async (req: any) => {
+        const answer = await real(req);
+        await mutate(sourceTests);
+        return answer;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }) as any;
+      try {
+        return await legibility(draft.token, draft.sourceTestId);
+      } finally {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ai.run = real as any;
+      }
+    }
+
+    it('fails the check rather than reporting one when the page set moves mid-flight', async () => {
+      // Answering 200 here would hand back a view with `legibilityCheckedAt`
+      // still null under a response that says the check ran, and the screen
+      // would announce "the pages were checked" over a check that did not
+      // happen. Nothing was stored, so the request fails — retryably.
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      const seeded = await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      const [firstPageId] = seeded.body.pages.map((page: { id: string }) => page.id);
+
+      const response = await checkWith(draft, (sourceTests) =>
+        sourceTests.deletePage(draft.parentAccountId, draft.sourceTestId, firstPageId),
+      );
+
+      expect(response.status).toBe(503);
+      expect(messagesOf(response)).toContain(LEGIBILITY_CHECK_FAILED);
+      expect(await storedCheck(draft.sourceTestId)).toEqual({
+        legibilityCheckedAt: null,
+        pages: [{ ordinal: 1, legibility: null }],
+      });
+
+      // And the parent simply checks again over the set they now have.
+      const again = await legibility(draft.token, draft.sourceTestId).expect(200);
+      expect(again.body.legibilityCheckedAt).not.toBeNull();
+      expect(again.body.pages.map((page: { legibility: string }) => page.legibility)).toEqual([
+        'Low',
+      ]);
+    });
+
+    it('fails the check when a page is retaken mid-flight, though the ordinals never moved', async () => {
+      // The case ordinals cannot see: a retake replaces one page's bytes and
+      // leaves `1..N` exactly as it was, so a re-assert on the ordinal set
+      // alone would file a verdict against a photograph nobody judged.
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      const seeded = await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      const [pageId] = seeded.body.pages.map((page: { id: string }) => page.id);
+
+      const response = await checkWith(draft, async (sourceTests) => {
+        await sourceTests.retakePage(
+          draft.parentAccountId,
+          draft.sourceTestId,
+          pageId,
+          await legible(),
+        );
+      });
+
+      expect(response.status).toBe(503);
+      expect(messagesOf(response)).toContain(LEGIBILITY_CHECK_FAILED);
+      // The `Low` the provider answered for the old bytes is nowhere, and the
+      // ordinal set it would have been filed against is unchanged.
+      expect(await storedCheck(draft.sourceTestId)).toEqual({
+        legibilityCheckedAt: null,
+        pages: [{ ordinal: 1, legibility: null }],
+      });
+
+      // Re-checked, the new bytes get their own verdict.
+      const again = await legibility(draft.token, draft.sourceTestId).expect(200);
+      expect(again.body.pages[0]!.legibility).toBe('High');
+    });
+
+    it('answers the winning verdict, not a false failure, when a concurrent check wins the same page set', async () => {
+      // Two requests for the same page set can both pass the pre-call
+      // `isChecked` read and both reach the provider; only one write wins the
+      // compare-and-set. The loser must not be told the check failed when in
+      // fact a check — its own verdicts, since the page set never moved —
+      // was stored by the winner.
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+
+      const response = await checkWith(draft, async () => {
+        // Stands in for a concurrent request's own write, over the same page
+        // set: the compare-and-set this call is about to run loses to it.
+        // Written directly rather than through another `checkLegibility`
+        // call, which would re-enter the very `ai.run` override this test
+        // installs.
+        await h.prisma.sourceTest.updateMany({
+          where: {
+            id: draft.sourceTestId,
+            parentAccountId: draft.parentAccountId,
+            status: 'Draft',
+            legibilityCheckedAt: null,
+          },
+          data: { legibilityCheckedAt: new Date() },
+        });
+        await h.prisma.pageImage.updateMany({
+          where: { sourceTestId: draft.sourceTestId },
+          data: { legibility: 'Low' },
+        });
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body.legibilityCheckedAt).not.toBeNull();
+      expect(response.body.pages[0]!.legibility).toBe('Low');
+    });
+
+    it('does not let an add leave a submittable unchecked page set behind', async () => {
+      // The submit gate's own claim: the flip to `Ready` and the check-clear
+      // are one transaction, so there is no instant at which the new page is
+      // committable and the old check still stands.
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      await runCheck(draft.token, draft.sourceTestId);
+
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+
+      const refused = await server()
+        .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+        .set('Authorization', bearer(draft.token))
+        .expect(400);
+      expect(messagesOf(refused)).toContain(LEGIBILITY_CHECK_REQUIRED);
+    });
+
+    it('leaves a committed upload\u2019s verdicts alone: the clear is account- and Draft-scoped', async () => {
+      // `clearCheck` is a write like every other one here, so it carries the
+      // account and the state in the statement that writes. A submitted
+      // upload's stored verdicts are part of what was committed.
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      await runCheck(draft.token, draft.sourceTestId);
+      await server()
+        .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+        .set('Authorization', bearer(draft.token))
+        .expect(200);
+
+      const after = await storedCheck(draft.sourceTestId);
+      expect(after.legibilityCheckedAt).not.toBeNull();
+      expect(after.pages).toEqual([{ ordinal: 1, legibility: 'Low' }]);
+    });
+
+    it('clears the check when a page is added', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      await runCheck(draft.token, draft.sourceTestId);
+
+      const after = await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+
+      expect(after.body.legibilityCheckedAt).toBeNull();
+      expect(after.body.pages.every((page: { legibility: null }) => page.legibility === null)).toBe(
+        true,
+      );
+    });
+
+    it('clears the check when a page is retaken', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      const seeded = await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      const [pageId] = seeded.body.pages.map((page: { id: string }) => page.id);
+      await runCheck(draft.token, draft.sourceTestId);
+
+      const after = await server()
+        .put(`/api/parent/source-tests/${draft.sourceTestId}/pages/${pageId}`)
+        .set('Authorization', bearer(draft.token))
+        .attach('file', await legible(), { filename: 'retake.jpg', contentType: 'image/jpeg' })
+        .expect(200);
+
+      expect(after.body.legibilityCheckedAt).toBeNull();
+      expect(after.body.pages[0]!.legibility).toBeNull();
+
+      // And it may be re-run, which is what makes the result's own "retake
+      // page N" action honest.
+      const rechecked = await legibility(draft.token, draft.sourceTestId).expect(200);
+      expect(rechecked.body.pages[0]!.legibility).toBe('High');
+    });
+
+    it('clears the check when a page is deleted', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      const seeded = await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      const [pageId] = seeded.body.pages.map((page: { id: string }) => page.id);
+      await runCheck(draft.token, draft.sourceTestId);
+
+      await server()
+        .delete(`/api/parent/source-tests/${draft.sourceTestId}/pages/${pageId}`)
+        .set('Authorization', bearer(draft.token))
+        .expect(204);
+
+      expect(await storedCheck(draft.sourceTestId)).toEqual({
+        legibilityCheckedAt: null,
+        pages: [{ ordinal: 1, legibility: null }],
+      });
+    });
+
+    it('survives a reorder — the ordinals moved, the bytes did not', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      const second = await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      const ids = second.body.pages.map((page: { id: string }) => page.id);
+      const checked = await legibility(draft.token, draft.sourceTestId).expect(200);
+      expect(checked.body.pages.map((page: { legibility: string }) => page.legibility)).toEqual([
+        'Low',
+        'High',
+      ]);
+
+      const reordered = await server()
+        .put(`/api/parent/source-tests/${draft.sourceTestId}/pages/order`)
+        .set('Authorization', bearer(draft.token))
+        .send({ pageIds: [ids[1], ids[0]] })
+        .expect(200);
+
+      expect(reordered.body.legibilityCheckedAt).toBe(checked.body.legibilityCheckedAt);
+      // The verdicts moved with their rows: what was page 2 and readable is
+      // now page 1 and still readable.
+      expect(reordered.body.pages.map((page: { legibility: string }) => page.legibility)).toEqual([
+        'High',
+        'Low',
+      ]);
+      expect(h.ai.sent).toHaveLength(1);
+    });
+
+    it('refuses a submit before the check has run, and leaves it a Draft', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+
+      const response = await server()
+        .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+        .set('Authorization', bearer(draft.token))
+        .expect(400);
+
+      expect(messagesOf(response)).toContain(LEGIBILITY_CHECK_REQUIRED);
+      const row = await h.prisma.sourceTest.findUniqueOrThrow({
+        where: { id: draft.sourceTestId },
+        select: { status: true, submittedAt: true },
+      });
+      expect(row).toEqual({ status: 'Draft', submittedAt: null });
+      expect(await h.prisma.extractionJob.count()).toBe(0);
+    });
+
+    it('accepts a submit over a flagged page — the check is advisory', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await tiny()).expect(201);
+      const checked = await legibility(draft.token, draft.sourceTestId).expect(200);
+      expect(checked.body.pages[0]!.legibility).toBe('Low');
+
+      const submitted = await server()
+        .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+        .set('Authorization', bearer(draft.token))
+        .expect(200);
+      expect(submitted.body.status).toBe('Submitted');
+    });
+
+    it('refuses the check on a submitted Source Test with the 409', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      await runCheck(draft.token, draft.sourceTestId);
+      await server()
+        .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
+        .set('Authorization', bearer(draft.token))
+        .expect(200);
+
+      const response = await legibility(draft.token, draft.sourceTestId).expect(409);
+      expect(messagesOf(response)).toContain(SOURCE_TEST_NOT_DRAFT);
+    });
+
+    it('answers the vanished-upload 404 for an expired draft', async () => {
+      const draft = await openDraft();
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      await h.prisma.sourceTest.update({
+        where: { id: draft.sourceTestId },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+
+      const response = await legibility(draft.token, draft.sourceTestId).expect(404);
+      expect(messagesOf(response)).toContain(SOURCE_TEST_NOT_FOUND);
+    });
+
+    it('answers 404 for another account\u2019s Source Test, never 403', async () => {
+      const mine = await elevatedParent();
+      const theirs = await openDraft();
+      await addPage(theirs.token, theirs.sourceTestId, await legible()).expect(201);
+
+      const response = await legibility(mine.token, theirs.sourceTestId).expect(404);
+
+      expect(messagesOf(response)).toContain(SOURCE_TEST_NOT_FOUND);
+      expect(h.ai.sent).toHaveLength(0);
+      expect(await storedCheck(theirs.sourceTestId)).toMatchObject({ legibilityCheckedAt: null });
+    });
+
+    it('carries no image bytes in the cost row or in the response body', async () => {
+      const draft = await openDraft();
+      await classifyDraft(draft);
+      await addPage(draft.token, draft.sourceTestId, await legible()).expect(201);
+      const response = await legibility(draft.token, draft.sourceTestId).expect(200);
+
+      // Nothing on the row but identifiers, counts, money and time (AD-20).
+      const [row] = await costRows(draft.parentAccountId);
+      expect(Object.keys(row!).sort()).toEqual([
+        'callClass',
+        'correlationId',
+        'costMicros',
+        'createdAt',
+        'id',
+        'inputTokens',
+        'latencyMs',
+        'model',
+        'outputTokens',
+        'parentAccountId',
+      ]);
+
+      // And nothing in the answer points at, or carries, the stored bytes.
+      const body = JSON.stringify(response.body);
+      expect(body).not.toContain('storagePath');
+      expect(body).not.toContain('.uploads');
+      expect(body).not.toContain('base64');
     });
   });
 });

@@ -112,6 +112,12 @@ export interface PageImageView {
   width: number | null;
   height: number | null;
   byteSize: number | null;
+  /**
+   * This page's own readability verdict from the one batch check, or null
+   * while the check has not run over the current page set. Per page, never a
+   * whole-test pass/fail — the screen names the page it flags.
+   */
+  legibility: 'Low' | 'Medium' | 'High' | null;
   createdAt: string;
 }
 
@@ -134,6 +140,13 @@ export interface SourceTestView {
   subjectName: string | null;
   gradeLevelId: string | null;
   gradeLevelName: string | null;
+  /**
+   * When the one batch legibility check ran, or null while it has not. It is
+   * the whole of the server's third submit gate, so the screen reads it to
+   * know whether to offer the commit control at all — never a verdict, which
+   * blocks nothing.
+   */
+  legibilityCheckedAt: string | null;
   /** The page ceiling, stated by the API so the web app owns no copy of it. */
   maxPages: number;
   pages: PageImageView[];
@@ -840,6 +853,19 @@ export const parentApi = {
       `/parent/source-tests/${encodeURIComponent(id)}/classification`,
       { method: 'PATCH', headers: elevated(token), body: JSON.stringify(input) },
       parentCopy.capture.classification.failed,
+    ),
+
+  /**
+   * Runs the one batch legibility check. No body: the page set is the request.
+   *
+   * It runs once — a second call answers with the stored verdicts and costs
+   * nothing — so a double tap is not a double charge.
+   */
+  checkSourceTestLegibility: (token: string, id: string) =>
+    call<SourceTestView>(
+      `/parent/source-tests/${encodeURIComponent(id)}/legibility`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.capture.legibility.failed,
     ),
 
   submitSourceTest: (token: string, id: string) =>

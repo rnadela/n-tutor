@@ -4,6 +4,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { parentCopy } from '@/copy/parent';
+import { isPageReadable } from '@/lib/legibility';
 import { canMoveDown, canMoveUp, type MoveDirection } from '@/lib/page-order';
 import type { PageImageView } from '@/lib/parent-api';
 import { density, focusRing, rounded } from '@/theme/tokens';
@@ -93,6 +94,33 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
           <Typography component="span" sx={{ fontWeight: 700 }}>
             {parentCopy.capture.pageLabel(page.ordinal)}
           </Typography>
+
+          {/* The row's legibility state, once the check has run over this page
+              set: the strip is the ordered list that names each page's ordinal
+              *and* its readability.
+
+              Glyph **and** text, never colour alone — the glyph is hidden from
+              assistive technology and the word beside it is what is read, so a
+              parent who cannot tell the two colours apart still gets the
+              verdict. Absent before the check, because nothing has judged the
+              page and a badge would be inventing a verdict. */}
+          {page.legibility !== null && (
+            <Typography
+              component="span"
+              data-testid={`legibility-badge-${page.ordinal}`}
+              sx={{ color: isPageReadable(page) ? 'text.primary' : 'error.main' }}
+            >
+              <Box component="span" aria-hidden="true">
+                {isPageReadable(page) ? '\u2713 ' : '\u0021 '}
+              </Box>
+              {parentCopy.capture.legibility.verdictFor(
+                page.ordinal,
+                isPageReadable(page)
+                  ? parentCopy.capture.legibility.readable
+                  : parentCopy.capture.legibility.blurry,
+              )}
+            </Typography>
+          )}
 
           {editable && (
             <>

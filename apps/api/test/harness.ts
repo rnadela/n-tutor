@@ -316,6 +316,31 @@ function captureAi(ai: AiService): AiCapture {
   };
 }
 
+/**
+ * Runs the legibility check over a draft, exactly as the parent's screen does.
+ *
+ * It exists because the check is now a submit gate: every fixture that used to
+ * go straight from "pages added" to `POST .../submit` has to pass through it,
+ * and a helper is what keeps that one step from being restated in four specs.
+ *
+ * `resetAi` clears the captured seam afterwards, which is what a spec asserting
+ * on its *own* provider call wants — the check's call is fixture noise there,
+ * not part of what is under test. A spec that is asserting on the check itself
+ * passes `false` and reads the call it made.
+ */
+export async function checkLegibility(
+  h: Pick<Harness, 'app' | 'ai'>,
+  bearerToken: string,
+  sourceTestId: string,
+  options: { resetAi?: boolean } = {},
+): Promise<void> {
+  await request(h.app.getHttpServer())
+    .post(`/api/parent/source-tests/${sourceTestId}/legibility`)
+    .set('Authorization', bearer(bearerToken))
+    .expect(200);
+  if (options.resetAi !== false) h.ai.reset();
+}
+
 /** The `Set-Cookie` value for the parent session, or `undefined`. */
 export function sessionCookieFrom(response: {
   headers: Record<string, unknown>;

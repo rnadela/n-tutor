@@ -12,6 +12,7 @@
  * a list or re-derives an availability rule.
  */
 
+import { isChecked, type Checkable } from './legibility';
 import { canSubmitPages } from './page-order';
 import type { TaxonomyItem } from './parent-api';
 
@@ -33,27 +34,39 @@ export function isClassified(view: Classifiable): boolean {
 }
 
 /**
- * Which requirement the submit control is refused for. Two of them, so the
- * order is the order the screen states them in.
+ * Which requirement the submit control is refused for. Three of them, so the
+ * order is the order the screen states them in — and the order the parent can
+ * act on them in: pages first, then what the upload is of, then the check over
+ * the pages they ended up with.
  */
-export type SubmitBlocker = 'pages' | 'classification';
+export type SubmitBlocker = 'pages' | 'classification' | 'legibility';
 
 /**
  * Every unmet requirement, in reading order — empty when submission is offered.
  *
- * A list rather than a first-failure, because both can be unmet at once and a
- * parent told only about the pages would fix them and be refused again for the
- * classification they were never told about.
+ * A list rather than a first-failure, because more than one can be unmet at
+ * once and a parent told only about the pages would fix them and be refused
+ * again for the classification they were never told about.
  *
  * The page count is the count of pages that actually landed: the server's gate
  * counts `Ready` rows alone, so a page still uploading is not one yet. Whether
  * that count is enough is `canSubmitPages`'s sentence and is called rather than
  * restated — two copies of one bound are two things that can disagree.
+ *
+ * The legibility reason is whether the check **ran**, never what it said:
+ * `Low` is advisory and the server commits over it, so a rule that read a
+ * verdict here would disable a control the server would have honoured. This is
+ * the one function that decides why the submit is refused — `legibility.ts`
+ * re-exports the type rather than growing a second one.
  */
-export function submitBlockedReasons(view: Classifiable, readyPageCount: number): SubmitBlocker[] {
+export function submitBlockedReasons(
+  view: Classifiable & Checkable,
+  readyPageCount: number,
+): SubmitBlocker[] {
   const reasons: SubmitBlocker[] = [];
   if (!canSubmitPages(readyPageCount)) reasons.push('pages');
   if (!isClassified(view)) reasons.push('classification');
+  if (!isChecked(view)) reasons.push('legibility');
   return reasons;
 }
 

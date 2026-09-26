@@ -330,12 +330,14 @@ export const parentCopy = {
      * courtesy; this sentence is what makes the refusal legible, and the server
      * refuses a zero-page submission whatever the browser did.
      */
-    submitBlocked: (reasons: readonly ('pages' | 'classification')[]): string =>
+    submitBlocked: (reasons: readonly ('pages' | 'classification' | 'legibility')[]): string =>
       reasons
         .map((reason) =>
           reason === 'pages'
             ? 'Add at least one page before submitting.'
-            : 'Choose a subject and a grade level before submitting.',
+            : reason === 'classification'
+              ? 'Choose a subject and a grade level before submitting.'
+              : 'Check the pages before submitting.',
         )
         .join(' '),
 
@@ -387,6 +389,79 @@ export const parentCopy = {
        * administrator about a network fault sends them somewhere useless.
        */
       gradeLevelsFailed: 'The grade levels could not be loaded. Try again.',
+    },
+
+    /**
+     * The batch page check, and the commit it leads into.
+     *
+     * Two rules shape every string here. The verdict is stated per page and
+     * the page is named, because the retake it offers is scoped to that page
+     * alone. And the cost is stated in **words** before the commit control —
+     * one Upload Allowance, and nothing at all for leaving — because Story 9.6
+     * owns the parent-facing Allowances surface and no figure or counter is
+     * this screen's to show.
+     */
+    legibility: {
+      heading: 'How the pages read',
+      /** While the batch call is in flight. It is foreground, so it says so. */
+      checking: 'Checking how clearly the pages read…',
+      /**
+       * The badge on every row, as **text**. The glyph beside it is
+       * decorative; this is what a screen reader hears and what a parent who
+       * cannot tell the two colours apart reads.
+       */
+      readable: 'Readable',
+      blurry: 'Blurry',
+      /** The badge's accessible name, which names the page it is about. */
+      verdictFor: (ordinal: number, verdict: string) => `Page ${ordinal}: ${verdict}`,
+      /**
+       * The flag head. It names the pages rather than counting them, because
+       * the parent's next action is to point a camera at one of them.
+       */
+      flagged: (ordinals: readonly number[]) =>
+        ordinals.length === 0
+          ? ''
+          : ordinals.length === 1
+            ? `Page ${ordinals[0]} may be too blurry to read.`
+            : `Pages ${ordinals.slice(0, -1).join(', ')} and ${ordinals[ordinals.length - 1]} may be too blurry to read.`,
+      /** Said when nothing was flagged, so silence is never the only answer. */
+      allReadable: 'Every page reads clearly.',
+      /** The advisory sentence. It is a warning, and it says so plainly. */
+      advisory: 'This is a warning, not a block. Continuing is allowed.',
+      /** Scoped to one page, exactly as the strip's own retake control is. */
+      retakeFor: (ordinal: number) => `Retake page ${ordinal}`,
+      /**
+       * The commit control. It names the count so the parent knows what is
+       * about to be committed, flagged pages included.
+       */
+      continueWith: (count: number) =>
+        count === 1 ? 'Continue with 1 page' : `Continue with all ${count} pages`,
+      /**
+       * FR-31's two halves, stated beforehand and in words. No figure and no
+       * counter: the parent-facing Allowances surface is Story 9.6's.
+       */
+      cost: 'Continuing commits this upload and uses one upload allowance.',
+      noCost: 'Nothing is used if you leave without continuing.',
+      /**
+       * While the commit is in flight. Distinct from `capture.submitting`,
+       * which now says "Checking…" and belongs to the control before this
+       * one: a commit button that reports checking describes the wrong step
+       * at the one moment the allowance is actually spent.
+       */
+      committing: 'Committing the upload…',
+      /** Announced from the answer the server returned, never predicted. */
+      checked: (flagged: number) =>
+        flagged === 0
+          ? 'The pages were checked. Every page reads clearly.'
+          : flagged === 1
+            ? 'The pages were checked. One page may be too blurry to read.'
+            : `The pages were checked. ${flagged} pages may be too blurry to read.`,
+      /**
+       * One sentence for the transport fault and the content fault alike:
+       * from the parent's side they are the same fact, nothing was stored,
+       * and the check may be run again.
+       */
+      failed: 'The pages could not be checked. Try again.',
     },
 
     /**

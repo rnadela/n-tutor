@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { AiModule } from '../ai/ai.module.js';
 import { requireParentJwtSecret } from '../common/env.js';
 import { TaxonomyModule } from '../admin/taxonomy.module.js';
 import { ExtractionModule } from '../extraction/extraction.module.js';
@@ -34,6 +35,10 @@ import { SOURCE_TEST_READER } from './source-test-reader.js';
  */
 @Module({
   imports: [
+    // The one thing this module may not do itself: make a provider call. The
+    // legibility prompt stays here under the AD-17 carve-out; the client, the
+    // pin, the timeout and the cost row are all `ai`'s.
+    AiModule,
     JwtModule.registerAsync({
       useFactory: () => ({ secret: requireParentJwtSecret() }),
     }),

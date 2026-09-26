@@ -123,6 +123,33 @@ export const SUBJECT_NOT_AVAILABLE = 'That subject is not available for that gra
 /** The submit gate's own refusal, distinct from the page-count one. */
 export const CLASSIFICATION_REQUIRED = 'Choose a subject and a grade level before submitting.';
 
+/**
+ * The legibility check's own classification gate. A direct call must not be
+ * able to spend a provider call on a Source Test the parent has not
+ * classified yet, the same reason the submit gate above exists.
+ */
+export const CLASSIFICATION_REQUIRED_FOR_CHECK =
+  'Choose a subject and a grade level before checking pages.';
+
+/**
+ * The third submit gate: the check has to have run over this page set.
+ *
+ * It gates on the check having *happened*, never on what it said — `Low` is a
+ * warning and is never a refusal (AD-29). The disabled control on the screen is
+ * a courtesy; this is what a caller who never saw the screen gets.
+ */
+export const LEGIBILITY_CHECK_REQUIRED = 'Check the pages before submitting.';
+
+/**
+ * The check itself could not be completed — the provider could not be reached,
+ * or answered with something the payload rules reject.
+ *
+ * One sentence for both, on purpose: from the parent's side they are the same
+ * fact, and the difference between them is not something they can act on. It
+ * says the check may be run again, because it may: nothing was stored.
+ */
+export const LEGIBILITY_CHECK_FAILED = 'The pages could not be checked. Try again.';
+
 /** A classification patch that would change nothing is a mistake, not a no-op. */
 export const NOTHING_TO_CLASSIFY = 'Choose a subject or a grade level.';
 
@@ -241,6 +268,30 @@ export function isClassified(row: {
   gradeLevelId: string | null;
 }): boolean {
   return row.subjectId !== null && row.gradeLevelId !== null;
+}
+
+/**
+ * Whether one page's stored verdict is a readable one.
+ *
+ * `Low` is the only failing verdict, and this is the one place that threshold
+ * is stated — the web app mirrors it, the flag copy reads it, and neither
+ * restates which verdict is the bad one.
+ *
+ * An unchecked page (`null`) reads as readable rather than as flagged: nothing
+ * has judged it, and a page nobody has looked at is not a page somebody found
+ * wanting. The gate that cares whether the check ran is `isChecked`, and
+ * conflating the two would make a fresh draft look full of blurry pages.
+ */
+export function isPageReadable(legibility: 'Low' | 'Medium' | 'High' | null): boolean {
+  return legibility !== 'Low';
+}
+
+/**
+ * Whether the one batch check has run over the page set as it currently
+ * stands. The whole of the submit gate, and the only thing it asserts.
+ */
+export function isChecked(row: { legibilityCheckedAt: Date | null }): boolean {
+  return row.legibilityCheckedAt !== null;
 }
 
 /** And an eleventh page is refused before any byte is written. */

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { AccountTier } from '../generated/prisma/enums.js';
 import { ParentAccountService } from '../identity/parent-account.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SourceTestService } from '../sourcetest/source-test.service.js';
 import { resolveWindow, type PeriodWindow } from './period.js';
 import { limitsFor } from './tiers.js';
 
@@ -36,43 +37,7 @@ interface UsageCounts {
 }
 
 /** Counts one allowance's artifacts inside `[window.start, window.end)`. */
-type ArtifactCounter = (
-  prisma: PrismaService,
-  accountId: string,
-  window: PeriodWindow,
-) => Promise<number>;
-
-/**
- * The counting seam — the single place Epics 3–6 wire their counts in.
- *
- * Each entry counts artifacts produced for the account with a charging instant
- * inside the window: Upload from `sourcetest`, Generation from `practicetest`
- * (charged on first reaching draft), Explanation from `explanation`.
- *
- * Usage is **derived** and nothing here is ever decremented (AD-14). A discard,
- * a deletion, or a draft the parent never released does not give the unit back,
- * because the artifact was produced and the provider call was paid for — which
- * is exactly why the marker counted is `chargedAt` on the row rather than a
- * status a later transition could move.
- *
- * `upload` and `explanation` have no entity yet, so they read zero and issue no
- * query. When they arrive they are counted here and **nowhere else**, and no
- * counter column, period column, or reset job is introduced anywhere.
- */
-const ARTIFACT_COUNTERS: Readonly<Record<keyof UsageCounts, ArtifactCounter>> = {
-  upload: async () => 0,
-  generation: (prisma, accountId, window) =>
-    // The half-open window the whole module is stated in: `[start, end)`, so a
-    // Practice Test charged at the instant a period ends belongs to the next
-    // one and is counted exactly once.
-    prisma.practiceTest.count({
-      where: {
-        parentAccountId: accountId,
-        chargedAt: { gte: window.start, lt: window.end },
-      },
-    }),
-  explanation: async () => 0,
-};
+type ArtifactCounter = (accountId: string, window: PeriodWindow) => Promise<number>;
 
 /**
  * The `allowance` policy module. It owns **no entity** (AD-14, AD-17): it holds
@@ -98,7 +63,51 @@ export class AllowanceService {
     // `PracticeTestService` instead would make `allowance` — which every
     // surface reads — depend on a module that depends on it.
     private readonly prisma: PrismaService,
+    // Upload usage is read **through** the owning module's service, never
+    // through a Prisma delegate of this one's (AD-17). `sourcetest` does not
+    // import `allowance`, so unlike `practicetest` this is a plain dependency
+    // in one direction and needs no token indirection.
+    private readonly sourceTests: SourceTestService,
   ) {}
+
+  /**
+   * The counting seam — the single place Epics 3–6 wire their counts in.
+   *
+   * Each entry counts artifacts produced for the account with a charging
+   * instant inside the window: Upload from `sourcetest` (a Source Test
+   * committed in the window), Generation from `practicetest` (charged on first
+   * reaching draft), Explanation from `explanation`.
+   *
+   * Usage is **derived** and nothing here is ever decremented (AD-14). A
+   * discard, a deletion, or a draft the parent never released does not give
+   * the unit back, because the artifact was produced and the provider call was
+   * paid for. There is no debit to reconcile either: reaching `Submitted` is
+   * one transaction, so counting Submitted rows in the window *is* the Upload
+   * charge — an abandoned or expired draft was never Submitted and so was
+   * never charged, and a refused submit leaves the row a Draft.
+   *
+   * `explanation` has no entity yet, so it reads zero and issues no query.
+   * When it arrives it is counted here and **nowhere else**, and no counter
+   * column, period column, or reset job is introduced anywhere.
+   *
+   * Instance-bound rather than module-level, which is what puts the injected
+   * services in reach; "counted here and nowhere else" is the part of the seam
+   * that matters and it is unchanged.
+   */
+  private readonly counters: Readonly<Record<keyof UsageCounts, ArtifactCounter>> = {
+    upload: (accountId, window) => this.sourceTests.countSubmittedIn(accountId, window),
+    generation: (accountId, window) =>
+      // The half-open window the whole module is stated in: `[start, end)`, so
+      // a Practice Test charged at the instant a period ends belongs to the
+      // next one and is counted exactly once.
+      this.prisma.practiceTest.count({
+        where: {
+          parentAccountId: accountId,
+          chargedAt: { gte: window.start, lt: window.end },
+        },
+      }),
+    explanation: async () => 0,
+  };
 
   /** The window this account's counters are measured over, in its own zone. */
   async windowFor(accountId: string, now: Date = new Date()): Promise<PeriodWindow> {
@@ -135,9 +144,9 @@ export class AllowanceService {
    */
   private async countArtifactsIn(accountId: string, window: PeriodWindow): Promise<UsageCounts> {
     const [upload, generation, explanation] = await Promise.all([
-      ARTIFACT_COUNTERS.upload(this.prisma, accountId, window),
-      ARTIFACT_COUNTERS.generation(this.prisma, accountId, window),
-      ARTIFACT_COUNTERS.explanation(this.prisma, accountId, window),
+      this.counters.upload(accountId, window),
+      this.counters.generation(accountId, window),
+      this.counters.explanation(accountId, window),
     ]);
     return { upload, generation, explanation };
   }

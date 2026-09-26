@@ -17,8 +17,10 @@ const DIR = import.meta.dirname;
 
 /** The screen's own source, for the rules it states rather than renders. */
 const PAGE_SOURCE = readFileSync(path.resolve(DIR, 'page.tsx'), 'utf8');
+/** The strip's own source: it carries the per-page legibility badge. */
+const STRIP_SOURCE = readFileSync(path.resolve(DIR, 'PageStrip.tsx'), 'utf8');
 
-function page(ordinal: number): PageImageView {
+function page(ordinal: number, legibility: PageImageView['legibility'] = null): PageImageView {
   return {
     id: `page-${ordinal}`,
     ordinal,
@@ -26,6 +28,7 @@ function page(ordinal: number): PageImageView {
     width: 40,
     height: 60,
     byteSize: 512,
+    legibility,
     createdAt: '2026-01-01T00:00:00.000Z',
   };
 }
@@ -177,7 +180,8 @@ describe('a submitted Source Test is terminal', () => {
     // provider, which this suite has neither of; these are the gates.
     expect(PAGE_SOURCE).toContain('const isDraft = sourceTest !== null');
     expect(PAGE_SOURCE).toContain('const addable = isDraft &&');
-    expect(PAGE_SOURCE).toContain('const submittable = isDraft &&');
+    expect(PAGE_SOURCE).toContain('const checkable = isDraft &&');
+    expect(PAGE_SOURCE).toContain('const checked = isDraft && isChecked(gate)');
     expect(PAGE_SOURCE).toContain('{isDraft && (');
   });
 });
@@ -269,9 +273,14 @@ describe('the classification the screen adds above the strip', () => {
   });
 
   it('is fed by the rule module rather than by a second copy of the gates', () => {
-    expect(PAGE_SOURCE).toContain('submitBlockedReasons(classification, readyPageCount)');
+    expect(PAGE_SOURCE).toContain('submitBlockedReasons(gate, readyPageCount)');
     expect(PAGE_SOURCE).toContain('isClassified(classification)');
-    expect(PAGE_SOURCE).toContain('parentCopy.capture.submitBlocked(blockedReasons)');
+    // The check reason is filtered out of *this* sentence: the control it
+    // would name is the very control being refused. It is still stated by the
+    // copy function, and by the server, for a caller that never saw the
+    // screen.
+    expect(PAGE_SOURCE).toContain('parentCopy.capture.submitBlocked(');
+    expect(PAGE_SOURCE).toContain("blockedReasons.filter((reason) => reason !== 'legibility')");
   });
 
   it('re-reads the Subjects whenever the stored Grade Level moves', () => {
@@ -1178,5 +1187,130 @@ describe('what the screen does with the pages it is handed', () => {
       .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
       .join('\n');
     expect(code).not.toMatch(/maxPages\s*=\s*\d/);
+  });
+});
+
+describe('the legibility result', () => {
+  it('states every verdict as glyph and text, never as colour alone', () => {
+    // The accessibility rule the epic states: the glyph is hidden from
+    // assistive technology and the word beside it is what is read, so a
+    // parent who cannot tell the two colours apart still gets the verdict.
+    expect(STRIP_SOURCE).toContain('<Box component="span" aria-hidden="true">');
+    expect(STRIP_SOURCE).toContain('parentCopy.capture.legibility.verdictFor(');
+    expect(parentCopy.capture.legibility.readable).toBe('Readable');
+    expect(parentCopy.capture.legibility.blurry).toBe('Blurry');
+    expect(parentCopy.capture.legibility.verdictFor(2, parentCopy.capture.legibility.blurry)).toBe(
+      'Page 2: Blurry',
+    );
+  });
+
+  it('names the pages it flagged rather than counting them', () => {
+    expect(parentCopy.capture.legibility.flagged([2])).toBe('Page 2 may be too blurry to read.');
+    expect(parentCopy.capture.legibility.flagged([1, 3])).toBe(
+      'Pages 1 and 3 may be too blurry to read.',
+    );
+    expect(parentCopy.capture.legibility.flagged([1, 2, 4])).toBe(
+      'Pages 1, 2 and 4 may be too blurry to read.',
+    );
+  });
+
+  it('says so when nothing was flagged, rather than leaving silence to mean it', () => {
+    expect(parentCopy.capture.legibility.allReadable).toBe('Every page reads clearly.');
+  });
+
+  it('offers a retake scoped to the flagged page alone', () => {
+    expect(parentCopy.capture.legibility.retakeFor(2)).toBe('Retake page 2');
+    // It drives the strip's own per-page retake input by `htmlFor` rather
+    // than adding a second way to replace a page's bytes.
+    expect(PAGE_SOURCE).toContain('htmlFor={`capture-retake-${page.id}`}');
+    expect(STRIP_SOURCE).toContain('id={`capture-retake-${page.id}`}');
+    // And it exists only for a page the check flagged.
+    expect(PAGE_SOURCE).toContain('pages.filter((page) => !isPageReadable(page))');
+  });
+
+  it('says plainly that continuing over a flagged page is allowed', () => {
+    expect(parentCopy.capture.legibility.advisory).toBe(
+      'This is a warning, not a block. Continuing is allowed.',
+    );
+  });
+
+  it('states the cost beforehand, in words, above the control that spends it', () => {
+    expect(parentCopy.capture.legibility.cost).toBe(
+      'Continuing commits this upload and uses one upload allowance.',
+    );
+    expect(parentCopy.capture.legibility.noCost).toBe(
+      'Nothing is used if you leave without continuing.',
+    );
+    // Both sentences are rendered before the commit control in source order,
+    // which is the order they are read in.
+    const panel = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('data-testid="legibility-result"'));
+    expect(panel.indexOf('legibility-cost')).toBeLessThan(panel.indexOf('legibility-continue'));
+    expect(panel.indexOf('legibility-no-cost')).toBeLessThan(panel.indexOf('legibility-continue'));
+  });
+
+  it('states no figure and shows no usage counter — Story 9.6 owns that surface', () => {
+    const block = JSON.stringify(parentCopy.capture.legibility);
+    expect(block).not.toMatch(/\b\d+\s*(uploads?|allowances?|left|remaining)\b/i);
+    expect(block.toLowerCase()).not.toContain('remaining');
+  });
+
+  it('never disables the commit control for a flagged page', () => {
+    // The check is advisory and the server commits over a `Low` verdict, so a
+    // client-side refusal here would be a gate the product does not have.
+    const panel = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('data-testid="legibility-continue"') - 400);
+    const control = panel.slice(0, panel.indexOf('data-testid="legibility-continue"'));
+    expect(control).toContain('disabled={busy}');
+    expect(control).not.toContain('flagged');
+  });
+
+  it('names the count the commit control is about to commit', () => {
+    expect(parentCopy.capture.legibility.continueWith(1)).toBe('Continue with 1 page');
+    expect(parentCopy.capture.legibility.continueWith(3)).toBe('Continue with all 3 pages');
+  });
+
+  it('runs the check on the shared write path, so the strip locks', () => {
+    expect(PAGE_SOURCE).toContain("'check',");
+    expect(PAGE_SOURCE).toContain('parentApi.checkSourceTestLegibility(token!, sourceTest!.id)');
+    expect(PAGE_SOURCE).toContain(
+      'parentCopy.capture.legibility.checked(unreadablePages(after.pages).length)',
+    );
+  });
+
+  it('announces the outcome from the answer the server returned', () => {
+    expect(parentCopy.capture.legibility.checked(0)).toBe(
+      'The pages were checked. Every page reads clearly.',
+    );
+    expect(parentCopy.capture.legibility.checked(1)).toBe(
+      'The pages were checked. One page may be too blurry to read.',
+    );
+    expect(parentCopy.capture.legibility.checked(2)).toBe(
+      'The pages were checked. 2 pages may be too blurry to read.',
+    );
+  });
+
+  it('says what is happening while the foreground call is in flight', () => {
+    expect(parentCopy.capture.legibility.checking).toBe('Checking how clearly the pages read…');
+    expect(PAGE_SOURCE).toContain("pending === 'check'");
+  });
+
+  it('describes committing, not checking, while the commit is in flight', () => {
+    // `capture.submitting` now reads "Checking…" and belongs to the control
+    // before this one. A commit button wearing it would describe the wrong
+    // step at the one moment an Upload Allowance is actually spent.
+    expect(parentCopy.capture.submitting).toBe('Checking…');
+    expect(parentCopy.capture.legibility.committing).toBe('Committing the upload…');
+    expect(PAGE_SOURCE).toContain('parentCopy.capture.legibility.committing');
+    const panel = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('data-testid="legibility-result"'));
+    const commit = panel.slice(0, panel.indexOf('data-testid="legibility-continue"'));
+    expect(commit).not.toContain('parentCopy.capture.submitting');
+  });
+
+  it('states the third submit reason without a code or an apology', () => {
+    expect(parentCopy.capture.submitBlocked(['legibility'])).toBe(
+      'Check the pages before submitting.',
+    );
+    expect(parentCopy.capture.submitBlocked(['pages', 'classification', 'legibility'])).toBe(
+      'Add at least one page before submitting. Choose a subject and a grade level before submitting. Check the pages before submitting.',
+    );
   });
 });

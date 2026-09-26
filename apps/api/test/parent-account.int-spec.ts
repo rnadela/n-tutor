@@ -1,14 +1,26 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { limitsFor } from '../src/allowance/tiers.js';
+import sharp from 'sharp';
 import {
   adminToken,
+  bearer,
+  checkLegibility,
+  createGradeLevel,
   createHarness,
   createParentAccount,
+  createSignedInParent,
+  createStudentProfile,
+  createSubject,
+  elevate,
   parentStyleToken,
   resetParentAccounts,
+  resetTaxonomy,
+  setPinFor,
   type Harness,
 } from './harness.js';
+
+const PIN = '4821';
 
 const UNKNOWN_ID = '00000000-0000-4000-8000-000000000000';
 
@@ -29,7 +41,13 @@ describe('parent account tier assignment and consumption', () => {
 
   beforeEach(async () => {
     vi.restoreAllMocks();
+    // Taxonomy first, then the accounts: the Upload-count cases below open
+    // real Source Tests, which need a Grade Level and a Subject, and the
+    // fixture names those from a per-process counter — so rows left behind by
+    // an earlier run would collide on `nameKey` rather than simply pile up.
+    await resetTaxonomy(h.prisma);
     await resetParentAccounts(h.prisma);
+    h.ai.reset();
   });
 
   const auth = () => ({ authorization: `Bearer ${token}` });
@@ -531,5 +549,171 @@ describe('parent account tier assignment and consumption', () => {
     ).rejects.toMatchObject({ status: 409 });
 
     expect(await h.prisma.parentAccount.count()).toBe(1);
+  });
+
+  // --- Upload usage (derived, never decremented) -------------------------
+
+  /**
+   * Upload usage is the count of this account's Source Tests whose
+   * `submittedAt` falls in the window (AD-14, FR-31). There is no counter
+   * column and no charge row, so this is where "charged once, on success
+   * only" is actually proved: the rows are written in the states the flow can
+   * leave behind, and the count is read through the same `consumptionFor` the
+   * Admin console uses.
+   */
+  describe('the derived Upload count', () => {
+    async function sourceTestFor(
+      parentAccountId: string,
+      state: { status: 'Draft' | 'Submitted'; submittedAt?: Date },
+    ): Promise<void> {
+      const gradeLevel = await createGradeLevel(h);
+      const profile = await createStudentProfile(h, parentAccountId, {
+        gradeLevelId: gradeLevel.id,
+      });
+      await h.prisma.sourceTest.create({
+        data: {
+          parentAccountId,
+          studentProfileId: profile.id,
+          status: state.status,
+          submittedAt: state.submittedAt ?? null,
+          expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+        },
+      });
+    }
+
+    const uploadUsed = async (accountId: string): Promise<number> =>
+      (await h.allowance.consumptionFor(accountId)).allowances.upload.used;
+
+    it('reads one after a Source Test is committed', async () => {
+      const account = await createParentAccount(h.identity, { email: 'upload-one@example.test' });
+      await sourceTestFor(account.id, { status: 'Submitted', submittedAt: new Date() });
+      expect(await uploadUsed(account.id)).toBe(1);
+    });
+
+    it('reads zero for a draft that was never submitted', async () => {
+      // Abandoned, or expired, or a submit that was refused — all three leave
+      // the row a Draft, and a Draft was never charged.
+      const account = await createParentAccount(h.identity, { email: 'upload-draft@example.test' });
+      await sourceTestFor(account.id, { status: 'Draft' });
+      expect(await uploadUsed(account.id)).toBe(0);
+    });
+
+    it('ignores a Source Test committed before the period started', async () => {
+      const account = await createParentAccount(h.identity, { email: 'upload-old@example.test' });
+      const { periodStart } = await h.allowance.consumptionFor(account.id);
+      await sourceTestFor(account.id, {
+        status: 'Submitted',
+        submittedAt: new Date(new Date(periodStart).getTime() - 1000),
+      });
+      expect(await uploadUsed(account.id)).toBe(0);
+    });
+
+    it('counts the instant the period starts and not the instant it ends', async () => {
+      // The half-open `[start, end)` the whole module is stated in: a commit at
+      // the reset instant belongs to the next period and is counted once.
+      const account = await createParentAccount(h.identity, { email: 'upload-edge@example.test' });
+      const { periodStart, periodEnd } = await h.allowance.consumptionFor(account.id);
+      await sourceTestFor(account.id, { status: 'Submitted', submittedAt: new Date(periodStart) });
+      await sourceTestFor(account.id, { status: 'Submitted', submittedAt: new Date(periodEnd) });
+      expect(await uploadUsed(account.id)).toBe(1);
+    });
+
+    it('counts this account\u2019s commits and nobody else\u2019s', async () => {
+      const mine = await createParentAccount(h.identity, { email: 'upload-mine@example.test' });
+      const theirs = await createParentAccount(h.identity, { email: 'upload-theirs@example.test' });
+      await sourceTestFor(theirs.id, { status: 'Submitted', submittedAt: new Date() });
+      expect(await uploadUsed(mine.id)).toBe(0);
+      expect(await uploadUsed(theirs.id)).toBe(1);
+    });
+
+    it('leaves no counter column or charge row anywhere to reconcile', async () => {
+      // The design claim, asserted rather than described: usage is derived, so
+      // the only evidence of a charge is the Source Test row itself.
+      const account = await createParentAccount(h.identity, {
+        email: 'upload-derived@example.test',
+      });
+      await sourceTestFor(account.id, { status: 'Submitted', submittedAt: new Date() });
+      const columns = await h.prisma.$queryRaw<{ column_name: string }[]>`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'source_test'
+      `;
+      const names = columns.map((column) => column.column_name);
+      expect(names).not.toContain('chargedAt');
+      expect(names).not.toContain('uploadsUsed');
+      expect(names).not.toContain('periodStart');
+    });
+
+    /**
+     * The acceptance criterion itself, driven through the routes a parent
+     * actually uses rather than asserted at the row surface.
+     *
+     * The rows above prove the *rule* — which rows count and which window they
+     * count in. This proves the **claim**: running the check charges nothing,
+     * because it produces nothing (AD-29), and committing charges exactly one,
+     * because reaching `Submitted` is the charge and there is nothing else to
+     * go wrong between the two.
+     */
+    it('charges exactly one for a commit made through the real routes, and nothing for the check', async () => {
+      // A real parent, elevated, with a classified draft holding a page — the
+      // whole path, because the charge is a property of the commit and not of
+      // a row somebody wrote by hand.
+      const parent = await createSignedInParent(h, { email: 'upload-committed@example.test' });
+      await setPinFor(h, parent.cookie, PIN);
+      const elevation = await elevate(h, parent.cookie, PIN);
+      const gradeLevel = await createGradeLevel(h);
+      const profile = await createStudentProfile(h, parent.parentAccountId, {
+        gradeLevelId: gradeLevel.id,
+      });
+      const subject = await createSubject(h, { gradeLevelId: gradeLevel.id });
+
+      const draft = await request(server())
+        .post('/api/parent/source-tests')
+        .set('Authorization', bearer(elevation))
+        .send({ studentProfileId: profile.id })
+        .expect(200);
+      const sourceTestId: string = draft.body.id;
+
+      await request(server())
+        .patch(`/api/parent/source-tests/${sourceTestId}/classification`)
+        .set('Authorization', bearer(elevation))
+        .send({ subjectId: subject.id })
+        .expect(200);
+      await request(server())
+        .post(`/api/parent/source-tests/${sourceTestId}/pages`)
+        .set('Authorization', bearer(elevation))
+        .attach(
+          'file',
+          await sharp({
+            create: { width: 40, height: 60, channels: 3, background: { r: 1, g: 2, b: 3 } },
+          })
+            .jpeg()
+            .toBuffer(),
+          { filename: 'page.jpg', contentType: 'image/jpeg' },
+        )
+        .expect(201);
+
+      // An open, classified, paged draft is not a commit.
+      expect(await uploadUsed(parent.parentAccountId)).toBe(0);
+
+      // Nor is the check: it produces nothing, so it charges nothing — and it
+      // makes a provider call, which is exactly why this has to be stated.
+      await checkLegibility(h, elevation, sourceTestId);
+      expect(await uploadUsed(parent.parentAccountId)).toBe(0);
+
+      await request(server())
+        .post(`/api/parent/source-tests/${sourceTestId}/submit`)
+        .set('Authorization', bearer(elevation))
+        .expect(200);
+
+      expect(await uploadUsed(parent.parentAccountId)).toBe(1);
+
+      // And exactly once: a second submit is refused, and the count does not
+      // move — there is no debit a retry could repeat.
+      await request(server())
+        .post(`/api/parent/source-tests/${sourceTestId}/submit`)
+        .set('Authorization', bearer(elevation))
+        .expect(409);
+      expect(await uploadUsed(parent.parentAccountId)).toBe(1);
+    });
   });
 });

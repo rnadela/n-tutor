@@ -18,6 +18,7 @@ const { ExtractionService } = await import('../src/extraction/extraction.service
 const { AiService, AiRejectedError } = await import('../src/ai/ai.service.js');
 const {
   bearer,
+  checkLegibility,
   createGradeLevel,
   createHarness,
   createSignedInParent,
@@ -121,6 +122,10 @@ describe('Source Tests: structured extraction', () => {
   /** A draft, submitted through the real route. */
   async function submitted(pageCount = 3) {
     const draft = await readyDraft(pageCount);
+    // The submit gate: the batch check has to have run over this page set.
+    // Its own provider call is fixture noise here, so the seam is cleared
+    // afterwards and every assertion below counts Extraction calls alone.
+    await checkLegibility(h, draft.token, draft.sourceTestId);
     await server()
       .post(`/api/parent/source-tests/${draft.sourceTestId}/submit`)
       .set('Authorization', bearer(draft.token))
@@ -225,7 +230,9 @@ describe('Source Tests: structured extraction', () => {
       const draft = await submitted(3);
       await h.extractionRunner.runOnce();
 
-      const calls = await h.prisma.aiCall.findMany();
+      // Extraction's own rows: the fixture's legibility check wrote one too,
+      // and this assertion is about what one worker pass costs.
+      const calls = await h.prisma.aiCall.findMany({ where: { callClass: 'Extraction' } });
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
         parentAccountId: draft.parentAccountId,
@@ -318,7 +325,7 @@ describe('Source Tests: structured extraction', () => {
       expect(job!.retryable).toBe(true);
       expect(job!.failureReason).toBe(EXTRACTION_FAILED);
       expect(await storedExtraction(draft.sourceTestId)).toBeNull();
-      expect(await h.prisma.aiCall.count()).toBe(0);
+      expect(await h.prisma.aiCall.count({ where: { callClass: 'Extraction' } })).toBe(0);
     });
 
     it("treats a schema-invalid payload as the provider's fault too", async () => {
@@ -331,7 +338,7 @@ describe('Source Tests: structured extraction', () => {
       expect(job!.failureKind).toBe('UpstreamFault');
       expect(job!.retryable).toBe(true);
       expect(await storedExtraction(draft.sourceTestId)).toBeNull();
-      expect(await h.prisma.aiCall.count()).toBe(0);
+      expect(await h.prisma.aiCall.count({ where: { callClass: 'Extraction' } })).toBe(0);
     });
 
     it('rejects a post-hoc violation whole, rather than storing the rest', async () => {
@@ -434,7 +441,7 @@ describe('Source Tests: structured extraction', () => {
       expect(job!.retryable).toBe(false);
       expect(job!.failureReason).toBe(EXTRACTION_PAGES_GONE);
       expect(await storedExtraction(draft.sourceTestId)).toBeNull();
-      expect(await h.prisma.aiCall.count()).toBe(0);
+      expect(await h.prisma.aiCall.count({ where: { callClass: 'Extraction' } })).toBe(0);
       // Terminal: a further pass does not pick it up and pay for nothing again.
       expect(await h.extractionRunner.runOnce()).toBe(false);
     });

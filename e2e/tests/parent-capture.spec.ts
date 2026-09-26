@@ -17,6 +17,19 @@ const PAGE_A =
 const PAGE_B =
   '/9j/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAgABgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAUG/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AggNOlgAAAAAP/9k=';
 
+/**
+ * A page the legibility check calls readable.
+ *
+ * The `fake` transport decides a page's verdict from its **stored** byte size
+ * (AD-22), so a flagged page is arranged by uploading a deliberately tiny
+ * image and a readable one by uploading a larger one — no env toggle and no
+ * per-test script anywhere. `PAGE_A` and `PAGE_B` above are both well under
+ * the threshold and both come back flagged; this one is noise at 64x64, which
+ * re-encodes to several kilobytes and comes back readable.
+ */
+const PAGE_LEGIBLE =
+  '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';
+
 function jpeg(name: string, base64: string) {
   return { name, mimeType: 'image/jpeg', buffer: Buffer.from(base64, 'base64') };
 }
@@ -98,6 +111,20 @@ async function addPage(page: Page, file: ReturnType<typeof jpeg>): Promise<void>
 /** The one polite live region the surface mounts, in `ThemeRegistry`. */
 function liveRegion(page: Page) {
   return page.locator('[role="status"][aria-live="polite"]');
+}
+
+/**
+ * The two steps a commit now takes: the batch check, then the commit it gates.
+ *
+ * They are deliberately separate controls — the check charges nothing and the
+ * commit charges an Upload Allowance, and the screen states that between them
+ * — so a fixture that wants a submitted upload has to pass through both.
+ */
+async function checkThenContinue(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Check pages' }).click();
+  const commit = page.getByTestId('legibility-continue');
+  await expect(commit).toBeVisible({ timeout: 20_000 });
+  await commit.click();
 }
 
 /** Accepts the delete confirmation, which states what the delete does. */
@@ -216,7 +243,7 @@ test.describe('page management before submit', () => {
     await expect(liveRegion(page)).toContainText(`The subject is ${subjectName}.`);
 
     await expect(page.getByTestId('submit-blocked')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Check pages' }).click();
+    await checkThenContinue(page);
     await expect(liveRegion(page)).toContainText('The pages were submitted.');
     await expect(page.getByTestId('submitted-note')).toBeVisible();
   });
@@ -266,9 +293,11 @@ test.describe('page management before submit', () => {
     await chooseSubject(page, subjectName);
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
-    await expect(liveRegion(page)).toContainText('Page 2 was added.');
+    // One `write` per parent action, so each single-file add announces one
+    // page rather than the running total.
+    await expect(liveRegion(page)).toContainText('One page was added.');
 
-    await page.getByRole('button', { name: 'Check pages' }).click();
+    await checkThenContinue(page);
 
     await expect(liveRegion(page)).toContainText('The pages were submitted.');
     await expect(page.getByTestId('submitted-note')).toHaveText(
@@ -284,6 +313,74 @@ test.describe('page management before submit', () => {
     await expect(page.locator('#capture-subject')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Delete page/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Move page/ })).toHaveCount(0);
+  });
+
+  test('checks the pages once, names the blurry one, states the cost, then commits', async ({
+    page,
+  }) => {
+    const { subjectName } = await openCapture(page);
+    await chooseSubject(page, subjectName);
+    // One page the check will flag and one it will not, arranged by the bytes
+    // alone: the fake transport reads a stored page under its byte threshold
+    // as Low (AD-22), so nothing in this test touches the seam.
+    await addPage(page, jpeg('page-legible.jpg', PAGE_LEGIBLE));
+    await addPage(page, jpeg('page-tiny.jpg', PAGE_A));
+
+    // Before the check, the commit control does not exist at all.
+    await expect(page.getByTestId('legibility-continue')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Check pages' }).click();
+    const panel = page.getByTestId('legibility-result');
+    await expect(panel).toBeVisible({ timeout: 20_000 });
+
+    // Per page, never a whole-test verdict — and each badge is a word, not a
+    // colour.
+    await expect(page.getByTestId('legibility-badge-1')).toHaveText('✓ Page 1: Readable');
+    await expect(page.getByTestId('legibility-badge-2')).toHaveText('! Page 2: Blurry');
+    await expect(page.getByTestId('legibility-summary')).toHaveText(
+      'Page 2 may be too blurry to read.',
+    );
+    await expect(liveRegion(page)).toContainText('One page may be too blurry to read.');
+
+    // The retake is offered for the flagged page alone.
+    await expect(page.getByTestId('legibility-retake-2')).toHaveText('Retake page 2');
+    await expect(page.getByTestId('legibility-retake-1')).toHaveCount(0);
+
+    // Proceeding is allowed and the screen says so, and the cost is stated
+    // before the control that spends it.
+    await expect(page.getByTestId('legibility-advisory')).toHaveText(
+      'This is a warning, not a block. Continuing is allowed.',
+    );
+    await expect(page.getByTestId('legibility-cost')).toHaveText(
+      'Continuing commits this upload and uses one upload allowance.',
+    );
+    await expect(page.getByTestId('legibility-no-cost')).toHaveText(
+      'Nothing is used if you leave without continuing.',
+    );
+
+    const commit = page.getByTestId('legibility-continue');
+    await expect(commit).toHaveText('Continue with all 2 pages');
+    // Never disabled for a flagged page.
+    await expect(commit).toBeEnabled();
+
+    // Retaking page 2 clears the check, because the bytes under a verdict
+    // moved — so the panel goes and the check control comes back.
+    await page.getByTestId('legibility-retake-2').click();
+    await page
+      .locator('input[type="file"][aria-label="Retake page 2"]')
+      .setInputFiles(jpeg('page-retake.jpg', PAGE_LEGIBLE));
+    await expect(liveRegion(page)).toContainText('Page 2 was replaced.');
+    await expect(page.getByTestId('legibility-result')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Check pages' })).toBeEnabled();
+
+    // Checked again, both pages now read clearly, and the commit stands.
+    await page.getByRole('button', { name: 'Check pages' }).click();
+    await expect(page.getByTestId('legibility-summary')).toHaveText('Every page reads clearly.', {
+      timeout: 20_000,
+    });
+    await page.getByTestId('legibility-continue').click();
+    await expect(liveRegion(page)).toContainText('The pages were submitted.');
+    await expect(page.getByTestId('submitted-note')).toBeVisible();
   });
 
   test('Retry re-issues the draft open, not only the profile list', async ({ page }) => {
@@ -350,7 +447,7 @@ test.describe('page management before submit', () => {
     await chooseSubject(page, subjectName);
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
-    await page.getByRole('button', { name: 'Check pages' }).click();
+    await checkThenContinue(page);
     await expect(page.getByTestId('submitted-note')).toBeVisible();
 
     // The job outlives the request, so the step says what it is doing and then
@@ -393,7 +490,7 @@ test.describe('page management before submit', () => {
     await chooseSubject(page, subjectName);
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
-    await page.getByRole('button', { name: 'Check pages' }).click();
+    await checkThenContinue(page);
     const proceedAgain = page.getByRole('button', { name: 'Continue to practice test' });
     await expect(proceedAgain).toBeVisible({ timeout: 30_000 });
     await proceedAgain.click();
@@ -505,6 +602,43 @@ test.describe('page management before submit', () => {
         201,
       );
     }
+
+    // Pages and a classification, but the check has not run: refused, with
+    // the reason stated, and the Source Test stays a draft. The disabled
+    // control on the screen is a courtesy; this is the control.
+    const beforeCheck = await fetch(
+      `${API_ORIGIN}/api/parent/source-tests/${sourceTestId}/submit`,
+      { method: 'POST', headers: elevated },
+    );
+    expect(beforeCheck.status).toBe(400);
+    expect(JSON.stringify(await beforeCheck.json())).toContain(
+      'Check the pages before submitting.',
+    );
+    const stillDraft = await fetch(`${API_ORIGIN}/api/parent/source-tests/${sourceTestId}`, {
+      headers: elevated,
+    });
+    const draftBody = (await stillDraft.json()) as {
+      status: string;
+      legibilityCheckedAt: string | null;
+    };
+    expect(draftBody.status).toBe('Draft');
+    expect(draftBody.legibilityCheckedAt).toBeNull();
+
+    // The check itself, over the whole page set, in one call.
+    const checked = await fetch(
+      `${API_ORIGIN}/api/parent/source-tests/${sourceTestId}/legibility`,
+      { method: 'POST', headers: elevated },
+    );
+    expect(checked.status).toBe(200);
+    const checkedBody = (await checked.json()) as {
+      legibilityCheckedAt: string | null;
+      pages: { ordinal: number; legibility: string | null }[];
+    };
+    expect(checkedBody.legibilityCheckedAt).not.toBeNull();
+    // Per page, and both of these are deliberately tiny, so both are flagged
+    // — which the submit below is then accepted over.
+    expect(checkedBody.pages.map((image) => image.legibility)).toEqual(['Low', 'Low']);
+
     await expectOk(
       fetch(`${API_ORIGIN}/api/parent/source-tests/${sourceTestId}/submit`, {
         method: 'POST',

@@ -4,12 +4,18 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnsupportedMediaTypeException,
   forwardRef,
 } from '@nestjs/common';
+import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai/ai.service.js';
 import { ExtractionService } from '../extraction/extraction.service.js';
 import { TaxonomyService, type TaxonomyItem } from '../admin/taxonomy.service.js';
-import type { PageImageState, SourceTestStatus } from '../generated/prisma/enums.js';
+import type {
+  PageImageState,
+  PageLegibility,
+  SourceTestStatus,
+} from '../generated/prisma/enums.js';
 import {
   GRADE_LEVEL_NOT_SELECTABLE,
   PROFILE_NOT_FOUND,
@@ -19,7 +25,18 @@ import { PrismaService, type TransactionClient } from '../prisma/prisma.service.
 import { PageIngestService, UnsupportedImageFormat } from './page-ingest.service.js';
 import type { PageBytes, SourceTestReader } from './source-test-reader.js';
 import {
+  LEGIBILITY_PROMPT,
+  LEGIBILITY_SCHEMA_NAME,
+  LegibilityPayload,
+  LegibilityPayloadInvalid,
+  fakeLegibilityPayload,
+  validateLegibilityPayload,
+} from './legibility.js';
+import {
   CLASSIFICATION_REQUIRED,
+  CLASSIFICATION_REQUIRED_FOR_CHECK,
+  LEGIBILITY_CHECK_FAILED,
+  LEGIBILITY_CHECK_REQUIRED,
   MAX_PAGES,
   NO_PAGES_TO_SUBMIT,
   NOTHING_TO_CLASSIFY,
@@ -34,6 +51,7 @@ import {
   canAddPage,
   canSubmit,
   expiryFrom,
+  isChecked,
   isClassified,
   isExpired,
   liveAt,
@@ -56,6 +74,12 @@ export interface PageImageView {
   width: number | null;
   height: number | null;
   byteSize: number | null;
+  /**
+   * This page's own verdict from the one batch check (AD-29), or null while
+   * the check has not run over the current page set. Per page, never a
+   * whole-test pass/fail — the screen names the page it flags.
+   */
+  legibility: PageLegibility | null;
   createdAt: string;
 }
 
@@ -78,6 +102,12 @@ export interface SourceTestView {
   subjectName: string | null;
   gradeLevelId: string | null;
   gradeLevelName: string | null;
+  /**
+   * When the one batch legibility check ran, or null while it has not. It is
+   * the whole of the submit gate, so the screen reads it to know whether to
+   * offer the commit control at all.
+   */
+  legibilityCheckedAt: string | null;
   /** The ceiling, stated by the API so no figure is a literal in the web app. */
   maxPages: number;
   pages: PageImageView[];
@@ -90,6 +120,7 @@ const PAGE_FIELDS = {
   width: true,
   height: true,
   byteSize: true,
+  legibility: true,
   createdAt: true,
 } as const;
 
@@ -102,6 +133,7 @@ const SOURCE_TEST_FIELDS = {
   submittedAt: true,
   subjectId: true,
   gradeLevelId: true,
+  legibilityCheckedAt: true,
 } as const;
 
 /**
@@ -132,6 +164,7 @@ export interface SourceTestRow {
   submittedAt: Date | null;
   subjectId: string | null;
   gradeLevelId: string | null;
+  legibilityCheckedAt: Date | null;
 }
 
 /**
@@ -157,8 +190,11 @@ export interface SourceTestRow {
  * as ids, resolved on read through `admin`'s `TaxonomyService` and never copied
  * as labels — and this module never writes a taxonomy row.
  *
- * Nothing here charges an Upload Allowance or runs a legibility check: that is
- * Story 3.4.
+ * The legibility check is one batch over every `Ready` page, foreground and
+ * in-request (AD-4, AD-29), run once and stored. Nothing here charges an Upload
+ * Allowance: usage is derived (AD-14), and `countSubmittedIn` below is the
+ * whole of the charge — counting Submitted rows in the window *is* the debit,
+ * so there is no counter column, no charge write and no reset job to reconcile.
  */
 @Injectable()
 export class SourceTestService implements SourceTestReader {
@@ -176,6 +212,10 @@ export class SourceTestService implements SourceTestReader {
     // direction or the other (AD-17).
     @Inject(forwardRef(() => ExtractionService))
     private readonly extraction: ExtractionService,
+    // The only way anything here reaches a provider (AD-17). This module hands
+    // over a typed request and the prompt it owns; it never sees a client, a
+    // model id, a retry policy or a cost row.
+    private readonly ai: AiService,
   ) {}
 
   // --- Reads -------------------------------------------------------------
@@ -302,7 +342,13 @@ export class SourceTestService implements SourceTestReader {
     const page = await this.claimOrdinal(sourceTestId);
 
     try {
-      await this.storeBytes(page.id, buffer);
+      // The promotion to `Ready` and the check-clear are one transaction: the
+      // page set the check ran over is no longer the page set that would be
+      // committed, and a window in which the new page is `Ready` while
+      // `legibilityCheckedAt` still stands is a window a concurrent `submit`
+      // commits an unchecked page set through. A failed add clears nothing,
+      // because the transaction never commits.
+      await this.storeBytes(page.id, buffer, { parentAccountId, sourceTestId });
     } catch (cause) {
       // The row was the authority; it must not outlive the bytes it stood for.
       await this.discardPage(page.id);
@@ -334,7 +380,11 @@ export class SourceTestService implements SourceTestReader {
     if (!page) throw new NotFoundException(PAGE_NOT_FOUND);
 
     try {
-      await this.storeBytes(page.id, buffer);
+      // One transaction, for the reason `addPage` states: the ordinals did not
+      // move, but the bytes under one verdict did — so the stored result
+      // describes a photograph that no longer exists, and it must stop
+      // standing at the same instant the new bytes start.
+      await this.storeBytes(page.id, buffer, { parentAccountId, sourceTestId });
     } catch (cause) {
       // Nothing is removed: the page that was already there is still the page.
       throw this.ingestFailure(cause);
@@ -366,6 +416,10 @@ export class SourceTestService implements SourceTestReader {
         sourceTestId,
         survivors.map((survivor) => survivor.id),
       );
+      // Inside the same transaction as the delete and the renumber: a Source
+      // Test whose page set shrank but whose check survived would let a
+      // submission through on a batch that no longer covers it.
+      await this.clearCheck(parentAccountId, sourceTestId, tx);
       return pageId;
     });
 
@@ -516,6 +570,134 @@ export class SourceTestService implements SourceTestReader {
   }
 
   /**
+   * The one batch legibility check: every `Ready` page, one provider call,
+   * foreground and in-request (AD-4, AD-29).
+   *
+   * It runs **once**. The verdicts and `legibilityCheckedAt` are stored, and a
+   * second call answers with the stored result and makes no provider call —
+   * which is what keeps the cost row count equal to the number of distinct
+   * page sets checked rather than to the number of times a parent tapped.
+   *
+   * It charges no allowance, because it produces nothing (AD-29), and it
+   * blocks nothing: `Low` is advisory and the submit gate never reads a
+   * verdict.
+   *
+   * The whole payload is validated in code after the schema has had its say
+   * (AD-30) and rejected whole on any fault, so a partial or invented verdict
+   * is never stored and `legibilityCheckedAt` is never set over a page set the
+   * model did not actually judge. Both the transport fault and the content
+   * fault answer the same 503: from the parent's side they are one fact, the
+   * check may be run again, and nothing was stored either way.
+   *
+   * A page set that moved while the provider call was in flight answers that
+   * **same 503**, and the reason it must is the whole of this method's
+   * contract: nothing was stored, so answering 200 would hand back a view with
+   * `legibilityCheckedAt: null` under a response that says the check ran — and
+   * the screen would announce "the pages were checked" over a check that never
+   * happened. Every path here either stores the whole result or fails.
+   */
+  async checkLegibility(parentAccountId: string, sourceTestId: string): Promise<SourceTestView> {
+    const row = await this.requireDraft(parentAccountId, sourceTestId);
+    // The stored result, untouched and without a provider call. Answered
+    // before the page read, so a repeat check costs one query rather than ten
+    // file reads.
+    if (isChecked(row)) return this.viewOf(row);
+
+    // `Ready` alone, exactly as the submit gate counts: a row stranded in
+    // `Uploading` holds no bytes, so judging it is not possible and counting it
+    // would make the batch disagree with what gets committed.
+    const pages = await this.readPageBytes(sourceTestId);
+    if (pages.length === 0) throw new BadRequestException(NO_PAGES_TO_SUBMIT);
+    // Asserted once there is a batch to price, not only before submit: the
+    // disabled "Check pages" control is a courtesy the same way the disabled
+    // submit control is, and a direct call must not be able to spend a
+    // provider call on a Source Test the parent has not classified yet.
+    if (!isClassified(row)) throw new BadRequestException(CLASSIFICATION_REQUIRED_FOR_CHECK);
+    const ordinals = pages.map((page) => page.ordinal);
+    // What the batch is a judgement *of*, captured before the call and
+    // re-read inside the transaction that writes. Ordinals alone are not
+    // enough: a retake leaves the ordinal set identical and replaces the bytes
+    // under one of them, so the stamp carries `updatedAt` — which `storeBytes`
+    // moves on every retake — and the row id, which an add or a delete moves.
+    const stamp = await this.pageSetStamp(this.prisma, sourceTestId);
+
+    let verdicts;
+    try {
+      const { payload } = await this.ai.run({
+        callClass: 'Legibility',
+        parentAccountId,
+        // Stated, never defaulted: this is the call that looks at photographs.
+        modality: 'vision',
+        // Already in ordinal order, and sent that way, so the ordinal the
+        // model answers under is the ordinal the page actually has.
+        images: pages,
+        prompt: LEGIBILITY_PROMPT,
+        schema: LegibilityPayload,
+        schemaName: LEGIBILITY_SCHEMA_NAME,
+        // The fake's verdict is a function of each page's stored size, so the
+        // builder closes over the bytes here rather than `ai` knowing what a
+        // page is (AD-17, AD-22).
+        fakePayload: fakeLegibilityPayload(pages),
+      });
+      verdicts = validateLegibilityPayload(payload, ordinals);
+    } catch (cause) {
+      throw this.checkFailure(cause);
+    }
+
+    const checkedAt = new Date();
+    const stored = await this.prisma.withTransaction(async (tx) => {
+      // The page set is re-asserted inside the transaction that writes: a page
+      // added, retaken or deleted while the call was in flight means the batch
+      // no longer covers what is stored, and attaching these verdicts to it
+      // would file a judgement about bytes nobody looked at.
+      //
+      // The stamp rather than the ordinals, because a retake is invisible to
+      // the ordinals: it replaces one page's bytes and leaves `1..N` exactly
+      // as it was.
+      if ((await this.pageSetStamp(tx, sourceTestId)) !== stamp) return false;
+
+      const written = await tx.sourceTest.updateMany({
+        // Account-scoped, state-guarded and compare-and-set on the check
+        // itself, like every other write here: a draft that was submitted,
+        // or already checked, under this call matches nothing and stores
+        // nothing.
+        where: { id: sourceTestId, parentAccountId, status: 'Draft', legibilityCheckedAt: null },
+        data: { legibilityCheckedAt: checkedAt },
+      });
+      if (written.count !== 1) return false;
+
+      for (const verdict of verdicts) {
+        // `updateMany` and scoped by the Source Test, so a page removed under
+        // this statement writes nothing rather than raising Prisma's
+        // missing-row fault as a 500.
+        await tx.pageImage.updateMany({
+          where: { sourceTestId, ordinal: verdict.ordinal },
+          data: { legibility: verdict.legibility },
+        });
+      }
+      return true;
+    });
+
+    if (!stored) {
+      // The write lost its compare-and-set, but that has two causes and only
+      // one of them is a fault: a page added, retaken or deleted under the
+      // call (a real staleness), or a concurrent call for the same page set
+      // winning the race and storing first. The second case already holds the
+      // exact verdicts this call would have written, so answering it as
+      // checked is correct, not stale — and it is what stops the loser of the
+      // race from paying for a provider call and then being told it failed.
+      const current = await this.requireLive(parentAccountId, sourceTestId);
+      if (isChecked(current)) return this.viewOf(current);
+      // Nothing was stored, so nothing may be reported as checked. The same
+      // retryable 503 every other nothing-was-stored path answers: the parent
+      // runs the check again over the page set they now have.
+      throw new ServiceUnavailableException(LEGIBILITY_CHECK_FAILED);
+    }
+
+    return this.read(parentAccountId, sourceTestId);
+  }
+
+  /**
    * Submits the draft, refusing while no page has actually landed.
    *
    * The count is of `Ready` rows alone, and the distinction is the whole point:
@@ -548,11 +730,17 @@ export class SourceTestService implements SourceTestReader {
       // slip between the check and the write. Non-null is the whole assertion
       // — enablement is deliberately never re-checked, so an Admin disabling a
       // Subject cannot invalidate a parent's finished work.
-      const classification = await tx.sourceTest.findUniqueOrThrow({
+      const gates = await tx.sourceTest.findUniqueOrThrow({
         where: { id: sourceTestId },
-        select: { subjectId: true, gradeLevelId: true },
+        select: { subjectId: true, gradeLevelId: true, legibilityCheckedAt: true },
       });
-      if (!isClassified(classification)) throw new BadRequestException(CLASSIFICATION_REQUIRED);
+      if (!isClassified(gates)) throw new BadRequestException(CLASSIFICATION_REQUIRED);
+      // The third gate, read in the same transaction for the same reason: a
+      // page added concurrently clears the check, and a submission that
+      // slipped between the read and the write would commit a page set the
+      // check never covered. It asserts the check *ran* and nothing about what
+      // it said — `Low` is a warning, never a refusal (AD-29).
+      if (!isChecked(gates)) throw new BadRequestException(LEGIBILITY_CHECK_REQUIRED);
       const written = await tx.sourceTest.updateMany({
         // Account-scoped and state-guarded in the statement that writes: a
         // concurrent submit matches nothing here, so the first one stands.
@@ -568,6 +756,11 @@ export class SourceTestService implements SourceTestReader {
           status: 'Draft',
           subjectId: { not: null },
           gradeLevelId: { not: null },
+          // The legibility gate joins the other two as a where-clause rather
+          // than being left to the read above, so the assertion is made by the
+          // statement that writes: a page added between the two cannot produce
+          // a Submitted row whose check was being cleared.
+          legibilityCheckedAt: { not: null },
         },
         data: { status: 'Submitted', submittedAt: new Date() },
       });
@@ -580,6 +773,35 @@ export class SourceTestService implements SourceTestReader {
     });
 
     return this.read(parentAccountId, sourceTestId);
+  }
+
+  /**
+   * How many Source Tests this account committed inside the window — which is
+   * the Upload Allowance charge, entire (AD-14, FR-31).
+   *
+   * There is no debit to go with it. A Source Test reaches `Submitted` in
+   * exactly one transaction, so counting Submitted rows in the window *is* the
+   * charge: it cannot double-charge a retry, cannot charge a draft that was
+   * abandoned or that expired, and cannot leave "job succeeded, debit did not"
+   * reachable, because there is no debit. That is why no `charged` column and
+   * no allowance write exist anywhere.
+   *
+   * Half-open `[start, end)`, like every other count in `allowance`, so a
+   * commit at the instant a period ends belongs to the next one and is counted
+   * exactly once. `allowance` reads it through this method and never through a
+   * Prisma delegate of its own (AD-17).
+   */
+  async countSubmittedIn(
+    parentAccountId: string,
+    window: { start: Date; end: Date },
+  ): Promise<number> {
+    return this.prisma.sourceTest.count({
+      where: {
+        parentAccountId,
+        status: 'Submitted',
+        submittedAt: { gte: window.start, lt: window.end },
+      },
+    });
   }
 
   /**
@@ -727,21 +949,149 @@ export class SourceTestService implements SourceTestReader {
     throw new ConflictException(PAGE_LIMIT_REACHED);
   }
 
-  /** Ingest, then the write, then the promotion out of `Uploading` (AD-28). */
-  private async storeBytes(pageId: string, buffer: Buffer): Promise<void> {
+  /**
+   * What the stored `Ready` page set *is*, as one comparable string.
+   *
+   * The id and the ordinal catch an add, a delete and a reorder; `updatedAt`
+   * catches a retake, which is the one mutation the other two are blind to —
+   * it replaces a page's bytes and leaves `1..N` exactly as it was, so a
+   * comparison on ordinals alone would call the set unchanged and let a
+   * verdict be filed against bytes nobody judged.
+   *
+   * A string rather than a structure because the only thing ever done with it
+   * is `!==` across a provider call, and a structural compare would be a
+   * second way of saying the same thing.
+   */
+  private async pageSetStamp(
+    client: TransactionClient | PrismaService,
+    sourceTestId: string,
+  ): Promise<string> {
+    const pages = await client.pageImage.findMany({
+      where: { sourceTestId, state: 'Ready' },
+      select: { id: true, ordinal: true, updatedAt: true },
+      orderBy: { ordinal: 'asc' },
+    });
+    return pages.map((page) => `${page.id}:${page.ordinal}:${page.updatedAt.getTime()}`).join('|');
+  }
+
+  /**
+   * Ingest, then the write, then the promotion out of `Uploading` (AD-28).
+   *
+   * `clearCheckFor` promotes the row and forgets the stored check in **one
+   * transaction**, and the two callers that pass it — `addPage` and
+   * `retakePage` — need that atomicity rather than tidiness: clearing in a
+   * transaction of its own leaves a window in which the new or retaken page is
+   * already `Ready` and `legibilityCheckedAt` is still set, and a `submit`
+   * landing inside it passes both the in-transaction read gate and the
+   * `updateMany` where-clause and commits a page set the check never covered.
+   * `deletePage` already clears inside its own transaction for the same
+   * reason.
+   */
+  private async storeBytes(
+    pageId: string,
+    buffer: Buffer,
+    clearCheckFor?: { parentAccountId: string; sourceTestId: string },
+  ): Promise<void> {
     const normalized = await this.ingest.normalize(buffer, UNSUPPORTED_IMAGE_FORMAT);
     const storagePath = await this.ingest.write(pageId, normalized.buffer);
-    await this.prisma.pageImage.update({
-      where: { id: pageId },
-      data: {
-        state: 'Ready',
-        storagePath,
-        mimeType: normalized.mimeType,
-        width: normalized.width,
-        height: normalized.height,
-        byteSize: normalized.byteSize,
-      },
+    await this.prisma.withTransaction(async (tx) => {
+      await tx.pageImage.update({
+        where: { id: pageId },
+        data: {
+          state: 'Ready',
+          storagePath,
+          mimeType: normalized.mimeType,
+          width: normalized.width,
+          height: normalized.height,
+          byteSize: normalized.byteSize,
+        },
+      });
+      if (clearCheckFor) {
+        await this.clearCheck(clearCheckFor.parentAccountId, clearCheckFor.sourceTestId, tx);
+      }
     });
+  }
+
+  /**
+   * Forgets the stored check: `legibilityCheckedAt` and every page's verdict,
+   * in one transaction so neither can survive the other.
+   *
+   * Called by the three page-set mutations and by none of the others.
+   * `reorderPages` deliberately does not call it: the verdicts hang off the
+   * `PageImage` rows, so moving ordinals moves the verdicts with them and the
+   * batch still covers exactly the pages it ran over. Adding or deleting
+   * changes the set, and a retake changes the bytes under a verdict — in all
+   * three the stored result no longer describes what would be committed.
+   *
+   * Account-scoped and `Draft`-guarded in the statements that write, like
+   * every other mutation in this module: a Source Test submitted or moved
+   * under the caller matches nothing, rather than having a committed upload's
+   * verdicts quietly wiped by a write that never checked whose it was.
+   *
+   * `legibilityCheckedAt: { not: null }` is in the where-clause for a reason
+   * beyond tidiness. This now runs inside the transaction that promotes a page
+   * to `Ready`, so an unconditional write would take a row lock on the Source
+   * Test for **every** add — and several pages added at once would serialize
+   * on it, each waiting out the one before inside an interactive transaction.
+   * Guarded, an unchecked draft matches no row, takes no lock, and concurrent
+   * adds stay concurrent; a checked one serializes, which is correct and is
+   * the rare case. The verdicts and the instant are only ever written together
+   * (`checkLegibility` stores both in one transaction), so "no instant" and
+   * "no verdicts" are the same state and skipping both is exact.
+   */
+  private async clearCheck(
+    parentAccountId: string,
+    sourceTestId: string,
+    tx?: TransactionClient,
+  ): Promise<void> {
+    const run = async (client: TransactionClient | PrismaService): Promise<void> => {
+      const cleared = await client.sourceTest.updateMany({
+        where: {
+          id: sourceTestId,
+          parentAccountId,
+          status: 'Draft',
+          legibilityCheckedAt: { not: null },
+        },
+        data: { legibilityCheckedAt: null },
+      });
+      // The page verdicts hang off the same gate, so they are cleared only
+      // when the Source Test itself was: a matched-nothing header write and a
+      // wiped set of verdicts would be exactly the half-state the single
+      // transaction exists to prevent.
+      if (cleared.count === 0) return;
+      await client.pageImage.updateMany({
+        where: { sourceTestId },
+        data: { legibility: null },
+      });
+    };
+    if (tx) return run(tx);
+    await this.prisma.withTransaction(run);
+  }
+
+  /**
+   * The check's own faults, and only those, become the one 503 the matrix
+   * names.
+   *
+   * Four causes collapse into it: the provider could not be reached, it
+   * refused the request, the request could not be made at all, and the payload
+   * did not survive validation. From the parent's side they are one fact —
+   * the pages were not checked, nothing was stored, and the check may be run
+   * again — and none of the differences is something they could act on.
+   *
+   * Anything else is re-thrown untouched rather than reported as a bad check:
+   * a missing stored page or a database fault is not the provider's doing, and
+   * dressing it as one would hide it behind a retry that can never succeed.
+   */
+  private checkFailure(cause: unknown): unknown {
+    if (
+      cause instanceof AiUpstreamError ||
+      cause instanceof AiRejectedError ||
+      cause instanceof AiInputError ||
+      cause instanceof LegibilityPayloadInvalid
+    ) {
+      return new ServiceUnavailableException(LEGIBILITY_CHECK_FAILED);
+    }
+    return cause;
   }
 
   /** The failure path's clean-up: the row, then whatever bytes reached disk. */
@@ -830,6 +1180,7 @@ export class SourceTestService implements SourceTestReader {
       subjectName: subject?.name ?? null,
       gradeLevelId: row.gradeLevelId,
       gradeLevelName: gradeLevel?.name ?? null,
+      legibilityCheckedAt: row.legibilityCheckedAt?.toISOString() ?? null,
       maxPages: MAX_PAGES,
       pages: pages.map((page) => ({
         id: page.id,
@@ -838,6 +1189,7 @@ export class SourceTestService implements SourceTestReader {
         width: page.width,
         height: page.height,
         byteSize: page.byteSize,
+        legibility: page.legibility,
         createdAt: page.createdAt.toISOString(),
       })),
     };

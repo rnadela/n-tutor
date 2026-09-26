@@ -23,6 +23,7 @@ import {
   submitBlockedReasons,
 } from '@/lib/classification';
 import { EXTRACTION_POLL_MS, isSettled, warningNeeded } from '@/lib/extraction-status';
+import { isChecked, isPageReadable, unreadablePages } from '@/lib/legibility';
 import { canAddPage, canSubmitPages, movedOrder, type MoveDirection } from '@/lib/page-order';
 import {
   parentApi,
@@ -47,13 +48,16 @@ const CLASSIFICATION_HEADING_ID = 'capture-classification-heading';
 /** The generate step's own heading, named the same way the other two sections are. */
 const GENERATE_HEADING_ID = 'capture-generate-heading';
 
+/** The legibility result's own heading, named the way the other sections are. */
+const LEGIBILITY_HEADING_ID = 'capture-legibility-heading';
+
 /**
  * Which write is in flight, so the screen can say what it is doing rather than
  * only that it is doing something. `null` is "nothing in flight"; every other
  * value locks the whole strip, because two writes against one ordinal sequence
  * could land out of order.
  */
-type Pending = 'add' | 'retake' | 'move' | 'delete' | 'submit' | 'classify' | null;
+type Pending = 'add' | 'retake' | 'move' | 'delete' | 'submit' | 'classify' | 'check' | null;
 
 /**
  * The page-management strip: the order a Source Test's pages are in, and the
@@ -435,8 +439,26 @@ export default function CapturePage() {
     subjectId: sourceTest?.subjectId ?? null,
     gradeLevelId: sourceTest?.gradeLevelId ?? null,
   };
-  const blockedReasons = submitBlockedReasons(classification, readyPageCount);
-  const submittable = isDraft && canSubmitPages(readyPageCount) && isClassified(classification);
+  /**
+   * The whole gate the server applies, mirrored: the pages that landed, the
+   * classification, and whether the check has run. Each control below reads
+   * the part of it that is its own.
+   */
+  const gate = {
+    ...classification,
+    legibilityCheckedAt: sourceTest?.legibilityCheckedAt ?? null,
+  };
+  const blockedReasons = submitBlockedReasons(gate, readyPageCount);
+  /** What the *check* control is offered for: pages and classification only. */
+  const checkable = isDraft && canSubmitPages(readyPageCount) && isClassified(classification);
+  /** The check has run, so the result panel and the commit control exist. */
+  const checked = isDraft && isChecked(gate);
+  /**
+   * Every page the check flagged, by ordinal. Empty both when nothing was
+   * flagged and before the check ran — the panel only exists in the first
+   * case, so the two never have to be told apart here.
+   */
+  const flagged = unreadablePages(pages);
   const addable = isDraft && canAddPage(pages.length, maxPages);
 
   /**
@@ -630,8 +652,30 @@ export default function CapturePage() {
     openDraft(() => announce(parentCopy.capture.generate.retakeStarted));
   }
 
+  /**
+   * The batch check, on the same `write()` path every other mutation takes —
+   * so the strip is locked while it is in flight and the outcome is announced
+   * from the view the server returned, never from what the client expected.
+   *
+   * It runs once. A second call answers with the stored verdicts and costs
+   * nothing, so the control does not have to guard against a double tap.
+   */
+  function checkPages(): void {
+    if (!checkable) return;
+    void write(
+      'check',
+      () => parentApi.checkSourceTestLegibility(token!, sourceTest!.id),
+      (after) => parentCopy.capture.legibility.checked(unreadablePages(after.pages).length),
+    );
+  }
+
+  /**
+   * The commit. Never disabled for a flagged page: the check is advisory and
+   * the server accepts a submission over a `Low` verdict, so refusing here
+   * would be the client inventing a gate the product does not have.
+   */
   function submit(): void {
-    if (!submittable) return;
+    if (!checked) return;
     void write(
       'submit',
       () => parentApi.submitSourceTest(token!, sourceTest!.id),
@@ -840,22 +884,130 @@ export default function CapturePage() {
                       </Typography>
                     )}
 
-                    <PrimaryButton
-                      disabled={busy || !submittable}
-                      sx={{ minHeight: density.tapTarget }}
-                      onClick={submit}
-                    >
-                      {pending === 'submit'
-                        ? parentCopy.capture.submitting
-                        : parentCopy.capture.submit}
-                    </PrimaryButton>
-                    {/* The reason, on screen, whenever the control is refused
-                        for it. The disabled button alone states nothing a
-                        parent can act on. */}
-                    {!submittable && (
-                      <Typography component="p" data-testid="submit-blocked">
-                        {parentCopy.capture.submitBlocked(blockedReasons)}
-                      </Typography>
+                    {/* The check, not the commit. It runs once over the whole
+                        page set, in the foreground, and it charges nothing. */}
+                    {!checked && (
+                      <>
+                        <PrimaryButton
+                          disabled={busy || !checkable}
+                          sx={{ minHeight: density.tapTarget }}
+                          onClick={checkPages}
+                          data-testid="check-pages"
+                        >
+                          {pending === 'check'
+                            ? parentCopy.capture.submitting
+                            : parentCopy.capture.submit}
+                        </PrimaryButton>
+                        {pending === 'check' && (
+                          <Typography component="p" data-testid="checking">
+                            {parentCopy.capture.legibility.checking}
+                          </Typography>
+                        )}
+                        {/* The reason, on screen, whenever the control is
+                            refused for it. The disabled button alone states
+                            nothing a parent can act on. */}
+                        {!checkable && (
+                          <Typography component="p" data-testid="submit-blocked">
+                            {/* The check reason is left out here: this control
+                                *is* the check, so telling a parent to run it
+                                is telling them to press the button they are
+                                being refused. It is stated by the server, and
+                                by the copy function, for the caller that never
+                                saw this screen. */}
+                            {parentCopy.capture.submitBlocked(
+                              blockedReasons.filter((reason) => reason !== 'legibility'),
+                            )}
+                          </Typography>
+                        )}
+                      </>
+                    )}
+
+                    {/* The result, above the commit control: the parent reads
+                        what the check said, and only then is asked to
+                        continue. */}
+                    {checked && (
+                      <Box
+                        component="section"
+                        aria-labelledby={LEGIBILITY_HEADING_ID}
+                        data-testid="legibility-result"
+                        sx={{ display: 'grid', gap: `${density.gap}px` }}
+                      >
+                        <Typography
+                          id={LEGIBILITY_HEADING_ID}
+                          component="h2"
+                          sx={{ fontSize: 18, fontWeight: 700 }}
+                        >
+                          {parentCopy.capture.legibility.heading}
+                        </Typography>
+
+                        <Typography component="p" data-testid="legibility-summary">
+                          {flagged.length === 0
+                            ? parentCopy.capture.legibility.allReadable
+                            : parentCopy.capture.legibility.flagged(flagged)}
+                        </Typography>
+
+                        {/* The retake, offered for each flagged page alone.
+                            Every verdict badge lives on the strip above — the
+                            ordered list that names each page's ordinal and its
+                            readability — and this drives that page's own
+                            retake input by `htmlFor` rather than adding a
+                            second way to replace a page's bytes. */}
+                        {pages.filter((page) => !isPageReadable(page)).length > 0 && (
+                          <Box
+                            component="ul"
+                            sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid' }}
+                          >
+                            {pages
+                              .filter((page) => !isPageReadable(page))
+                              .map((page) => (
+                                <Box
+                                  component="li"
+                                  key={page.id}
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    minHeight: density.tapTarget,
+                                  }}
+                                >
+                                  <Typography
+                                    component="label"
+                                    htmlFor={`capture-retake-${page.id}`}
+                                    data-testid={`legibility-retake-${page.ordinal}`}
+                                  >
+                                    {parentCopy.capture.legibility.retakeFor(page.ordinal)}
+                                  </Typography>
+                                </Box>
+                              ))}
+                          </Box>
+                        )}
+
+                        {/* Proceeding over a flagged page is allowed, and the
+                            screen says so rather than leaving it to be tried. */}
+                        <Typography component="p" data-testid="legibility-advisory">
+                          {parentCopy.capture.legibility.advisory}
+                        </Typography>
+
+                        {/* Stated beforehand, in words, above the control that
+                            spends it. No figure and no counter: the
+                            parent-facing Allowances surface is Story 9.6's. */}
+                        <Typography component="p" data-testid="legibility-cost">
+                          {parentCopy.capture.legibility.cost}
+                        </Typography>
+                        <Typography component="p" data-testid="legibility-no-cost">
+                          {parentCopy.capture.legibility.noCost}
+                        </Typography>
+
+                        <PrimaryButton
+                          disabled={busy}
+                          sx={{ minHeight: density.tapTarget }}
+                          onClick={submit}
+                          data-testid="legibility-continue"
+                        >
+                          {pending === 'submit'
+                            ? parentCopy.capture.legibility.committing
+                            : parentCopy.capture.legibility.continueWith(readyPageCount)}
+                        </PrimaryButton>
+                      </Box>
                     )}
                   </>
                 )}

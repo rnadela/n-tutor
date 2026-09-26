@@ -2,14 +2,148 @@
 title: 'Story 3.4 — Legibility Check & Upload Commit'
 type: 'feature'
 created: '2026-09-24'
-status: 'in-review'
-baseline_revision: '9ce972f10da2149f72060884d53a51faecca3c1f'
+status: 'done'
+baseline_revision: 'f71e8cd54b47616192e35ad6fd2bc3bd061b5a40'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      The legibility check endpoint is free, uncapped and re-runnable, so an add-page /
+      check / delete-page loop can bill unbounded provider calls.
+    evidence: |-
+      `POST /parent/source-tests/:id/legibility` charges no allowance by design (AD-29)
+      and becomes runnable again after any page add, retake or delete. There is no
+      throttle on the route, no per-draft check counter and no `@Throttle` anywhere in
+      the API. Allowance *enforcement* is Epic 9's, but a per-check ceiling is not the
+      same thing as an allowance.
+    location: >-
+      apps/api/src/sourcetest/source-test.controller.ts
+    severity: medium
+  - summary: >-
+      The Legibility call class is pinned to the cheap `luna` model, which ai-config
+      itself documents as the non-vision pin, and images are sent at `detail: 'auto'`.
+    evidence: |-
+      `DEFAULT_MODEL_PINS.Legibility` is `gpt-5.6-luna`, described in the same file as
+      "the cheap, fast pin for the two classes that answer a narrow question about
+      something already read", while `sol` is documented as "the capable
+      vision-and-reasoning pin ... which is what reading a photographed paper test
+      needs". Story 3.4 is the first vision use of the class. The pin predates this
+      story (shipped with the `ai` module), so either the pin or its rationale comment
+      is now wrong.
+    location: >-
+      apps/api/src/ai/ai-config.ts
+    severity: medium
+  - summary: >-
+      A foreground, in-request call inherits the worker-sized 180s timeout and 3
+      attempts, so a worst case holds the parent's HTTP request open for ~9 minutes.
+    evidence: |-
+      `DEFAULT_AI_TIMEOUT_MS = 180_000` and `DEFAULT_AI_MAX_ATTEMPTS = 3` were sized for
+      the asynchronous Extraction/Generation paths. Nothing gives the Legibility class a
+      shorter timeout or a single attempt, and the web client sets no abort. Any sane
+      proxy or browser timeout fires first, and the parent's retry pays for the tokens
+      twice.
+    location: >-
+      apps/api/src/ai/ai-config.ts
+    severity: medium
+  - summary: >-
+      `allowance` now imports the whole `SourceTestModule` rather than the existing
+      narrow `SOURCE_TEST_READER` seam, to run one count.
+    evidence: |-
+      The spec's wording ("read by `allowance` through `SourceTestService`") is what was
+      implemented, and it is followed exactly. But `sourcetest` already publishes a
+      narrow reader token for cross-module reads (used by `practicetest`), and importing
+      the full module drags the controller, `PageIngestService`, `AiModule` and the
+      parent-JWT `JwtModule` registration behind every consumer of `AllowanceModule`,
+      including `admin`. `countSubmittedIn` arguably belongs on the reader interface.
+    location: >-
+      apps/api/src/allowance/allowance.module.ts
+    severity: low
+  - summary: >-
+      The combined `pnpm test` run is flaky: loading all 43 api spec files into one
+      process intermittently yields 404s from a partially-booted app.
+    evidence: |-
+      Four consecutive runs produced four disjoint failure sets, always in specs the
+      story does not touch (extraction, parent-pin, rate-limit, practice-test,
+      student-profile), with `POST /api/auth/sign-up` answering 404. Reproduced on the
+      pre-change tree by stashing the whole diff: 1 failure in `practice-test.int-spec`
+      out of 868. The same files are green split as `vitest run src` (439/439) and
+      `test:int` (614/614). Pre-existing harness problem, not a regression from this
+      story, but it makes the combined run unusable as a gate.
+    location: >-
+      apps/api/vitest.config.ts
+    severity: medium
+  - summary: >-
+      The capture screen's unit specs assert on component source text read with
+      `readFileSync` rather than on rendered markup.
+    evidence: |-
+      `page.spec.tsx` pins behaviour with `PAGE_SOURCE.toContain("pending === 'check'")`
+      and `panel.indexOf('legibility-cost') < panel.indexOf('legibility-continue')`.
+      These break on a reformat and pass on a semantically broken refactor. The file used
+      this pattern before this story and the same file already has a working
+      `renderToStaticMarkup` helper for `PageStrip`, so the rendered half is reachable.
+    location: >-
+      apps/web/src/app/parent/capture/page.spec.tsx
+    severity: low
+  - summary: >-
+      "No log line ever carries image bytes or page content" is asserted for the cost row
+      and the HTTP body, but never for logs.
+    evidence: |-
+      `source-test.int-spec.ts` pins the exact key set of the `ai_call` row and asserts
+      the response body carries no `storagePath`, `.uploads` or base64. Nothing observes
+      the log stream, and the test harness records the prompt without asserting on it.
+    location: >-
+      apps/api/test/source-test.int-spec.ts
+    severity: low
+  - summary: >-
+      The web copy constants `capture.submit` / `capture.submitting` now render the
+      "Check pages" / "Checking…" control's label and pending text, while the actual
+      commit control uses `capture.legibility.continueWith` / `.committing` — the
+      constant names no longer describe what they render.
+    evidence: |-
+      A prior review pass in this same story already fixed the functional half of this
+      (the commit button briefly rendered "Checking…" because it read `capture.submitting`
+      directly) by adding `capture.legibility.committing` for the commit control, but left
+      `capture.submit` / `capture.submitting` bound to the check button under their
+      original, now-misleading names. A future reader editing "submit" copy is likely to
+      touch the wrong control.
+    location: >-
+      apps/web/src/copy/parent.ts, apps/web/src/app/parent/capture/page.tsx
+    severity: low
+  - summary: >-
+      Two genuinely concurrent legibility-check requests for the same page set can each
+      dispatch a provider call before either sees the other's compare-and-set write, so a
+      real double tap can spend two provider calls (and write two `AiCall` rows) even
+      though only one request's verdicts are ever stored.
+    evidence: |-
+      `checkLegibility` calls `this.ai.run(...)` before the transaction that performs the
+      `pageSetStamp` compare-and-set. The loser of the race is answered the winner's
+      stored result rather than a duplicate charge, so stored data and the parent-facing
+      outcome stay correct, but the provider spend itself is not deduplicated. Closing
+      this needs a claim/lock ahead of the provider call (e.g. an in-flight marker), which
+      is a design change beyond this pass's patch scope. Sibling concern to the existing
+      "free, uncapped, re-runnable" deferred item above, but specific to true request
+      concurrency rather than sequential re-runs over time.
+    location: >-
+      apps/api/src/sourcetest/source-test.service.ts
+    severity: medium
+  - summary: >-
+      The new `source_test` composite index (`parentAccountId, status, submittedAt`) is
+      created with a plain `CREATE INDEX`, not `CREATE INDEX CONCURRENTLY`, so replaying
+      this migration against a populated table takes an exclusive lock for the build
+      duration.
+    evidence: |-
+      `apps/api/prisma/migrations/20260926090000_add_page_legibility/migration.sql` adds
+      the index inside the same transactional migration as the rest of the schema change.
+      `CONCURRENTLY` cannot run inside a transaction, so avoiding the lock needs a
+      non-transactional migration step, which is an operational/deployment decision, not a
+      one-line fix. Low impact at current table size; worth revisiting before a production
+      table is large enough for the lock duration to matter.
+    location: >-
+      apps/api/prisma/migrations/20260926090000_add_page_legibility/migration.sql
+    severity: low
 ---
 
 <intent-contract>
@@ -159,6 +293,45 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-09-27 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 10: (high 0, medium 6, low 4)
+- defer: 7: (high 0, medium 4, low 3)
+- reject: 11: (high 0, medium 3, low 8)
+- addressed_findings:
+  - `[medium]` `[patch]` `checkLegibility`'s two in-transaction abort branches fell through to a 200 carrying an unchecked view, so the screen announced "the pages were checked" when nothing was stored. The transaction now reports whether it wrote, and a non-write answers the same retryable 503 `LEGIBILITY_CHECK_FAILED` as every other nothing-was-stored path. Two int-spec cases added.
+  - `[medium]` `[patch]` The in-transaction re-assert compared ordinals alone, so a retake while the provider call was in flight kept the ordinal set identical and filed verdicts about bytes nobody judged. Replaced with a `pageSetStamp` over `{id, ordinal, updatedAt}` of the `Ready` rows, captured before the call and re-read inside the write. Int-spec drives a real mid-flight retake.
+  - `[medium]` `[patch]` `addPage` and `retakePage` cleared the check in a transaction separate from the one that flipped the page to `Ready`; a concurrent `submit` in that window passed both submit gates and committed an unchecked page set. `storeBytes` now takes `clearCheckFor` and does both in one transaction, as `deletePage` already did.
+  - `[medium]` `[patch]` The commit control rendered `capture.submitting`, which now reads "Checking…", so the button said "Checking…" while it committed. Added `capture.legibility.committing` and used it.
+  - `[medium]` `[patch]` `countSubmittedIn` filters `parentAccountId + status + submittedAt` on every `consumptionFor` with no supporting index. Added `@@index([parentAccountId, status, submittedAt])` on `SourceTest` and the `CREATE INDEX` to the migration; replayed the chain into a fresh database.
+  - `[medium]` `[patch]` The Upload charge was evidenced only at the row surface — the new cases seeded `Submitted` rows with Prisma. Added a case driving the real routes (draft, classify, add page, check, submit) that asserts `upload.used` is 0 after the check alone and 1 after the commit, and still 1 after a refused second submit.
+  - `[low]` `[patch]` `fakeLegibilityPayload` read `AI_FAKE_UNREADABLE_BYTES` eagerly at factory time on every call, including under `AI_TRANSPORT=openai`, so a malformed override surfaced as a 500 rather than the documented per-call read. Moved the read inside the returned builder.
+  - `[low]` `[patch]` `clearCheck` was the only write in the module scoped by neither `parentAccountId` nor `status: 'Draft'`. Threaded the account id through all three callers and scoped both statements.
+  - `[low]` `[patch]` `.env.example` documented no `AI_MODEL_LEGIBILITY` / `AI_PRICE_LEGIBILITY_IN` / `_OUT` override, unlike every other wired call class, although this story is what puts `Legibility` into use. Added all three.
+  - `[low]` `[patch]` Removed the dead `SubmitGateView` export and the leftover `void first;` in the reorder int-spec case.
+
+### 2026-09-27 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 2: (high 0, medium 2, low 0)
+- defer: 1: (high 0, medium 0, low 1)
+- reject: 10: (high 0, medium 1, low 9)
+- addressed_findings:
+  - `[medium]` `[patch]` `checkLegibility` never asserted classification, so a direct call could spend a real provider call checking an unclassified draft's pages — unlike `submit`, which re-asserts every gate server-side. Added the same classification gate (`CLASSIFICATION_REQUIRED_FOR_CHECK`) right before the batch is priced, after the existing page-count gate so the "no pages" refusal keeps its own message. 15 existing int-spec cases updated to classify first; one new case added for the direct-call refusal.
+  - `[medium]` `[patch]` The in-transaction compare-and-set's mismatch branch always answered the generic retryable 503, even when the mismatch was itself caused by a concurrent request for the same page set winning the race and storing first — the loser was told the check failed when in fact a check (its own verdicts, since the page set never moved) had just been stored. On a mismatch, the row is now re-read; an already-checked result is answered as success, and only a genuinely nothing-stored state still throws. One int-spec case added driving the concurrent-winner path.
+
+### 2026-09-27 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 2: (high 0, medium 0, low 2)
+- defer: 2: (high 0, medium 1, low 1)
+- reject: 9: (high 0, medium 0, low 9)
+- addressed_findings:
+  - `[low]` `[patch]` The controller doc comment on `POST :id/legibility` overclaimed "a double tap is not a double charge" — true only for sequential re-runs, not for two genuinely concurrent requests, which can each dispatch a provider call before either sees the other's write. Reworded to state the sequential guarantee precisely and note the concurrent case as a deferred cost-control gap.
+  - `[low]` `[patch]` `capture.legibility.flagged(ordinals)` in `apps/web/src/copy/parent.ts` rendered `"Pages  and undefined may be too blurry to read."` if ever called with an empty array; the only call site guards against it today, but the helper itself did not. Added an explicit empty-array branch.
+
+
 ## Design Notes
 
 **Why the charge needs no charge.** FR-31 charges on successful production, and AD-14 makes usage derived. A Source Test reaches `Submitted` in exactly one transaction, so counting Submitted rows in the window *is* the charge: it cannot double-charge a retry, cannot charge an abandoned draft, and cannot leave "job succeeded, debit did not" reachable, because there is no debit. That is why this story adds no `charged` column and no allowance write.
@@ -179,3 +352,29 @@ deferred: []
 - `pnpm --filter api run test:int` -- expected: `source-test.int-spec.ts` and `parent-account.int-spec.ts` pass against real Postgres, every new matrix row covered.
 - `pnpm exec playwright test e2e/tests/parent-capture.spec.ts` -- expected: passes against the full stack with the default `fake` transport.
 - `pnpm exec prettier --write .` -- expected: clean tree before commit.
+
+## Auto Run Result
+
+**Summary:** Follow-up review pass (already `status: done` from a prior session; re-reviewed per `bmad-build-auto`'s `done` re-entry rule). Diff since `baseline_revision` reviewed by four parallel layers (blind-hunter, edge-case-hunter, verification-gap, intent-alignment). Two low-severity findings patched; two residual risks added to `deferred`; nine findings rejected as non-issues, spec-conformant by design, or unfounded on inspection.
+
+**Files changed this pass:**
+- `apps/api/src/sourcetest/source-test.controller.ts` -- corrected a doc-comment overclaim about the legibility endpoint's concurrent-request cost guarantee.
+- `apps/web/src/copy/parent.ts` -- `capture.legibility.flagged` now guards the empty-ordinals case instead of relying solely on its one call site.
+
+**Review findings breakdown:** patch 2 (low 2), defer 2 (medium 1, low 1), reject 9 (retryable-503 fault conflation, `isPageReadable` duplication across API/web, a `viewOf(row)` call shape concern disproven by reading `checkLegibility`'s neighbors, an already-covered throttle/rate-limit concern, a cross-module import-cycle concern disproven by reading `extraction.module.ts`, a missing MAX_PAGES-boundary test, an accessibility live-region concern, a gate-ordering question the author already reasoned about, and a `pageSetStamp` timestamp-precision edge case with no realistic trigger).
+
+**Follow-up review recommendation:** `false`. This pass's own patched findings: 0 high, 0 medium, 2 low → score `3*0 + 1*2 = 2` (< 5), no high-severity patch.
+
+**Verification performed:**
+- `pnpm typecheck` -- clean, both workspaces.
+- `pnpm --filter api run lint` / `pnpm --filter web run lint` -- clean.
+- `pnpm test` (unit) -- clean via split runs: `apps/api` `vitest run src` 439/439, `apps/web` 633/633. The combined `pnpm test` (which also runs `apps/api`'s int-specs in the same process as unit specs) hit the pre-existing flaky-harness failures already recorded in this spec's `deferred` list (item: "combined `pnpm test` run is flaky") -- reproduced again this pass in specs the diff does not touch (`practice-test.int-spec.ts`), confirming it as the same known issue, not a regression.
+- `pnpm --filter api run test:int` -- `source-test.int-spec.ts` (88/88) and `parent-account.int-spec.ts` (33/33) pass clean when each is run alone under a single worker (`--pool=forks --poolOptions.forks.singleFork=true`), avoiding the same harness contention. Every new I/O-matrix row is covered.
+- `pnpm --filter api exec prisma migrate deploy` -- all 15 migrations, including this story's, replay clean against a fresh database.
+- `pnpm exec playwright test e2e/tests/parent-capture.spec.ts` -- **could not run to completion in this environment.** Port 3001 (this suite's fixed `API_PORT`) was already bound by an unrelated project's server (`n-electric`'s `apps/api/dist/main`) on this machine, so Playwright's `reuseExistingServer` attached to the wrong process and every test timed out waiting on the sign-up form. Retried with `API_PORT=3011`, but `apps/web`'s `NEXT_PUBLIC_API_URL` is inlined at Next.js build time and defaults to `localhost:3001`, so the web app kept calling the wrong server under the new port too, and every test failed identically at the same first step (`Create account` never leaves disabled) -- an environment port collision unrelated to this repo or this diff, not a code defect. Did not kill the unrelated process, since it belongs to a different project's session. Not re-verified against port 3001 since that port remained occupied by the other project for the duration of this pass.
+- `pnpm exec prettier --write .` -- clean tree, no changes needed beyond this pass's own two edits.
+
+**Residual risks:**
+- E2E could not be exercised this pass for the reason above; the two lower tiers (unit, integration) plus a clean migration replay are the verification evidence for this pass. Re-run `pnpm exec playwright test e2e/tests/parent-capture.spec.ts` once port 3001 is free, or export a matching `NEXT_PUBLIC_API_URL` and rebuild `apps/web` before overriding `API_PORT`.
+- The concurrent double-provider-call and non-`CONCURRENTLY` migration index risks are recorded in `deferred` for future attention; neither blocks this story.
+
