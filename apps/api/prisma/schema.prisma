@@ -476,10 +476,10 @@ model SourceTest {
 /// exactly while the row is `Uploading`, and are written by ingest in the same
 /// update that promotes it to `Ready`.
 model PageImage {
-  id           String         @id @default(uuid())
+  id           String          @id @default(uuid())
   sourceTestId String
   ordinal      Int
-  state        PageImageState @default(Uploading)
+  state        PageImageState  @default(Uploading)
   /// Derived from `id`. Never supplied or influenced by the client, and never
   /// served as a static file.
   storagePath  String?
@@ -492,8 +492,8 @@ model PageImage {
   /// Null means the check has not run over the current page set — cleared
   /// whenever the set or this page's bytes change.
   legibility   PageLegibility?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
   sourceTest SourceTest @relation(fields: [sourceTestId], references: [id], onDelete: Cascade)
 
@@ -1118,16 +1118,24 @@ model Answer {
 /// pending literal would be a second way to say one of them that every read would
 /// then have to tell apart from the first.
 ///
-/// **Absence says two things, and both of them are "nothing has judged this".** A
-/// Question with no row here is either one nothing has graded yet, or a blank on an
-/// Attempt the server judged **expired** — Story 5.4 deliberately writes no row for
-/// those, because FR-37 grades them `Incorrect` and that verdict is the story that
-/// grades an Attempt's answers to make. Neither reading is "graded and the result is
-/// pending", which is the state this enum must never be able to express.
+/// **Absence says exactly one thing: "nothing has judged this yet".** It used to say
+/// two — that, or a blank on an Attempt the server judged **expired**, which Story
+/// 5.4 deliberately wrote no row for. Story 5.5 grades that second case `Incorrect`,
+/// so on a submitted Attempt every presented Question carries a row and absence is
+/// back to one reading. Neither reading is "graded and the result is pending", which
+/// is the state this enum must never be able to express.
 ///
-/// Story 5.4 writes exactly one of these, `Unanswered`, and only for a blank on a
-/// manually submitted Attempt the server judged unexpired. The other three are
-/// Story 5.5's to write into a table that already exists.
+/// **All four are written now, and each by one rule** (Story 5.5). `Correct` and
+/// `Incorrect` come from the deterministic Multiple Choice comparison — the child's
+/// chosen ordinal against the option flagged correct — from a blank on an Attempt the
+/// server judged expired, which is always `Incorrect`, and from a provider's verdict
+/// on an answered Fill-in-the-Blank or Short Answer. `Unanswered` is written only for
+/// a blank on a manually submitted Attempt the server judged unexpired, exactly as
+/// Story 5.4 wrote it. `Ungraded` is written only where grading *failed* — an input
+/// fault, a provider refusal, an exhausted upstream retry, or a payload the post-hoc
+/// pass kept rejecting — and never to mean "queued": it is the one state a later read
+/// re-asks for, and it is excluded from the score's denominator rather than counted
+/// against the child.
 enum GradeState {
   Correct
   Incorrect
@@ -1152,14 +1160,33 @@ enum GradeState {
 /// Attempt whose time ran out grades `Incorrect` while a blank on one handed in
 /// early grades `Unanswered`, and the empty field looks identical in both.
 ///
-/// No rationale column and no score: Story 5.5 adds what its own verdicts need.
+/// **Every presented Question of a submitted Attempt carries a row** as of Story
+/// 5.5, so a missing row no longer means "a blank on an expired Attempt" — it means
+/// only "nothing has judged this yet", which is the one thing `resolveUngraded`
+/// treats exactly as it treats a stored `Ungraded`.
+///
+/// There is still no score column: a score is a count over these rows and FR-37
+/// fixes how it is counted, so storing it would be a second denominator to keep in
+/// step with the first.
+///
 /// Both relations cascade, for the reason `Attempt`'s and `Answer`'s do.
 model QuestionGrade {
   id         String     @id @default(uuid())
   attemptId  String
   questionId String
-  /// One of FR-37's four literals. Story 5.4 writes only `Unanswered`.
+  /// One of FR-37's four literals. All four are written, each by its own rule —
+  /// the enum's own doc states which.
   state      GradeState
+  /// Why a provider judged this answer the way it did, in one or two plain
+  /// sentences addressed to the parent.
+  ///
+  /// **A column and not a log line**, because it is the evidence a parent decides
+  /// an FR-25 override on: a rationale that lived only in a log would be a reason
+  /// nobody the decision belongs to can read. It is null for a deterministic
+  /// Multiple Choice verdict, for `Unanswered` and for `Ungraded`, because none of
+  /// those is a judgement a provider explained. `@db.Text` for the reason
+  /// `Answer.value` is: it is prose, not a label.
+  rationale  String?    @db.Text
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 

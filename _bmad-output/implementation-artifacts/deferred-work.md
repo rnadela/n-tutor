@@ -1453,3 +1453,67 @@ source_spec: `spec-5-4-submitting-an-attempt.md`
 severity: low
 reason: Raised by the Blind Hunter reviewer. Each site is individually tested for the plain-space case; nothing in this diff exercises the sites together for non-space whitespace, so a future edit to only one of them could silently desync client-reported and server-persisted blank counts.
 status: open
+
+### DW-183: The API integration suite fails non-deterministically in a varying handful of cases across describes unrelated to this story, so a single green full run is not trustworthy gating.
+origin: spec-deferred e66c2c6a8512
+location: n/a
+source_spec: `spec-5-5-grading-engine-four-grade-states.md`
+severity: medium
+reason: Reproduced on every run of this story's verification: one full-suite run failed 5 cases in `parent-auth`/`parent-pin`, another 3 in `parent-pin`/ `uncommitted-state`, and single-file runs of `practice-test.int-spec.ts` failed 2 cases in "claiming" and "release and discard", then 1 in "the request" -- a different set each time, always in fixture setup (`elevate`, `generatable`'s upload, subject classification), never in a grading case. Every failing case passes when its file is run alone. The implementation agent reproduced the same failures with this story's work stashed at HEAD. Already recorded on Stories 5.3 and 5.4 and still open.
+status: open
+
+### DW-184: `AttemptClosure.blankQuestionIds` is now computed by `closeAttempt` and consumed by nobody, and its doc still calls it the reason the hand-in transaction exists.
+origin: spec-deferred 0e87265a76f2
+location: apps/api/src/practicetest/practice-test.service.ts:361
+source_spec: `spec-5-5-grading-engine-four-grade-states.md`
+severity: low
+reason: Story 5.4 read it to write `Unanswered`; Story 5.5 derives every blank from `gradingInputFor`'s answer rows instead, because the same function must serve the retry pass where no closure exists. Grep finds the field written at `practice-test.service.ts:1101`, declared at `:361`, and read only by an int-spec assertion that the response body does *not* carry the key. Harmless but dead, and the surrounding prose is now wrong about why it is there.
+status: open
+
+### DW-185: Nothing caps how often an Attempt's `Ungraded` Questions may be re-asked, so a results view that keeps failing spends a fresh Grading call on every refresh.
+origin: spec-deferred a36551d8179d
+location: apps/api/src/grading/grading.service.ts:214
+source_spec: `spec-5-5-grading-engine-four-grade-states.md`
+severity: medium
+reason: FR-22 makes viewing the trigger and grading is deliberately exempt from every allowance, so `resolveUngraded` re-asks on each call with no attempt counter, cooldown column or minimum interval. A provider outage plus a child refreshing is unbounded spend. A cap is a product decision -- it would make some views not retry, which is the opposite of what FR-22 asks for -- so it is recorded rather than invented here.
+status: open
+
+### DW-186: A Question whose stored correct answer is empty or unreadable stays permanently `Ungraded` with nothing distinguishing it from a transient grading failure.
+origin: spec-deferred 652abbd93491
+location: apps/api/src/grading/grading.service.ts
+source_spec: `spec-5-5-grading-engine-four-grade-states.md`
+severity: medium
+reason: `askable` gates a Question on having a correct answer to grade against; one that can never produce a plain-text correct answer is retried by every `resolveUngraded` call exactly like a transient provider fault, and nothing marks or logs the difference between "will resolve on retry" and "can never resolve." A product decision on how to surface or cap this is not made here.
+status: open
+
+### DW-187: The batched Grading call has no upper bound on how many free-text Questions it sends in one prompt.
+origin: spec-deferred 7b1f98acb945
+location: apps/api/src/grading/grading-prompt.ts
+source_spec: `spec-5-5-grading-engine-four-grade-states.md`
+severity: medium
+reason: `buildGradingPrompt` batches every asked Question with no chunking or size ceiling; a Practice Test with many Fill-in-the-Blank/Short Answer Questions could produce a prompt near or past the provider's context/token limits, and neither the spec nor the tests address that case.
+status: open
+
+### DW-188: No test exercises `resolveUngraded` against a truly legacy Attempt with zero grade rows at all, as opposed to one already carrying an `Ungraded` row.
+origin: spec-deferred 21d978393b3c
+location: apps/api/test/practice-test.int-spec.ts
+source_spec: `spec-5-5-grading-engine-four-grade-states.md`
+severity: low
+reason: Existing cases delete a submitted Attempt's grade rows to simulate the row-less branch, but none represents an Attempt submitted before this story shipped, which never had grading run against it at all.
+status: open
+
+### DW-189: `writeGuarded`'s race-handling is covered by sequential simulation only; no test drives two truly concurrent writers to confirm the loser writes nothing.
+origin: spec-deferred 10c227352f55
+location: apps/api/src/grading/grading.service.ts
+source_spec: `spec-5-5-grading-engine-four-grade-states.md`
+severity: low
+reason: The fix recorded in the 2026-09-27 triage log changed the read-then-write to `createMany(skipDuplicates)` plus a guarded `updateMany`, but every case exercising it runs sequentially rather than racing two calls against the same rows.
+status: open
+
+### DW-190: No test covers grading or re-grading after the answer key drifts -- a Question removed or a choice's `isCorrect` flag changed between when an Attempt was answered and when it is graded.
+origin: spec-deferred 21c33018efbb
+location: apps/api/src/practicetest/practice-test.service.ts
+source_spec: `spec-5-5-grading-engine-four-grade-states.md`
+severity: low
+reason: `gradingInputFor` and `resolveUngraded` both re-read the current Practice Test state at grading time, so a changed answer key silently changes the verdict of an already-answered Question; this drift scenario is absent from the I/O matrix and the tests.
+status: open

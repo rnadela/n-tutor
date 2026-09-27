@@ -361,6 +361,60 @@ export interface AttemptClosure extends AttemptSubmissionView {
   blankQuestionIds: string[];
 }
 
+/**
+ * One Question of an Attempt as **the grader** reads it: the answer key beside
+ * the child's raw answer.
+ *
+ * **Never a response body and never a student-scoped view.** Every field
+ * `StudentQuestionView` deliberately omits is here — the stored correct answer,
+ * which option is flagged, the raw Topic labels — because the caller of this is
+ * the module that decides whether the child was right, and it cannot do that
+ * without the answer key. `grading` reads it, uses it and answers with none of
+ * it (AD-20).
+ */
+export interface GradingQuestionInput {
+  questionId: string;
+  ordinal: number;
+  format: QuestionFormat;
+  /** The stored segments, exactly as stored (AD-32). */
+  prompt: RichText;
+  /** The stored correct free-text answer, or null for MultipleChoice. */
+  answer: RichText | null;
+  /**
+   * The ordinal of the option flagged `isCorrect`, or null where there is no
+   * such option — every non-MultipleChoice Question, and a Multiple Choice row
+   * that somehow lost its flag. An ordinal rather than a body, because what the
+   * browser submits for a Multiple Choice Question is the chosen ordinal.
+   */
+  correctChoiceOrdinal: number | null;
+  /** Raw as stored. Canonicalization is Epic 7's (AD-11). */
+  topics: string[];
+  /** Exactly what the child typed or chose, or null for a Question left blank. */
+  answerValue: string | null;
+}
+
+/**
+ * Everything grading one Attempt needs, in one read.
+ *
+ * The Attempt's own three facts plus one row per Question of its Practice Test,
+ * in stored ordinal order, so every list downstream of this — the prompt's
+ * lines, the verdicts, the score — is in the order the child was shown the
+ * Questions.
+ *
+ * An **internal** read, for the reason the row type states. It exists at all
+ * because grade state is `grading`'s and Practice Test rows are `practicetest`'s
+ * (AD-6, AD-17): the module arrow is `grading -> practicetest`, so the grader
+ * asks for this rather than reaching for a delegate it does not own.
+ */
+export interface AttemptGradingInput {
+  practiceTestId: string;
+  /** The comparison the server made at submit, against its own clock and column. */
+  expired: boolean;
+  /** Null while the Attempt is open. */
+  submittedAt: Date | null;
+  questions: GradingQuestionInput[];
+}
+
 /** One generated option, in the order it is to be shown. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -1045,6 +1099,96 @@ export class PracticeTestService {
       // a value trimmed away to nothing leaves its Question blank, because no row
       // was written for it.
       blankQuestionIds: questionsOnThisTest.filter((id) => !byQuestion.has(id)),
+    };
+  }
+
+  /**
+   * The answer key plus the child's raw answers, for the module that grades them.
+   *
+   * **Internal, and never a response body.** This is the one read on this service
+   * that hands out what `StudentQuestionView` exists to withhold — the stored
+   * correct answer, which option is flagged, the raw Topic labels (AD-20). Its
+   * only caller is `grading`, which needs all three to decide whether the child
+   * was right and answers with none of them.
+   *
+   * It lives here rather than in `grading` because the rows are `practicetest`'s:
+   * the module arrow is `grading -> practicetest` and never reversed, so the
+   * grader asks for a view instead of holding a delegate of its own (AD-6, AD-17).
+   *
+   * Found by the attempt id **and** both binding ids, so an Attempt of another
+   * profile or another account answers the one shared 404 by construction rather
+   * than by a check somebody has to remember to make (AD-18). Joined in one round
+   * trip for the reason `draftViewIn` is, and ordered by `ordinal` so every list
+   * derived from it is in the order the child was shown the Questions.
+   *
+   * `tx` is required: both callers are inside a transaction — the submit path
+   * reads this in the same transaction that closed the Attempt, and the retry path
+   * opens its own — and a read of its own would be a second snapshot of rows the
+   * caller is about to write against.
+   *
+   * `studentProfileId` is nullable because **either party reaches this**: the child
+   * hands the work in under their own binding, and the parent reads the result of
+   * it later under none. Null narrows to the account alone, which is still the
+   * whole of what that party is entitled to; a profile id narrows further, so a
+   * child's binding can never reach a sibling's Attempt.
+   */
+  async gradingInputFor(
+    tx: TransactionClient,
+    parentAccountId: string,
+    studentProfileId: string | null,
+    attemptId: string,
+  ): Promise<AttemptGradingInput> {
+    const attempt = await tx.attempt.findFirst({
+      where: {
+        id: attemptId,
+        parentAccountId,
+        ...(studentProfileId === null ? {} : { studentProfileId }),
+      },
+      select: { id: true, practiceTestId: true, expired: true, submittedAt: true },
+    });
+    // The one sentence a foreign, another profile's and an unknown id all share.
+    if (attempt === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+
+    const questions = await tx.practiceTestQuestion.findMany({
+      where: { practiceTestId: attempt.practiceTestId },
+      orderBy: { ordinal: 'asc' },
+      select: {
+        id: true,
+        ordinal: true,
+        format: true,
+        prompt: true,
+        answer: true,
+        choices: { select: { ordinal: true, isCorrect: true }, orderBy: { ordinal: 'asc' } },
+        topics: { select: { label: true }, orderBy: { label: 'asc' } },
+        answers: {
+          where: { attemptId: attempt.id },
+          select: { value: true },
+        },
+      },
+    });
+
+    return {
+      practiceTestId: attempt.practiceTestId,
+      expired: attempt.expired,
+      submittedAt: attempt.submittedAt,
+      questions: questions.map((question) => ({
+        questionId: question.id,
+        ordinal: question.ordinal,
+        format: question.format,
+        // Checked rather than cast past `JsonValue`, and degraded rather than
+        // thrown on, for the reason `landedPromptsFor` states: this read runs on
+        // work already done — an Attempt that is already closed — so a row a
+        // schema change left unreadable must not fail the hand-in. An empty
+        // prompt or a null answer is a Question the grader can only leave
+        // `Ungraded`, which is exactly what it is for.
+        prompt: isRichText(question.prompt) ? (question.prompt as RichText) : [],
+        answer: isRichText(question.answer) ? (question.answer as RichText) : null,
+        correctChoiceOrdinal: question.choices.find((choice) => choice.isCorrect)?.ordinal ?? null,
+        topics: question.topics.map((topic) => topic.label),
+        // One row at most, by `answer_attemptId_questionId_key`. No row is a
+        // Question the child left blank.
+        answerValue: question.answers[0]?.value ?? null,
+      })),
     };
   }
 

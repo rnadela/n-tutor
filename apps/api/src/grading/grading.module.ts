@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { AiModule } from '../ai/ai.module.js';
 import { requireParentJwtSecret } from '../common/env.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { StudentModeGuard } from '../identity/student-mode.guard.js';
@@ -26,8 +27,12 @@ import { StudentAttemptController } from './student-attempt.controller.js';
  * `requireParentJwtSecret()` (AD-25). The same arrangement `practice-test.module.ts`
  * makes, for the same reason.
  *
- * No AI module and no allowance module: nothing here calls a provider or spends
- * anything. Story 5.5 is what changes that.
+ * **`AiModule` and no allowance module.** A provider call is made here now, as its
+ * own call class (`Grading`), with its own pin and its own price — and it is
+ * **never gated by an allowance**: an unaffordable grade would be a child punished
+ * for a billing state, handing work in and being told nothing about it. So the cost
+ * row is written, as it is for every call class, and nothing is ever refused for
+ * want of headroom.
  */
 @Module({
   imports: [
@@ -36,6 +41,7 @@ import { StudentAttemptController } from './student-attempt.controller.js';
     }),
     IdentityModule,
     PracticeTestModule,
+    AiModule,
   ],
   controllers: [StudentAttemptController],
   providers: [GradingService, StudentModeGuard],

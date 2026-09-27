@@ -581,6 +581,16 @@ export async function countAttemptsFor(parentEmail: string): Promise<number> {
 export interface QuestionGradeFixture {
   questionId: string;
   state: string;
+  /**
+   * Why a provider judged this answer the way it did, or null.
+   *
+   * Read for the same reason the state is: a rationale is a fact **no screen this
+   * story builds will ever show**, so the only honest way for a browser test to say
+   * "every free-text verdict carries a reason the parent can read" is to read the
+   * column the grading transaction wrote. Null for a deterministic Multiple Choice
+   * verdict, for `Unanswered` and for `Ungraded`.
+   */
+  rationale: string | null;
 }
 
 /** The grade rows of one Attempt, and **which** Attempt they were read for. */
@@ -637,13 +647,11 @@ export async function questionGradesFor(
         [resolved, parentEmail],
       );
       if (owned.rows[0] === undefined) {
-        throw new Error(
-          `Attempt ${resolved} does not belong to parent ${parentEmail}.`,
-        );
+        throw new Error(`Attempt ${resolved} does not belong to parent ${parentEmail}.`);
       }
     }
     const result = await client.query<QuestionGradeFixture>(
-      `SELECT g."questionId", g."state"::text AS "state"
+      `SELECT g."questionId", g."state"::text AS "state", g."rationale"
          FROM "question_grade" g
          JOIN "practice_test_question" q ON q."id" = g."questionId"
         WHERE g."attemptId" = $1

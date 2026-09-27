@@ -156,7 +156,7 @@ async function totalOf(page: Page): Promise<number> {
 }
 
 test.describe('handing an Attempt in', () => {
-  test('asks about the Questions that are not answered, then records one Unanswered for each', async ({
+  test('asks about the Questions that are not answered, then grades every Question of the paper', async ({
     page,
   }) => {
     test.setTimeout(300_000);
@@ -263,19 +263,28 @@ test.describe('handing an Attempt in', () => {
     expect(attempt.answerCount).toBe(1);
     const partlyBlankAttemptId = attempt.id;
 
-    // --- One `Unanswered` per blank, and none for the answered Question -----
+    // --- Every presented Question graded: one verdict, the rest `Unanswered` -----
     // Read from the table, because no screen this story builds shows a grade row —
     // and read **for a named Attempt**, so "no rows" can never stand in for "rows,
     // but on a different Attempt than the one this case is about".
     const first = await questionGradesFor(email, partlyBlankAttemptId);
     expect(first.attemptId).toBe(partlyBlankAttemptId);
-    expect(first.grades).toHaveLength(total - 1);
-    expect(first.grades.map((grade) => grade.state)).toEqual(
-      Array.from({ length: total - 1 }, () => 'Unanswered'),
+    // Exactly one row per Question the paper presented, and no Question with two.
+    expect(first.grades).toHaveLength(total);
+    expect(new Set(first.grades.map((grade) => grade.questionId)).size).toBe(total);
+    // The generated questions are Multiple Choice and the first option is the right
+    // one, so checking the first radio is a right answer — judged in code, with no
+    // provider asked and therefore no reason to record.
+    expect(first.grades.filter((grade) => grade.state === 'Correct')).toHaveLength(1);
+    expect(first.grades.filter((grade) => grade.state === 'Unanswered')).toHaveLength(total - 1);
+    // Nothing `Ungraded`: an `Ungraded` row is a grading failure, and nothing here
+    // needed a provider at all.
+    expect(first.grades.filter((grade) => grade.state === 'Ungraded')).toEqual([]);
+    // Not one rationale anywhere on this paper: every verdict on it was a
+    // comparison, and a rationale is what a provider explained.
+    expect(first.grades.map((grade) => grade.rationale)).toEqual(
+      Array.from({ length: total }, () => null),
     );
-    // Not one `Incorrect`, and not one row for the Question that was answered:
-    // there are exactly as many rows as there were blanks.
-    expect(new Set(first.grades.map((grade) => grade.questionId)).size).toBe(total - 1);
 
     // --- Student Home reads Completed --------------------------------------
     await page.goto('/student');
@@ -297,8 +306,13 @@ test.describe('handing an Attempt in', () => {
 
     await expect(page.getByTestId('take-test-counter')).toBeVisible();
     const secondTotal = await totalOf(page);
+    // The first Question rightly and every other one wrongly: the first option is
+    // the right one, so the second option is a wrong answer the child actually gave
+    // — which is what makes "a wrong answer is `Incorrect`, not `Unanswered`" a
+    // claim this run can make.
     for (let at = 0; at < secondTotal; at += 1) {
-      await page.getByTestId('take-test-question').getByRole('radio').first().check();
+      const radios = page.getByTestId('take-test-question').getByRole('radio');
+      await (at === 0 ? radios.first() : radios.nth(1)).check();
       if (at < secondTotal - 1) await page.getByTestId('take-test-next').click();
     }
     await expect(rail.getByTestId('question-map-summary')).toHaveText(
@@ -311,17 +325,28 @@ test.describe('handing an Attempt in', () => {
     await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(submits()).toHaveLength(2);
-    // Nothing blank, so nothing to record: no grade row at all on **this** Attempt,
-    // which is a second Attempt and not the one above.
+    // Nothing blank, so nothing is `Unanswered` — every Question carries the verdict
+    // its answer earned, on **this** Attempt, which is a second Attempt and not the
+    // one above.
     const second = await questionGradesFor(email);
     expect(second.attemptId).not.toBe(partlyBlankAttemptId);
-    expect(second.grades).toEqual([]);
+    expect(second.grades).toHaveLength(secondTotal);
+    expect(second.grades.filter((grade) => grade.state === 'Correct')).toHaveLength(1);
+    expect(second.grades.filter((grade) => grade.state === 'Incorrect')).toHaveLength(
+      secondTotal - 1,
+    );
+    expect(second.grades.filter((grade) => grade.state === 'Unanswered')).toEqual([]);
+    // The same answer graded the same way on both papers: the first option was
+    // checked on Question 1 of each, and each came back `Correct`. Deterministic,
+    // because no provider was involved in either.
+    expect(second.grades[0]!.state).toBe('Correct');
+    expect(first.grades[0]!.state).toBe('Correct');
     // And the first Attempt's rows are exactly where they were: nothing this
     // hand-in wrote landed on somebody else's Attempt.
-    expect((await questionGradesFor(email, partlyBlankAttemptId)).grades).toHaveLength(total - 1);
+    expect((await questionGradesFor(email, partlyBlankAttemptId)).grades).toHaveLength(total);
   });
 
-  test('auto-submits on the deadline with no confirmation, and records no grade row', async ({
+  test('auto-submits on the deadline with no confirmation, and grades every blank Incorrect', async ({
     page,
   }) => {
     test.setTimeout(300_000);
@@ -362,14 +387,19 @@ test.describe('handing an Attempt in', () => {
     expect(attempt.answerCount).toBe(1);
     expect(total).toBeGreaterThan(1);
 
-    // **No grade row of any kind.** FR-37 grades the blanks of an Attempt whose time
-    // ran out `Incorrect`, and that verdict is Story 5.5's to make — so this story
-    // writes nothing here rather than something a later one would have to correct.
-    // Named against the Attempt that just expired, so an empty answer is an answer
-    // about that Attempt and not about whichever one happens to be newest.
+    // **FR-37 grades the blanks of an Attempt whose time ran out `Incorrect`**, and
+    // nothing on this path is `Unanswered`: `Unanswered` is a Question the child
+    // *chose* to leave, and here the clock chose for them. Named against the Attempt
+    // that just expired, so this is an answer about that Attempt and not about
+    // whichever one happens to be newest.
     const grades = await questionGradesFor(email, attempt.id);
     expect(grades.attemptId).toBe(attempt.id);
-    expect(grades.grades).toEqual([]);
+    expect(grades.grades).toHaveLength(total);
+    // The one Question that was answered still stands on its own answer: expiry
+    // decides what a *blank* means, not what an answer came to.
+    expect(grades.grades.filter((grade) => grade.state === 'Correct')).toHaveLength(1);
+    expect(grades.grades.filter((grade) => grade.state === 'Incorrect')).toHaveLength(total - 1);
+    expect(grades.grades.filter((grade) => grade.state === 'Unanswered')).toEqual([]);
 
     // A settle, then a final count: nothing loops and nothing sends a second time.
     await page.waitForTimeout(3_000);
