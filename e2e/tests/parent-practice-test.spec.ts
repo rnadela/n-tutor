@@ -51,7 +51,7 @@ async function signUp(page: Page, email: string): Promise<void> {
  * being proved here is that the Extraction the generator reads is the one the
  * real pipeline wrote.
  */
-async function uploadAndRead(page: Page, email: string): Promise<void> {
+async function uploadAndRead(page: Page, email: string): Promise<{ subjectName: string }> {
   const gradeLevel = await createGradeLevelFixture('Generate Grade');
   const subject = await createSubjectFixture('Generate Subject', gradeLevel.id);
 
@@ -100,6 +100,9 @@ async function uploadAndRead(page: Page, email: string): Promise<void> {
   await expect(page.getByRole('button', { name: 'Continue to practice test' })).toBeVisible({
     timeout: 30_000,
   });
+  // Returned so a case can assert the Subject the child's list shows: it is
+  // generated per run, so no case can spell it out for itself.
+  return { subjectName: subject.name };
 }
 
 /**
@@ -630,7 +633,7 @@ test.describe('generating practice tests', () => {
     // browser leaving Parent View can prove.
     test.setTimeout(180_000);
     const email = uniqueParentEmail('draft-release');
-    await uploadAndRead(page, email);
+    const { subjectName } = await uploadAndRead(page, email);
     await enterGenerate(page);
 
     await countRow(page, 2).getByRole('radio').check();
@@ -765,11 +768,19 @@ test.describe('generating practice tests', () => {
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
     const tests = page.locator('[data-testid="student-practice-test"]');
     await expect(tests).toHaveCount(1);
-    await expect(tests.first()).toHaveText(
+    // Per line, never one `toHaveText` over the whole row: the row now carries
+    // a Subject, a question count and a state, and an exact match on all of it
+    // would break on any one of them moving.
+    const row = tests.first();
+    await expect(row).toContainText(
       questionCount === 1
         ? 'A practice test with 1 question'
         : `A practice test with ${questionCount} questions`,
     );
+    // The Subject the upload was classified under, on the row itself.
+    await expect(row.getByTestId('student-practice-test-subject')).toHaveText(subjectName);
+    // And the condition, in words — nothing has been sat yet.
+    await expect(row.getByTestId('student-practice-test-state')).toHaveText('Not started');
     // The "nothing yet" sentence is gone, and the draft still waiting is not here.
     await expect(page.getByTestId('student-empty')).toHaveCount(0);
 

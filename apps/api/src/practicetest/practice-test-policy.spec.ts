@@ -20,10 +20,13 @@ import {
   WEIGHTED_TOPIC_SHARE,
   WEIGHTED_TOPIC_UNKNOWN,
   clampCount,
+  compareStudentListRows,
   formatTargets,
+  lastSubmission,
   normalizeTopicLabel,
   practiceTestRuntime,
   remainingFor,
+  studentListState,
   resetPracticeTestRuntime,
   weightedTopicFloor,
   worstCaseRunMs,
@@ -354,5 +357,135 @@ describe('normalizeTopicLabel', () => {
 
   it('bounds an incoming label at the same figure a generated one is bounded at', () => {
     expect(MAX_TOPIC_LABEL_LENGTH).toBe(MAX_LABEL_LENGTH);
+  });
+});
+
+describe('what condition a released practice test is in for a child', () => {
+  it('is not started when no Attempt exists', () => {
+    expect(studentListState([])).toBe('NotStarted');
+  });
+
+  it('is in progress while an Attempt has not been handed in', () => {
+    expect(studentListState([{ submittedAt: null }])).toBe('InProgress');
+  });
+
+  it('is completed once every Attempt has been handed in', () => {
+    expect(studentListState([{ submittedAt: new Date('2026-01-01T00:00:00.000Z') }])).toBe(
+      'Completed',
+    );
+  });
+
+  it('lets an open retake outrank a past submission, whichever order they arrive in', () => {
+    // The band exists to surface what there is to do, so a sitting left open is
+    // work to return to even on a test finished once already.
+    const submitted = { submittedAt: new Date('2026-01-01T00:00:00.000Z') };
+    const open = { submittedAt: null };
+    expect(studentListState([submitted, open])).toBe('InProgress');
+    expect(studentListState([open, submitted])).toBe('InProgress');
+  });
+});
+
+describe('the instant a completed practice test is ordered by', () => {
+  it('is the most recent submission, not the last row it was handed', () => {
+    const later = new Date('2026-03-02T00:00:00.000Z');
+    const earlier = new Date('2026-03-01T00:00:00.000Z');
+    expect(lastSubmission([{ submittedAt: later }, { submittedAt: earlier }])).toEqual(later);
+    expect(lastSubmission([{ submittedAt: earlier }, { submittedAt: later }])).toEqual(later);
+  });
+
+  it('is null when nothing was ever handed in', () => {
+    expect(lastSubmission([])).toBeNull();
+    expect(lastSubmission([{ submittedAt: null }])).toBeNull();
+  });
+
+  it('ignores the open sitting beside a submitted one', () => {
+    const at = new Date('2026-03-02T00:00:00.000Z');
+    expect(lastSubmission([{ submittedAt: null }, { submittedAt: at }])).toEqual(at);
+  });
+});
+
+describe('the order the child’s list is served in', () => {
+  function row(
+    id: string,
+    state: 'NotStarted' | 'InProgress' | 'Completed',
+    createdAt: string,
+    lastSubmittedAt: string | null = null,
+  ) {
+    return {
+      id,
+      state,
+      createdAt: new Date(createdAt),
+      lastSubmittedAt: lastSubmittedAt === null ? null : new Date(lastSubmittedAt),
+    };
+  }
+
+  function ordered(rows: ReturnType<typeof row>[]): string[] {
+    return [...rows].sort(compareStudentListRows).map((entry) => entry.id);
+  }
+
+  it('puts everything there is still to do ahead of everything finished', () => {
+    // Whatever the dates say: a test completed this morning sits below one
+    // released last year and never opened.
+    const done = row('a', 'Completed', '2026-06-01T00:00:00.000Z', '2026-06-02T00:00:00.000Z');
+    const todo = row('b', 'NotStarted', '2025-01-01T00:00:00.000Z');
+    expect(ordered([done, todo])).toEqual(['b', 'a']);
+    expect(ordered([todo, done])).toEqual(['b', 'a']);
+  });
+
+  it('mixes not-started and in-progress in one band, newest made first', () => {
+    const rows = [
+      row('a', 'NotStarted', '2026-01-01T00:00:00.000Z'),
+      row('b', 'InProgress', '2026-03-01T00:00:00.000Z'),
+      row('c', 'NotStarted', '2026-02-01T00:00:00.000Z'),
+    ];
+    // In progress is not a band of its own: both are work waiting, and the
+    // only thing that separates them in the list is the date.
+    expect(ordered(rows)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('orders the completed band by the most recent submission', () => {
+    const rows = [
+      row('a', 'Completed', '2026-01-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z'),
+      row('b', 'Completed', '2026-04-01T00:00:00.000Z', '2026-02-01T00:00:00.000Z'),
+    ];
+    // Made-at would say `b` first; submitted-at says `a`, and submitted-at is
+    // what distinguishes two finished tests to the child who finished them.
+    expect(ordered(rows)).toEqual(['a', 'b']);
+  });
+
+  it('breaks a tie on the id, descending, in both bands', () => {
+    const band1 = [
+      row('id-1', 'NotStarted', '2026-01-01T00:00:00.000Z'),
+      row('id-2', 'InProgress', '2026-01-01T00:00:00.000Z'),
+    ];
+    expect(ordered(band1)).toEqual(['id-2', 'id-1']);
+    const band2 = [
+      row('id-1', 'Completed', '2026-01-01T00:00:00.000Z', '2026-02-01T00:00:00.000Z'),
+      row('id-2', 'Completed', '2026-03-01T00:00:00.000Z', '2026-02-01T00:00:00.000Z'),
+    ];
+    expect(ordered(band2)).toEqual(['id-2', 'id-1']);
+  });
+
+  it('is a total order, so the list cannot shuffle between reads', () => {
+    const rows = [
+      row('a', 'NotStarted', '2026-01-01T00:00:00.000Z'),
+      row('b', 'InProgress', '2026-01-01T00:00:00.000Z'),
+      row('c', 'Completed', '2026-05-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z'),
+      row('d', 'Completed', '2026-05-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z'),
+    ];
+    const expected = ordered(rows);
+    // Every arrival order settles on the same answer.
+    expect(ordered([...rows].reverse())).toEqual(expected);
+    expect(ordered([rows[2]!, rows[0]!, rows[3]!, rows[1]!])).toEqual(expected);
+    // And antisymmetry: no pair claims to precede the other.
+    // `|| 0` normalises `-0`, which `toBe` distinguishes from `0`.
+    const direction = (a: (typeof rows)[number], b: (typeof rows)[number]) =>
+      Math.sign(compareStudentListRows(a, b)) || 0;
+    for (const left of rows) {
+      expect(direction(left, left)).toBe(0);
+      for (const right of rows) {
+        expect(direction(left, right)).toBe(-direction(right, left) || 0);
+      }
+    }
   });
 });

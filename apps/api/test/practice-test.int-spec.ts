@@ -2653,7 +2653,78 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
 
     // --- The student-scoped read -------------------------------------------
 
-    it('shows the bound child their released tests, as an id and a count and nothing else', async () => {
+    /**
+     * A **second** Source Test on the same account and the same child,
+     * classified under a different Subject and driven to a live Extraction.
+     *
+     * It exists so a list can hold two differently-classified rows without
+     * fabricating a state no route can produce: re-pointing another account's
+     * released test onto this child would encode exactly the crossing the
+     * intent calls absent by construction. Everything here goes through the
+     * parent's own routes, as a parent with two uploads would.
+     */
+    async function secondClassifiedSourceTest(
+      ready: Ready,
+    ): Promise<{ sourceTestId: string; subjectName: string }> {
+      const profile = await h.prisma.studentProfile.findUniqueOrThrow({
+        where: { id: ready.studentProfileId },
+        select: { gradeLevelId: true },
+      });
+      const draft = await server()
+        .post('/api/parent/source-tests')
+        .set('Authorization', bearer(ready.token))
+        .send({ studentProfileId: ready.studentProfileId })
+        .expect(200);
+      const sourceTestId: string = draft.body.id;
+
+      const subject = await createSubject(h, { gradeLevelId: profile.gradeLevelId });
+      await server()
+        .patch(`/api/parent/source-tests/${sourceTestId}/classification`)
+        .set('Authorization', bearer(ready.token))
+        .send({ subjectId: subject.id })
+        .expect(200);
+
+      for (let index = 0; index < 2; index += 1) {
+        await server()
+          .post(`/api/parent/source-tests/${sourceTestId}/pages`)
+          .set('Authorization', bearer(ready.token))
+          .attach('file', await photo(index + 3), {
+            filename: 'page.jpg',
+            contentType: 'image/jpeg',
+          })
+          .expect(201);
+      }
+      await checkLegibility(h, ready.token, sourceTestId);
+      await server()
+        .post(`/api/parent/source-tests/${sourceTestId}/submit`)
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      expect(await h.extractionRunner.runOnce()).toBe(true);
+      // The legibility check and the Extraction both went through the AI
+      // double, so its recorded calls are fixture noise by the time a case
+      // starts. Cleared here for the same reason `generatable` clears it: a
+      // case asserting on what the generator asked for must not have to count
+      // past the setup's calls first.
+      h.ai.reset();
+      return { sourceTestId, subjectName: subject.name };
+    }
+
+    /**
+     * One sitting, written straight to the table.
+     *
+     * **A stand-in for Story 5.2's writer**, which does not exist yet: this
+     * story reads Attempts and writes none anywhere. Once 5.2 lands, these
+     * fixtures should go through it rather than behind its back, or they will
+     * drift from what the real writer actually produces.
+     */
+    function seedAttempt(practiceTestId: string, submittedAt: Date | null) {
+      return h.prisma.attempt.create({
+        data: { practiceTestId, submittedAt },
+        select: { id: true },
+      });
+    }
+
+    it('shows the bound child their released tests, as an id, a Subject, a count and a state', async () => {
       const ready = await withLandedDrafts(2);
       const [released, stillDraft] = ready.draftIds;
       const view = await release(ready.token, released!).expect(200);
@@ -2664,9 +2735,23 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       expect(response.body).toHaveLength(1);
       expect(response.body[0].id).toBe(released);
       expect(response.body[0].questionCount).toBe(view.body.questions.length);
-      // An identifier and a count. Nothing else at all — not a field name, not a
-      // prompt, not an option, not a Topic, not a figure about spending.
-      expect(Object.keys(response.body[0]).sort()).toEqual(['id', 'questionCount']);
+      // The Subject the parent classified the upload under, resolved across the
+      // `sourcetest` boundary rather than by a delegate this module must not
+      // hold. A non-empty string, so a label silently degrading to null fails.
+      expect(typeof response.body[0].subjectName).toBe('string');
+      expect(response.body[0].subjectName.length).toBeGreaterThan(0);
+      // Never sat, so not started — derived from the absence of Attempts.
+      expect(response.body[0].state).toBe('NotStarted');
+      // Those four and nothing else at all — not a field name, not a prompt,
+      // not an option, not a Topic, not a figure about spending, and no
+      // `timerMinutes`.
+      expect(Object.keys(response.body[0]).sort()).toEqual([
+        'id',
+        'questionCount',
+        'state',
+        'subjectName',
+      ]);
+      expect(Object.keys(response.body[0])).not.toContain('timerMinutes');
       const serialized = JSON.stringify(response.body);
       for (const forbidden of [
         'prompt',
@@ -2741,6 +2826,173 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       expect(response.body.map((row: { id: string }) => row.id)).toEqual(
         [...ready.draftIds].sort().reverse(),
       );
+    });
+
+    it('calls a released test with an open Attempt in progress, and keeps it in the first band', async () => {
+      const ready = await withLandedDrafts(2);
+      const [inProgress, notStarted] = ready.draftIds;
+      await release(ready.token, inProgress!).expect(200);
+      await release(ready.token, notStarted!).expect(200);
+      await seedAttempt(inProgress!, null);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleased(cookie).expect(200);
+
+      const byId = new Map(
+        response.body.map((row: { id: string; state: string }) => [row.id, row.state]),
+      );
+      expect(byId.get(inProgress!)).toBe('InProgress');
+      expect(byId.get(notStarted!)).toBe('NotStarted');
+      // Both are work waiting, so both are in band 1 and only the date
+      // separates them — in progress is not a band of its own.
+      expect(response.body).toHaveLength(2);
+    });
+
+    it('calls a released test completed once every Attempt has been handed in', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      await release(ready.token, id).expect(200);
+      await seedAttempt(id, new Date('2026-05-01T00:00:00.000Z'));
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleased(cookie).expect(200);
+      expect(response.body).toEqual([
+        {
+          id,
+          subjectName: expect.any(String),
+          questionCount: expect.any(Number),
+          state: 'Completed',
+        },
+      ]);
+    });
+
+    it('puts everything there is still to do ahead of everything finished, whatever the dates say', async () => {
+      const ready = await withLandedDrafts(2);
+      const [done, todo] = ready.draftIds;
+      await release(ready.token, done!).expect(200);
+      await release(ready.token, todo!).expect(200);
+      await seedAttempt(done!, new Date('2026-06-02T00:00:00.000Z'));
+      // The finished one is also the *newest*, so a list ordered by date alone
+      // would put it first. The band is what decides, not the instant.
+      await h.prisma.practiceTest.update({
+        where: { id: done! },
+        data: { createdAt: new Date('2026-06-01T00:00:00.000Z') },
+      });
+      await h.prisma.practiceTest.update({
+        where: { id: todo! },
+        data: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      });
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleased(cookie).expect(200);
+      expect(response.body.map((row: { id: string }) => row.id)).toEqual([todo, done]);
+    });
+
+    it('treats an open retake as work to return to, ahead of what is finished', async () => {
+      const ready = await withLandedDrafts(2);
+      const [retaken, done] = ready.draftIds;
+      await release(ready.token, retaken!).expect(200);
+      await release(ready.token, done!).expect(200);
+      // One submitted sitting and one still open, on the same test.
+      await seedAttempt(retaken!, new Date('2026-01-01T00:00:00.000Z'));
+      await seedAttempt(retaken!, null);
+      await seedAttempt(done!, new Date('2026-06-01T00:00:00.000Z'));
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleased(cookie).expect(200);
+      // An open Attempt outranks a past submission: it is work to return to.
+      expect(response.body[0].id).toBe(retaken);
+      expect(response.body[0].state).toBe('InProgress');
+      expect(response.body[1].id).toBe(done);
+      expect(response.body[1].state).toBe('Completed');
+    });
+
+    it('orders the finished band by the most recent submission, not by the last row read', async () => {
+      const ready = await withLandedDrafts(2);
+      const [latest, earlier] = ready.draftIds;
+      await release(ready.token, latest!).expect(200);
+      await release(ready.token, earlier!).expect(200);
+      // Two submissions on one test, seeded **newest first**, so the
+      // most-recent reduce is actually exercised: a reduce that took the last
+      // row it was handed would read 2026-01-01 here and flip the order below.
+      await seedAttempt(latest!, new Date('2026-05-01T00:00:00.000Z'));
+      await seedAttempt(latest!, new Date('2026-01-01T00:00:00.000Z'));
+      await seedAttempt(earlier!, new Date('2026-03-01T00:00:00.000Z'));
+      // And made-at disagrees with submitted-at, so a list still ordered by
+      // `createdAt` in this band would fail too.
+      await h.prisma.practiceTest.update({
+        where: { id: latest! },
+        data: { createdAt: new Date('2025-01-01T00:00:00.000Z') },
+      });
+      await h.prisma.practiceTest.update({
+        where: { id: earlier! },
+        data: { createdAt: new Date('2026-12-01T00:00:00.000Z') },
+      });
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      const response = await readReleased(cookie).expect(200);
+      expect(response.body.map((row: { id: string }) => row.id)).toEqual([latest, earlier]);
+    });
+
+    it('still lists a test completed years ago, with nothing on this path filtering by date', async () => {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      await release(ready.token, id).expect(200);
+      await seedAttempt(id, new Date('2024-02-03T00:00:00.000Z'));
+      await h.prisma.practiceTest.update({
+        where: { id },
+        data: { createdAt: new Date('2024-02-01T00:00:00.000Z') },
+      });
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      // No cutoff, no archive flag and no date filter anywhere on this path:
+      // a child's finished work stays where they left it.
+      const response = await readReleased(cookie).expect(200);
+      expect(response.body).toHaveLength(1);
+      expect(response.body[0].id).toBe(id);
+      expect(response.body[0].state).toBe('Completed');
+    });
+
+    it('carries each row’s own Subject when one list holds two of them', async () => {
+      // Two Source Tests classified under **different** Subjects, both on the
+      // one account and the one child — the state a real parent can actually
+      // reach. A single-row fixture cannot see a batched lookup that returns
+      // the right labels against the wrong rows; this one can.
+      const ready = await withLandedDrafts(1);
+      const first = ready.draftIds[0]!;
+      await release(ready.token, first).expect(200);
+      const firstSubject = await h.prisma.sourceTest
+        .findUniqueOrThrow({
+          where: { id: ready.sourceTestId },
+          select: { subject: { select: { name: true } } },
+        })
+        .then((row) => row.subject!.name);
+
+      const second = await secondClassifiedSourceTest(ready);
+      await server()
+        .post(`/api/parent/source-tests/${second.sourceTestId}/practice-tests`)
+        .set('Authorization', bearer(ready.token))
+        .send({ count: 1 })
+        .expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      const secondDraft = await h.prisma.practiceTest.findFirstOrThrow({
+        where: { sourceTestId: second.sourceTestId },
+        select: { id: true },
+      });
+      await release(ready.token, secondDraft.id).expect(200);
+
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+      const response = await readReleased(cookie).expect(200);
+
+      expect(firstSubject).not.toBe(second.subjectName);
+      const labels = new Map(
+        response.body.map((row: { id: string; subjectName: string | null }) => [
+          row.id,
+          row.subjectName,
+        ]),
+      );
+      expect(labels.get(first)).toBe(firstSubject);
+      expect(labels.get(secondDraft.id)).toBe(second.subjectName);
     });
 
     it('refuses the read on an unbound device, and on one carrying the parent’s bearer', async () => {

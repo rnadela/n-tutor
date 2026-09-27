@@ -1205,3 +1205,83 @@ source_spec: `spec-3-4-legibility-check-upload-commit.md`
 severity: low
 reason: `apps/api/prisma/migrations/20260926090000_add_page_legibility/migration.sql` adds the index inside the same transactional migration as the rest of the schema change. `CONCURRENTLY` cannot run inside a transaction, so avoiding the lock needs a non-transactional migration step, which is an operational/deployment decision, not a one-line fix. Low impact at current table size; worth revisiting before a production table is large enough for the lock duration to matter.
 status: open
+
+### DW-152: The student list loads every Attempt row of every released test to derive state and the completed band's order.
+origin: spec-deferred 1273ea7a9bb1
+location: apps/api/src/practicetest/practice-test.service.ts (releasedFor)
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: `releasedFor` selects `attempts: { select: { submittedAt: true } }` with no bound. Rows are allowance-bounded, but Attempts per row are not once retakes exist (Story 5.7). Both facts needed are aggregates: whether any `submittedAt` is null, and the maximum non-null one.
+status: open
+
+### DW-153: Nothing constrains how many Attempts of one Practice Test may be open at once.
+origin: spec-deferred ec46038d8c4e
+location: apps/api/prisma/schema.prisma (model Attempt)
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: The `attempt` table permits any number of rows with `submittedAt` null for one `practiceTestId`, and `studentListState` tolerates it. If "at most one open sitting" is the intended invariant it belongs as a partial unique index, and it is cheapest to add while the table has no writer.
+status: open
+
+### DW-154: Band 1 of the student list orders by generation time because no release instant is stored.
+origin: spec-deferred ed6106ccaa36
+location: apps/api/src/practicetest/practice-test.service.ts (releasedFor)
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: There is no `releasedAt` column, so a test generated last week and released today sorts below one generated this morning. The acceptance criterion says only "newest-first within each band" and does not name the instant, so this is defensible -- but it is a modelling limitation worth a decision if the distinction ever matters to a child.
+status: open
+
+### DW-155: Nothing constrains `submittedAt` to fall at or after `startedAt` on an Attempt row.
+origin: spec-deferred da4d83849cd4
+location: apps/api/prisma/migrations/20260925130000_add_attempt/migration.sql
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: The table has no CHECK constraint, so a negative-duration sitting is storable. No writer exists yet -- Story 5.2 owns it -- so this is cheapest to decide alongside that writer, together with the one-open-sitting question already deferred above.
+status: open
+
+### DW-156: The integration suite writes Attempt rows directly, and nothing tracks replacing those helpers once the real writer exists.
+origin: spec-deferred a212b932d4c4
+location: apps/api/test/practice-test.int-spec.ts (seedAttempt)
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: `seedAttempt` calls `h.prisma.attempt.create` and says in a comment that it stands in for Story 5.2's writer. Once 5.2 lands, tests seeding rows behind the writer's back can drift from what the writer actually produces.
+status: open
+
+### DW-157: Every row in the child's list exposes the same accessible name, so the Subject and the state that tell the rows apart never reach a screen reader's link list.
+origin: spec-deferred d1c633b48323
+location: apps/web/src/app/student/_components/PracticeTestRow.tsx
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: medium
+reason: The row's link is Story 5.2's and its accessible name is still only the question-count sentence. This story added a Subject line above it and a state label below it as sibling text nodes, so the two facts that distinguish one row from another sit outside the link's name. An `aria-labelledby` pointing at the three nodes would fix it without adding an `aria-label` that hides the visible words, but the link belongs to 5.2's Take Test path, so the change is best made there.
+status: open
+
+### DW-158: No integration test exercises `readSubjectLabels` rethrowing a non-`NotFoundException` failure all the way through `releasedFor` to the student route's existing per-read error handling.
+origin: spec-deferred 2abc38d31c20
+location: apps/api/src/sourcetest/source-test.service.ts (readSubjectLabels)
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: The unit-level absorb/rethrow split (`NotFoundException` -> null, anything else rethrows) is tested directly on `readSubjectLabels`, but nothing injects a non-`NotFoundException` taxonomy failure and asserts the student list route still answers with the page's existing alert-with-retry behaviour rather than an unhandled state.
+status: open
+
+### DW-159: `Attempt` carries both `startedAt` and `createdAt`, which are functionally identical while the table has no writer.
+origin: spec-deferred f7ac42b84bd7
+location: apps/api/prisma/schema.prisma (model Attempt)
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: Both default to `now()` and this read-only story never diverges them. Whether `startedAt` is meant to ever differ from `createdAt` -- or whether one column is redundant -- is a decision Story 5.2's writer should make explicitly rather than inherit by default.
+status: open
+
+### DW-160: `studentListState` and `lastSubmission` do not guard against an invalid `submittedAt` Date.
+origin: spec-deferred 06a6ae44571a
+location: apps/api/src/practicetest/practice-test-policy.ts (studentListState, lastSubmission)
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: Both are pure functions over `readonly AttemptSubmission[]` and `lastSubmission`'s comparison calls `.getTime()`, which would compare against `NaN` for an invalid Date. The value only ever arrives from Postgres via Prisma today, so the risk is low, but it is untested.
+status: open
+
+### DW-161: `readSubjectLabels` has no timeout around `TaxonomyService.resolveSubject`, so one slow or hung resolution blocks the whole student list read.
+origin: spec-deferred f340dfe092b5
+location: apps/api/src/sourcetest/source-test.service.ts (readSubjectLabels)
+source_spec: `spec-5-1-student-s-test-list.md`
+severity: low
+reason: Each distinct Subject id is now resolved in parallel via `Promise.all`, but nothing bounds how long any single `resolveSubject` call may take before the batch (and so the list) is considered failed.
+status: open

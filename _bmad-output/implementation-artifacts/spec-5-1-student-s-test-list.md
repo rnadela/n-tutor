@@ -2,9 +2,9 @@
 title: "Story 5.1 — Student's Test List"
 type: 'feature'
 created: '2026-09-25'
-status: 'in-progress'
-baseline_revision: 'd9f21c2ea98bc4a54cb9d0ce69b4d245093e5a90'
-review_loop_iteration: 2
+status: 'done'
+baseline_revision: '470107a2b26e052fc406a3071d10da5acca26c6c'
+review_loop_iteration: 0
 followup_review_recommended: false
 context: []
 warnings: ['oversized']
@@ -63,6 +63,66 @@ deferred:
       the writer's back can drift from what the writer actually produces.
     location: >-
       apps/api/test/practice-test.int-spec.ts (seedAttempt)
+    severity: low
+  - summary: >-
+      Every row in the child's list exposes the same accessible name, so the
+      Subject and the state that tell the rows apart never reach a screen
+      reader's link list.
+    evidence: |-
+      The row's link is Story 5.2's and its accessible name is still only the
+      question-count sentence. This story added a Subject line above it and a
+      state label below it as sibling text nodes, so the two facts that
+      distinguish one row from another sit outside the link's name. An
+      `aria-labelledby` pointing at the three nodes would fix it without adding
+      an `aria-label` that hides the visible words, but the link belongs to
+      5.2's Take Test path, so the change is best made there.
+    location: >-
+      apps/web/src/app/student/_components/PracticeTestRow.tsx
+    severity: medium
+  - summary: >-
+      No integration test exercises `readSubjectLabels` rethrowing a
+      non-`NotFoundException` failure all the way through `releasedFor` to the
+      student route's existing per-read error handling.
+    evidence: |-
+      The unit-level absorb/rethrow split (`NotFoundException` -> null, anything
+      else rethrows) is tested directly on `readSubjectLabels`, but nothing
+      injects a non-`NotFoundException` taxonomy failure and asserts the
+      student list route still answers with the page's existing alert-with-retry
+      behaviour rather than an unhandled state.
+    location: >-
+      apps/api/src/sourcetest/source-test.service.ts (readSubjectLabels)
+    severity: low
+  - summary: >-
+      `Attempt` carries both `startedAt` and `createdAt`, which are
+      functionally identical while the table has no writer.
+    evidence: |-
+      Both default to `now()` and this read-only story never diverges them.
+      Whether `startedAt` is meant to ever differ from `createdAt` -- or
+      whether one column is redundant -- is a decision Story 5.2's writer
+      should make explicitly rather than inherit by default.
+    location: >-
+      apps/api/prisma/schema.prisma (model Attempt)
+    severity: low
+  - summary: >-
+      `studentListState` and `lastSubmission` do not guard against an invalid
+      `submittedAt` Date.
+    evidence: |-
+      Both are pure functions over `readonly AttemptSubmission[]` and
+      `lastSubmission`'s comparison calls `.getTime()`, which would compare
+      against `NaN` for an invalid Date. The value only ever arrives from
+      Postgres via Prisma today, so the risk is low, but it is untested.
+    location: >-
+      apps/api/src/practicetest/practice-test-policy.ts (studentListState, lastSubmission)
+    severity: low
+  - summary: >-
+      `readSubjectLabels` has no timeout around `TaxonomyService.resolveSubject`,
+      so one slow or hung resolution blocks the whole student list read.
+    evidence: |-
+      Each distinct Subject id is now resolved in parallel via `Promise.all`,
+      but nothing bounds how long any single `resolveSubject` call may take
+      before the batch (and so the list) is considered failed.
+    location: >-
+      apps/api/src/sourcetest/source-test.service.ts (readSubjectLabels)
     severity: low
 ---
 
@@ -240,6 +300,28 @@ deferred:
   - `[medium]` `[bad_spec]` The two-Subjects-in-one-list integration case reached its fixture by re-pointing another account's released Practice Test onto the child, encoding a state no route can produce and crossing the very boundary the intent calls absent by construction. Amended to require both released tests within one account and one child.
   - `[low]` `[bad_spec]` The `page.spec.tsx` region guard checked the slice's length rather than that either `indexOf` anchor was found, and banned the field name `subjectName` outright; the render call was pinned to an exact JSX one-liner. Amended to assert both anchors, match a pattern, and ban reordering verbs only. An empty-string Subject also passed the `null`/`undefined` guard and rendered an empty styled line -- amended to a truthiness guard.
 
+### 2026-09-27 -- Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 4: (high 0, medium 1, low 3)
+- defer: 1: (high 0, medium 1, low 0)
+- reject: 21
+- addressed_findings:
+  - `[medium]` `[patch]` `readSubjectLabels` wrapped `resolveSubject` in a bare `catch {}`, so a transient database fault or a `TaxonomyService` bug silently blanked a real Subject label instead of failing loudly. Narrowed to `NotFoundException`; anything else rethrows.
+  - `[low]` `[patch]` `readSubjectLabels` took `string[]`; widened to `readonly string[]`, matching the `readonly AttemptSubmission[]` convention the policy functions in this change use.
+  - `[low]` `[patch]` The new `harness.ts` truncate-list comment restated the preceding `page_image`/CASCADE rationale nearly verbatim; cut to the one sentence the `attempt` entry needs.
+  - `[low]` `[patch]` `secondClassifiedSourceTest` reset the AI double with no explanation while every other line of the helper was explained; the reset now states why.
+
+### 2026-09-27 -- Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 2: (high 0, medium 0, low 2)
+- defer: 4: (high 0, medium 0, low 4)
+- reject: 7
+- addressed_findings:
+  - `[low]` `[patch]` `readSubjectLabels` resolved distinct Subject ids one `await` at a time in a `for...of` loop, paying N sequential round-trips for a batch built to serve one list read. Switched to `Promise.all` over the distinct ids, keeping the same per-id `NotFoundException`-only absorb/rethrow.
+  - `[low]` `[patch]` `PracticeTestRow`'s Subject line was guarded on truthiness alone, so a whitespace-only `subjectName` would render an empty styled line -- the exact failure its own doc comment says it avoids. Guard changed to `test.subjectName?.trim()`.
+
 ## Design Notes
 
 Completion is **derived**, not a fourth `PracticeTestStatus`. A `Completed` enum member would make `practicetest` write a status from what is really an Attempt fact, and 5.7's retake would then have to walk it backwards.
@@ -271,3 +353,28 @@ That rule applies to the **list**, not only to the row. `apps/web` runs with `en
 - `pnpm --filter api run test:int` -- expected: the practice-test and student-mode integration suites pass
 - `pnpm typecheck:e2e` -- expected: no errors in the Playwright suite (it is outside `pnpm typecheck`)
 - `pnpm lint` -- expected: clean (note: `eslint` is not installed in this workspace, so this command cannot run; `pnpm prettier --write` on every touched path stands in)
+
+## Auto Run Result
+
+**Summary of implemented change:** No change to production behaviour this pass beyond the two patches below -- this run entered on an existing `done` spec for a fresh review pass (per the `done` routing rule), constructed the diff against `baseline_revision`, and ran the four review layers over it.
+
+**Files changed this pass:**
+- `apps/api/src/sourcetest/source-test.service.ts` -- `readSubjectLabels` now resolves its distinct Subject ids with `Promise.all` instead of one `await` per id in a loop.
+- `apps/web/src/app/student/_components/PracticeTestRow.tsx` -- the Subject line's guard changed from truthiness to `test.subjectName?.trim()`, so a whitespace-only label renders no line.
+- `_bmad-output/implementation-artifacts/spec-5-1-student-s-test-list.md` -- `review_loop_iteration` reset to 0 on entry (per the `done` routing rule), triage log entry appended, `deferred` list carries four new items, `followup_review_recommended` recomputed, `status` set to `done`.
+
+**Review findings breakdown:** 2 patch (both low, both applied), 4 deferred (all low), 7 rejected. 0 intent_gap, 0 bad_spec -- no spec or intent defect found this pass.
+
+**Follow-up review recommendation:** `false`. This pass's patch findings: 0 high, 0 medium, 2 low -- score `3*0 + 1*2 = 2`, under the threshold of 5, and no high-severity patch.
+
+**Verification performed:**
+- `pnpm typecheck` -- clean (`api` and `web`).
+- `pnpm typecheck:e2e` -- clean.
+- `pnpm --filter api exec vitest run practice-test-policy` -- 49/49 passed (untouched by this pass's patches; re-run as a scope check).
+- `pnpm --filter web exec vitest run PracticeTestRow` -- 10/10 passed, covering the patched guard.
+- `pnpm --filter api run test:int` -- `practice-test.int-spec.ts`, `source-test.int-spec.ts`, `student-mode.int-spec.ts` (the three suites this story's diff touches) all passed. The full `test:int` run is flaky independent of this change: `extraction.int-spec.ts` intermittently fails a `setPinFor` assertion (`expected 204, got 200`) with a different failure count between runs (1, then 5), never in a file this story touches -- consistent with pre-existing cross-test PIN-state pollution under parallel execution, not a regression from either patch.
+- `pnpm prettier --write` on both patched files -- already clean.
+- `pnpm lint` -- not run; `eslint` is not installed in this workspace, per the spec's own Verification note.
+
+**Residual risks:** the four newly deferred items (rethrow path untested end-to-end, `Attempt.startedAt`/`createdAt` redundancy, no invalid-`Date` guard in the policy functions, no timeout around `resolveSubject`) and the pre-existing `extraction.int-spec.ts` flake noted above. None block this story: all are low severity, pre-existing risk shapes, or explicitly out of this story's scope.
+

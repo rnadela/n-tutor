@@ -40,11 +40,21 @@ export class StudentPracticeTestController {
   constructor(private readonly practiceTests: PracticeTestService) {}
 
   /**
-   * The practice tests this child can see, most recently made first.
+   * The practice tests this child can see: one flat list, never grouped, with
+   * the Subject and the condition on every row.
    *
-   * Made, not released: there is no `releasedAt` column and this story adds none,
-   * so `createdAt` — generation time — is the only stable order available. The
-   * service says why at length.
+   * Server-ordered in two bands — everything there is still to do, then
+   * everything finished — and the browser renders what it is given. Band 1 is
+   * newest *made* first, because there is no `releasedAt` column; band 2 is
+   * most recently submitted first. The service says why at length.
+   *
+   * The condition is `NotStarted`, `InProgress` or `Completed`, derived from
+   * Attempts rather than stored: there is no fourth `PracticeTestStatus`.
+   * Completed rows are returned unconditionally and forever — no cutoff, no
+   * archive flag, no date filter anywhere on this path.
+   *
+   * Still no generated content of any kind, and still no `timerMinutes`: a
+   * Subject label, a question count and a state word (AD-20, AD-26).
    *
    * An account with nothing released answers `[]` and never a 404: having nothing
    * yet is a state Student Home renders as a plain sentence, not a refusal.

@@ -71,6 +71,24 @@ export interface SourceTestReader {
   requireLive(parentAccountId: string, id: string): Promise<LiveSourceTest>;
   requireReadable(parentAccountId: string, id: string): Promise<LiveSourceTest>;
   readPageBytes(sourceTestId: string): Promise<PageBytes[]>;
+  /**
+   * The Subject label of each of the given Source Tests, keyed by Source Test
+   * id — `null` where the upload carries no classification, and absent where
+   * the id names nothing this reader can see.
+   *
+   * Batched rather than single-id because its one caller is a *list*:
+   * `practicetest` renders the Subject on every row of Student Home, and a
+   * per-row call would be an N+1 across a module boundary. It exists at all
+   * because `practicetest` must never hold the `sourceTest` or the `subject`
+   * delegate (AD-17) — the label is `sourcetest`'s to resolve, through the same
+   * `TaxonomyService` call the classification read already makes.
+   *
+   * Deliberately **not** account-scoped: the caller has already proved whose
+   * the Practice Test is, in the very `where` that found it, and re-proving
+   * ownership here would be a second place that proof could disagree with
+   * itself. Nothing but a Subject *name* crosses back.
+   */
+  readSubjectLabels(sourceTestIds: readonly string[]): Promise<Map<string, string | null>>;
 }
 
 /**

@@ -3,15 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NextLink from 'next/link';
-import type { Route } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
-import Link from '@mui/material/Link';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import { studentCopy } from '@/copy/student';
+import { PracticeTestList } from './_components/PracticeTestList';
 import {
   ParentApiError,
   parentApi,
@@ -49,10 +48,16 @@ export function deviceIsUnbound(cause: unknown): boolean {
  * and each carries its **own** failure state with its own way to try again, so a
  * bad moment on one is never a child left holding a greeting and no way forward.
  *
- * What a released practice test shows is an identifier's worth: how many
- * questions it holds. There is nothing to open, because taking one is Epic 5's —
- * and a student-scoped read carrying prompts and correct answers would hand a
- * child the answer key the whole quality gate exists to keep from them.
+ * The list itself belongs to `PracticeTestList`, and this page's whole job on
+ * that path is to hand the array over exactly as the server sent it: the order
+ * — what there is still to do, then what is finished — is a decision already
+ * made, and a second one taken here would be a second answer to it. Nothing on
+ * this page sorts, filters or groups.
+ *
+ * What a released practice test shows is a Subject, how many questions it holds
+ * and which of three conditions it is in. Never a prompt and never a correct
+ * answer: a student-scoped read carrying those would hand a child the answer key
+ * the whole quality gate exists to keep from them.
  */
 export default function StudentModePage() {
   const router = useRouter();
@@ -195,40 +200,11 @@ export default function StudentModePage() {
                   <Typography component="h2" sx={{ fontWeight: 700 }}>
                     {studentCopy.practiceTestsTitle}
                   </Typography>
-                  <Box
-                    component="ul"
-                    // `listStyle: 'none'` strips list semantics in
-                    // Safari/VoiceOver, and the item count with them — which is
-                    // the one thing a child scanning what is waiting needs
-                    // announced. Put back by hand, as `PageStrip.tsx` does.
-                    role="list"
-                    sx={{ display: 'grid', gap: `${comfortableDensity.gap}px`, p: 0, m: 0 }}
-                  >
-                    {tests.map((test) => (
-                      <Typography
-                        key={test.id}
-                        component="li"
-                        role="listitem"
-                        sx={{ listStyle: 'none' }}
-                        data-testid="student-practice-test"
-                      >
-                        {/* The row *is* the link, and the sentence **is** its
-                            accessible name — no `aria-label` over the top of it.
-                            A label would read identically on every row, hiding
-                            the one thing that tells them apart, and would replace
-                            the visible words for anyone speaking them (WCAG
-                            2.5.3). A client-side navigation, because Take Test is
-                            inside Student Mode rather than past it. */}
-                        <Link
-                          component={NextLink}
-                          href={`/student/tests/${test.id}` as Route}
-                          sx={{ minHeight: comfortableDensity.tapTarget }}
-                        >
-                          {studentCopy.practiceTest(test.questionCount)}
-                        </Link>
-                      </Typography>
-                    ))}
-                  </Box>
+                  {/* Handed over exactly as it arrived. The server owns the
+                      order — what there is to do first, then what is finished
+                      — and this page neither sorts it, filters it nor groups it
+                      by Subject. */}
+                  <PracticeTestList tests={tests} />
                 </>
               ))}
             {/* A client-side link on purpose: leaving Student Mode means

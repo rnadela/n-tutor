@@ -48,12 +48,16 @@ import {
   WEIGHTED_TOPIC_UNKNOWN,
   claimTimeoutMs,
   clampCount,
+  compareStudentListRows,
   formatTargets,
+  lastSubmission,
   normalizeTopicLabel,
   remainingFor,
+  studentListState,
   suggestedTimerMinutes,
   weightingFor,
   type GenerationWeighting,
+  type StudentListState,
 } from './practice-test-policy.js';
 import {
   ANSWER_FORBIDDEN,
@@ -220,17 +224,27 @@ export interface PracticeTestDraftSummary {
 /**
  * One row of the student-scoped list of released Practice Tests.
  *
- * An identifier and a count, and deliberately nothing else. "Becomes visible in
- * Student Mode" is a claim about visibility, and this epic ends there: taking
- * the test is Epic 5. A student-scoped read that already carried prompts,
- * options and *correct answers* would hand a child the answer key before any
- * surface existed to grade an Attempt against — the exact leak the human quality
- * gate exists to prevent. No prompt, no answer, no option body, no Topic label,
- * no allowance figure, no tier and no model name (AD-20, AD-26).
+ * An identifier, the Subject it is, how many questions it holds and which of
+ * the three conditions it is in — and deliberately nothing else. A
+ * student-scoped read that carried prompts, options and *correct answers*
+ * would hand a child the answer key before any surface existed to grade an
+ * Attempt against, the exact leak the human quality gate exists to prevent. No
+ * prompt, no answer, no option body, no Topic label, no allowance figure, no
+ * tier, no model name and no `timerMinutes` (AD-20, AD-26).
+ *
+ * `subjectName` is null for a Source Test carrying no classification, or one
+ * whose stored Subject no longer resolves: the row keeps its place and loses
+ * its label, because one unresolvable Subject must never cost a child the
+ * whole list.
+ *
+ * `state` is **derived** from Attempts, not stored: there is no `Completed`
+ * member on `PracticeTestStatus`.
  */
 export interface PracticeTestReleasedSummary {
   id: string;
+  subjectName: string | null;
   questionCount: number;
+  state: StudentListState;
 }
 
 /**
@@ -597,8 +611,8 @@ export class PracticeTestService {
   }
 
   /**
-   * The Practice Tests one child can see: released, theirs, most recently *made*
-   * first.
+   * The Practice Tests one child can see: released, theirs, what there is left
+   * to do first and what is finished after it.
    *
    * The **only** cross-boundary read of a Practice Test that exists, and the
    * whole of what Student Home is drawn from. Both ids come from the binding the
@@ -610,22 +624,35 @@ export class PracticeTestService {
    * remembered: a `Discarded` row is not something a later reader must filter,
    * it is something this read cannot reach (AD-17).
    *
-   * An identifier and a count per row. Not a prompt, not an answer, not an
-   * option body, not a Topic label, and no allowance figure, tier or model name
-   * — none of those is a student-scoped fact (AD-20, AD-26).
+   * An identifier, a Subject, a count and a condition per row. Not a prompt,
+   * not an answer, not an option body, not a Topic label, no `timerMinutes`,
+   * and no allowance figure, tier or model name — none of those is a
+   * student-scoped fact (AD-20, AD-26).
    *
-   * Ordered server-side, `createdAt desc` with `id desc` breaking the tie, the
-   * same rule `draftsFor` states and for the same reason: two rows made in one
-   * millisecond must not be left in whatever order Postgres returned.
+   * **One flat list, never grouped.** The Subject is a label on a row, not a
+   * heading over a section: grouping would make finding the newest thing to do
+   * a search through headings, and the whole point of the order below is that
+   * it is not.
    *
-   * `createdAt` is when the Practice Test was **generated**, not when it was
-   * released, and the distinction is real: a test generated last week and released
-   * today sorts below one generated this morning. There is no `releasedAt` column
-   * and this story adds none — no new table, no new column, no migration — so the
-   * made-at instant is the only stable ordering available, and it is stated as what
-   * it is rather than described as release order it cannot express. Epic 5 owns the
-   * list a student actually works from, and whatever sort band that surface needs
-   * is its call to make, with whatever column it decides to carry.
+   * The Subject label is resolved through `SOURCE_TEST_READER`, batched over
+   * every row's Source Test in one call. `practicetest` holds no `sourceTest`
+   * and no `subject` delegate and must not acquire one (AD-17), and one call
+   * per row across a module boundary would be an N+1. A test whose Subject
+   * cannot be resolved keeps its place and loses its label.
+   *
+   * **Sorted in memory**, which every other read here does in the statement.
+   * The comparator's key for the completed band is the *most recent
+   * `submittedAt` across a row's Attempts* — a per-row aggregate Prisma cannot
+   * `orderBy` — and the band itself is derived from those same rows. A child's
+   * released tests are bounded by the Generation Allowance their parent has
+   * spent, so the set being sorted is small by construction and stays small.
+   *
+   * Band 1's key is `createdAt`: when the Practice Test was **generated**, not
+   * when it was released. There is no `releasedAt` column, so a test generated
+   * last week and released today sorts below one generated this morning. The
+   * acceptance criterion asks only for newest-first within the band and does
+   * not name the instant, so this is stated as what it is rather than
+   * described as a release order it cannot express.
    */
   async releasedFor(
     parentAccountId: string,
@@ -633,10 +660,39 @@ export class PracticeTestService {
   ): Promise<PracticeTestReleasedSummary[]> {
     const rows = await this.prisma.practiceTest.findMany({
       where: { parentAccountId, studentProfileId, status: 'Released' },
+      // Still `createdAt desc, id desc`, so the rows arrive in band-1 order
+      // already and the comparator below only has to move the completed ones.
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: { id: true, questionCount: true },
+      select: {
+        id: true,
+        sourceTestId: true,
+        questionCount: true,
+        createdAt: true,
+        // Read-only: nothing in this story creates, starts or submits an
+        // Attempt. Stories 5.2–5.4 own every write.
+        attempts: { select: { submittedAt: true } },
+      },
     });
-    return rows.map((row) => ({ id: row.id, questionCount: row.questionCount }));
+    if (rows.length === 0) return [];
+
+    const labels = await this.sourceTests.readSubjectLabels(rows.map((row) => row.sourceTestId));
+
+    return rows
+      .map((row) => ({
+        id: row.id,
+        subjectName: labels.get(row.sourceTestId) ?? null,
+        questionCount: row.questionCount,
+        createdAt: row.createdAt,
+        state: studentListState(row.attempts),
+        lastSubmittedAt: lastSubmission(row.attempts),
+      }))
+      .sort(compareStudentListRows)
+      .map(({ id, subjectName, questionCount, state }) => ({
+        id,
+        subjectName,
+        questionCount,
+        state,
+      }));
   }
 
   /**

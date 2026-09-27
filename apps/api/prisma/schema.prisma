@@ -927,6 +927,7 @@ model PracticeTest {
   generationJob  GenerationJob  @relation(fields: [generationJobId], references: [id], onDelete: Cascade)
 
   questions PracticeTestQuestion[]
+  attempts  Attempt[]
 
   @@unique([generationJobId, ordinal])
   /// The one index the allowance count reads: this account's charged rows
@@ -993,4 +994,37 @@ model PracticeTestQuestionTopic {
 
   @@index([questionId])
   @@map("practice_test_question_topic")
+}
+
+/// One sitting of a Practice Test: the child opened it, and either they are
+/// still in it or they submitted it.
+///
+/// `submittedAt` null **is** in progress. There is no `state` column and no
+/// fourth `PracticeTestStatus` member, because completion is an Attempt fact
+/// rather than a property of the test: a status written here would make
+/// `practicetest` record something it derives, and Story 5.7's retake would
+/// then have to walk it backwards.
+///
+/// No `studentProfileId`: the `PracticeTest` this hangs off already carries the
+/// child, and duplicating it would be a second place the association could
+/// drift (AD-17).
+///
+/// Read-only in Story 5.1 — nothing creates, starts or submits an Attempt here.
+/// Stories 5.2–5.4 own every write.
+model Attempt {
+  id             String    @id @default(uuid())
+  practiceTestId String
+  startedAt      DateTime  @default(now())
+  /// When the sitting was handed in, or null while it is still open. The one
+  /// signal that tells an in-progress Attempt from a finished one.
+  submittedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  practiceTest PracticeTest @relation(fields: [practiceTestId], references: [id], onDelete: Cascade)
+
+  /// The one index the student list reads: this test's Attempts, and whether
+  /// any of them is still open.
+  @@index([practiceTestId, submittedAt])
+  @@map("attempt")
 }

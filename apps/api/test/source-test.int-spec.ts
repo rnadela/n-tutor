@@ -2027,4 +2027,76 @@ describe('Source Tests: page management before submit', () => {
       expect(body).not.toContain('base64');
     });
   });
+
+  // --- The Subject labels a reader outside this module asks for ------------
+
+  describe('readSubjectLabels', () => {
+    /**
+     * The reader, reached as its own service.
+     *
+     * Its only production caller is `practicetest`, which holds it as
+     * `SOURCE_TEST_READER` and reaches it over a module boundary. Exercising it
+     * only through that route would leave every claim it makes on its own —
+     * a disabled Subject still resolving, an unclassified upload mapping to
+     * null — asserted nowhere.
+     */
+    function reader() {
+      return h.moduleRef.get(SourceTestService);
+    }
+
+    it('still resolves a Subject disabled after the upload was classified', async () => {
+      const draft = await openDraft();
+      const subject = await classifyDraft(draft);
+      // Retired from the picker after the fact. A stored reference has to keep
+      // resolving, or a Subject retired today would blank the label on every
+      // practice test a child ever did under it.
+      await h.taxonomy.setSubjectEnabled(h.operatorId, subject.id, false);
+
+      const labels = await reader().readSubjectLabels([draft.sourceTestId]);
+      expect(labels.get(draft.sourceTestId)).toBe(subject.name);
+    });
+
+    it('maps an unclassified Source Test to null rather than leaving it out', async () => {
+      const draft = await openDraft();
+
+      const labels = await reader().readSubjectLabels([draft.sourceTestId]);
+      // Present, with a null label: "no Subject chosen" is a different answer
+      // from "no such row", and a caller renders the two differently.
+      expect(labels.has(draft.sourceTestId)).toBe(true);
+      expect(labels.get(draft.sourceTestId)).toBeNull();
+    });
+
+    it('leaves out an id the batch does not return at all', async () => {
+      const missing = randomUUID();
+
+      const labels = await reader().readSubjectLabels([missing]);
+      expect(labels.has(missing)).toBe(false);
+    });
+
+    it('answers an empty map for an empty request', async () => {
+      expect(await reader().readSubjectLabels([])).toEqual(new Map());
+    });
+
+    it('labels several uploads in one call, each with its own Subject', async () => {
+      // The batch is what `practicetest` renders a whole list from, so labels
+      // landing against the wrong ids is the failure that matters most here.
+      const first = await openDraft();
+      const firstSubject = await classifyDraft(first);
+      const second = await openDraft();
+      const secondSubject = await classifyDraft(second);
+      const unclassified = await openDraft();
+
+      const labels = await reader().readSubjectLabels([
+        first.sourceTestId,
+        second.sourceTestId,
+        unclassified.sourceTestId,
+      ]);
+
+      expect(firstSubject.name).not.toBe(secondSubject.name);
+      expect(labels.get(first.sourceTestId)).toBe(firstSubject.name);
+      expect(labels.get(second.sourceTestId)).toBe(secondSubject.name);
+      expect(labels.get(unclassified.sourceTestId)).toBeNull();
+      expect(labels.size).toBe(3);
+    });
+  });
 });

@@ -264,14 +264,21 @@ export interface PracticeTestDraftSummary {
  * One row of Student Home's released practice tests, exactly as the API states
  * it.
  *
- * An identifier and a count, and nothing else exists on it: no prompt, no
- * answer, no option body, no Topic label, and no allowance figure, tier or model
- * name — none of those is a student-scoped fact (AD-20, AD-26). Taking the test
- * is Epic 5's, and this story ships visibility.
+ * An identifier, the Subject it is, how many questions it holds and which of
+ * three conditions it is in — and nothing else exists on it: no prompt, no
+ * answer, no option body, no Topic label, no `timerMinutes`, and no allowance
+ * figure, tier or model name — none of those is a student-scoped fact (AD-20,
+ * AD-26).
+ *
+ * `subjectName` is null for an upload carrying no classification, or one whose
+ * stored Subject no longer resolves: the row keeps its place and loses its
+ * label.
  */
 export interface StudentPracticeTestSummary {
   id: string;
+  subjectName: string | null;
   questionCount: number;
+  state: 'NotStarted' | 'InProgress' | 'Completed';
 }
 
 /**
@@ -686,9 +693,15 @@ export const parentApi = {
   studentSession: () => call<StudentSession>('/student/session', {}, studentCopy.failed),
 
   /**
-   * The practice tests the bound child can see, ordered by the server: most
-   * recently made first, which is generation time and not release time — there is
-   * no `releasedAt` column for it to be anything else.
+   * The practice tests the bound child can see, in **one flat list ordered by
+   * the server**: everything there is still to do first, then everything
+   * finished. Band 1 is newest *made* first, which is generation time and not
+   * release time — there is no `releasedAt` column for it to be anything else
+   * — and band 2 is most recently submitted first.
+   *
+   * The browser renders the array as it arrives. It does not sort it, filter
+   * it or group it by Subject: the order is a decision the server already
+   * made, and a second one taken here would be a second answer to it.
    *
    * No bearer, exactly as the session read: the binding travels as its own
    * httpOnly cookie, and the profile is named by that cookie server-side rather

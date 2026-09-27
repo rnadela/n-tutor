@@ -453,3 +453,89 @@ export function formatTargets(
   }
   return targets;
 }
+
+// --- The student's list ----------------------------------------------------
+
+/** The three conditions a released Practice Test can be in, for a child. */
+export type StudentListState = 'NotStarted' | 'InProgress' | 'Completed';
+
+/** The one thing the list needs off an Attempt: whether, and when, it was handed in. */
+export interface AttemptSubmission {
+  submittedAt: Date | null;
+}
+
+/**
+ * Which of the three conditions a released Practice Test is in.
+ *
+ * Derived from Attempts and from nothing stored: there is no `Completed`
+ * member on `PracticeTestStatus` and there is deliberately never going to be
+ * one, because a status written here would record what is really an Attempt
+ * fact, and Story 5.7's retake would then have to walk it backwards.
+ *
+ * **An open Attempt outranks a submitted one.** The band exists to surface what
+ * there is to do, so a retake left open reads as in progress even though the
+ * test has been completed before — which is the reading Story 5.7 needs too.
+ */
+export function studentListState(attempts: readonly AttemptSubmission[]): StudentListState {
+  if (attempts.length === 0) return 'NotStarted';
+  if (attempts.some((attempt) => attempt.submittedAt === null)) return 'InProgress';
+  return 'Completed';
+}
+
+/**
+ * The most recent submission across a test's Attempts, or null if none was
+ * ever handed in. What band 2 is ordered by.
+ */
+export function lastSubmission(attempts: readonly AttemptSubmission[]): Date | null {
+  let latest: Date | null = null;
+  for (const attempt of attempts) {
+    if (attempt.submittedAt === null) continue;
+    if (latest === null || attempt.submittedAt.getTime() > latest.getTime()) {
+      latest = attempt.submittedAt;
+    }
+  }
+  return latest;
+}
+
+/** One row as the comparator reads it. */
+export interface StudentListRow {
+  id: string;
+  createdAt: Date;
+  state: StudentListState;
+  /** The most recent submission, for a completed row. Null in band 1. */
+  lastSubmittedAt: Date | null;
+}
+
+/**
+ * The order the child sees: everything there is still to do, then everything
+ * finished.
+ *
+ * Two bands. Band 1 is every non-completed row — not started and in progress
+ * side by side, because both are work waiting — newest **made** first, since
+ * there is no `releasedAt` column to sort on. Band 2 is the completed rows,
+ * most recently **submitted** first, which is the instant that actually
+ * distinguishes them. `id` descending breaks a tie in both, exactly as
+ * `releasedFor` already tiebreaks, so two rows sharing an instant are never
+ * left in whatever order the planner returned.
+ *
+ * A total order, and deliberately so: the sort it drives must be stable
+ * whatever the input order, or the list would shuffle between reads.
+ */
+export function compareStudentListRows(a: StudentListRow, b: StudentListRow): number {
+  const bandOf = (row: StudentListRow) => (row.state === 'Completed' ? 1 : 0);
+  const band = bandOf(a) - bandOf(b);
+  if (band !== 0) return band;
+
+  if (bandOf(a) === 1) {
+    // A completed row always has a submission — `studentListState` only says
+    // `Completed` when every Attempt carries one — so the `?? 0` is reached by
+    // no caller and exists only so the comparison is total on the type.
+    const bySubmission = (b.lastSubmittedAt?.getTime() ?? 0) - (a.lastSubmittedAt?.getTime() ?? 0);
+    if (bySubmission !== 0) return bySubmission;
+  } else {
+    const byCreated = b.createdAt.getTime() - a.createdAt.getTime();
+    if (byCreated !== 0) return byCreated;
+  }
+
+  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+}

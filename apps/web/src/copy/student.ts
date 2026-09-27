@@ -21,17 +21,40 @@ export const studentCopy = {
   /** The released list's own heading. Second person, like everything here. */
   practiceTestsTitle: 'Your practice tests',
   /**
-   * One row of the list.
+   * One row's question-count line, and the row's accessible name.
    *
-   * The question count arrives from the API rather than being written here, and
-   * it is the only figure on the row: there is nothing to open yet, because
-   * taking a practice test is Epic 5's. Seeing that it is there is the whole of
-   * what this story ships to a child.
+   * The count arrives from the API rather than being written here, and it is
+   * the only figure on the row: no allowance, no tier, no minute figure.
    */
   practiceTest: (questionCount: number) =>
     questionCount === 1
       ? 'A practice test with 1 question'
       : `A practice test with ${questionCount} questions`,
+  /**
+   * The word for the condition a row is in, or `null` for anything else.
+   *
+   * **Exhaustive over exactly the three tags the API states, and nothing
+   * else.** An unrecognized or missing value renders no label at all — never
+   * `Completed`, because telling a child that a test they have never touched
+   * is finished is the worst answer available, and a `switch` that fell
+   * through to the last case would say exactly that.
+   *
+   * These are words, not colours. The three conditions have to be tellable
+   * apart with every bit of styling stripped away, so the distinction lives in
+   * the sentence and not in a swatch.
+   */
+  practiceTestState: (state: string | null | undefined): string | null => {
+    switch (state) {
+      case 'NotStarted':
+        return 'Not started';
+      case 'InProgress':
+        return 'In progress';
+      case 'Completed':
+        return 'Completed';
+      default:
+        return null;
+    }
+  },
   loading: 'Loading…',
   /**
    * Take Test: the screen a child actually works on.

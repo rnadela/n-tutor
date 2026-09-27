@@ -651,9 +651,10 @@ describe('Student Mode and the device binding', () => {
     // And a **timed** released test carries no minute figure onto this surface.
     // The timer is a parent-only configuration (FR-15, Story 4.6): a child is
     // shown the time they have by Epic 5's own Attempt surface, and this list is
-    // exactly `{ id, questionCount }` whether a timer was configured or not.
-    // Asserted with `toEqual` on the whole body rather than a substring search,
-    // so a `timerMinutes` field appearing here is a failure by construction.
+    // exactly `{ id, subjectName, questionCount, state }` whether a timer was
+    // configured or not. Asserted with `toEqual` on the whole body rather than a
+    // substring search, so a `timerMinutes` field appearing here is a failure by
+    // construction.
     const timed = await h.prisma.practiceTest.create({
       data: {
         parentAccountId: parent.parentAccountId,
@@ -672,8 +673,19 @@ describe('Student Mode and the device binding', () => {
       .get('/api/student/practice-tests')
       .set('Cookie', cookie)
       .expect(200);
-    expect(withTimer.body).toEqual([{ id: timed.id, questionCount: 3 }]);
-    expect(Object.keys(withTimer.body[0] as object)).toEqual(['id', 'questionCount']);
+    // The upload behind it carries no classification, so the row's Subject is
+    // null — a state the payload states rather than hides. And never sat, so
+    // the condition is `NotStarted`: derived from Attempts, of which there are
+    // none, and not from a status column.
+    expect(withTimer.body).toEqual([
+      { id: timed.id, subjectName: null, questionCount: 3, state: 'NotStarted' },
+    ]);
+    expect(Object.keys(withTimer.body[0] as object).sort()).toEqual([
+      'id',
+      'questionCount',
+      'state',
+      'subjectName',
+    ]);
 
     const session = await readStudentSession(cookie).expect(200);
     // One read, the bound profile, and nothing else on it.

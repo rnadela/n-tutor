@@ -176,6 +176,8 @@ const EXTRACTION_TABLES = [
   // every one of these or the statement fails. Named in full rather than left
   // to the CASCADE for the reason the list already names `page_image`: a reader
   // asking "are the generated drafts wiped too?" should find the answer here.
+  // An Attempt hangs off a Practice Test, so it is named before it.
+  '"attempt"',
   '"practice_test_question_topic"',
   '"practice_test_choice"',
   '"practice_test_question"',

@@ -98,10 +98,34 @@ describe('what the page does with each outcome', () => {
     expect(SOURCE).toContain('studentCopy.empty');
   });
 
-  it('renders the released tests as a real list with its semantics restored', () => {
-    expect(SOURCE).toContain('role="list"');
-    expect(SOURCE).toContain('role="listitem"');
-    expect(SOURCE).toContain('studentCopy.practiceTest(test.questionCount)');
+  it('hands the list component the array exactly as the server sent it', () => {
+    // Matched as a pattern rather than as an exact JSX line, so a Prettier
+    // reflow cannot fail a test whose subject is intact.
+    expect(SOURCE).toMatch(/<PracticeTestList\s+tests=\{tests\}/u);
+    // What the list *renders* — one flat list, in the order received, a
+    // Subject and a state per row — is asserted where it can be rendered, in
+    // `_components/PracticeTestList.spec.tsx`. It cannot be asserted here:
+    // this workspace runs with `environment: 'node'` and no router, so the
+    // page itself cannot be rendered at all.
+  });
+
+  it('does not reorder, filter or group what it was given', () => {
+    // A rule about this *file*, which is the one kind of claim regex over
+    // source is the right instrument for — and scoped to the region it is
+    // about rather than the whole file, so unrelated future code cannot trip
+    // it. Both anchors are asserted found: an `indexOf` returning -1 would
+    // silently widen the slice to the start of the file and assert nothing.
+    const opens = CODE.indexOf('tests !== null &&');
+    const closes = CODE.indexOf('studentCopy.parent');
+    expect(opens).toBeGreaterThanOrEqual(0);
+    expect(closes).toBeGreaterThan(opens);
+    const region = CODE.slice(opens, closes);
+    // Reordering verbs only. A field name like `subjectName` is deliberately
+    // not banned: a legitimate future `aria-label` would name it.
+    for (const verb of ['.sort(', '.toSorted(', '.reverse(', '.filter(', 'groupBy']) {
+      expect(region).not.toContain(verb);
+    }
+    expect(region).not.toContain('Object.entries(');
   });
 
   it('shows no generated content, because none is on the wire', () => {
@@ -153,6 +177,23 @@ describe('Student Mode’s copy', () => {
     for (const count of [1, 8]) {
       expect(studentCopy.practiceTest(count)).not.toContain('!');
       expect(studentCopy.practiceTest(count)).not.toMatch(/allowance|tier|gpt/iu);
+    }
+  });
+
+  it('names each of the three conditions in plain second-person words', () => {
+    expect(studentCopy.practiceTestState('NotStarted')).toBe('Not started');
+    expect(studentCopy.practiceTestState('InProgress')).toBe('In progress');
+    expect(studentCopy.practiceTestState('Completed')).toBe('Completed');
+    for (const state of ['NotStarted', 'InProgress', 'Completed']) {
+      expect(studentCopy.practiceTestState(state)).not.toContain('!');
+    }
+  });
+
+  it('says nothing at all for a state it does not recognise, and never “Completed”', () => {
+    // A mapping that fell through to its last case would tell a child that a
+    // test they have never touched is finished.
+    for (const state of [undefined, null, '', 'completed', 'Completed ', 'Graded', 'Expired']) {
+      expect(studentCopy.practiceTestState(state)).toBeNull();
     }
   });
 

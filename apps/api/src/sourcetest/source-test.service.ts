@@ -805,6 +805,71 @@ export class SourceTestService implements SourceTestReader {
   }
 
   /**
+   * The Subject label of each given Source Test, keyed by Source Test id.
+   *
+   * One `findMany` over the ids, then one `resolveSubject` per **distinct**
+   * non-null subject id. Distinct Subjects across one child's released tests
+   * are a handful, so this reuses the existing single-id taxonomy call rather
+   * than adding a batch API to `admin` for a set that size.
+   *
+   * `resolveSubject` **throws** `NotFoundException` for an id it cannot find —
+   * it never returns nullish — so each resolution is caught on its own and
+   * recorded as `null`. One unresolvable Subject costs that row its label; it
+   * must never cost the caller its whole read, on a route whose documented
+   * contract is that it answers `[]` and never a refusal.
+   *
+   * Resolution keeps succeeding for a **disabled** Subject, because
+   * `resolveSubject` is the read that succeeds for a disabled row: a stored
+   * reference resolves for as long as it is stored, and a Subject retired
+   * after a test was classified must not blank the label on work already done.
+   *
+   * An id this reader cannot see is simply **absent** from the map, which is
+   * how a caller tells "no classification" (`null`) from "no such row".
+   */
+  async readSubjectLabels(sourceTestIds: readonly string[]): Promise<Map<string, string | null>> {
+    const labels = new Map<string, string | null>();
+    const ids = [...new Set(sourceTestIds)];
+    if (ids.length === 0) return labels;
+
+    const rows = await this.prisma.sourceTest.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, subjectId: true },
+    });
+
+    const names = new Map<string, string | null>();
+    const distinctSubjectIds = [
+      ...new Set(rows.map((row) => row.subjectId).filter((id): id is string => id !== null)),
+    ];
+    // Resolved together rather than one `await` at a time: the list this
+    // serves is one read, and a caller waiting on it should not pay for N
+    // distinct Subjects sequentially when they resolve independently.
+    const resolved = await Promise.all(
+      distinctSubjectIds.map(async (subjectId) => {
+        try {
+          return { subjectId, name: (await this.taxonomy.resolveSubject(subjectId)).name };
+        } catch (cause) {
+          // Only the "no such Subject" refusal is absorbed: that one is a stored
+          // id that no longer names a row, and the row it labels loses its label
+          // while the list keeps every other one. A dropped connection or a bug
+          // in the taxonomy read is neither of those — swallowing it would blank
+          // a real Subject silently and say nothing about why, so it is rethrown
+          // and the caller's read fails honestly.
+          if (!(cause instanceof NotFoundException)) throw cause;
+          return { subjectId, name: null };
+        }
+      }),
+    );
+    for (const { subjectId, name } of resolved) {
+      names.set(subjectId, name);
+    }
+
+    for (const row of rows) {
+      labels.set(row.id, row.subjectId === null ? null : (names.get(row.subjectId) ?? null));
+    }
+    return labels;
+  }
+
+  /**
    * Every `Ready` page's stored bytes, in ordinal order.
    *
    * This is how the Extraction job reaches the images, and it is deliberately
