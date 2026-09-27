@@ -116,6 +116,80 @@ export const studentCopy = {
     closeMap: 'Close',
     loading: 'Loading…',
     failed: 'That practice test could not be opened.',
+
+    // --- The clock -------------------------------------------------------
+    //
+    // Not one figure is written into a sentence here. The countdown's figures
+    // come from `attempt-clock`, which computes them from the instants the server
+    // stated, and the thresholds are that module's constants. A duration written
+    // into copy would be a second definition of the timer, in the one place
+    // nothing could reconcile it with the first.
+
+    /**
+     * The countdown's accessible name: what this figure is, said with its units.
+     *
+     * The spoken form is handed in, because it is the same figure the display
+     * shows and nothing here may restate it. `role="timer"` with no unit-bearing
+     * name reads as a bare number, which is a number about nothing.
+     */
+    timerLabel: (spoken: string) => `Time left: ${spoken}`,
+    /**
+     * The countdown as it appears on screen: the `m:ss` figure alone.
+     *
+     * No unit words beside it — they are the label's, and repeating them would
+     * make every tick read twice.
+     */
+    timerRemaining: (display: string) => display,
+    /**
+     * Said at each of the three thresholds, and said **identically** at all
+     * three.
+     *
+     * One sentence, with the remaining time handed in. Nothing escalates: a
+     * countdown that got louder as it ran out would be pressure rather than
+     * information, and a child working under it does not need to be hurried.
+     * There is no exclamation mark for the same reason.
+     */
+    timerWarning: (spoken: string) => `You have ${spoken} left.`,
+
+    // --- Handing in ------------------------------------------------------
+
+    /** The deadline has passed. It states the fact and nothing about the work. */
+    timeUp: 'Your time is up.',
+    /** The one control that ends the Attempt. */
+    handIn: 'Hand in',
+    /** While the request is out. Not a promise that it worked. */
+    handingIn: 'Handing in…',
+    /** It worked. No count, no tally, and nothing about being right. */
+    handedIn: 'Your work is handed in.',
+    /**
+     * The heading of the state the screen moves to, which is where focus lands.
+     * A state change with no heading is a state change nothing can be pointed at.
+     */
+    handedInHeading: 'Handed in',
+    /**
+     * Handing in offline.
+     *
+     * It says what is needed and what is safe, in that order, because "it did not
+     * work" on its own reads as work lost. The Attempt stays open and the control
+     * stays live, so there is nothing else to ask of the child.
+     */
+    offlineSubmit:
+      'Handing in needs a connection. Your answers are kept, so you can try again once you are back online.',
+    /**
+     * The deadline passed with no connection.
+     *
+     * It states that the time is up and that the handing in is already arranged,
+     * so a child is not left wondering whether to keep pressing something.
+     */
+    offlineExpired: 'Your time is up. Your work will be handed in as soon as you are back online.',
+    /** Announced before the screen changes on its own, so the move is never silent. */
+    autoSubmitAnnouncement: 'Your time is up. Your work is being handed in.',
+    /** It was already in. Said rather than re-sent. */
+    alreadyHandedIn: 'This practice test is already handed in.',
+    /** The request failed for some other reason. The Attempt is still open. */
+    submitFailed: 'Your work could not be handed in. Your answers are kept, so you can try again.',
+    /** The Attempt could not be opened at all, so there is nothing to work under. */
+    attemptFailed: 'That practice test could not be started.',
     // There is deliberately no link label here. Student Home's row *is* the
     // link, and the sentence it already shows — "A practice test with 8
     // questions" — is its accessible name. A second string over the top of it

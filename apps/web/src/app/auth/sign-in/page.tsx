@@ -11,6 +11,7 @@ import Link from '@mui/material/Link';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { parentCopy } from '@/copy/parent';
+import { attemptStorage, clearAll } from '@/lib/attempt-store';
 import { parentApi } from '@/lib/parent-api';
 import { density } from '@/theme/tokens';
 
@@ -27,6 +28,12 @@ export default function SignInPage() {
     setError(null);
     try {
       await parentApi.signIn(email, password);
+      // A sign-in is a mode-gate crossing, and AD-26 says a crossing clears the
+      // client-held answers. `clearAll` rather than `retainOnly`: nobody is a child
+      // here, so there is no profile whose work it would be right to keep — and a
+      // device signed into by a different parent must not be holding the previous
+      // household's schoolwork.
+      clearAll(attemptStorage());
       router.replace('/auth/signed-in');
     } catch (cause) {
       // One message for a wrong password and for an unknown email alike.

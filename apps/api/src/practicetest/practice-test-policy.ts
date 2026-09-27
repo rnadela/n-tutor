@@ -12,6 +12,7 @@
 import type { QuestionFormat } from '../generated/prisma/enums.js';
 import { resolveAiConfig } from '../ai/ai-config.js';
 import { optionalBoolEnv, requireIntEnv } from '../common/env.js';
+import { MAX_QUESTIONS } from '../extraction/extraction-payload.js';
 import { SOURCE_TEST_NOT_FOUND } from '../sourcetest/source-test-policy.js';
 
 // --- Constants -----------------------------------------------------------
@@ -104,6 +105,75 @@ export const TIMER_MINUTES_PER_QUESTION = 1;
 /** Plus five, to read the paper and check the answers. */
 export const TIMER_MINUTES_OVERHEAD = 5;
 
+/**
+ * The most answers one submission may carry.
+ *
+ * **Derived, not chosen.** A Practice Test can hold at most one Question per
+ * Question the Extraction found, and `MAX_QUESTIONS` is that ceiling — so a body
+ * carrying more answers than that names more Questions than any Practice Test can
+ * have, which is malformed rather than merely generous. Reusing the figure is what
+ * keeps the transport bound below computable: an independently chosen number here
+ * would silently stop covering the worst case the first time either moved.
+ *
+ * Still a bound on the *shape* of the body and nothing more. Which Questions are
+ * actually on that Practice Test is a row-dependent rule the service settles by
+ * ignoring every id it does not recognise, so a browser that sent one stale id is
+ * never a 400 that loses the child's whole paper.
+ */
+export const MAX_ANSWERS_PER_SUBMISSION = MAX_QUESTIONS;
+
+/**
+ * The longest a Question id may be on the way in.
+ *
+ * Its own figure rather than a borrowed one. Ids here are UUIDs (36 characters), and
+ * this is a plausibility ceiling with room to spare — **not** `MAX_ANSWER_LENGTH`,
+ * whose own doc calls it "the longest one answer may be" and which exists to bound
+ * Short Answer *prose*. Sharing one constant between an id and a paragraph is two
+ * uses that disagree the first time either is tuned.
+ *
+ * Deliberately not `@IsUUID`, for the reason the DTO states: an id that names no
+ * Question on this Practice Test is already ignored by the write path.
+ */
+export const MAX_QUESTION_ID_LENGTH = 64;
+
+/**
+ * The longest one answer may be.
+ *
+ * A Short Answer is prose a child typed into a textarea, so this is a ceiling on
+ * a paragraph and not on an essay. Stated here rather than in the DTO so the DTO
+ * and any later reader of the column cannot each hold their own figure.
+ *
+ * Mirrored in the web app as `MAX_ANSWER_LENGTH` in `apps/web/src/lib/answers.ts`,
+ * which caps the input so a child cannot type past this bound and then discover it as
+ * a hand-in failure. The two are named the same on purpose: moving one means moving
+ * the other.
+ */
+export const MAX_ANSWER_LENGTH = 2000;
+
+/**
+ * How large a JSON body the HTTP surface accepts, in bytes.
+ *
+ * **Computed from the submission bounds above, because it has to cover them.** The
+ * hand-in body is the largest legitimate JSON this API takes, and Express's own
+ * default is 100KB — well under the worst case the DTO above deliberately allows. A
+ * submission refused by the transport never reaches validation, so it arrives at the
+ * browser as neither a 409 nor a dropped connection and the screen maps it to the
+ * generic failure: the child presses Hand in again, forever, and their work is never
+ * accepted. The bound is raised here on purpose rather than left to be discovered.
+ *
+ * The 6x is JSON escaping's actual worst case, not UTF-8's: `MAX_ANSWER_LENGTH`
+ * counts UTF-16 code units, and any one of them can serialize as a `\u00XX`
+ * escape — six ASCII bytes for a single unit. Sizing this from UTF-8 width alone
+ * (up to 3 bytes for a BMP character) would still be short of that, and a
+ * genuine answer in a three-byte script would then be the one thing this bound
+ * exists to stop from being refused. `questionId` carries no `@IsUUID` either
+ * (deliberately, see the DTO), so it gets the same 6x — a value passing every
+ * DTO check should never be the thing that trips the transport limit ahead of
+ * it. The per-entry constant covers the key names, braces, quotes and commas.
+ */
+export const MAX_JSON_BODY_BYTES =
+  MAX_ANSWERS_PER_SUBMISSION * ((MAX_ANSWER_LENGTH + MAX_QUESTION_ID_LENGTH) * 6 + 64) + 1024;
+
 // --- Messages ------------------------------------------------------------
 //
 // Not one of them carries a provider string, a model name, a tier label or a
@@ -146,6 +216,23 @@ export const NO_USABLE_QUESTIONS =
  * the three apart. It names no Practice Test, no Topic and no count.
  */
 export const PRACTICE_TEST_NOT_FOUND = 'That practice test could not be found.';
+
+/**
+ * The one refusal a submission of its own can get: this Attempt was already
+ * handed in.
+ *
+ * It is a 409 rather than a 404 because it is a refusal on a **rule** and the
+ * child is entitled to know which — "you already handed this in" is actionable
+ * where "that could not be found" would make a successful hand-in look like a
+ * lost one, and would invite the screen to re-send. Every *ownership* refusal on
+ * the student surface stays `PRACTICE_TEST_NOT_FOUND`: an Attempt that is not
+ * this child's is one that does not exist, and this sentence is only ever
+ * reached for an Attempt the binding already owns.
+ *
+ * Second person, like every other sentence a child reads, and it states nothing
+ * about the work: no count, no score, no grade word.
+ */
+export const ATTEMPT_ALREADY_SUBMITTED = 'You have already handed this practice test in.';
 
 /**
  * The weighted Topic asked for is not one this upload carries.

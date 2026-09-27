@@ -223,3 +223,32 @@ describe('Student Mode’s copy', () => {
     }
   });
 });
+
+describe('whose work stays on the device', () => {
+  it('keeps only the bound child’s records when the session resolves', () => {
+    // Student Home is the screen every child passes through, so it is where a
+    // sibling's abandoned work stops being on the device (AD-26). Keyed on the profile
+    // the *binding* named, never one this page chose.
+    expect(CODE).toContain('retainOnly(attemptStorage(), value.profile.id)');
+  });
+
+  it('drops every record on the way out to the parent surface', () => {
+    // The other mode-gate crossing. `clearAll`, not `retainOnly`: past the PIN gate
+    // nobody is a child, so there is no profile it would be right to keep.
+    expect(CODE).toContain('clearAll(attemptStorage())');
+    // On the control that leaves, so a navigation cannot skip it.
+    expect(CODE).toMatch(/href="\/parent\/pin"[\s\S]{0,400}?clearAll\(attemptStorage\(\)\)/u);
+  });
+
+  it('never names a profile it was not handed', () => {
+    // Every sweep is keyed by what the binding answered. A profile id assembled here
+    // would be this screen deciding whose device it is.
+    // To the end of the line, not to the first `)`: the nested `attemptStorage()`
+    // reaches that one before the call does.
+    const calls = CODE.match(/retainOnly\(.*$/gmu) ?? [];
+    expect(calls).toHaveLength(1);
+    for (const call of calls) {
+      expect(call).toContain('value.profile.id');
+    }
+  });
+});

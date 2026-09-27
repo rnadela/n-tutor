@@ -32,6 +32,7 @@ import { PrismaService, type TransactionClient } from '../prisma/prisma.service.
 import { renumbered } from '../sourcetest/source-test-policy.js';
 import { SOURCE_TEST_READER, type SourceTestReader } from '../sourcetest/source-test-reader.js';
 import {
+  ATTEMPT_ALREADY_SUBMITTED,
   EXTRACTION_NOT_READY,
   GENERATION_CLOCK_ANOMALY,
   GENERATION_FAILED,
@@ -288,6 +289,55 @@ export interface StudentPracticeTestView {
   id: string;
   questionCount: number;
   questions: StudentQuestionView[];
+}
+
+/**
+ * One Attempt, as the Take Test screen reads it.
+ *
+ * Three instants and nothing else of substance. `startedAt` and `expiresAt` are
+ * the server's own, written once at start; `serverNow` is the server's clock at
+ * the moment it answered, and it is here so the browser can render a countdown
+ * against a **fixed offset** rather than against its own unadjusted clock. A
+ * device whose clock is wrong then shifts only what is displayed — expiry is
+ * still decided server-side, at submit, from the stored column.
+ *
+ * `expiresAt` is null for an untimed Practice Test: there is no deadline to
+ * render and none to reach.
+ *
+ * No `timerMinutes`: the duration is not a student-scoped fact and the deadline
+ * already expresses it. No grade, no score, no answer and no parent-scoped
+ * figure — there is nothing on this view a child could learn anything from but
+ * their own clock.
+ */
+export interface AttemptView {
+  id: string;
+  practiceTestId: string;
+  startedAt: string;
+  /** The deadline, or null for an untimed Practice Test. Written once. */
+  expiresAt: string | null;
+  /** The server's clock when it answered. The browser's offset is measured off this. */
+  serverNow: string;
+  /** Null while the Attempt is open. */
+  submittedAt: string | null;
+}
+
+/**
+ * What handing in answered.
+ *
+ * `expired` is the comparison **the server made, against its own clock and its
+ * own column**, and `gradeAt` is the instant the work is judged at: the deadline
+ * when it had passed, the arrival instant otherwise. A submission that crossed a
+ * network outage is therefore judged at the moment the time ran out rather than
+ * at the moment the connection came back — which is the whole reason the column
+ * exists and the reason nothing a browser sends can move it.
+ *
+ * Still no grade, no score and no answer key: grading is Stories 5.5–5.6, and
+ * `gradeAt` names *when* a later story will judge, never what it judged.
+ */
+export interface AttemptSubmissionView {
+  submittedAt: string;
+  expired: boolean;
+  gradeAt: string;
 }
 
 /** One generated option, in the order it is to be shown. */
@@ -727,6 +777,231 @@ export class PracticeTestService {
     // was, and nothing could: the statement above cannot tell them apart either.
     if (test === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
     return studentTestViewOf(test);
+  }
+
+  /**
+   * The Attempt this child is working under: the open one if there is one, a new
+   * one otherwise.
+   *
+   * **Idempotent by construction.** A refresh, a second tab and a re-entry after
+   * a dropped connection all reach this and all get the *same* row back with its
+   * original instants: an existing Attempt is looked for first, and only its
+   * absence inserts. Without that, every reload would hand the child a fresh
+   * deadline and the timer the parent configured would mean nothing.
+   *
+   * "Existing" means **any** Attempt on this Practice Test for this child, not only
+   * an open one. A child who re-opens a test they handed in gets that Attempt back
+   * with its `submittedAt` set, and the screen states that the work is in. A second
+   * row would be a retake, and retakes are Story 5.7's — so the only way to get one
+   * is a story that deliberately adds it.
+   *
+   * **The server writes both instants, from its own clock, once.** `startedAt` is
+   * `now`. `expiresAt` is `startedAt` plus the Practice Test's `timerMinutes`
+   * *snapshotted at this moment*, or null for an untimed test — and neither is
+   * ever moved, extended, paused or recomputed afterwards. Nothing in a request
+   * body reaches either: there is no body on this route at all. A timer that
+   * could be moved would retroactively change how a past Attempt graded.
+   *
+   * All three ids and `status: 'Released'` sit in one `where`, exactly as
+   * `releasedTestFor`'s do, and for the same reason: a draft, a discarded row, a
+   * sibling's release, another account's test and an id that never existed are
+   * one indistinguishable 404 by construction rather than by five checks.
+   *
+   * One transaction, because the read that decides whether to insert and the
+   * insert itself have to be one decision — two children cannot be on one device,
+   * but two tabs can, and a split read would leave two open Attempts with two
+   * different deadlines.
+   */
+  async startOrResumeAttempt(
+    parentAccountId: string,
+    studentProfileId: string,
+    practiceTestId: string,
+  ): Promise<AttemptView> {
+    /**
+     * Find the released test, resume the Attempt there is, insert one otherwise.
+     *
+     * Named rather than inlined because it is run **twice** in the race the catch
+     * below describes, and both runs have to be the same decision.
+     */
+    const open = async (tx: TransactionClient): Promise<AttemptRow> => {
+      const test = await tx.practiceTest.findFirst({
+        where: { id: practiceTestId, parentAccountId, studentProfileId, status: 'Released' },
+        select: { id: true, timerMinutes: true },
+      });
+      // The one sentence every student refusal shares. Nothing in it says which
+      // case it was, and nothing could: the statement above cannot tell them
+      // apart either.
+      if (test === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+
+      const existing = await tx.attempt.findFirst({
+        where: { practiceTestId: test.id, studentProfileId },
+        orderBy: { ordinal: 'desc' },
+        select: ATTEMPT_SELECT,
+      });
+      // Returned untouched, **whether it is open or already handed in**. Not
+      // `update`d, not re-stamped, not extended: resuming is reading, and the whole
+      // authority of the clock is that this row's instants were written once. A
+      // submitted Attempt comes back carrying its `submittedAt`, which is how the
+      // screen knows to state that the work is in rather than to offer a second run
+      // at it — there is **no retake here**, and inserting a second row for a test
+      // this child has already handed in would be exactly that (Story 5.7's).
+      if (existing !== null) return existing;
+
+      const startedAt = new Date();
+      return tx.attempt.create({
+        data: {
+          practiceTestId: test.id,
+          parentAccountId,
+          studentProfileId,
+          // Always 1 while there are no retakes: the branch above returns any row
+          // that exists, so this insert is only ever the first. The column is here
+          // so Story 5.7 has somewhere to put a second run, and so the unique index
+          // can express "one row per run" without a partial index.
+          ordinal: 1,
+          startedAt,
+          // Minutes converted here and nowhere else: the column is what a parent
+          // entered, and a unit converted twice is a unit two surfaces can
+          // disagree about.
+          expiresAt:
+            test.timerMinutes === null
+              ? null
+              : new Date(startedAt.getTime() + test.timerMinutes * 60_000),
+        },
+        select: ATTEMPT_SELECT,
+      });
+    };
+
+    let attempt: AttemptRow;
+    try {
+      attempt = await this.prisma.withTransaction(open);
+    } catch (cause: unknown) {
+      // The read and the insert inside `open` are one decision but not one lock:
+      // under read-committed isolation two tabs opening the same test both find no
+      // row and both insert `ordinal: 1`, and the loser trips
+      // `attempt_practiceTestId_studentProfileId_ordinal_key`. That is the unique
+      // index doing its job — "one Attempt per child per run" held at the database
+      // rather than by whichever request happened to arrive first — so the loser
+      // **resumes** the row the winner wrote. A 500 here would break the one promise
+      // this method makes, at exactly the moment it is needed.
+      //
+      // **Caught out here, and the transaction run again.** Postgres aborts the whole
+      // transaction on a constraint violation, so every statement after it inside the
+      // same transaction fails with "current transaction is aborted" — recovering
+      // where the insert failed is not something a retry inside it can do. The second
+      // run finds the winner's row with its `existing` branch and returns it
+      // untouched; it cannot loop, because that row is now there for good.
+      if (!isUniqueViolation(cause)) throw cause;
+      attempt = await this.prisma.withTransaction(open);
+    }
+    return attemptViewOf(attempt, new Date());
+  }
+
+  /**
+   * Hands the child's work in: their raw answers, and the instant the Attempt
+   * closed.
+   *
+   * **Expiry is decided here, on the server's clock, against the server's own
+   * column.** A client claim about expiry never arrives and would never be
+   * believed: the browser decides only *when it dispatches*, never how the
+   * Attempt is judged. So a submission that crossed a network outage is judged at
+   * `expiresAt` — `gradeAt` names that instant rather than the arrival one — and
+   * nothing a browser sends can buy time or lose it.
+   *
+   * The Attempt is found by its id **and** both ids off the binding, so an
+   * Attempt of another profile or another account answers the one shared 404. A
+   * second submission answers 409 with its own stated reason instead: "already
+   * handed in" is a rule the child is entitled to know about, where a 404 would
+   * make a successful hand-in look like a lost one and invite a re-send.
+   *
+   * What is written is the **raw** answers and nothing else. A question id that
+   * is not on this Practice Test is ignored rather than refused — a stale id in a
+   * browser's store is not a reason to lose a child's whole paper — and a blank
+   * value is simply a Question left blank, with no row at all. There is no grade
+   * column to write, no score to compute and nothing here that says what a blank
+   * means: Stories 5.4–5.5 own both and extend this route rather than replace it.
+   *
+   * One transaction, so the answers and the closing instant land together: a
+   * submission that wrote half the answers and no `submittedAt` would leave an
+   * Attempt a second press would write twice.
+   */
+  async submitAttempt(
+    parentAccountId: string,
+    studentProfileId: string,
+    attemptId: string,
+    answers: readonly { questionId: string; value: string }[],
+  ): Promise<AttemptSubmissionView> {
+    return this.prisma.withTransaction(async (tx) => {
+      const attempt = await tx.attempt.findFirst({
+        where: { id: attemptId, parentAccountId, studentProfileId },
+        select: { id: true, practiceTestId: true, expiresAt: true, submittedAt: true },
+      });
+      if (attempt === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      if (attempt.submittedAt !== null) throw new ConflictException(ATTEMPT_ALREADY_SUBMITTED);
+
+      const now = new Date();
+      // The comparison, in one place: the server's clock against the server's
+      // column. `expiresAt` null is an untimed Attempt, which never expires.
+      const expired = attempt.expiresAt !== null && now.getTime() > attempt.expiresAt.getTime();
+
+      // **Closed first, and closed conditionally.** `submittedAt: null` is in the
+      // `where`, so exactly one of two concurrent submissions can match — the read
+      // above is a courtesy that gives the common case its sentence early, and *this*
+      // is what makes "a second submission answers 409" true rather than merely
+      // usual. Without it, two submissions arriving together both read `null` under
+      // read-committed isolation, both write answers, and the loser trips
+      // `answer_attemptId_questionId_key` as a 500 instead of the stated refusal.
+      //
+      // Before the answers rather than after, so the loser is refused before it
+      // writes a row: the whole statement is one transaction, so a rollback would
+      // undo them either way, but ordering it this way means the conflict is decided
+      // by the Attempt's own state and never by a collision on someone else's rows.
+      const closed = await tx.attempt.updateMany({
+        where: { id: attempt.id, submittedAt: null },
+        data: { submittedAt: now, expired },
+      });
+      if (closed.count !== 1) throw new ConflictException(ATTEMPT_ALREADY_SUBMITTED);
+
+      // Which Questions are on this Practice Test is a row-dependent fact, so it
+      // is settled here rather than in the DTO. Ids the body names and this set
+      // does not are dropped silently.
+      const onThisTest = new Set(
+        (
+          await tx.practiceTestQuestion.findMany({
+            where: { practiceTestId: attempt.practiceTestId },
+            select: { id: true },
+          })
+        ).map((question) => question.id),
+      );
+
+      // Keyed by question, so a body that named one Question twice writes one row
+      // rather than tripping the unique index and losing the whole submission.
+      // Trimmed for emptiness only — the stored value is exactly what was typed.
+      const byQuestion = new Map<string, string>();
+      for (const answer of answers) {
+        if (!onThisTest.has(answer.questionId)) continue;
+        if (answer.value.trim().length === 0) continue;
+        byQuestion.set(answer.questionId, answer.value);
+      }
+
+      if (byQuestion.size > 0) {
+        await tx.answer.createMany({
+          data: [...byQuestion].map(([questionId, value]) => ({
+            attemptId: attempt.id,
+            questionId,
+            value,
+          })),
+        });
+      }
+
+      return {
+        submittedAt: now.toISOString(),
+        expired,
+        // Judged at the deadline when it had passed, at arrival otherwise. The
+        // non-null assertion is the `expired` guard's: `expired` is only ever true
+        // where `expiresAt` is a date.
+        gradeAt: (expired ? attempt.expiresAt! : now).toISOString(),
+      };
+    });
   }
 
   /**
@@ -1744,6 +2019,16 @@ type StudentTestRow = Prisma.PracticeTestGetPayload<{ select: typeof STUDENT_TES
  * gives: it was parsed on the way in, and a second parse is a second chance for
  * the two readings to disagree.
  */
+/**
+ * A unique-index violation: something landed concurrently, which is not a fault.
+ *
+ * The same predicate `uncommitted-state.service.ts` holds, restated here rather than
+ * shared across a module boundary this service does not otherwise cross.
+ */
+function isUniqueViolation(cause: unknown): boolean {
+  return cause instanceof Prisma.PrismaClientKnownRequestError && cause.code === 'P2002';
+}
+
 function studentTestViewOf(test: StudentTestRow): StudentPracticeTestView {
   return {
     id: test.id,
@@ -1758,6 +2043,47 @@ function studentTestViewOf(test: StudentTestRow): StudentPracticeTestView {
         body: storedRichText(choice.body),
       })),
     })),
+  };
+}
+
+/**
+ * Everything an Attempt is read by, on both routes.
+ *
+ * Five columns and no more. `parentAccountId` and `studentProfileId` are
+ * deliberately **not** selected: they were in the `where` of the statement that
+ * found the row, so they are already known to the caller that asked, and putting
+ * them on the wire would tell a child an id they never addressed. No
+ * `timerMinutes` either — the deadline already expresses the duration, and the
+ * duration is the parent's configuration rather than a student-scoped fact.
+ */
+const ATTEMPT_SELECT = {
+  id: true,
+  practiceTestId: true,
+  startedAt: true,
+  expiresAt: true,
+  submittedAt: true,
+} as const satisfies Prisma.AttemptSelect;
+
+type AttemptRow = Prisma.AttemptGetPayload<{ select: typeof ATTEMPT_SELECT }>;
+
+/**
+ * The Attempt as the Take Test screen reads it, with the server's own clock
+ * stamped on the way out.
+ *
+ * `serverNow` is read here rather than inside the transaction on purpose: it is
+ * what the browser measures its offset against, so the closer it sits to the
+ * response the smaller the offset's error. It is not a deadline and decides
+ * nothing — the only clock that decides anything is the one `submitAttempt`
+ * reads, against the stored column.
+ */
+function attemptViewOf(attempt: AttemptRow, serverNow: Date): AttemptView {
+  return {
+    id: attempt.id,
+    practiceTestId: attempt.practiceTestId,
+    startedAt: attempt.startedAt.toISOString(),
+    expiresAt: attempt.expiresAt === null ? null : attempt.expiresAt.toISOString(),
+    serverNow: serverNow.toISOString(),
+    submittedAt: attempt.submittedAt === null ? null : attempt.submittedAt.toISOString(),
   };
 }
 

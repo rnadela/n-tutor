@@ -13,6 +13,20 @@
  * submission can claim.
  */
 
+/**
+ * The longest one answer may be, as the input enforces it.
+ *
+ * The same figure and the same rule as the API's own `MAX_ANSWER_LENGTH`, restated
+ * here for the reason `attempt-store.ts` restates the TTL: this is a different
+ * mechanism in a different place rather than the same one read twice. The server's
+ * copy refuses a body; this one stops a child from typing past it in the first place,
+ * which is the only version of the bound they ever experience.
+ *
+ * Without it the ceiling is discovered as an unexplained hand-in failure, after the
+ * work is done — the one moment on this screen where a refusal cannot be acted on.
+ */
+export const MAX_ANSWER_LENGTH = 2000;
+
 /** Where one Question stands. There is no correctness state, and never will be here. */
 export type AnswerState = 'answered' | 'not-answered';
 

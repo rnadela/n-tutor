@@ -1285,3 +1285,131 @@ source_spec: `spec-5-1-student-s-test-list.md`
 severity: low
 reason: Each distinct Subject id is now resolved in parallel via `Promise.all`, but nothing bounds how long any single `resolveSubject` call may take before the batch (and so the list) is considered failed.
 status: open
+
+### DW-162: The API integration suite fails non-deterministically in fixture setup, in a varying handful of cases unrelated to this story, so a single green full run is not trustworthy gating.
+origin: spec-deferred 814fff14a32b
+location: apps/api/test/ (shared nts_test database reset helpers)
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: high
+reason: Reproduced twice in this run at review time: one pass failed 6 cases across extraction.int-spec.ts and the Story 4.1/4.2 generation describes, a second pass failed 1 case in the Story 4.6 timer describe. Different cases each time, none of them this story's Attempt cases, and all of them failing in fixture setup (release / setPinFor / elevate answering 404) rather than in an assertion. The implementation session established it also reproduces with practice-test.int-spec.ts run alone (about 1 in 3) with fileParallelism already off, and that it predates this story's review fixes. The symptom is a row vanishing between creation and the next read, pointing at the shared nts_test database and the TRUNCATE ... CASCADE reset helpers rather than at cross-file interference.
+status: open
+
+### DW-163: Two pre-existing end-to-end failures in the parent password-reset flow.
+origin: spec-deferred 6e694819a8d8
+location: e2e/tests/parent-auth.spec.ts
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: medium
+reason: e2e/tests/parent-auth.spec.ts fails two password-reset cases. Confirmed pre-existing by stashing this story's entire diff, rebuilding both apps at baseline_revision and re-running: they fail identically. This story touches no auth, identity or mail file.
+status: open
+
+### DW-164: submitAttempt does not require the Practice Test to still be Released, while startOrResumeAttempt does.
+origin: spec-deferred dd853abbdbc2
+location: apps/api/src/practicetest/practice-test.service.ts (submitAttempt)
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: medium
+reason: startOrResumeAttempt carries status: 'Released' in its where clause; submitAttempt matches on the Attempt id plus both owner ids only. A test discarded while the child is working therefore still accepts a hand-in and writes answer rows, and the "one indistinguishable 404" story applies to start but not to submit. Nothing in this story's intent requires the check, so the asymmetry was recorded rather than closed.
+status: open
+
+### DW-165: The new Attempt start/submit write routes inherit the controller's existing @SkipThrottle, which was reasonable for its prior read-only routes but was not reconsidered now that the controller has
+origin: spec-deferred 001e330c63b0
+location: apps/api/src/practicetest/student-practice-test.controller.ts
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: medium
+reason: apps/api/src/practicetest/student-practice-test.controller.ts carries a class-level @SkipThrottle predating this story; startAttempt and submitAttempt were added under it with nothing in this diff adding throttling to either.
+status: open
+
+### DW-166: answer.questionId has an ON DELETE CASCADE foreign key, so deleting a PracticeTestQuestion after Attempts/Answers exist against it silently drops a child's submitted answer with no tombstone.
+origin: spec-deferred b3284fcc8410
+location: apps/api/prisma/migrations/20260927120000_extend_attempt_and_add_answer/migration.sql
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: low
+reason: apps/api/prisma/migrations/20260927120000_extend_attempt_and_add_answer/migration.sql declares answer_questionId_fkey ON DELETE CASCADE. Nothing in this diff enforces or tests that a Released test's questions are immutable once Attempts exist against it.
+status: open
+
+### DW-167: isUniqueViolation treats any P2002 inside a transaction as safe to retry without checking which constraint fired, so an unrelated unique violation in the same transaction would be masked and retried
+origin: spec-deferred 831ea4089bef
+location: apps/api/src/practicetest/practice-test.service.ts (isUniqueViolation)
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: low
+reason: apps/api/src/practicetest/practice-test.service.ts:2028 (and the same helper restated in source-test.service.ts, extraction.service.ts and uncommitted-state.service.ts) checks only `cause.code === 'P2002'`, not `cause.meta?.target`. This is a pre-existing codebase-wide pattern, not something this story introduced, so fixing it here alone would diverge from the other three call sites.
+status: open
+
+### DW-168: startOrResumeAttempt retries a P2002 exactly once (two attempts total), so a third concurrent racer for the same first-open would surface as an unhandled 500 instead of resuming.
+origin: spec-deferred a519eb947cfd
+location: apps/api/src/practicetest/practice-test.service.ts (startOrResumeAttempt)
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: low
+reason: apps/api/src/practicetest/practice-test.service.ts:874-895 catches the first P2002 and retries the transaction once with no loop. The same single-retry-no-loop shape is used at the other isUniqueViolation call sites, so this is a pre-existing codebase-wide pattern rather than a defect specific to this story, and a three-way race is a narrow window.
+status: open
+
+### DW-169: The new migration drops the DEFAULT now() on attempt.startedAt, so any insert into that table outside startOrResumeAttempt must now supply it explicitly or fail on a missing NOT NULL column.
+origin: spec-deferred 6d5a43ab58e3
+location: apps/api/prisma/migrations/20260927120000_extend_attempt_and_add_answer/migration.sql
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: low
+reason: apps/api/prisma/migrations/20260927120000_extend_attempt_and_add_answer/migration.sql (ALTER TABLE "attempt" ... ALTER COLUMN "startedAt" DROP DEFAULT). No other writer of this table exists today, so the risk is latent rather than active.
+status: open
+
+### DW-170: The Hand-in dispatch fix for a null profileId (send() gated on the Attempt alone, not the profile) is verified only by a source-text regex in page.spec.tsx, never by an executed dispatch.
+origin: spec-deferred a7394e790d6a
+location: apps/web/src/app/student/tests/[practiceTestId]/page.spec.tsx
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: medium
+reason: page.spec.tsx's "what the screen does with a profile it never learned" describe block asserts `CODE.toContain('if (current === null) return;')` and a banned regex over stripped source; nothing renders the page, stubs a failing studentSession(), clicks Hand in, and confirms parentApi.submitAttempt is still called. Reproducing the guarded bug with the operands reversed would pass every existing test. Fixing this needs either a DOM-rendering test environment for this file (currently environment: 'node') or new network-mock e2e infrastructure this suite has no precedent for -- downgraded from patch to defer this pass because this session had no way to run either and confirm it passes.
+status: open
+
+### DW-171: e2e/tests/student-mode.spec.ts seeds a sibling's storage record with a hand-rolled key string instead of deriving it from attempt-store.ts's attemptKey(), so a change to the key-encoding scheme would
+origin: spec-deferred 906cc12db97e
+location: e2e/tests/student-mode.spec.ts
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: low
+reason: 'ntr.attempt.another-child.some-attempt' is written directly in two places in student-mode.spec.ts. Fixing this by importing attemptKey() would be e2e's first cross-package import from apps/web/src/lib -- no existing precedent -- so it is recorded here for a deliberate call rather than a blind edit.
+status: open
+
+### DW-172: The Hand-in control's visible text changes to "Handing in..." on press with no aria-live confirmation that the press itself registered.
+origin: spec-deferred 651be64e6a65
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx (Hand in button)
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: low
+reason: The intent requires live-region behavior for the countdown's three thresholds and for the auto-submit alert; it says nothing about the button press itself. A screen-reader user gets no immediate spoken confirmation until the eventual success or failure state renders.
+status: open
+
+### DW-173: isAttemptState validates that answers' values are strings but never validates the object's keys.
+origin: spec-deferred 2d33f9baee6a
+location: apps/web/src/lib/attempt-store.ts (isAttemptState)
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: low
+reason: A same-origin, self-written record with an empty-string key or a prototype-polluting key (e.g. __proto__) would satisfy the shape check. This is the page's own storage, not untrusted input, so the practical exposure is limited, but the check is cheap to close.
+status: open
+
+### DW-174: AttemptTimer's multi-threshold-skip behavior (a device waking far past a warning threshold) is proven only at the pure-function layer, not through the page's two same-tick effects end-to-end.
+origin: spec-deferred 57e2c0f29111
+location: apps/web/src/app/student/_components/AttemptTimer.tsx
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: low
+reason: attempt-clock.spec.ts unit-tests warningFor's multi-threshold skip; nothing exercises the page's warning-crossing effect and its remaining-=== 0 belt-and-braces effect together through a real render to confirm they resolve in the order that prevents a stale warning sentence from ever painting.
+status: open
+
+### DW-175: The Parent-View "Parent" link's clearAll call is verified by an e2e crossing that seeds only a foreign profile's storage record, never the currently bound profile's own.
+origin: spec-deferred 2dbe11b64d2a
+location: apps/web/src/app/student/page.tsx (Parent link) / e2e/tests/student-mode.spec.ts
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: medium
+reason: student-mode.spec.ts's mode-crossing test seeds 'ntr.attempt.another-child.some-attempt' before clicking "Parent"; that record would be swept by the next screen's retainOnly call regardless of whether clearAll fired on the Parent-link click. No test seeds the bound profile's own attempt record and asserts it specifically is gone right after that click.
+status: open
+
+### DW-176: studentSession() is read once with no retry; a transient failure before the deadline is reached while offline leaves profileId unresolved for the rest of the session, which prevents both answer
+origin: spec-deferred 44212b0e9948
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx (studentSession effect)
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: medium
+reason: apps/web/src/app/student/tests/[practiceTestId]/page.tsx's profile effect (studentSession().then(...)) runs once on mount with no retry on a non-unbound failure. The hydration, persist, and deadline-latch effects all gate on profileId !== null, so a failed read blocks all three for the page's lifetime unless the tab is reloaded.
+status: open
+
+### DW-177: MAX_JSON_BODY_BYTES raises the JSON body-parser limit for the whole app, not scoped to the submit route it was sized for.
+origin: spec-deferred 98099e9d2410
+location: apps/api/src/app-setup.ts
+source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
+severity: medium
+reason: apps/api/src/app-setup.ts applies useBodyParser('json', { limit: MAX_JSON_BODY_BYTES }) globally. Every other route's oversized-payload exposure grows by the same margin the submit route needed, rather than only the route that needed it.
+status: open

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it } from 'vitest';
 import { studentCopy } from '@/copy/student';
+import { MAX_ANSWER_LENGTH } from '@/lib/answers';
 import type { StudentQuestionView } from '@/lib/parent-api';
 import { studentTheme } from '@/theme/theme';
 import { AnswerInput } from './AnswerInput';
@@ -122,6 +123,23 @@ describe('Short Answer', () => {
     expect(markup).toContain('<textarea');
     expect(markup).toContain('Because six halved is three.');
     expect(markup).toContain(studentCopy.takeTest.answerLabel);
+  });
+
+  it('caps what can be typed at the length the API accepts', () => {
+    // The ceiling has to be enforced where the typing happens. Without it a child can
+    // write past it and find out only when handing in fails — a refusal arriving after
+    // the work is finished, which is the one point on this screen where there is
+    // nothing useful left to do about it.
+    const markup = render(question({ format: 'ShortAnswer' }));
+    // On the control the child actually types into, not merely somewhere in the
+    // markup: MUI's auto-sizing textarea renders a second, hidden shadow copy, and an
+    // assertion over the whole string would pass if only that one carried the cap.
+    const real = /<textarea[^>]*data-testid="answer-short-input"[^>]*>/u.exec(markup)?.[0];
+    expect(real).toBeDefined();
+    // `maxLength`, camelCased: that is how React serializes it for a textarea.
+    expect(real).toContain(`maxLength="${MAX_ANSWER_LENGTH}"`);
+    // The same figure the API refuses a body by, not a second one written here.
+    expect(MAX_ANSWER_LENGTH).toBe(2000);
   });
 });
 

@@ -17,6 +17,7 @@ import {
   type StudentPracticeTestSummary,
   type StudentSession,
 } from '@/lib/parent-api';
+import { attemptStorage, clearAll, retainOnly } from '@/lib/attempt-store';
 import { comfortableDensity } from '@/theme/tokens';
 
 /**
@@ -98,6 +99,13 @@ export default function StudentModePage() {
         if (requestId.current !== thisRequest) return;
         setSession(value);
         setLoading(false);
+        // Student Home is the screen every child passes through, so it is where a
+        // sibling's abandoned work stops being on the device (AD-26). The binding
+        // has just told us whose device this is; every record under any other
+        // profile goes, and it goes from the key rather than from the payload —
+        // "the other child's work is gone" must not be conditional on their record
+        // being readable.
+        retainOnly(attemptStorage(), value.profile.id);
       },
       (cause: unknown) => {
         if (requestId.current !== thisRequest) return;
@@ -213,6 +221,11 @@ export default function StudentModePage() {
               component={NextLink}
               href="/parent/pin"
               variant="outlined"
+              // Crossing into the parent surface is the other mode-gate crossing AD-26
+              // clears the client-held answers on. Done on the way out rather than on
+              // the way in, because the parent side has no profile to key a sweep by —
+              // and `clearAll`, for the same reason: past this gate nobody is a child.
+              onClick={() => clearAll(attemptStorage())}
               sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
             >
               {studentCopy.parent}

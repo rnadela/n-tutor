@@ -323,6 +323,41 @@ export interface StudentPracticeTestView {
   questions: StudentQuestionView[];
 }
 
+/**
+ * One Attempt, as the server states it.
+ *
+ * Instants only, and every one of them the server's. `serverNow` is here so the
+ * countdown can be rendered against a **fixed offset** rather than against this
+ * browser's unadjusted clock — a device whose clock is wrong then shifts only
+ * what is displayed, because expiry is decided server-side at submit from the
+ * stored column. `expiresAt` is null for an untimed Practice Test.
+ *
+ * Nothing on it is a grade, a score, a count or a parent-scoped figure, and
+ * nothing on it names a profile.
+ */
+export interface AttemptView {
+  id: string;
+  practiceTestId: string;
+  startedAt: string;
+  expiresAt: string | null;
+  serverNow: string;
+  submittedAt: string | null;
+}
+
+/**
+ * What handing in answered.
+ *
+ * `expired` is the server's own comparison and `gradeAt` the instant the work is
+ * judged at — the deadline when it had passed, the arrival instant otherwise. A
+ * submission that crossed an outage is therefore judged at the moment the time
+ * ran out, and no browser can move it. `gradeAt` names *when*, never what.
+ */
+export interface AttemptSubmissionView {
+  submittedAt: string;
+  expired: boolean;
+  gradeAt: string;
+}
+
 /** One generated option, in the order the API states it. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -726,6 +761,43 @@ export const parentApi = {
       `/student/practice-tests/${encodeURIComponent(id)}`,
       {},
       studentCopy.takeTest.failed,
+    ),
+
+  /**
+   * Opens the Attempt the bound child works under, or returns the one already
+   * open.
+   *
+   * No bearer and **no body**: the binding names the child, and both instants are
+   * the server's. There is nowhere here for this browser to state a duration, a
+   * start, an expiry or a clock — not because a handler ignores one, but because
+   * nothing is sent. A refresh, a second tab and a re-entry after a dropped
+   * connection all get the same Attempt back with its original instants.
+   */
+  startAttempt: (practiceTestId: string) =>
+    call<AttemptView>(
+      `/student/practice-tests/${encodeURIComponent(practiceTestId)}/attempt`,
+      { method: 'POST' },
+      studentCopy.takeTest.attemptFailed,
+    ),
+
+  /**
+   * Hands one Attempt in: the child's raw answers, and nothing else.
+   *
+   * No bearer, and nothing about time. **Whether the deadline had passed is the
+   * server's to decide**, from its own clock against its own column, which is what
+   * makes a submission that crossed an outage still judged at the instant the time
+   * ran out. A claim about expiry from here would not be read if it were sent.
+   *
+   * A dropped connection surfaces as `ParentApiError` with `NETWORK_STATUS`, which
+   * is how offline presents; a second submission surfaces as `CONFLICT_STATUS`
+   * carrying the server's own stated reason. The screen says both and re-sends
+   * neither.
+   */
+  submitAttempt: (attemptId: string, answers: readonly { questionId: string; value: string }[]) =>
+    call<AttemptSubmissionView>(
+      `/student/attempts/${encodeURIComponent(attemptId)}/submit`,
+      { method: 'POST', body: JSON.stringify({ answers }) },
+      studentCopy.takeTest.submitFailed,
     ),
 
   // --- Uncommitted parent state ------------------------------------------

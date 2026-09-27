@@ -205,6 +205,11 @@ model StudentProfile {
   practiceTests  PracticeTest[]
   generationJobs GenerationJob[]
 
+  /// This child's runs at their released Practice Tests. Cascades from here,
+  /// like `uncommitted`: an Attempt carries the clock and the child's own raw
+  /// answers, and neither is something a deletion has to preserve.
+  attempts Attempt[]
+
   /// The list read and the selectable read are both scoped by account and
   /// filtered by archive state.
   @@index([parentAccountId, archivedAt])
@@ -957,6 +962,7 @@ model PracticeTestQuestion {
 
   choices PracticeTestChoice[]
   topics  PracticeTestQuestionTopic[]
+  answers Answer[]
 
   @@unique([practiceTestId, ordinal])
   @@map("practice_test_question")
@@ -996,35 +1002,95 @@ model PracticeTestQuestionTopic {
   @@map("practice_test_question_topic")
 }
 
-/// One sitting of a Practice Test: the child opened it, and either they are
-/// still in it or they submitted it.
+/// One run at a released Practice Test by the child it was released for.
 ///
-/// `submittedAt` null **is** in progress. There is no `state` column and no
-/// fourth `PracticeTestStatus` member, because completion is an Attempt fact
-/// rather than a property of the test: a status written here would make
-/// `practicetest` record something it derives, and Story 5.7's retake would
-/// then have to walk it backwards.
+/// The child's answers live in the browser while they work (AD-26); what lives
+/// here is the part the browser may not own — **the clock**. Two instants and a
+/// submission marker are the whole of its substance until the work is handed in.
 ///
-/// No `studentProfileId`: the `PracticeTest` this hangs off already carries the
-/// child, and duplicating it would be a second place the association could
-/// drift (AD-17).
+/// - `startedAt` is the server's clock at the moment the Attempt began, written
+///   once. Nothing in a request body sets or influences it.
+/// - `expiresAt` is the server's one statement of when this Attempt ended:
+///   `startedAt` plus the Practice Test's `timerMinutes` snapshotted at start,
+///   or null for an untimed test. **Written once and never moved** — never
+///   extended, never paused, never recomputed — because a timer that could be
+///   moved would retroactively change how a past Attempt graded, and expiry is
+///   what decides `unanswered` from `incorrect` downstream.
+/// - `submittedAt` is null while the Attempt is open. Exactly one Attempt per
+///   Practice Test and profile is ever open, which is what `ordinal` plus the
+///   unique index below expresses: a re-open resumes the open row rather than
+///   inserting a second one.
+/// - `expired` records the comparison the server itself made at submit, against
+///   its own clock and its own column. A client claim about expiry is never
+///   stored, because a browser that could claim it could buy time.
 ///
-/// Read-only in Story 5.1 — nothing creates, starts or submits an Attempt here.
-/// Stories 5.2–5.4 own every write.
+/// Both relations cascade: an Attempt never blocks a deletion and leaves no
+/// tombstone behind it. No grade column of any kind — grading is Epic 5's later
+/// stories, and a column here would be a half-built one.
 model Attempt {
-  id             String    @id @default(uuid())
-  practiceTestId String
-  startedAt      DateTime  @default(now())
-  /// When the sitting was handed in, or null while it is still open. The one
-  /// signal that tells an in-progress Attempt from a finished one.
-  submittedAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id               String    @id @default(uuid())
+  practiceTestId   String
+  /// The owning account, denormalized so every student-scoped statement can
+  /// carry all three ids in one `where`. A plain column rather than a relation:
+  /// `PracticeTest`'s own `parentAccount` is `Restrict` because the row may be
+  /// charged (AD-14), and a second, cascading edge to the same account would
+  /// contradict it.
+  parentAccountId  String
+  studentProfileId String
+  /// This Attempt's place in the child's runs at this Practice Test, 1-based.
+  /// Retakes are Story 5.7's; the column exists so the unique index below can
+  /// express "one open Attempt" without a partial index.
+  ordinal          Int
+  /// The server's clock when the Attempt began. Written once.
+  startedAt        DateTime
+  /// `startedAt + timerMinutes`, or null for an untimed test. Written once and
+  /// never moved.
+  expiresAt        DateTime?
+  /// The server's clock when the work was handed in, or null while it is open.
+  submittedAt      DateTime?
+  /// Whether the server's own clock was past `expiresAt` when the submission
+  /// arrived. Decided server-side, at submit, and never sent up.
+  expired          Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  practiceTest PracticeTest @relation(fields: [practiceTestId], references: [id], onDelete: Cascade)
+  practiceTest   PracticeTest   @relation(fields: [practiceTestId], references: [id], onDelete: Cascade)
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
 
-  /// The one index the student list reads: this test's Attempts, and whether
-  /// any of them is still open.
+  answers Answer[]
+
+  /// One row per child per run at a Practice Test.
+  @@unique([practiceTestId, studentProfileId, ordinal])
+  /// The open-Attempt lookup: this child's Attempts, filtered by submission.
+  @@index([studentProfileId, submittedAt])
+  /// The index the student list (Story 5.1) reads: this test's Attempts, and
+  /// whether any of them is still open.
   @@index([practiceTestId, submittedAt])
   @@map("attempt")
+}
+
+/// What the child answered on one Question of one Attempt, as raw text.
+///
+/// Raw, and nothing else. There is **no grade column and no correctness flag**:
+/// what a blank means and whether an answer is right are Stories 5.4–5.5, and a
+/// nullable `isCorrect` here would be a column two stories could disagree about.
+/// A Question the child left blank has no row at all.
+///
+/// `@db.Text` because a Short Answer is prose, not a label. Both relations
+/// cascade, for the reason `Attempt`'s do.
+model Answer {
+  id         String   @id @default(uuid())
+  attemptId  String
+  questionId String
+  /// Exactly what the child typed or chose, untouched. Text on the wire and
+  /// text in the column: no fraction is parsed, normalized or judged here.
+  value      String   @db.Text
+  createdAt  DateTime @default(now())
+
+  attempt  Attempt              @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question PracticeTestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  /// One answer per Question per Attempt.
+  @@unique([attemptId, questionId])
+  @@map("answer")
 }

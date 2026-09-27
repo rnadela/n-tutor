@@ -147,6 +147,124 @@ test.describe('Student Mode and the handover', () => {
     await expect(page.getByText('Hello, Mira.')).toBeVisible();
   });
 
+  /**
+   * The AD-26 sweep, at the two crossings that run it.
+   *
+   * A record belonging to another child is seeded directly rather than typed into a
+   * practice test: what is being asserted is that the sweep **removes another
+   * profile's key**, and the sweep is decided from the key rather than the payload —
+   * so where the record came from changes nothing about the claim. (That the decision
+   * is key-based and not payload-based is `attempt-store.spec.ts`'s.)
+   *
+   * Seeded twice on purpose, once per crossing. Either call site alone would satisfy a
+   * single assertion, so deleting the other would go unnoticed.
+   */
+  test('leaves no other child’s answers on the device at either mode crossing', async ({
+    page,
+  }) => {
+    const grade = await createGradeLevelFixture('Grade');
+    await openStudents(page);
+    await addProfile(page, 'Noah', grade.name);
+    await addProfile(page, 'Mira', grade.name);
+
+    const seed = () =>
+      page.evaluate(() => {
+        window.localStorage.setItem(
+          'ntr.attempt.another-child.some-attempt',
+          JSON.stringify({
+            createdAt: Date.now(),
+            profileId: 'another-child',
+            attemptId: 'some-attempt',
+            answers: { 'q-1': 'a sibling’s working' },
+            index: 0,
+            pendingSubmitAt: null,
+          }),
+        );
+      });
+    const attemptKeys = () =>
+      page.evaluate(() =>
+        Object.keys({ ...window.localStorage }).filter((key) => key.startsWith('ntr.attempt.')),
+      );
+
+    // --- Crossing one: the binding changes ---------------------------------
+    await page.goto('/student');
+    await expect(page.getByText('Hello, Noah.')).toBeVisible();
+    await seed();
+    expect(await attemptKeys()).toHaveLength(1);
+
+    await page.getByRole('link', { name: 'Parent' }).click();
+    await enterParentView(page);
+    await page.getByRole('button', { name: 'Back to Student Mode' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('radio', { name: 'Mira' }).check();
+    await dialog.getByRole('button', { name: 'Hand over the device' }).click();
+    await expect(page.getByText('Hello, Mira.')).toBeVisible();
+
+    // The device is Mira's now, and nothing of anyone else's work is on it.
+    expect(await attemptKeys()).toEqual([]);
+
+    // --- Crossing two: every child passes through Student Home -------------
+    await seed();
+    expect(await attemptKeys()).toHaveLength(1);
+    await page.goto('/student');
+    await expect(page.getByText('Hello, Mira.')).toBeVisible();
+
+    await expect.poll(async () => (await attemptKeys()).length, { timeout: 10_000 }).toBe(0);
+  });
+
+  /**
+   * The AD-26 sweep's third crossing: signing in.
+   *
+   * `sign-in/page.spec.tsx` only asserts the call is present in source, never that it
+   * runs — this drives the real form and reads real `localStorage`, so a regression
+   * that keeps the exact wording intact while breaking the effect (a guard that never
+   * evaluates true, a stale `attemptStorage()` capture, an exception path that skips
+   * it) would fail here even though it would not fail that spec.
+   */
+  test('clears every attempt record on sign-in, the third AD-26 crossing', async ({ page }) => {
+    const email = uniqueParentEmail('sign-in-sweep');
+    await page.goto('/auth/sign-up');
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByLabel('I accept the terms of use.').check();
+    await page.getByLabel('I accept the notice on children’s data.').check();
+    await page.getByRole('button', { name: 'Create account' }).click();
+    await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
+
+    await page.evaluate(() => {
+      window.localStorage.setItem(
+        'ntr.attempt.another-child.some-attempt',
+        JSON.stringify({
+          createdAt: Date.now(),
+          profileId: 'another-child',
+          attemptId: 'some-attempt',
+          answers: { 'q-1': 'a sibling’s working' },
+          index: 0,
+          pendingSubmitAt: null,
+        }),
+      );
+    });
+    const attemptKeyCount = () =>
+      page.evaluate(
+        () => Object.keys({ ...window.localStorage }).filter((key) => key.startsWith('ntr.attempt.')).length,
+      );
+    expect(await attemptKeyCount()).toBe(1);
+
+    await page.getByRole('button', { name: 'Sign out' }).click();
+    await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible();
+    // Signing out is not a crossing this story adds a sweep for; the record must
+    // still be there right up until the sign-in below is what clears it.
+    expect(await attemptKeyCount()).toBe(1);
+
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
+
+    expect(await attemptKeyCount()).toBe(0);
+  });
+
   test('renders the PIN gate for a parent URL typed from Student Mode', async ({ page }) => {
     const grade = await createGradeLevelFixture('Grade');
     await openStudents(page);

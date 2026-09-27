@@ -7,6 +7,7 @@ import RadioGroup from '@mui/material/RadioGroup';
 import { RichText } from '@/components/RichText';
 import { TextField } from '@/components/TextField';
 import { studentCopy } from '@/copy/student';
+import { MAX_ANSWER_LENGTH } from '@/lib/answers';
 import type { StudentQuestionView } from '@/lib/parent-api';
 import { comfortableDensity } from '@/theme/tokens';
 import { SmartFractionField } from './SmartFractionField';
@@ -78,7 +79,13 @@ export function AnswerInput({
         // The raw string, held as it was typed. Nothing here reformats it.
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        slotProps={{ htmlInput: { 'data-testid': 'answer-short-input' } }}
+        // Capped where the typing happens, at the same figure the API refuses a body
+        // by. The alternative is a child writing past the ceiling and finding out only
+        // when handing in fails — a refusal arriving after the work is finished, which
+        // is the one point on this screen where there is nothing useful to do about it.
+        slotProps={{
+          htmlInput: { 'data-testid': 'answer-short-input', maxLength: MAX_ANSWER_LENGTH },
+        }}
       />
     );
   }

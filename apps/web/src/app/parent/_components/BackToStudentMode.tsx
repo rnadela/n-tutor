@@ -16,6 +16,7 @@ import FormLabel from '@mui/material/FormLabel';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
 import { parentCopy } from '@/copy/parent';
+import { attemptStorage, retainOnly } from '@/lib/attempt-store';
 import { useElevation } from '@/lib/elevation';
 import { ParentApiError, parentApi, type StudentProfileView } from '@/lib/parent-api';
 import { density } from '@/theme/tokens';
@@ -97,6 +98,13 @@ export function BackToStudentMode() {
       setError(null);
       try {
         await parentApi.bindStudentMode(token, profileId);
+        // The binding changing **is** the mode-gate crossing AD-26 says clears the
+        // client-held answers: from this moment the device is this child's, so no
+        // record of anyone else's work remains under any key. Done here rather than
+        // only on Student Home because this is the one place the binding changes,
+        // and a sweep that waited for the next screen would be a sweep a navigation
+        // could skip.
+        retainOnly(attemptStorage(), profileId);
         setAnnounced(parentCopy.parentView.boundTo(name));
         router.replace('/student');
       } catch (cause: unknown) {

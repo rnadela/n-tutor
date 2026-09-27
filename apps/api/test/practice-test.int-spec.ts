@@ -18,6 +18,10 @@ const {
   MIN_TIMER_MINUTES,
   NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
+  ATTEMPT_ALREADY_SUBMITTED,
+  MAX_ANSWERS_PER_SUBMISSION,
+  MAX_ANSWER_LENGTH,
+  MAX_QUESTION_ID_LENGTH,
   PRACTICE_TEST_NOT_FOUND,
   WEIGHTED_TOPIC_UNKNOWN,
   claimTimeoutMs,
@@ -2712,14 +2716,40 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
     /**
      * One sitting, written straight to the table.
      *
-     * **A stand-in for Story 5.2's writer**, which does not exist yet: this
-     * story reads Attempts and writes none anywhere. Once 5.2 lands, these
-     * fixtures should go through it rather than behind its back, or they will
-     * drift from what the real writer actually produces.
+     * **A stand-in for the list's own writer**: these cases are about how a past
+     * sitting reads on Student Home, not about how one is started, so they write
+     * the row rather than driving `POST .../attempt` through the whole release
+     * and binding dance for every band they need.
+     *
+     * The three ids the column set now requires are resolved from the Practice
+     * Test itself rather than passed in, so every existing call site still reads
+     * as "a sitting on this test", and `ordinal` is counted from what is already
+     * there — a case seeding two sittings on one test (the retake and
+     * most-recent-submission bands below) would otherwise collide on
+     * `@@unique([practiceTestId, studentProfileId, ordinal])`.
      */
-    function seedAttempt(practiceTestId: string, submittedAt: Date | null) {
+    async function seedAttempt(practiceTestId: string, submittedAt: Date | null) {
+      const test = await h.prisma.practiceTest.findUniqueOrThrow({
+        where: { id: practiceTestId },
+        select: { parentAccountId: true, studentProfileId: true },
+      });
+      const ordinal =
+        (await h.prisma.attempt.count({
+          where: { practiceTestId, studentProfileId: test.studentProfileId },
+        })) + 1;
       return h.prisma.attempt.create({
-        data: { practiceTestId, submittedAt },
+        data: {
+          practiceTestId,
+          parentAccountId: test.parentAccountId,
+          studentProfileId: test.studentProfileId,
+          ordinal,
+          // The instants the server would have written. `startedAt` is only ever
+          // read as "before the submission" by the list, so a fixed instant
+          // ahead of nothing is enough; a submitted sitting keeps the instant
+          // the case asserts on.
+          startedAt: submittedAt ?? new Date('2026-01-01T00:00:00.000Z'),
+          submittedAt,
+        },
         select: { id: true },
       });
     }
@@ -3291,6 +3321,536 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       const unknown = await readReleasedTest(cookie, randomUUID()).expect(404);
       expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
       expect(refusal.body.message).toBe(unknown.body.message);
+    });
+
+    // --- The Attempt: start, resume, and hand in ---------------------------
+
+    /** Opens or resumes the Attempt, carrying the binding cookie and no bearer. */
+    function startAttempt(cookie: string, practiceTestId: string) {
+      return server()
+        .post(`/api/student/practice-tests/${practiceTestId}/attempt`)
+        .set('Cookie', cookie);
+    }
+
+    /** Hands one Attempt in. The body is answers and only answers. */
+    function submitAttempt(
+      cookie: string,
+      attemptId: string,
+      answers: { questionId: string; value: string }[],
+    ) {
+      return server()
+        .post(`/api/student/attempts/${attemptId}/submit`)
+        .set('Cookie', cookie)
+        .send({ answers });
+    }
+
+    /** Sets the countdown the parent configured, which start snapshots. */
+    function setTimerMinutes(token: string, id: string, minutes: number | null) {
+      return server()
+        .put(`/api/parent/practice-tests/${id}/timer`)
+        .set('Authorization', bearer(token))
+        .send({ minutes });
+    }
+
+    /** A released test this child is bound to, with its Question ids in order. */
+    async function releasedForChild(timerMinutes: number | null): Promise<{
+      ready: Ready & { draftIds: string[] };
+      id: string;
+      cookie: string;
+      questionIds: string[];
+    }> {
+      const ready = await withLandedDrafts(1);
+      const id = ready.draftIds[0]!;
+      if (timerMinutes !== null) await setTimerMinutes(ready.token, id, timerMinutes).expect(200);
+      await release(ready.token, id).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+      const questions = await h.prisma.practiceTestQuestion.findMany({
+        where: { practiceTestId: id },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      });
+      return { ready, id, cookie, questionIds: questions.map((question) => question.id) };
+    }
+
+    it('starts a timed Attempt with a server startedAt and an expiresAt exactly that much later', async () => {
+      const { id, cookie } = await releasedForChild(20);
+
+      const before = Date.now();
+      const response = await startAttempt(cookie, id).expect(201);
+      const after = Date.now();
+
+      expect(Object.keys(response.body).sort()).toEqual([
+        'expiresAt',
+        'id',
+        'practiceTestId',
+        'serverNow',
+        'startedAt',
+        'submittedAt',
+      ]);
+      expect(response.body.practiceTestId).toBe(id);
+      expect(response.body.submittedAt).toBeNull();
+      // The server's own clock, not a figure this test supplied: it simply has to
+      // fall inside the window the request occupied.
+      const startedAt = Date.parse(response.body.startedAt);
+      expect(startedAt).toBeGreaterThanOrEqual(before - 1000);
+      expect(startedAt).toBeLessThanOrEqual(after + 1000);
+      // Exactly `timerMinutes` later. Derived from the response's own `startedAt`,
+      // so this asserts the *relationship* rather than agreeing with a clock.
+      expect(Date.parse(response.body.expiresAt) - startedAt).toBe(20 * 60_000);
+      // And the stored row says the same thing, so nothing is computed on the wire.
+      const stored = await h.prisma.attempt.findUniqueOrThrow({
+        where: { id: response.body.id },
+        select: {
+          startedAt: true,
+          expiresAt: true,
+          submittedAt: true,
+          expired: true,
+          ordinal: true,
+        },
+      });
+      expect(stored.startedAt.toISOString()).toBe(response.body.startedAt);
+      expect(stored.expiresAt!.toISOString()).toBe(response.body.expiresAt);
+      expect(stored.submittedAt).toBeNull();
+      expect(stored.expired).toBe(false);
+      expect(stored.ordinal).toBe(1);
+    });
+
+    it('starts an untimed Attempt with no deadline at all', async () => {
+      const { id, cookie } = await releasedForChild(null);
+
+      const response = await startAttempt(cookie, id).expect(201);
+
+      // Null already means exactly what "no timer" means: there is no deadline to
+      // render and none to reach.
+      expect(response.body.expiresAt).toBeNull();
+      expect(typeof response.body.startedAt).toBe('string');
+      const stored = await h.prisma.attempt.findUniqueOrThrow({
+        where: { id: response.body.id },
+        select: { expiresAt: true },
+      });
+      expect(stored.expiresAt).toBeNull();
+    });
+
+    it('resumes the open Attempt on a second start, with both instants untouched', async () => {
+      const { id, cookie } = await releasedForChild(20);
+      const first = await startAttempt(cookie, id).expect(201);
+
+      const again = await startAttempt(cookie, id).expect(201);
+
+      // The same row, and the same two instants. A reload that handed out a fresh
+      // deadline would make the timer the parent configured mean nothing.
+      expect(again.body.id).toBe(first.body.id);
+      expect(again.body.startedAt).toBe(first.body.startedAt);
+      expect(again.body.expiresAt).toBe(first.body.expiresAt);
+      // And exactly one row exists: resuming is reading, not inserting.
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: id } })).toBe(1);
+    });
+
+    it('returns the handed-in Attempt on a re-open rather than starting a retake', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const first = await startAttempt(cookie, id).expect(201);
+      const submitted = await submitAttempt(cookie, first.body.id, [
+        { questionId: questionIds[0]!, value: 'in' },
+      ]).expect(200);
+
+      const again = await startAttempt(cookie, id).expect(201);
+
+      // The same row, carrying its `submittedAt` — which is how the screen knows to
+      // state that the work is in. A second row would be a retake, and retakes are
+      // Story 5.7's: the only way to get one is a story that deliberately adds it.
+      expect(again.body.id).toBe(first.body.id);
+      expect(again.body.startedAt).toBe(first.body.startedAt);
+      expect(again.body.expiresAt).toBe(first.body.expiresAt);
+      expect(again.body.submittedAt).toBe(submitted.body.submittedAt);
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: id } })).toBe(1);
+      // And the answers already recorded were not touched by the re-open.
+      expect(await h.prisma.answer.count({ where: { attemptId: first.body.id } })).toBe(1);
+    });
+
+    it('refuses to start on a draft, a discarded row, a sibling’s, a stranger’s or an unknown id', async () => {
+      const mine = await withLandedDrafts(2);
+      const [stillDraft, discarded] = mine.draftIds;
+      await discard(mine.token, discarded!).expect(200);
+      const cookie = await bindDevice(h, mine.token, mine.studentProfileId);
+
+      // A sibling's release, on this same account.
+      const sibling = await releasedForChild(20);
+      const grade = await createGradeLevel(h);
+      const other = await createStudentProfile(h, sibling.ready.parentAccountId, {
+        gradeLevelId: grade.id,
+      });
+      const siblingCookie = await bindDevice(h, sibling.ready.token, other.id);
+
+      // And another account's.
+      const strangers = await releasedForChild(20);
+
+      const unknown = await startAttempt(cookie, randomUUID()).expect(404);
+      for (const refusal of [
+        await startAttempt(cookie, stillDraft!).expect(404),
+        await startAttempt(cookie, discarded!).expect(404),
+        await startAttempt(siblingCookie, sibling.id).expect(404),
+        await startAttempt(cookie, strangers.id).expect(404),
+        await startAttempt(cookie, 'not-a-uuid').expect(404),
+        unknown,
+      ]) {
+        expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+        expect(refusal.body.message).toBe(unknown.body.message);
+        // Nothing distinguishes them: the statement that looked cannot tell them
+        // apart either.
+        expect(JSON.stringify(refusal.body)).not.toMatch(/draft|released|discarded|already/iu);
+      }
+      // And not one Attempt row was written by any of them.
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: stillDraft! } })).toBe(0);
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: strangers.id } })).toBe(0);
+    });
+
+    it('refuses to start on an unbound device, and on one carrying the parent’s bearer', async () => {
+      const { id, ready } = await releasedForChild(20);
+
+      const unbound = await server().post(`/api/student/practice-tests/${id}/attempt`).expect(401);
+      expect(unbound.body.bound).toBe(false);
+      await server()
+        .post(`/api/student/practice-tests/${id}/attempt`)
+        .set('Cookie', 'student_mode=not-a-token')
+        .expect(401);
+      // The elevation bearer is the wrong audience for this surface entirely.
+      await server()
+        .post(`/api/student/practice-tests/${id}/attempt`)
+        .set('Authorization', bearer(ready.token))
+        .expect(401);
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: id } })).toBe(0);
+    });
+
+    it('hands the work in, stores the raw answers, and closes the Attempt', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const answers = questionIds.map((questionId, position) => ({
+        questionId,
+        value: position === 0 ? '3/4' : `answer ${position}`,
+      }));
+
+      const response = await submitAttempt(cookie, attempt.body.id, answers).expect(200);
+
+      expect(Object.keys(response.body).sort()).toEqual(['expired', 'gradeAt', 'submittedAt']);
+      expect(response.body.expired).toBe(false);
+      // Not expired, so the work is judged at the instant it arrived.
+      expect(response.body.gradeAt).toBe(response.body.submittedAt);
+      const stored = await h.prisma.attempt.findUniqueOrThrow({
+        where: { id: attempt.body.id },
+        select: { submittedAt: true, expired: true, startedAt: true, expiresAt: true },
+      });
+      expect(stored.submittedAt!.toISOString()).toBe(response.body.submittedAt);
+      expect(stored.expired).toBe(false);
+      // Neither instant moved: submission closes an Attempt, it does not re-time it.
+      expect(stored.startedAt.toISOString()).toBe(attempt.body.startedAt);
+      expect(stored.expiresAt!.toISOString()).toBe(attempt.body.expiresAt);
+
+      // Raw, and exactly what was sent — no fraction parsed, nothing normalized.
+      const rows = await h.prisma.answer.findMany({
+        where: { attemptId: attempt.body.id },
+        select: { questionId: true, value: true },
+      });
+      expect(rows).toHaveLength(answers.length);
+      expect([...rows].sort((a, b) => a.questionId.localeCompare(b.questionId))).toEqual(
+        [...answers].sort((a, b) => a.questionId.localeCompare(b.questionId)),
+      );
+    });
+
+    it('ignores a question that is not on this test, and a value that is blank', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      // A stale id in a browser's store is not a reason to lose a child's whole
+      // paper, and an emptied field is a Question left blank rather than a 400.
+      const strangers = await releasedForChild(null);
+      const foreignQuestion = strangers.questionIds[0]!;
+
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: '3/4' },
+        { questionId: questionIds[1]!, value: '   ' },
+        { questionId: foreignQuestion, value: 'from another test' },
+        { questionId: randomUUID(), value: 'from nowhere' },
+      ]).expect(200);
+
+      const rows = await h.prisma.answer.findMany({
+        where: { attemptId: attempt.body.id },
+        select: { questionId: true, value: true },
+      });
+      expect(rows).toEqual([{ questionId: questionIds[0]!, value: '3/4' }]);
+    });
+
+    it('refuses a second hand-in with a stated reason, and the first result stands', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const first = await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'kept' },
+      ]).expect(200);
+
+      // 409, not the shared 404: "already handed in" is a rule the child is
+      // entitled to know about, where a 404 would make a successful hand-in look
+      // like a lost one and invite the screen to send it again.
+      const again = await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'overwritten' },
+      ]).expect(409);
+      expect(again.body.message).toBe(ATTEMPT_ALREADY_SUBMITTED);
+      expect(again.body.message).not.toBe(PRACTICE_TEST_NOT_FOUND);
+
+      // The first result stands, down to the stored value.
+      const stored = await h.prisma.attempt.findUniqueOrThrow({
+        where: { id: attempt.body.id },
+        select: { submittedAt: true },
+      });
+      expect(stored.submittedAt!.toISOString()).toBe(first.body.submittedAt);
+      const rows = await h.prisma.answer.findMany({
+        where: { attemptId: attempt.body.id },
+        select: { value: true },
+      });
+      expect(rows).toEqual([{ value: 'kept' }]);
+    });
+
+    it('judges an expired Attempt at its deadline rather than at the instant it arrived', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      // The deadline moved into the past, which is the state a submission that
+      // crossed a network outage arrives in. Written straight to the column,
+      // because nothing on the wire can move it — which is the point.
+      const deadline = new Date(Date.now() - 60_000);
+      await h.prisma.attempt.update({
+        where: { id: attempt.body.id },
+        data: { expiresAt: deadline },
+      });
+
+      const response = await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'entered before the outage' },
+      ]).expect(200);
+
+      expect(response.body.expired).toBe(true);
+      // Judged at the expiry instant, not the arrival one.
+      expect(response.body.gradeAt).toBe(deadline.toISOString());
+      expect(response.body.gradeAt).not.toBe(response.body.submittedAt);
+      expect(Date.parse(response.body.submittedAt)).toBeGreaterThan(deadline.getTime());
+      const stored = await h.prisma.attempt.findUniqueOrThrow({
+        where: { id: attempt.body.id },
+        select: { expired: true },
+      });
+      expect(stored.expired).toBe(true);
+      // And every answer entered before the outage is in the persisted set.
+      expect(
+        await h.prisma.answer.findMany({
+          where: { attemptId: attempt.body.id },
+          select: { value: true },
+        }),
+      ).toEqual([{ value: 'entered before the outage' }]);
+    });
+
+    it('leaves an untimed Attempt unexpired however long it is held open', async () => {
+      const { id, cookie } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      const response = await submitAttempt(cookie, attempt.body.id, []).expect(200);
+
+      expect(response.body.expired).toBe(false);
+      expect(response.body.gradeAt).toBe(response.body.submittedAt);
+    });
+
+    it('refuses a hand-in of a sibling’s or a stranger’s Attempt with the shared sentence', async () => {
+      const mine = await releasedForChild(20);
+      const theirs = await releasedForChild(20);
+      const theirAttempt = await startAttempt(theirs.cookie, theirs.id).expect(201);
+      // A sibling on this same account, working on their own release.
+      const grade = await createGradeLevel(h);
+      const sibling = await createStudentProfile(h, mine.ready.parentAccountId, {
+        gradeLevelId: grade.id,
+      });
+      const siblingCookie = await bindDevice(h, mine.ready.token, sibling.id);
+
+      const unknown = await submitAttempt(mine.cookie, randomUUID(), []).expect(404);
+      for (const refusal of [
+        await submitAttempt(mine.cookie, theirAttempt.body.id, []).expect(404),
+        await submitAttempt(siblingCookie, theirAttempt.body.id, []).expect(404),
+        await submitAttempt(mine.cookie, 'not-a-uuid', []).expect(404),
+        unknown,
+      ]) {
+        expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+        expect(refusal.body.message).toBe(unknown.body.message);
+      }
+      // And the Attempt somebody else's device addressed is untouched: still open.
+      expect(
+        (
+          await h.prisma.attempt.findUniqueOrThrow({
+            where: { id: theirAttempt.body.id },
+            select: { submittedAt: true },
+          })
+        ).submittedAt,
+      ).toBeNull();
+    });
+
+    it('refuses a hand-in on an unbound device', async () => {
+      const { id, cookie } = await releasedForChild(20);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      const unbound = await server()
+        .post(`/api/student/attempts/${attempt.body.id}/submit`)
+        .send({ answers: [] })
+        .expect(401);
+      expect(unbound.body.bound).toBe(false);
+      expect(
+        (
+          await h.prisma.attempt.findUniqueOrThrow({
+            where: { id: attempt.body.id },
+            select: { submittedAt: true },
+          })
+        ).submittedAt,
+      ).toBeNull();
+    });
+
+    it('bounds the one student-authored body it accepts', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      // A body that said nothing is malformed; `[]` is a legitimate hand-in.
+      await submitAttempt(cookie, attempt.body.id, undefined as never).expect(400);
+      // Values bounded by length, and the array by size. One past each ceiling.
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'x'.repeat(MAX_ANSWER_LENGTH + 1) },
+      ]).expect(400);
+      await submitAttempt(
+        cookie,
+        attempt.body.id,
+        Array.from({ length: MAX_ANSWERS_PER_SUBMISSION + 1 }, () => ({
+          questionId: questionIds[0]!,
+          value: 'x',
+        })),
+      ).expect(400);
+      // And an id longer than an id can be. Its own ceiling, not the answer's.
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: 'q'.repeat(MAX_QUESTION_ID_LENGTH + 1), value: 'x' },
+      ]).expect(400);
+      // None of them wrote anything.
+      expect(await h.prisma.answer.count({ where: { attemptId: attempt.body.id } })).toBe(0);
+      expect(
+        (
+          await h.prisma.attempt.findUniqueOrThrow({
+            where: { id: attempt.body.id },
+            select: { submittedAt: true },
+          })
+        ).submittedAt,
+      ).toBeNull();
+    });
+
+    it('accepts a body at the very edge of every bound rather than refusing it in transport', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      // **Exactly** the maximum, not one past it: the ceiling the DTO allows has to be
+      // a ceiling the transport allows too. Express defaults to a 100KB JSON body,
+      // which this is far beyond — so without `MAX_JSON_BODY_BYTES` raising it, the
+      // largest legitimate paper a child can hand in is refused as a 413 before
+      // validation ever sees it. The screen reads that as the generic failure and the
+      // child presses Hand in forever on work that will never be taken.
+      //
+      // The real question ids are reused round-robin, so every answer is one the
+      // service keeps: this measures the accepted body, not the ignored one.
+      const answers = Array.from({ length: MAX_ANSWERS_PER_SUBMISSION }, (_unused, at) => ({
+        questionId: questionIds[at % questionIds.length]!,
+        value: 'x'.repeat(MAX_ANSWER_LENGTH),
+      }));
+      expect(JSON.stringify({ answers }).length).toBeGreaterThan(100 * 1024);
+
+      const response = await submitAttempt(cookie, attempt.body.id, answers).expect(200);
+
+      expect(response.body.expired).toBe(false);
+      // One row per distinct Question, because the map keys by Question: the point of
+      // the case is that the body was accepted, not how many rows it came to.
+      expect(await h.prisma.answer.count({ where: { attemptId: attempt.body.id } })).toBe(
+        questionIds.length,
+      );
+    });
+
+    it('refuses the loser of two simultaneous hand-ins with the 409, never a 500', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      // Both in flight together, so both read `submittedAt: null`. Under
+      // read-committed isolation the up-front check cannot separate them — the
+      // conditional close is what does, and without it the loser collides on
+      // `answer_attemptId_questionId_key` and surfaces as a 500.
+      const [first, second] = await Promise.all([
+        submitAttempt(cookie, attempt.body.id, [{ questionId: questionIds[0]!, value: 'one' }]),
+        submitAttempt(cookie, attempt.body.id, [{ questionId: questionIds[0]!, value: 'two' }]),
+      ]);
+
+      const statuses = [first.status, second.status].sort();
+      expect(statuses).toEqual([200, 409]);
+      const loser = first.status === 409 ? first : second;
+      expect(loser.body.message).toBe(ATTEMPT_ALREADY_SUBMITTED);
+      // Exactly one hand-in landed, and exactly one set of answers with it.
+      const rows = await h.prisma.answer.findMany({
+        where: { attemptId: attempt.body.id },
+        select: { value: true },
+      });
+      expect(rows).toHaveLength(1);
+      expect(['one', 'two']).toContain(rows[0]!.value);
+    });
+
+    it('resumes rather than faulting when two starts race for the same Attempt', async () => {
+      const { id, cookie } = await releasedForChild(20);
+
+      // Two tabs opening the same test. Both find no row and both insert `ordinal: 1`;
+      // the unique index refuses the loser, which then resumes the winner's row. The
+      // method's own promise is that a second tab resumes, so a 500 here would be that
+      // promise broken at exactly the moment it is needed.
+      const [first, second] = await Promise.all([
+        startAttempt(cookie, id),
+        startAttempt(cookie, id),
+      ]);
+
+      expect(first.status).toBe(201);
+      expect(second.status).toBe(201);
+      // One row, one deadline: whichever request lost, it came back with the same
+      // instants the winner wrote rather than a second Attempt of its own.
+      expect(first.body.id).toBe(second.body.id);
+      expect(first.body.startedAt).toBe(second.body.startedAt);
+      expect(first.body.expiresAt).toBe(second.body.expiresAt);
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: id } })).toBe(1);
+    });
+
+    it('carries no answer, no correctness, no topic and no parent-scoped figure on either route', async () => {
+      const { id, cookie, questionIds, ready } = await releasedForChild(20);
+
+      const started = await startAttempt(cookie, id).expect(201);
+      const submitted = await submitAttempt(cookie, started.body.id, [
+        { questionId: questionIds[0]!, value: '3/4' },
+      ]).expect(200);
+
+      // Over the raw JSON of both, not field by field: a field-by-field check
+      // passes on exactly the shape it was written against and says nothing about a
+      // key a later edit adds.
+      for (const body of [started.body, submitted.body]) {
+        const serialized = JSON.stringify(body);
+        for (const key of [
+          'answer',
+          'answers',
+          'isCorrect',
+          'topics',
+          'topic',
+          'cost',
+          'tier',
+          'model',
+          'allowance',
+          'timerMinutes',
+          'score',
+          'studentProfileId',
+          'parentAccountId',
+        ]) {
+          expect(serialized).not.toMatch(new RegExp(`"${key}"\\s*:`, 'iu'));
+        }
+        expect(serialized).not.toContain('isCorrect');
+        expect(serialized).not.toMatch(/allowance|tier|free|unlimited|gpt|model/iu);
+        // Not one grade or score word, and not the account's own id.
+        expect(serialized).not.toMatch(/grade(?!At)|score|correct|wrong/iu);
+        expect(serialized).not.toContain(ready.parentAccountId);
+        expect(serialized).not.toContain(ready.studentProfileId);
+      }
     });
   });
 });

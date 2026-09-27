@@ -183,8 +183,8 @@ test.describe('taking a released practice test', () => {
     await page.getByTestId('take-test-next').click();
     await expect(page.getByTestId('take-test-counter')).toHaveText('Question 3 of 3');
     await expect(page.getByTestId('take-test-format')).toHaveText('Short answer');
-    // Next is disabled on the last Question: there is nothing past it, and no
-    // control here hands anything in.
+    // Next is disabled on the last Question: there is nothing past it. Handing in
+    // is its own control and its own end-to-end, not something Next falls into.
     await expect(page.getByTestId('take-test-next')).toBeDisabled();
     const short = page.getByTestId('answer-short-input');
     await expect(short).toHaveJSProperty('tagName', 'TEXTAREA');
@@ -245,14 +245,22 @@ test.describe('taking a released practice test', () => {
       'Three of the four parts are shaded.',
     );
 
-    // Nothing was written anywhere the browser can see: the answers are this
-    // page's state, and Story 5.3 owns keeping them.
+    // Where the answers are kept, since Story 5.3: one `localStorage` record under
+    // this module's own prefix, keyed to the Attempt and the profile, and nothing
+    // else anywhere the browser can see. `student-attempt-resilience.spec.ts` owns
+    // what that record does across a reload and an outage; what this case states is
+    // that it is the *only* thing written — no session storage, and no readable
+    // cookie, because the binding is httpOnly and nothing here holds a credential.
     const residue = await page.evaluate(() => ({
-      local: Object.entries({ ...window.localStorage }),
+      local: Object.keys({ ...window.localStorage }),
       session: Object.entries({ ...window.sessionStorage }),
       cookie: document.cookie,
     }));
-    expect(residue.local).toEqual([]);
+    expect(residue.local.filter((key) => !key.startsWith('ntr.attempt.'))).toEqual([]);
+    expect(residue.local).toHaveLength(1);
+    // Not one answer, not one prompt and not one verdict in the key itself:
+    // identifiers only.
+    expect(residue.local[0]).toMatch(/^ntr\.attempt\.[\w%-]+\.[\w%-]+$/u);
     expect(residue.session).toEqual([]);
     expect(residue.cookie).toBe('');
   });

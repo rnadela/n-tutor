@@ -468,3 +468,111 @@ export async function spreadPracticeTestFormatsFixture(parentEmail: string): Pro
     await client.end();
   }
 }
+
+/**
+ * Sets the countdown on this parent's newest draft, in whole minutes.
+ *
+ * The stored column is what an Attempt snapshots at start, so writing it directly
+ * is honest about what this is: the parent-facing screen that configures a timer is
+ * Story 4.6's and has its own end-to-end. What a *student* test needs is a released
+ * practice test that carries a duration, and a one-minute duration in particular —
+ * which no parent would sit and configure through a form in a browser test.
+ *
+ * Nothing about the student path is faked by this. The Attempt's instants are still
+ * the server's, written once at start from this column.
+ */
+export async function setNewestDraftTimerFixture(
+  parentEmail: string,
+  minutes: number | null,
+): Promise<void> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query(
+      `UPDATE "practice_test" SET "timerMinutes" = $2
+        WHERE "id" = (
+          SELECT p."id" FROM "practice_test" p
+            JOIN "parent_account" a ON a."id" = p."parentAccountId"
+           WHERE a."email" = $1 AND p."status" = 'Draft'
+           ORDER BY p."createdAt" DESC, p."id" DESC
+           LIMIT 1
+        )`,
+      [parentEmail, minutes],
+    );
+    if (result.rowCount !== 1) throw new Error('No draft practice test to set a timer on.');
+  } finally {
+    await client.end();
+  }
+}
+
+/** One Attempt, as the database holds it. */
+export interface AttemptRowFixture {
+  id: string;
+  startedAt: Date;
+  expiresAt: Date | null;
+  submittedAt: Date | null;
+  expired: boolean;
+  answerCount: number;
+}
+
+/**
+ * This parent's newest Attempt, read straight from the row.
+ *
+ * `expired` is the comparison the *server* made, against its own clock and its own
+ * column, so reading it here is the only way a browser test can state that a
+ * submission which crossed an outage was judged at the deadline rather than at the
+ * instant it arrived. Nothing on any screen shows it, and nothing should.
+ */
+export async function newestAttemptFixture(parentEmail: string): Promise<AttemptRowFixture> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query<{
+      id: string;
+      startedAt: Date;
+      expiresAt: Date | null;
+      submittedAt: Date | null;
+      expired: boolean;
+      answerCount: string;
+    }>(
+      `SELECT t."id", t."startedAt", t."expiresAt", t."submittedAt", t."expired",
+              (SELECT count(*)::text FROM "answer" WHERE "attemptId" = t."id") AS "answerCount"
+         FROM "attempt" t
+         JOIN "parent_account" a ON a."id" = t."parentAccountId"
+        WHERE a."email" = $1
+        ORDER BY t."createdAt" DESC, t."id" DESC
+        LIMIT 1`,
+      [parentEmail],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new Error('No attempt for that parent.');
+    return {
+      id: row.id,
+      startedAt: row.startedAt,
+      expiresAt: row.expiresAt,
+      submittedAt: row.submittedAt,
+      expired: row.expired,
+      answerCount: Number(row.answerCount),
+    };
+  } finally {
+    await client.end();
+  }
+}
+
+/** How many Attempts this parent's children have opened, across every test. */
+export async function countAttemptsFor(parentEmail: string): Promise<number> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM "attempt" t
+         JOIN "parent_account" a ON a."id" = t."parentAccountId"
+        WHERE a."email" = $1`,
+      [parentEmail],
+    );
+    return Number(result.rows[0]?.count ?? '0');
+  } finally {
+    await client.end();
+  }
+}
