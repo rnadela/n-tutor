@@ -963,6 +963,7 @@ model PracticeTestQuestion {
   choices PracticeTestChoice[]
   topics  PracticeTestQuestionTopic[]
   answers Answer[]
+  grades  QuestionGrade[]
 
   @@unique([practiceTestId, ordinal])
   @@map("practice_test_question")
@@ -1058,6 +1059,10 @@ model Attempt {
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
 
   answers Answer[]
+  /// `grading`'s rows, back-related here because Prisma requires both sides of a
+  /// relation to be named. It is a relation and not a licence: nothing in
+  /// `practicetest` reads or writes a grade (AD-6, AD-17).
+  grades  QuestionGrade[]
 
   /// One row per child per run at a Practice Test.
   @@unique([practiceTestId, studentProfileId, ordinal])
@@ -1093,4 +1098,79 @@ model Answer {
   /// One answer per Question per Attempt.
   @@unique([attemptId, questionId])
   @@map("answer")
+}
+
+// `grading` is the sole owner and sole writer of every table below (AD-6,
+// AD-17). It reads Practice Test rows through `practicetest`'s own service and
+// never writes one: the module arrow is `grading -> practicetest` and is never
+// reversed, which is why a grade lives here rather than as a column on a table
+// `practicetest` owns.
+
+/// What one Question of one Attempt came to.
+///
+/// **Four literals, because FR-37 fixes four**, and they are not this schema's to
+/// negotiate: `Correct` and `Incorrect` are the two verdicts, `Unanswered` is a
+/// blank on an Attempt handed in before its time ran out, and `Ungraded` is a
+/// grading *failure* — an answer nothing could judge — and never a pending state.
+///
+/// What must never appear is a fifth member. There is no `Pending` and no
+/// `Queued`: absence already carries every "no verdict yet" this domain has, and a
+/// pending literal would be a second way to say one of them that every read would
+/// then have to tell apart from the first.
+///
+/// **Absence says two things, and both of them are "nothing has judged this".** A
+/// Question with no row here is either one nothing has graded yet, or a blank on an
+/// Attempt the server judged **expired** — Story 5.4 deliberately writes no row for
+/// those, because FR-37 grades them `Incorrect` and that verdict is the story that
+/// grades an Attempt's answers to make. Neither reading is "graded and the result is
+/// pending", which is the state this enum must never be able to express.
+///
+/// Story 5.4 writes exactly one of these, `Unanswered`, and only for a blank on a
+/// manually submitted Attempt the server judged unexpired. The other three are
+/// Story 5.5's to write into a table that already exists.
+enum GradeState {
+  Correct
+  Incorrect
+  Unanswered
+  Ungraded
+
+  @@map("grade_state")
+}
+
+/// Where one Question of one Attempt stands, once something has judged it.
+///
+/// **A table of its own rather than a column on `Answer`**, for two reasons that
+/// each would be enough. A blank Question has no `Answer` row at all — that is a
+/// promise `Answer`'s own doc makes, and keeping it is what leaves raw answers
+/// raw — so a blank would have nothing to hang a grade on. And `Answer` is
+/// `practicetest`'s table while grade state is `grading`'s (AD-6, AD-17): a grade
+/// column over there would be a second module writing rows it does not own.
+///
+/// The unique key says what a grade is a fact *about*: one (Attempt, Question)
+/// pair, whether or not an answer exists for it. Nothing is derived at read time
+/// from an empty answer field — FR-37 forbids exactly that, because a blank on an
+/// Attempt whose time ran out grades `Incorrect` while a blank on one handed in
+/// early grades `Unanswered`, and the empty field looks identical in both.
+///
+/// No rationale column and no score: Story 5.5 adds what its own verdicts need.
+/// Both relations cascade, for the reason `Attempt`'s and `Answer`'s do.
+model QuestionGrade {
+  id         String     @id @default(uuid())
+  attemptId  String
+  questionId String
+  /// One of FR-37's four literals. Story 5.4 writes only `Unanswered`.
+  state      GradeState
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  attempt  Attempt              @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question PracticeTestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  /// One grade per Question per Attempt. A second row for the same pair would be
+  /// two answers to one question, and the losing writer is refused by the index
+  /// rather than by a check somebody has to remember to make.
+  @@unique([attemptId, questionId])
+  /// The read every later story makes: one Attempt's grades, whole.
+  @@index([attemptId])
+  @@map("question_grade")
 }

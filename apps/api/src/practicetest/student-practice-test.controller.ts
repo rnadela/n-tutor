@@ -1,20 +1,8 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  Post,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { StudentModeGuard, type StudentRequest } from '../identity/student-mode.guard.js';
-import { SubmitAttemptDto } from './dto/attempt-submit.dto.js';
 import {
   PracticeTestService,
-  type AttemptSubmissionView,
   type AttemptView,
   type PracticeTestReleasedSummary,
   type StudentPracticeTestView,
@@ -24,22 +12,26 @@ import {
  * The student-scoped reads of a Practice Test: the list a child chooses from and
  * the one they work through, both mounted at `/api/student`.
  *
- * Shaped after `StudentModeController` and holding to the same claims, with one
- * that has changed since Story 5.2: there **is** now a student-scoped write, and
- * it is exactly one kind. A child may open an Attempt on a test released to them
- * and hand that Attempt in. Nothing else. What those two writes touch is the
- * Attempt's own instants — written by the server, from the server's clock, once —
- * and the child's own raw answers. A child still authors nothing about a Practice
- * Test, nothing about a profile, nothing about an account and nothing about their
- * own binding, which is changed only through the elevation-guarded parent routes.
+ * Shaped after `StudentModeController` and holding to the same claims. There is
+ * exactly **one** student-scoped write mounted here, and it is the Attempt start:
+ * a child may open an Attempt on a test released to them, and that write touches
+ * only the Attempt's own instants, written by the server, from the server's clock,
+ * once. A child still authors nothing about a Practice Test, nothing about a
+ * profile, nothing about an account and nothing about their own binding, which is
+ * changed only through the elevation-guarded parent routes.
  *
- * Neither write carries a grade, a score or a verdict of any kind, and neither
- * accepts one: there is no body at all on the start route, and the submit body is
- * answers and only answers. What a blank means and whether an answer is right are
- * later stories', which extend these routes rather than replace them.
+ * **Handing in used to be mounted here and is now `grading`'s** — same path, same
+ * body, same 200, same 409, same guard. It moved because closing an Attempt and
+ * recording what its blanks mean are one transaction (AD-4, AD-10), and grade state
+ * is `grading`'s entity and `grading`'s sole write (AD-6, AD-17). A controller here
+ * injecting a grading service would reverse the module arrow and make the two a
+ * `forwardRef` cycle, which is the one thing `practice-test.module.ts` says it has
+ * no reason to have. The half of handing in that is this module's — the 404, the
+ * conditional close behind the 409, and the raw answers — is
+ * `PracticeTestService.closeAttempt`, called inside `grading`'s transaction.
  *
- * The submit body is the **only student-authored input the API accepts anywhere**,
- * which is why its bounds are stated in a DTO of its own rather than assumed.
+ * The start route carries no body at all, so nothing student-authored is read on
+ * this controller: there is no grade, no score and no verdict it could accept.
  *
  * Since Story 5.2 the detail read **does** carry generated content, because
  * taking a test requires it: prompts and option bodies, in stored ordinal order.
@@ -154,44 +146,6 @@ export class StudentPracticeTestController {
       req.student!.parentAccountId,
       req.student!.studentProfileId,
       practiceTestId,
-    );
-  }
-
-  /**
-   * Hands one Attempt in: the child's raw answers, and the instant it closed.
-   *
-   * **Whether the deadline had passed is decided here, on the server's clock,
-   * against the server's own column.** Nothing in the body says anything about
-   * time, and a claim about it would not be read if it did — the browser decides
-   * only when it dispatches, which is what makes a submission that crossed a
-   * network outage still judged at the instant the time ran out.
-   *
-   * The Attempt id in the path names *which* Attempt. Both ids come off
-   * `req.student`, so an Attempt of another profile or another account answers the
-   * one shared 404 with everything else. A second submission is the single
-   * exception to one-sentence refusal on this surface and answers **409** with its
-   * own stated reason: "already handed in" is a rule the child is entitled to know
-   * about, where a 404 would make a successful hand-in look like a lost one and
-   * invite the screen to send it again.
-   *
-   * No `ParseUUIDPipe` here either, and for the same reason.
-   *
-   * **200, not Nest's `POST` default of 201.** Nothing is created here: the Attempt
-   * already existed and this closes it. The start route above keeps its 201, because
-   * that one may genuinely insert a row.
-   */
-  @Post('attempts/:attemptId/submit')
-  @HttpCode(HttpStatus.OK)
-  submitAttempt(
-    @Req() req: StudentRequest,
-    @Param('attemptId') attemptId: string,
-    @Body() body: SubmitAttemptDto,
-  ): Promise<AttemptSubmissionView> {
-    return this.practiceTests.submitAttempt(
-      req.student!.parentAccountId,
-      req.student!.studentProfileId,
-      attemptId,
-      body.answers,
     );
   }
 }

@@ -88,3 +88,44 @@ export function progressOf(
     state: isAnswered(answers[question.id]) ? 'answered' : 'not-answered',
   }));
 }
+
+/**
+ * Which of these Questions are not answered, **in the order given**.
+ *
+ * The same shape `progressOf` returns, filtered to the one state, and derived from
+ * the same `isAnswered` predicate the map's cells are — so the count a confirmation
+ * names and the figure the map shows can never disagree. There is no second
+ * definition of "answered" anywhere in this module for them to drift apart on.
+ *
+ * Counted over the order given, so an answer left behind for a Question that is not
+ * in this test can neither hide a blank nor invent one.
+ *
+ * `Not answered` is what this is about. It is deliberately **not** called
+ * `unanswered`: that word is a grade state only submission can claim, and nothing
+ * in this vocabulary grades.
+ */
+export function notAnswered(
+  order: readonly QuestionRef[],
+  answers: Readonly<Record<string, string>>,
+): QuestionProgress[] {
+  return progressOf(order, answers).filter((question) => question.state === 'not-answered');
+}
+
+/**
+ * The index of the earliest Question that is not answered, or `null` when none is.
+ *
+ * An index into the order given rather than an ordinal or an id, because that is
+ * what the screen navigates by — and the earliest rather than any, so "go back to
+ * the questions" lands the child at the start of what is left rather than somewhere
+ * in the middle of it.
+ *
+ * `null` is the whole paper being answered, which is also what means no
+ * confirmation is asked for in the first place.
+ */
+export function firstNotAnsweredIndex(
+  order: readonly QuestionRef[],
+  answers: Readonly<Record<string, string>>,
+): number | null {
+  const at = order.findIndex((question) => !isAnswered(answers[question.id]));
+  return at === -1 ? null : at;
+}

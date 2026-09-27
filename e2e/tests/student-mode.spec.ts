@@ -247,7 +247,9 @@ test.describe('Student Mode and the handover', () => {
     });
     const attemptKeyCount = () =>
       page.evaluate(
-        () => Object.keys({ ...window.localStorage }).filter((key) => key.startsWith('ntr.attempt.')).length,
+        () =>
+          Object.keys({ ...window.localStorage }).filter((key) => key.startsWith('ntr.attempt.'))
+            .length,
       );
     expect(await attemptKeyCount()).toBe(1);
 

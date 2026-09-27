@@ -186,6 +186,33 @@ export const studentCopy = {
     autoSubmitAnnouncement: 'Your time is up. Your work is being handed in.',
     /** It was already in. Said rather than re-sent. */
     alreadyHandedIn: 'This practice test is already handed in.',
+
+    // --- Being asked about what is still blank ---------------------------
+    //
+    // A question put to the child before their own press goes through, and only
+    // ever before *their* press: a deadline that has already passed has nobody to
+    // ask. It states a count in the progress vocabulary and says nothing about
+    // being right — it is a question about what is finished, not a verdict on any
+    // of it. The word `Unanswered` appears nowhere here: it is a grade state, and
+    // this is asked while nothing has been graded.
+
+    /** The confirmation's heading, which is where its accessible name comes from. */
+    confirmHandInTitle: 'Hand in now?',
+    /**
+     * The confirmation's whole sentence, with the count handed in.
+     *
+     * Singular and plural, because "1 questions" is a sentence nobody wrote on
+     * purpose. It names what is left and says the work can still be finished, in
+     * that order, so the way back reads as an offer rather than as a warning.
+     */
+    confirmHandIn: (notAnswered: number) =>
+      notAnswered === 1
+        ? `You have ${notAnswered} question that is not answered. You can go back and finish it, or hand in now.`
+        : `You have ${notAnswered} questions that are not answered. You can go back and finish them, or hand in now.`,
+    /** The way back to the questions. It leads to the map, not to a hand-in. */
+    confirmHandInBack: 'Go back to the questions',
+    /** The way through. Nothing else on the screen hands in on the child's behalf. */
+    confirmHandInAnyway: 'Hand in anyway',
     /** The request failed for some other reason. The Attempt is still open. */
     submitFailed: 'Your work could not be handed in. Your answers are kept, so you can try again.',
     /** The Attempt could not be opened at all, so there is nothing to work under. */

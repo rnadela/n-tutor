@@ -11,7 +11,7 @@ import {
   MAX_ANSWERS_PER_SUBMISSION,
   MAX_ANSWER_LENGTH,
   MAX_QUESTION_ID_LENGTH,
-} from '../practice-test-policy.js';
+} from '../../practicetest/practice-test-policy.js';
 
 /**
  * One answer as the child's browser restates it: which Question, and exactly
@@ -61,7 +61,16 @@ export class SubmitAnswerDto {
  * `@IsDefined()` on the array is what keeps a body that said nothing from
  * reading as "hand in a blank paper by accident": an absent `answers` is a
  * malformed request, while `[]` is a legitimate one — a child may hand in with
- * nothing filled, and Story 5.4 owns whether they are asked about it first.
+ * nothing filled. They **are** asked about it first, and asked on the screen: Take
+ * Test names how many Questions are not answered and offers a way back before it
+ * dispatches anything. That confirmation is a question put to a person, not a rule
+ * this DTO enforces — nothing about a browser's answer to it arrives here, and `[]`
+ * is as legitimate a body as it ever was.
+ *
+ * The ceilings are imported from `practicetest`'s policy rather than restated:
+ * `MAX_JSON_BODY_BYTES` is computed from the same two figures, and a second copy
+ * here would be two ceilings that disagree the first time either is tuned. Reading
+ * them is the `grading -> practicetest` arrow, which is the direction it runs in.
  */
 export class SubmitAttemptDto {
   @IsDefined()

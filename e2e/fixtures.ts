@@ -576,3 +576,82 @@ export async function countAttemptsFor(parentEmail: string): Promise<number> {
     await client.end();
   }
 }
+
+/** One grade row, as the database holds it. */
+export interface QuestionGradeFixture {
+  questionId: string;
+  state: string;
+}
+
+/** The grade rows of one Attempt, and **which** Attempt they were read for. */
+export interface AttemptGradesFixture {
+  /** The Attempt the rows below belong to. Named, never assumed. */
+  attemptId: string;
+  grades: QuestionGradeFixture[];
+}
+
+/**
+ * The grade rows on one Attempt, read straight from the table.
+ *
+ * Here for the reason `newestAttemptFixture` is: a grade row is a fact **no screen
+ * this story builds will ever show**. The student surface states two progress words
+ * and never a grade, and the results screen is a later story's — so the only honest
+ * way for a browser test to say "each blank Question carries exactly one persisted
+ * `Unanswered`" is to read the rows the submit transaction wrote.
+ *
+ * `attemptId` is **returned as well as optionally given**, because "no rows" and
+ * "rows, but against a different Attempt than the one you meant" are the same empty
+ * array otherwise — and a run with two Attempts on it would keep an
+ * `expect(grades).toEqual([])` green while the rows sat on the wrong one. A caller
+ * that names the Attempt asserts about that Attempt; a caller that omits it gets the
+ * newest and is told which that was.
+ *
+ * Ordered by the Question's stored ordinal, so a caller can line the rows up against
+ * the Questions the child was shown.
+ */
+export async function questionGradesFor(
+  parentEmail: string,
+  attemptId?: string,
+): Promise<AttemptGradesFixture> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    let resolved = attemptId;
+    if (resolved === undefined) {
+      const newest = await client.query<{ id: string }>(
+        `SELECT t."id" FROM "attempt" t
+           JOIN "parent_account" a ON a."id" = t."parentAccountId"
+          WHERE a."email" = $1
+          ORDER BY t."createdAt" DESC, t."id" DESC
+          LIMIT 1`,
+        [parentEmail],
+      );
+      const row = newest.rows[0];
+      if (row === undefined) throw new Error('No attempt for that parent.');
+      resolved = row.id;
+    } else {
+      const owned = await client.query<{ id: string }>(
+        `SELECT t."id" FROM "attempt" t
+           JOIN "parent_account" a ON a."id" = t."parentAccountId"
+          WHERE t."id" = $1 AND a."email" = $2`,
+        [resolved, parentEmail],
+      );
+      if (owned.rows[0] === undefined) {
+        throw new Error(
+          `Attempt ${resolved} does not belong to parent ${parentEmail}.`,
+        );
+      }
+    }
+    const result = await client.query<QuestionGradeFixture>(
+      `SELECT g."questionId", g."state"::text AS "state"
+         FROM "question_grade" g
+         JOIN "practice_test_question" q ON q."id" = g."questionId"
+        WHERE g."attemptId" = $1
+        ORDER BY q."ordinal" ASC`,
+      [resolved],
+    );
+    return { attemptId: resolved, grades: result.rows };
+  } finally {
+    await client.end();
+  }
+}

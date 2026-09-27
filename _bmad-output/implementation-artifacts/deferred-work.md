@@ -1413,3 +1413,43 @@ source_spec: `spec-5-3-attempt-resilience-interruption-offline.md`
 severity: medium
 reason: apps/api/src/app-setup.ts applies useBodyParser('json', { limit: MAX_JSON_BODY_BYTES }) globally. Every other route's oversized-payload exposure grows by the same margin the submit route needed, rather than only the route that needed it.
 status: open
+
+### DW-178: A person's press of Hand in is not guarded on the client store having been hydrated for this Attempt, so a press inside the window before hydration dispatches the answers held in state rather than the
+origin: spec-deferred 438b44f6cc5d
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx
+source_spec: `spec-5-4-submitting-an-attempt.md`
+severity: medium
+reason: `send` and the press path gate on the Attempt and on `submitState`, never on `hydratedFor`; the deadline effect does carry that guard and says why ("resuming an Attempt whose deadline had already passed auto-submits the *empty* answer set"). The same exposure reaches a person's press. Pre-existing from Story 5.3 -- this story only made it visible, since the confirmation now names a blank count computed from the same un-hydrated state.
+status: open
+
+### DW-179: The API integration suite fails non-deterministically in PIN/elevation and upload fixture setup, in a varying handful of cases across files unrelated to this story, so a single green full run is not
+origin: spec-deferred a203f34e2c9c
+location: n/a
+source_spec: `spec-5-4-submitting-an-attempt.md`
+severity: medium
+reason: Reproduced on every full run of this story's verification: one run failed 2 cases in source-test.int-spec.ts, another 1 in practice-test.int-spec.ts "draft editing", another 2 in "claiming" and "release and discard" -- each time a different case, each time inside `elevate` (401/404) or `generatable`'s upload (404), never inside this story's own cases, which were verified green by name on every run. The implementation agent reproduced the same failures with this story's work stashed at HEAD. Already recorded on Story 5.3 and still open.
+status: open
+
+### DW-180: Below the `md` breakpoint the confirmation's way back lands the child on the first Question that is not answered but no longer opens the question-map overlay for them, so the map is one further press
+origin: spec-deferred d59f5e57b183
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx
+source_spec: `spec-5-4-submitting-an-attempt.md`
+severity: low
+reason: Opening the overlay from that control was removed during review: MUI's ModalManager sets `aria-hidden` on the rest of the app and traps focus while a Modal is open regardless of CSS, so hiding the overlay above `md` with a `display` rule made the whole screen invisible to assistive technology behind a dialog nobody could see (reproduced in e2e). The map remains reachable by its own control at that width, and is permanently on screen in the rail above it, so AC1's path back is intact -- but a click-time media-query read would restore the stronger behaviour at phone width.
+status: open
+
+### DW-181: Reconfirmed this pass: a Hand-in press before `hydratedFor` matches the current Attempt can submit fewer answers than the device has stored, because `handIn`/`decideHandIn` read the same un-hydrated
+origin: spec-deferred 34a79e0eb033
+location: apps/web/src/app/student/tests/[practiceTestId]/page.tsx (handIn, decideHandIn)
+source_spec: `spec-5-4-submitting-an-attempt.md`
+severity: medium
+reason: Blind Hunter, Edge Case Hunter and the Verification Gap reviewer each independently traced the same gap this pass. Verification Gap reviewer confirmed no test reloads mid-flight and presses Hand in inside the pre-hydration window, so neither `page.spec.tsx`'s source-region assertions nor the new e2e specs would catch a regression here. Same root cause as the existing hydration entry above; recorded separately since this pass's review produced a concrete demonstration and consumer trace, not because the underlying issue is new.
+status: open
+
+### DW-182: The "value counts as blank" rule is defined independently in three places -- the web `isAnswered` helper, the API's inline `value.trim().length === 0` check, and the e2e/int-spec fixtures -- with no
+origin: spec-deferred e6e1978f9a7c
+location: apps/web/src/lib/answers.ts; apps/api/src/practicetest/practice-test.service.ts
+source_spec: `spec-5-4-submitting-an-attempt.md`
+severity: low
+reason: Raised by the Blind Hunter reviewer. Each site is individually tested for the plain-space case; nothing in this diff exercises the sites together for non-space whitespace, so a future edit to only one of them could silently desync client-reported and server-persisted blank counts.
+status: open

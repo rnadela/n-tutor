@@ -35,6 +35,34 @@ function jpeg(name: string, base64: string) {
   return { name, mimeType: 'image/jpeg', buffer: Buffer.from(base64, 'base64') };
 }
 
+/**
+ * Presses Hand in, and takes the way through the blank-questions confirmation when
+ * the caller says there is one to take.
+ *
+ * Since Story 5.4 a **person's** press of Hand in on a paper with Questions still not
+ * answered, and with time still on the clock, is answered with a question first: how
+ * many are left, and would they rather go back. None of the cases in this file is
+ * about that dialog — `student-submit-attempt.spec.ts` owns it, including that
+ * nothing is dispatched until it is answered — so this helper keeps every dispatch
+ * count here a count of what one press came to.
+ *
+ * `blanks` is **stated by the caller rather than probed for**. Each case sets up
+ * exactly how much of its paper is answered, so whether the dialog is coming is
+ * something the case already knows; an `isVisible()` check does not retry, so on a
+ * run where React had not yet committed the render it would click nothing and fail
+ * somewhere later instead. Stated, both outcomes are waited for and both are
+ * asserted — including that no dialog appears at all when nothing is blank.
+ */
+async function handIn(page: Page, blanks: boolean): Promise<void> {
+  await page.getByTestId('take-test-hand-in').click();
+  if (blanks) {
+    const through = page.getByTestId('take-test-confirm-hand-in');
+    await expect(through).toBeVisible();
+    await through.click();
+  }
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+}
+
 /** `m:ss` back to seconds, so "the countdown fell" is a comparison of numbers. */
 function secondsOf(display: string): number {
   const [minutes, seconds] = display.split(':');
@@ -230,7 +258,9 @@ test.describe('an Attempt that survives an interruption', () => {
     expect(apiCalls()).toBe(quietFrom);
 
     // --- Handing in while offline -----------------------------------------
-    await page.getByTestId('take-test-hand-in').click();
+    // Every Question on this paper is answered — the summary above says so — so
+    // there is nothing to ask about and the press goes straight to the decision.
+    await handIn(page, false);
     await expect(page.getByTestId('take-test-submit-note')).toContainText('needs a connection');
     // The Attempt is still open, every answer is still there, and the control is
     // still live for the child to press again.
@@ -249,7 +279,7 @@ test.describe('an Attempt that survives an interruption', () => {
     expect((await newestAttemptFixture(email)).submittedAt).toBeNull();
 
     // --- The child presses again -------------------------------------------
-    await page.getByTestId('take-test-hand-in').click();
+    await handIn(page, false);
     await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
     // Focus landed on the heading of the state the screen moved to.
     await expect(page.getByTestId('take-test-handed-in-heading')).toBeFocused();
@@ -428,12 +458,14 @@ test.describe('an Attempt that survives an interruption', () => {
     await second.goto(url);
     await expect(second.getByTestId('attempt-timer')).toBeVisible();
 
-    // The first tab hands in.
-    await page.getByTestId('take-test-hand-in').click();
+    // The first tab hands in. One Question of this paper is answered and the rest are
+    // not, so this press is the one that meets the confirmation.
+    await handIn(page, true);
     await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
 
-    // The second tab tries, and the server answers 409.
-    await second.getByTestId('take-test-hand-in').click();
+    // The second tab tries, and the server answers 409. It hydrated the same stored
+    // answers, so it meets the same confirmation.
+    await handIn(second, true);
 
     // It lands on the handed-in state rather than on the generic failure: a 404 or a
     // generic message would make work that is safely in look lost, and would invite

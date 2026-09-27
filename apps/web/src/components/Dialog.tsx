@@ -17,6 +17,18 @@ export type AppDialogProps = Omit<DialogProps, 'title' | 'onClose' | 'children'>
   onClose(): void;
   children?: React.ReactNode;
   actions?: React.ReactNode;
+  /**
+   * The id of the element inside the dialog that carries the sentence a reader
+   * needs on arrival, wired to `aria-describedby`.
+   *
+   * Stated as a prop rather than left to the props spread because a dialog whose
+   * whole point is one sentence — a count, a consequence, a figure — announces
+   * only its title without it, and "the title is the accessible name" is exactly
+   * the reason that sentence would otherwise go unread. Omitted for a dialog whose
+   * body is a set of controls rather than a statement: describing a grid of
+   * buttons as prose reads worse than not describing it at all.
+   */
+  describedBy?: string;
 };
 
 /**
@@ -27,10 +39,27 @@ export type AppDialogProps = Omit<DialogProps, 'title' | 'onClose' | 'children'>
  * Extra MUI Dialog props pass straight through, so a caller can set a width —
  * or a test can mount the overlay inline instead of through a portal.
  */
-export function AppDialog({ open, title, onClose, children, actions, ...rest }: AppDialogProps) {
+export function AppDialog({
+  open,
+  title,
+  onClose,
+  children,
+  actions,
+  describedBy,
+  ...rest
+}: AppDialogProps) {
   const titleId = useId();
   return (
-    <MuiDialog {...rest} open={open} onClose={onClose} aria-labelledby={titleId} fullWidth>
+    <MuiDialog
+      {...rest}
+      open={open}
+      onClose={onClose}
+      aria-labelledby={titleId}
+      // Absent rather than empty when no caller named one: an `aria-describedby`
+      // pointing at nothing is a description that silently never arrives.
+      aria-describedby={describedBy}
+      fullWidth
+    >
       <DialogTitle id={titleId}>{title}</DialogTitle>
       <DialogContent>{children}</DialogContent>
       {actions == null ? null : <DialogActions>{actions}</DialogActions>}

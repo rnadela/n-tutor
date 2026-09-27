@@ -340,6 +340,27 @@ export interface AttemptSubmissionView {
   gradeAt: string;
 }
 
+/**
+ * What closing an Attempt came to, for the caller that closed it.
+ *
+ * The submission view's three fields, plus the one fact only the writer of
+ * `Answer` can state: which Questions of this Practice Test ended up with no
+ * answer row. It is **not** part of any response body — `grading` answers with
+ * `AttemptSubmissionView` and nothing more — because a blank count is a fact
+ * about the paper and this surface tells a child nothing about their work.
+ *
+ * Still no grade of any kind. This says *which* Questions are blank; what a blank
+ * means is the caller's, and the caller is the module that owns grade state
+ * (AD-6, AD-17).
+ */
+export interface AttemptClosure extends AttemptSubmissionView {
+  /**
+   * The blank Questions, in stored ordinal order: every Question on the Practice
+   * Test that the closing transaction wrote no `Answer` row for.
+   */
+  blankQuestionIds: string[];
+}
+
 /** One generated option, in the order it is to be shown. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -897,8 +918,20 @@ export class PracticeTestService {
   }
 
   /**
-   * Hands the child's work in: their raw answers, and the instant the Attempt
-   * closed.
+   * Closes the Attempt inside the caller's transaction: the child's raw answers,
+   * the instant it closed, and which Questions were left blank.
+   *
+   * **Called from `grading`, never mounted here.** Handing in is one transaction
+   * that closes the Attempt *and* records what its blanks mean (AD-4, AD-10), and
+   * grade state is `grading`'s entity and `grading`'s sole write (AD-6, AD-17). So
+   * the route lives over there and this is the half of it `practicetest` owns.
+   * Nothing in this module reads or writes a grade, and the module arrow stays
+   * `grading -> practicetest` with no `forwardRef` and no reversed edge.
+   *
+   * It takes a `tx` rather than opening one, for the reason `admin-audit` and
+   * `parent-account` do: `withTransaction` does not nest, and a cross-module
+   * transaction is a client passed as a parameter. There is therefore no instant at
+   * which an Attempt is handed in and its blanks are unrecorded.
    *
    * **Expiry is decided here, on the server's clock, against the server's own
    * column.** A client claim about expiry never arrives and would never be
@@ -913,95 +946,106 @@ export class PracticeTestService {
    * handed in" is a rule the child is entitled to know about, where a 404 would
    * make a successful hand-in look like a lost one and invite a re-send.
    *
-   * What is written is the **raw** answers and nothing else. A question id that
-   * is not on this Practice Test is ignored rather than refused — a stale id in a
-   * browser's store is not a reason to lose a child's whole paper — and a blank
-   * value is simply a Question left blank, with no row at all. There is no grade
-   * column to write, no score to compute and nothing here that says what a blank
-   * means: Stories 5.4–5.5 own both and extend this route rather than replace it.
+   * What is written here is the **raw** answers and nothing else. A question id
+   * that is not on this Practice Test is ignored rather than refused — a stale id in
+   * a browser's store is not a reason to lose a child's whole paper — and a blank
+   * value is simply a Question left blank, with no row at all. There is still no
+   * grade column on `Answer` and nothing here says what a blank *means*: this method
+   * reports which Questions are blank and the caller decides.
    *
-   * One transaction, so the answers and the closing instant land together: a
-   * submission that wrote half the answers and no `submittedAt` would leave an
-   * Attempt a second press would write twice.
+   * The blanks are computed here because **only the writer of `Answer` knows what it
+   * wrote**. Computing them anywhere else would be a second definition of "blank",
+   * and the two would disagree the first time either the dedupe or the
+   * drop-the-whitespace rule was tuned.
    */
-  async submitAttempt(
+  async closeAttempt(
+    tx: TransactionClient,
     parentAccountId: string,
     studentProfileId: string,
     attemptId: string,
     answers: readonly { questionId: string; value: string }[],
-  ): Promise<AttemptSubmissionView> {
-    return this.prisma.withTransaction(async (tx) => {
-      const attempt = await tx.attempt.findFirst({
-        where: { id: attemptId, parentAccountId, studentProfileId },
-        select: { id: true, practiceTestId: true, expiresAt: true, submittedAt: true },
-      });
-      if (attempt === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
-      if (attempt.submittedAt !== null) throw new ConflictException(ATTEMPT_ALREADY_SUBMITTED);
-
-      const now = new Date();
-      // The comparison, in one place: the server's clock against the server's
-      // column. `expiresAt` null is an untimed Attempt, which never expires.
-      const expired = attempt.expiresAt !== null && now.getTime() > attempt.expiresAt.getTime();
-
-      // **Closed first, and closed conditionally.** `submittedAt: null` is in the
-      // `where`, so exactly one of two concurrent submissions can match — the read
-      // above is a courtesy that gives the common case its sentence early, and *this*
-      // is what makes "a second submission answers 409" true rather than merely
-      // usual. Without it, two submissions arriving together both read `null` under
-      // read-committed isolation, both write answers, and the loser trips
-      // `answer_attemptId_questionId_key` as a 500 instead of the stated refusal.
-      //
-      // Before the answers rather than after, so the loser is refused before it
-      // writes a row: the whole statement is one transaction, so a rollback would
-      // undo them either way, but ordering it this way means the conflict is decided
-      // by the Attempt's own state and never by a collision on someone else's rows.
-      const closed = await tx.attempt.updateMany({
-        where: { id: attempt.id, submittedAt: null },
-        data: { submittedAt: now, expired },
-      });
-      if (closed.count !== 1) throw new ConflictException(ATTEMPT_ALREADY_SUBMITTED);
-
-      // Which Questions are on this Practice Test is a row-dependent fact, so it
-      // is settled here rather than in the DTO. Ids the body names and this set
-      // does not are dropped silently.
-      const onThisTest = new Set(
-        (
-          await tx.practiceTestQuestion.findMany({
-            where: { practiceTestId: attempt.practiceTestId },
-            select: { id: true },
-          })
-        ).map((question) => question.id),
-      );
-
-      // Keyed by question, so a body that named one Question twice writes one row
-      // rather than tripping the unique index and losing the whole submission.
-      // Trimmed for emptiness only — the stored value is exactly what was typed.
-      const byQuestion = new Map<string, string>();
-      for (const answer of answers) {
-        if (!onThisTest.has(answer.questionId)) continue;
-        if (answer.value.trim().length === 0) continue;
-        byQuestion.set(answer.questionId, answer.value);
-      }
-
-      if (byQuestion.size > 0) {
-        await tx.answer.createMany({
-          data: [...byQuestion].map(([questionId, value]) => ({
-            attemptId: attempt.id,
-            questionId,
-            value,
-          })),
-        });
-      }
-
-      return {
-        submittedAt: now.toISOString(),
-        expired,
-        // Judged at the deadline when it had passed, at arrival otherwise. The
-        // non-null assertion is the `expired` guard's: `expired` is only ever true
-        // where `expiresAt` is a date.
-        gradeAt: (expired ? attempt.expiresAt! : now).toISOString(),
-      };
+  ): Promise<AttemptClosure> {
+    const attempt = await tx.attempt.findFirst({
+      where: { id: attemptId, parentAccountId, studentProfileId },
+      select: { id: true, practiceTestId: true, expiresAt: true, submittedAt: true },
     });
+    if (attempt === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+    if (attempt.submittedAt !== null) throw new ConflictException(ATTEMPT_ALREADY_SUBMITTED);
+
+    const now = new Date();
+    // The comparison, in one place: the server's clock against the server's
+    // column. `expiresAt` null is an untimed Attempt, which never expires.
+    const expired = attempt.expiresAt !== null && now.getTime() > attempt.expiresAt.getTime();
+
+    // **Closed first, and closed conditionally.** `submittedAt: null` is in the
+    // `where`, so exactly one of two concurrent submissions can match — the read
+    // above is a courtesy that gives the common case its sentence early, and *this*
+    // is what makes "a second submission answers 409" true rather than merely
+    // usual. Without it, two submissions arriving together both read `null` under
+    // read-committed isolation, both write answers, and the loser trips
+    // `answer_attemptId_questionId_key` as a 500 instead of the stated refusal.
+    //
+    // Before the answers rather than after, so the loser is refused before it
+    // writes a row: the whole statement is one transaction, so a rollback would
+    // undo them either way, but ordering it this way means the conflict is decided
+    // by the Attempt's own state and never by a collision on someone else's rows.
+    const closed = await tx.attempt.updateMany({
+      where: { id: attempt.id, submittedAt: null },
+      data: { submittedAt: now, expired },
+    });
+    if (closed.count !== 1) throw new ConflictException(ATTEMPT_ALREADY_SUBMITTED);
+
+    // Which Questions are on this Practice Test is a row-dependent fact, so it
+    // is settled here rather than in the DTO. Ids the body names and this set
+    // does not are dropped silently.
+    //
+    // Read in stored ordinal order, so the blank list below comes back in the
+    // order the child was shown the Questions rather than in whatever order the
+    // planner happened to return rows in.
+    const questionsOnThisTest = (
+      await tx.practiceTestQuestion.findMany({
+        where: { practiceTestId: attempt.practiceTestId },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true },
+      })
+    ).map((question) => question.id);
+    const onThisTest = new Set(questionsOnThisTest);
+
+    // Keyed by question, so a body that named one Question twice writes one row
+    // rather than tripping the unique index and losing the whole submission.
+    // Trimmed for emptiness only — the stored value is exactly what was typed.
+    const byQuestion = new Map<string, string>();
+    for (const answer of answers) {
+      if (!onThisTest.has(answer.questionId)) continue;
+      if (answer.value.trim().length === 0) continue;
+      byQuestion.set(answer.questionId, answer.value);
+    }
+
+    if (byQuestion.size > 0) {
+      await tx.answer.createMany({
+        data: [...byQuestion].map(([questionId, value]) => ({
+          attemptId: attempt.id,
+          questionId,
+          value,
+        })),
+      });
+    }
+
+    return {
+      submittedAt: now.toISOString(),
+      expired,
+      // Judged at the deadline when it had passed, at arrival otherwise. The
+      // non-null assertion is the `expired` guard's: `expired` is only ever true
+      // where `expiresAt` is a date.
+      gradeAt: (expired ? attempt.expiresAt! : now).toISOString(),
+      // Every Question on this test that `byQuestion` — the set actually written
+      // above — has no key for. A body that named a Question twice leaves it
+      // unblank once; a body that named one of another test's Questions does not
+      // make that Question blank here, because it is not on this test at all; and
+      // a value trimmed away to nothing leaves its Question blank, because no row
+      // was written for it.
+      blankQuestionIds: questionsOnThisTest.filter((id) => !byQuestion.has(id)),
+    };
   }
 
   /**

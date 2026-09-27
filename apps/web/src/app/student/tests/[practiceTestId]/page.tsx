@@ -10,7 +10,7 @@ import { AppDialog } from '@/components/Dialog';
 import { RichText } from '@/components/RichText';
 import { Screen } from '@/components/Screen';
 import { studentCopy } from '@/copy/student';
-import { progressOf } from '@/lib/answers';
+import { firstNotAnsweredIndex, notAnswered, progressOf } from '@/lib/answers';
 import { CLOCK_TICK_MS, WARNING_VISIBLE_MS, remainingMs, warningFor } from '@/lib/attempt-clock';
 import {
   attemptStorage,
@@ -31,6 +31,13 @@ import { deviceIsUnbound } from '../../page';
 import { AnswerInput } from '../../_components/AnswerInput';
 import { AttemptTimer } from '../../_components/AttemptTimer';
 import { QuestionMap } from '../../_components/QuestionMap';
+
+/**
+ * The id the confirmation's count sentence carries, so `aria-describedby` can name
+ * it. A constant rather than a `useId`, because exactly one of these is ever
+ * mounted and a stable id is what the e2e can point at.
+ */
+const CONFIRM_NOTE_ID = 'take-test-confirm-note';
 
 /**
  * Take Test: one Question at a time, with a map of the whole test beside it, a
@@ -59,8 +66,17 @@ import { QuestionMap } from '../../_components/QuestionMap';
  *
  * **Nothing here says anything about being right.** The view it renders carries no
  * answer key, the map states only Answered or Not answered, and handing in answers
- * with two instants and a boolean about *time* rather than about work. Grading,
- * scores and what a blank means are later stories'.
+ * with two instants and a boolean about *time* rather than about work. Grading and
+ * scores are later stories'.
+ *
+ * **The one thing a person's press now passes through is a question about their own
+ * blanks — and it is a question, not a verdict.** When Questions are still not
+ * answered, Hand in opens a confirmation that names how many, in the progress
+ * vocabulary, and offers the way back to the question map. It states nothing about
+ * correctness, because nothing here could. It sits inside `handIn` and nowhere else:
+ * `send(true)` — the deadline effect and the latch take — never reaches it, because
+ * a dialog on an automatic path is a dialog nobody is there to answer, and it would
+ * hold a child's work back past a deadline the server has already judged.
  *
  * Navigation is linear *and* random-access: Back and Next walk the test, and the
  * map is the escape hatch (UX-DR39). The map is a persistent rail from the `md`
@@ -94,6 +110,14 @@ export default function TakeTestPage() {
   const [index, setIndex] = useState(0);
   /** Whether the overlay form of the map is open. Below `md` only. */
   const [mapOpen, setMapOpen] = useState(false);
+  /**
+   * Whether the child is being asked about the Questions they have not answered.
+   *
+   * Set in exactly one place — `handIn`, a person's press — and never by the
+   * deadline effect or the reconnect take. Nothing is dispatched while it is true:
+   * it is the press held, not a request in flight.
+   */
+  const [confirmingHandIn, setConfirmingHandIn] = useState(false);
 
   /**
    * Which child this device is bound to, as the session read answered.
@@ -208,6 +232,7 @@ export default function TakeTestPage() {
     setAnswers({});
     setIndex(0);
     setMapOpen(false);
+    setConfirmingHandIn(false);
     setAttempt(null);
     setSyncedAt(null);
     setHydratedFor(null);
@@ -445,6 +470,16 @@ export default function TakeTestPage() {
    * for the two to drift apart on.
    */
   const progress = useMemo(() => progressOf(questions, answers), [questions, answers]);
+  /**
+   * The Questions that are not answered, derived once.
+   *
+   * The same predicate `progress` is built from and memoized on the same two
+   * inputs, so the figure the map states and the figure the confirmation names are
+   * one derivation recomputed at one cadence — never a second pass taken in the
+   * middle of a render, which is how the dialog and the map would come to disagree
+   * about the very Question the child is being sent back to.
+   */
+  const blanks = useMemo(() => notAnswered(questions, answers), [questions, answers]);
 
   /**
    * How much time is left, computed from the server's instants through the offset.
@@ -503,8 +538,8 @@ export default function TakeTestPage() {
    * answers. A ref is the honest way to say "whatever is current at the moment it
    * fires" — the alternative is re-attaching the listener on every keystroke.
    */
-  const pending = useRef({ attempt, profileId, answers, remaining, submitState });
-  pending.current = { attempt, profileId, answers, remaining, submitState };
+  const pending = useRef({ attempt, profileId, answers, blanks, remaining, submitState });
+  pending.current = { attempt, profileId, answers, blanks, remaining, submitState };
 
   /** Whether a submission is out right now, known synchronously. See `send`. */
   const inFlight = useRef(false);
@@ -597,13 +632,17 @@ export default function TakeTestPage() {
   );
 
   /**
-   * What a press of Hand in does.
+   * What a press of Hand in comes to, once there is nothing left to ask about it.
    *
    * The decision is `attempt-submit`'s, so "offline refuses, expired-and-offline
    * waits, online sends" is a rule with a spec rather than a branch in a handler.
    * Arming the latch here is what makes the wait survive a reload.
+   *
+   * Split from the press itself so the confirmation is a gate in front of it rather
+   * than a fifth `SubmitAction`: what a press *decides* is unchanged by this story,
+   * and both ways out of the dialog reach exactly this, once.
    */
-  const handIn = useCallback(() => {
+  const decideHandIn = useCallback(() => {
     const { attempt: current, profileId: profile, remaining: left } = pending.current;
     if (current === null) return;
     const expiredAt = left === 0 ? Date.now() : null;
@@ -639,6 +678,50 @@ export default function TakeTestPage() {
     // handling, and nothing re-sends on its own.
     setSubmitNote(studentCopy.takeTest.offlineSubmit);
   }, [send]);
+
+  /**
+   * A person's press of Hand in, and **the only place the confirmation is opened**.
+   *
+   * With Questions still not answered it asks about them and dispatches nothing:
+   * the press is held, not queued. With nothing left blank it decides straight
+   * away, so a finished paper still goes up on one press.
+   *
+   * **Not once the time is up.** At `remaining === 0` there is nothing to go back
+   * and finish: the server judges the work as of the expiry instant however long
+   * the child spends after it, so a dialog offering to return to the questions
+   * would be offering something that no longer exists — and the deadline has
+   * already been decided, by the server, against its own column. This is the state
+   * the control is still live in offline at the deadline, which is exactly where
+   * that offer would be worst.
+   *
+   * The deadline effect and the latch take call `send` directly and can never reach
+   * this function: there would be nobody there to answer a dialog, and a gate on
+   * those paths would hold a child's work back past a deadline the server has
+   * already decided — and would turn "exactly one dispatch on reconnect" into none.
+   */
+  const handIn = useCallback(() => {
+    const { blanks: left, remaining: timeLeft } = pending.current;
+    if (timeLeft !== 0 && left.length > 0) {
+      setConfirmingHandIn(true);
+      return;
+    }
+    decideHandIn();
+  }, [decideHandIn]);
+
+  /**
+   * The confirmation closes the moment the Attempt is no longer open.
+   *
+   * A dialog is a question held in front of a *person's* press, and the automatic
+   * paths do not go through it: the deadline effect and the reconnect latch move
+   * `submitState` to `'sending'` on their own, and a confirmation still up over a
+   * dispatch already on the wire would be asking a child whether to hand in work
+   * that is already going. Closing on anything but `'open'` covers the failure
+   * return to `'open'` too — a press that failed leaves the child pressing again,
+   * which asks the question afresh against whatever they have answered by then.
+   */
+  useEffect(() => {
+    if (submitState !== 'open') setConfirmingHandIn(false);
+  }, [submitState]);
 
   /**
    * The deadline reached.
@@ -962,6 +1045,15 @@ export default function TakeTestPage() {
         <QuestionMap progress={progress} currentIndex={index} onJump={jumpTo} />
       </Box>
 
+      {/* The overlay form of the map, opened by its own control and by nothing else.
+          **Not by the way back out of the confirmation**: above `md` the rail is
+          already permanently on screen, so raising this would be a modal duplicate of
+          a map the child can already see, which they would have to dismiss before
+          they could type. Hiding it with CSS instead would be worse still — an open
+          MUI dialog marks the rest of the app `aria-hidden` and traps focus whatever
+          its `display` says, so an invisible one hides the whole screen from a screen
+          reader. The opener below `md` is the one thing that opens it, and CSS
+          already decides where that opener exists. */}
       <AppDialog
         open={mapOpen}
         title={studentCopy.takeTest.mapHeading}
@@ -977,6 +1069,65 @@ export default function TakeTestPage() {
         }
       >
         <QuestionMap progress={progress} currentIndex={index} onJump={jumpTo} />
+      </AppDialog>
+
+      {/* The question put in front of a person's press, and never in front of an
+          automatic one. It names how many Questions are not answered — in the
+          progress vocabulary, with the figure handed to the copy — and says nothing
+          about correctness, because nothing here could.
+
+          Two ways out and a dismissal. Escape and a backdrop click route through
+          `onClose`, which hands nothing in: dismissing is the child changing their
+          mind, and the Attempt stays open with every answer where it was. Neither
+          action dispatches anything of its own — "hand in anyway" runs the same
+          decision an unblank paper's press runs, exactly once. */}
+      <AppDialog
+        open={confirmingHandIn}
+        title={studentCopy.takeTest.confirmHandInTitle}
+        // The sentence naming the count is the whole reason this dialog exists, so
+        // it is what a screen reader hears on arrival rather than the heading alone.
+        describedBy={CONFIRM_NOTE_ID}
+        onClose={() => setConfirmingHandIn(false)}
+        actions={
+          <>
+            <Button
+              data-testid="take-test-confirm-back"
+              onClick={() => {
+                setConfirmingHandIn(false);
+                // Back to the questions: the child standing on the first one that is
+                // not answered, and the map showing it as where they are. The index
+                // comes from the same predicate the count did, so the dialog and the
+                // map can never point at different Questions.
+                //
+                // Nothing is *opened* here. The map is already on screen as the rail
+                // from `md` up, and below `md` it is one press of its own control
+                // away — raising the overlay would put a modal over the very Question
+                // the child was just sent to, and above `md` it would be a duplicate
+                // of a map they can already see.
+                const first = firstNotAnsweredIndex(questions, answers);
+                if (first !== null) setIndex(first);
+              }}
+              sx={{ minHeight: comfortableDensity.tapTarget }}
+            >
+              {studentCopy.takeTest.confirmHandInBack}
+            </Button>
+            <Button
+              variant="contained"
+              data-testid="take-test-confirm-hand-in"
+              onClick={() => {
+                setConfirmingHandIn(false);
+                decideHandIn();
+              }}
+              sx={{ minHeight: comfortableDensity.tapTarget }}
+            >
+              {studentCopy.takeTest.confirmHandInAnyway}
+            </Button>
+          </>
+        }
+      >
+        <Typography id={CONFIRM_NOTE_ID} data-testid="take-test-confirm-note">
+          {studentCopy.takeTest.confirmHandIn(blanks.length)}
+        </Typography>
       </AppDialog>
     </Box>
   );

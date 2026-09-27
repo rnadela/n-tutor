@@ -61,6 +61,9 @@ describe('moving from one practice test to another', () => {
     expect(reset).toContain('setAnswers({})');
     expect(reset).toContain('setIndex(0)');
     expect(reset).toContain('setMapOpen(false)');
+    // The question about this test's blanks with them: a confirmation left open
+    // across a move would be asking about the previous test's Questions.
+    expect(reset).toContain('setConfirmingHandIn(false)');
     // And the Attempt with them: its deadline belongs to the test it was opened
     // on, and counting it down on another one would be the wrong clock entirely.
     expect(reset).toContain('setAttempt(null)');
@@ -110,12 +113,13 @@ describe('what this story is not', () => {
     }
   });
 
-  it('asks nothing about blanks and assigns nothing to them', () => {
-    // Story 5.4 owns the confirmation that names blank questions and the
-    // `unanswered`-versus-`incorrect` decision. This story's submit records the raw
-    // answers and closes the Attempt, and states nothing about what a blank means.
+  it('asks about blanks without ever assigning a state to one', () => {
+    // Since Story 5.4 the screen *does* ask: a person's press passes through a
+    // question naming how many Questions are not answered. What it still never does
+    // is say what a blank means — `Unanswered` is a grade state, written server-side
+    // inside the submit transaction, and it is not a word this surface holds.
     expect(CODE).not.toMatch(/unanswered/iu);
-    expect(CODE).not.toMatch(/blankCount|confirmBlank/iu);
+    expect(CODE).toContain('notAnswered(questions, answers)');
   });
 
   it('holds no retake, no attempt list and no second open Attempt', () => {
@@ -445,5 +449,161 @@ describe('what the screen does with a profile it never learned', () => {
     expect(CODE).toContain(
       'clearAttemptState(storage.current, profileId, submittedAttemptToClear)',
     );
+  });
+});
+
+/**
+ * The source between two markers, with **both markers proved present first**.
+ *
+ * `indexOf` answers `-1` for a marker that has moved or been renamed, and a slice
+ * taken from it is either empty or most of the file — so a `not.toMatch` over it
+ * goes green on nothing and a `toContain` goes green on everything. Every
+ * region-scoped claim below is only a claim while its own markers exist, and this
+ * is what makes that true rather than assumed.
+ */
+function regionOf(from: string, to: string): string {
+  expect(CODE).toContain(from);
+  expect(CODE).toContain(to);
+  const start = CODE.indexOf(from);
+  const end = CODE.indexOf(to, start);
+  expect(end).toBeGreaterThan(start);
+  return CODE.slice(start, end);
+}
+
+describe('the question put in front of a person’s press', () => {
+  it('is opened in `handIn` and nowhere else', () => {
+    const opens = CODE.match(/setConfirmingHandIn\(true\)/gu) ?? [];
+    expect(opens).toHaveLength(1);
+    // The one place the dialog is raised is inside a handler a child's finger
+    // reaches.
+    const press = regionOf('const handIn = useCallback(() => {', '}, [decideHandIn]);');
+    expect(press).toContain('setConfirmingHandIn(true)');
+    // And it holds the press rather than queueing anything: no dispatch in the
+    // branch that asks.
+    expect(press).toMatch(/setConfirmingHandIn\(true\);\s*return;/u);
+    expect(press).not.toMatch(/send\(|parentApi/u);
+  });
+
+  it('asks from the one derivation the map is drawn from, taken once', () => {
+    // `blanks` is memoized beside `progress` on the same two inputs and the same
+    // predicate, so the figure the dialog names and the figure the map states are
+    // one derivation rather than two that could drift apart mid-render.
+    expect(CODE).toContain('const blanks = useMemo(() => notAnswered(questions, answers)');
+    expect(CODE).toContain('confirmHandIn(blanks.length)');
+    // Not recomputed inline anywhere: exactly one call of the rule in the file.
+    expect(CODE.match(/notAnswered\(/gu)).toHaveLength(1);
+  });
+
+  it('does not ask once the time is up, because there is nothing to go back to', () => {
+    // At the deadline the server judges the work as of the expiry instant however
+    // long the child spends after it, so an offer to go back and finish would be an
+    // offer of something that no longer exists — and the control is still live in
+    // exactly that state offline.
+    const press = regionOf('const handIn = useCallback(() => {', '}, [decideHandIn]);');
+    expect(press).toContain('remaining: timeLeft');
+    expect(press).toMatch(/if \(timeLeft !== 0 && left\.length > 0\)/u);
+  });
+
+  it('closes itself the moment the Attempt is no longer open', () => {
+    // The automatic paths move `submitState` on their own, and a confirmation still
+    // up over a dispatch already on the wire would be asking about work that is
+    // already going.
+    expect(CODE).toMatch(
+      /if \(submitState !== 'open'\) setConfirmingHandIn\(false\);\s*\}, \[submitState\]\);/u,
+    );
+  });
+
+  it('is never reachable from the deadline effect or the reconnect take', () => {
+    // A dialog on an automatic path is a dialog nobody is there to answer, and it
+    // would hold a child's work back past a deadline the server has already judged.
+    const deadline = regionOf('if (remaining !== 0', '}, [remaining,');
+    expect(deadline).not.toMatch(/onfirmingHandIn/u);
+    const reconnect = regionOf('if (!online || attempt === null', '}, [online,');
+    expect(reconnect).not.toMatch(/onfirmingHandIn/u);
+  });
+
+  it('leaves `send(true)` reachable without it', () => {
+    // Both automatic dispatches call `send` directly; neither goes through the
+    // press, so neither can be gated by a flag it never reads.
+    const calls = CODE.match(/.{0,120}send\(true\)/gsu) ?? [];
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(call).not.toMatch(/onfirmingHandIn/u);
+  });
+
+  it('offers a way back that issues no request and a way through that decides once', () => {
+    expect(CODE).toContain('data-testid="take-test-confirm-back"');
+    expect(CODE).toContain('data-testid="take-test-confirm-hand-in"');
+    // The way back navigates and opens the map. It touches nothing about sending.
+    const back = regionOf(
+      'data-testid="take-test-confirm-back"',
+      'data-testid="take-test-confirm-hand-in"',
+    );
+    expect(back).toContain('firstNotAnsweredIndex(questions, answers)');
+    expect(back).not.toMatch(/send\(|decideHandIn|parentApi/u);
+    // And it raises no second map over the Question it just sent the child to.
+    expect(back).not.toContain('setMapOpen(true)');
+    // The way through runs the existing decision path, and only that.
+    expect(CODE).toMatch(/setConfirmingHandIn\(false\);\s*decideHandIn\(\);/u);
+    // Dismissing hands nothing in either.
+    expect(CODE).toContain('onClose={() => setConfirmingHandIn(false)}');
+  });
+
+  it('is described by the sentence that names the count, not by its heading alone', () => {
+    // A dialog whose whole point is one figure announces only its title without an
+    // `aria-describedby`, which is the one sentence a child arriving needs.
+    expect(CODE).toContain("const CONFIRM_NOTE_ID = 'take-test-confirm-note'");
+    expect(CODE).toContain('describedBy={CONFIRM_NOTE_ID}');
+    expect(CODE).toContain('id={CONFIRM_NOTE_ID}');
+  });
+
+  it('is built on the plain dialog primitive, not the destructive one', () => {
+    // Nothing is destroyed and no password is asked for: this is a question about
+    // what is finished.
+    expect(CODE).not.toMatch(/DestructiveConfirmDialog|password/iu);
+    expect(CODE).toContain('title={studentCopy.takeTest.confirmHandInTitle}');
+  });
+
+  it('never raises the overlay map where the rail is already on screen', () => {
+    // The overlay is opened by its own control and by nothing else, and CSS already
+    // decides where that control exists. Hiding an *open* dialog with CSS instead
+    // would be worse than the duplicate it removed: MUI marks the rest of the app
+    // `aria-hidden` and traps focus whatever the dialog's `display` says.
+    expect(CODE.match(/setMapOpen\(true\)/gu)).toHaveLength(1);
+    const opener = regionOf('data-testid="take-test-map-open"', '{studentCopy.takeTest.openMap}');
+    expect(opener).toContain('setMapOpen(true)');
+    expect(opener).toContain("display: { xs: 'inline-flex', md: 'none' }");
+    expect(CODE).not.toMatch(/useMediaQuery|matchMedia/u);
+  });
+});
+
+describe('what the confirmation says', () => {
+  it('names the count in the progress vocabulary, and never a grade word', () => {
+    const lines = [
+      studentCopy.takeTest.confirmHandInTitle,
+      studentCopy.takeTest.confirmHandIn(1),
+      studentCopy.takeTest.confirmHandIn(4),
+      studentCopy.takeTest.confirmHandInBack,
+      studentCopy.takeTest.confirmHandInAnyway,
+    ];
+    for (const line of lines) {
+      expect(line).not.toContain('!');
+      expect(line).not.toMatch(/\b(4\d\d|5\d\d)\b/u);
+      // `Unanswered` reads as a grade state, and nothing here has graded anything.
+      expect(line).not.toMatch(/unanswered/iu);
+      expect(line).not.toMatch(/correct|wrong|score|grade|right/iu);
+    }
+    expect(studentCopy.takeTest.confirmHandIn(4)).toContain('4 questions');
+    expect(studentCopy.takeTest.confirmHandIn(4)).toContain('not answered');
+  });
+
+  it('says `1 question` rather than `1 questions`', () => {
+    expect(studentCopy.takeTest.confirmHandIn(1)).toContain('1 question that');
+    expect(studentCopy.takeTest.confirmHandIn(1)).not.toContain('1 questions');
+  });
+
+  it('addresses the child and offers the way back before the way through', () => {
+    expect(studentCopy.takeTest.confirmHandIn(2)).toMatch(/^You\b/u);
+    expect(studentCopy.takeTest.confirmHandInBack).toMatch(/questions/u);
+    expect(studentCopy.takeTest.confirmHandInAnyway).toMatch(/^Hand in/u);
   });
 });

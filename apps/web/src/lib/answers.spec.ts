@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { answeredCount, isAnswered, progressOf, type QuestionRef } from './answers';
+import {
+  answeredCount,
+  firstNotAnsweredIndex,
+  isAnswered,
+  notAnswered,
+  progressOf,
+  type QuestionRef,
+} from './answers';
 
 const ORDER: QuestionRef[] = [
   { id: 'q-a', ordinal: 1 },
@@ -75,6 +82,63 @@ describe('the order the map is drawn in', () => {
     const order = [...ORDER];
     progressOf(order, { 'q-a': 'x' });
     answeredCount(order, { 'q-a': 'x' });
+    expect(order).toEqual(ORDER);
+  });
+});
+
+describe('which Questions are not answered, and which one to go back to', () => {
+  it('names as many as the map states in its own summary, for the same input', () => {
+    // The dialog's count and the map's figure are the same claim about the same
+    // input. Derived from one predicate here so they cannot drift apart there.
+    const answers = { 'q-a': '3/4' };
+    const states = progressOf(ORDER, answers);
+    expect(notAnswered(ORDER, answers)).toHaveLength(states.length - answeredCount(ORDER, answers));
+    expect(notAnswered(ORDER, answers).map((question) => question.ordinal)).toEqual([2, 3]);
+  });
+
+  it('counts a Question answered and then cleared, because to a child it is not answered', () => {
+    expect(notAnswered(ORDER, { 'q-a': '3/4', 'q-b': '' }).map((q) => q.id)).toEqual([
+      'q-b',
+      'q-c',
+    ]);
+  });
+
+  it('counts whitespace as not answered', () => {
+    expect(
+      notAnswered(ORDER, { 'q-a': '   ', 'q-b': '\n\t', 'q-c': 'x' }).map((q) => q.id),
+    ).toEqual(['q-a', 'q-b']);
+  });
+
+  it('is empty when every Question in the order is answered', () => {
+    expect(notAnswered(ORDER, { 'q-a': '1', 'q-b': '2', 'q-c': '3' })).toEqual([]);
+    expect(firstNotAnsweredIndex(ORDER, { 'q-a': '1', 'q-b': '2', 'q-c': '3' })).toBeNull();
+  });
+
+  it('points at the earliest one in the order given, never merely at one of them', () => {
+    // The order given, not the ordinals: the screen navigates by index.
+    expect(firstNotAnsweredIndex(ORDER, { 'q-a': '1', 'q-c': '3' })).toBe(1);
+    expect(firstNotAnsweredIndex(ORDER, {})).toBe(0);
+    const shuffled: QuestionRef[] = [
+      { id: 'q-c', ordinal: 3 },
+      { id: 'q-a', ordinal: 1 },
+      { id: 'q-b', ordinal: 2 },
+    ];
+    expect(firstNotAnsweredIndex(shuffled, { 'q-c': 'x' })).toBe(1);
+  });
+
+  it('is unmoved by an answer held for a Question that is not in the order', () => {
+    // A stale entry can neither hide a blank nor invent one.
+    expect(notAnswered(ORDER, { 'q-elsewhere': 'x' })).toHaveLength(ORDER.length);
+    expect(firstNotAnsweredIndex(ORDER, { 'q-elsewhere': 'x' })).toBe(0);
+    expect(
+      firstNotAnsweredIndex(ORDER, { 'q-a': '1', 'q-b': '2', 'q-c': '3', 'q-elsewhere': '' }),
+    ).toBeNull();
+  });
+
+  it('does not mutate what it was handed', () => {
+    const order = [...ORDER];
+    notAnswered(order, { 'q-a': 'x' });
+    firstNotAnsweredIndex(order, { 'q-a': 'x' });
     expect(order).toEqual(ORDER);
   });
 });

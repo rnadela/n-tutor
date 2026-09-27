@@ -201,6 +201,35 @@ describe('the dialog primitive', () => {
     expect(markup).toContain('Delete Ada?');
   });
 
+  it('describes itself by the sentence a caller names, and by nothing when none is', () => {
+    // A dialog whose whole point is one sentence — a count, a consequence, a figure
+    // — announces only its title without this, which is the one thing a reader
+    // arriving needed.
+    const described = renderOverlay(
+      <AppDialog
+        open
+        title="Hand in now?"
+        describedBy="the-count"
+        onClose={noop}
+        disablePortal
+        keepMounted
+      >
+        <p id="the-count">You have 2 questions that are not answered.</p>
+      </AppDialog>,
+    );
+    expect(described).toContain('aria-describedby="the-count"');
+    expect(described).toContain('id="the-count"');
+
+    // Absent rather than empty when no caller named one: an `aria-describedby`
+    // pointing at nothing is a description that silently never arrives.
+    const plain = renderOverlay(
+      <AppDialog open title="Your questions" onClose={noop} disablePortal keepMounted>
+        body
+      </AppDialog>,
+    );
+    expect(plain).not.toContain('aria-describedby');
+  });
+
   it('carries the destructive intent as an outlined error button, never a fill', () => {
     const markup = renderOverlay(
       <DestructiveActions password="hunter2" busy={false} onCancel={noop} onConfirm={noop} />,

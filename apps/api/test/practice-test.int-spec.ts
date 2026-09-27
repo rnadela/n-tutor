@@ -3852,5 +3852,273 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
         expect(serialized).not.toContain(ready.studentProfileId);
       }
     });
+
+    // --- What a blank means, once the work is in ---------------------------
+    //
+    // Story 5.4's own cases. Every one of them goes over the **unchanged** HTTP
+    // path: the route moved from `practicetest` into `grading` and nothing about
+    // its contract did, which is why the cases above still pin it untouched.
+    //
+    // A grade row is a fact no student-scoped response carries, so it is read
+    // straight from the table — the only place it can be seen.
+
+    /** This Attempt's grade rows, by Question. Nothing on any surface shows one. */
+    async function gradesOf(attemptId: string): Promise<Map<string, string>> {
+      const rows = await h.prisma.questionGrade.findMany({
+        where: { attemptId },
+        select: { questionId: true, state: true },
+      });
+      return new Map(rows.map((row) => [row.questionId, row.state]));
+    }
+
+    it('records one Unanswered per blank Question on an untimed hand-in, and none for an answered one', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const [answered, ...blanks] = questionIds;
+      expect(blanks.length).toBeGreaterThan(0);
+
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: answered!, value: '3/4' },
+      ]).expect(200);
+
+      // Persisted, not derived: FR-37 forbids reading a blank off an empty answer
+      // field at display time, because a blank on an Attempt whose time ran out
+      // means something else entirely.
+      const grades = await gradesOf(attempt.body.id);
+      expect(grades.size).toBe(blanks.length);
+      for (const blank of blanks) expect(grades.get(blank)).toBe('Unanswered');
+      // The Question that was answered carries no grade at all: nothing here judged
+      // it, and a row saying so would be a verdict this story does not make.
+      expect(grades.has(answered!)).toBe(false);
+      // And not one of the other three literals was written anywhere.
+      expect([...grades.values()]).toEqual(blanks.map(() => 'Unanswered'));
+    });
+
+    it('records the same rows on a timed test whose deadline has not passed', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      const response = await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'done' },
+      ]).expect(200);
+
+      // Timed or untimed makes no difference while there was still time: what
+      // decides is `expired`, and the server said false.
+      expect(response.body.expired).toBe(false);
+      const grades = await gradesOf(attempt.body.id);
+      expect(grades.size).toBe(questionIds.length - 1);
+      for (const blank of questionIds.slice(1)) expect(grades.get(blank)).toBe('Unanswered');
+    });
+
+    it('records no grade row at all when every Question was answered', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      await submitAttempt(
+        cookie,
+        attempt.body.id,
+        questionIds.map((questionId, position) => ({ questionId, value: `answer ${position}` })),
+      ).expect(200);
+
+      // There is no blank to record, and nothing else in this story writes a row.
+      expect(await h.prisma.questionGrade.count({ where: { attemptId: attempt.body.id } })).toBe(0);
+      expect(await h.prisma.answer.count({ where: { attemptId: attempt.body.id } })).toBe(
+        questionIds.length,
+      );
+    });
+
+    it('records one Unanswered per Question when the body answers nothing', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      // `[]` is a legitimate hand-in: a child may hand a blank paper in, having
+      // been asked about it on the screen first.
+      await submitAttempt(cookie, attempt.body.id, []).expect(200);
+
+      expect(await h.prisma.answer.count({ where: { attemptId: attempt.body.id } })).toBe(0);
+      const grades = await gradesOf(attempt.body.id);
+      expect(grades.size).toBe(questionIds.length);
+      for (const questionId of questionIds) expect(grades.get(questionId)).toBe('Unanswered');
+    });
+
+    it('records no grade row of any kind once the deadline has passed', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const deadline = new Date(Date.now() - 60_000);
+      await h.prisma.attempt.update({
+        where: { id: attempt.body.id },
+        data: { expiresAt: deadline },
+      });
+
+      const response = await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'entered before the outage' },
+      ]).expect(200);
+
+      // FR-37 grades the blanks of an Attempt whose time ran out `Incorrect`, and
+      // that verdict is Story 5.5's to make. Nothing is written here, so nothing
+      // has to be corrected later.
+      expect(response.body.expired).toBe(true);
+      expect(response.body.gradeAt).toBe(deadline.toISOString());
+      expect(await h.prisma.questionGrade.count({ where: { attemptId: attempt.body.id } })).toBe(0);
+    });
+
+    it('counts a whitespace-only value as a blank and grades it Unanswered', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      // Dropped by the write path as today — and the Question it named is blank,
+      // because a field emptied back to spaces is a Question left blank.
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: '   ' },
+        { questionId: questionIds[1]!, value: 'real' },
+      ]).expect(200);
+
+      expect(
+        await h.prisma.answer.findMany({
+          where: { attemptId: attempt.body.id },
+          select: { questionId: true },
+        }),
+      ).toEqual([{ questionId: questionIds[1]! }]);
+      const grades = await gradesOf(attempt.body.id);
+      expect(grades.get(questionIds[0]!)).toBe('Unanswered');
+      expect(grades.has(questionIds[1]!)).toBe(false);
+      expect(grades.size).toBe(questionIds.length - 1);
+    });
+
+    it('lets a stale foreign question id neither write an answer nor suppress a real blank', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const strangers = await releasedForChild(null);
+
+      // A stale id in a browser's store names a Question that is not on this test,
+      // so it writes nothing — and it cannot make any Question of *this* test look
+      // answered either. Which Questions are blank is the server's own subtraction.
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: strangers.questionIds[0]!, value: 'from another test' },
+        { questionId: randomUUID(), value: 'from nowhere' },
+      ]).expect(200);
+
+      expect(await h.prisma.answer.count({ where: { attemptId: attempt.body.id } })).toBe(0);
+      const grades = await gradesOf(attempt.body.id);
+      expect(grades.size).toBe(questionIds.length);
+      for (const questionId of questionIds) expect(grades.get(questionId)).toBe('Unanswered');
+      // And no row was written against a Question of the other child's test.
+      expect(grades.has(strangers.questionIds[0]!)).toBe(false);
+    });
+
+    it('writes one answer and no blank for a Question the body names twice', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const [twice, ...blanks] = questionIds;
+
+      // A browser that restated one Question twice is not a submission to lose: the
+      // write path keys by Question, so the last value stands as one row — and that
+      // Question is answered, so it is not among the blanks the subtraction finds.
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: twice!, value: 'first' },
+        { questionId: twice!, value: 'second' },
+      ]).expect(200);
+
+      const answers = await h.prisma.answer.findMany({
+        where: { attemptId: attempt.body.id },
+        select: { questionId: true, value: true },
+      });
+      expect(answers).toEqual([{ questionId: twice!, value: 'second' }]);
+      const grades = await gradesOf(attempt.body.id);
+      expect(grades.has(twice!)).toBe(false);
+      expect(grades.size).toBe(blanks.length);
+      for (const blank of blanks) expect(grades.get(blank)).toBe('Unanswered');
+    });
+
+    it('leaves exactly one set of grade rows when two hand-ins race, and refuses the loser', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      // Both in flight together. The close is conditional, so exactly one
+      // transaction closes the Attempt — and the other rolls back before it could
+      // write a grade row, which is what keeps the unique index from surfacing as
+      // a 500 in place of the stated refusal.
+      const [first, second] = await Promise.all([
+        submitAttempt(cookie, attempt.body.id, [{ questionId: questionIds[0]!, value: 'one' }]),
+        submitAttempt(cookie, attempt.body.id, [{ questionId: questionIds[0]!, value: 'two' }]),
+      ]);
+
+      expect([first.status, second.status].sort()).toEqual([200, 409]);
+      const loser = first.status === 409 ? first : second;
+      expect(loser.body.message).toBe(ATTEMPT_ALREADY_SUBMITTED);
+      const grades = await gradesOf(attempt.body.id);
+      expect(grades.size).toBe(questionIds.length - 1);
+      for (const blank of questionIds.slice(1)) expect(grades.get(blank)).toBe('Unanswered');
+    });
+
+    it('re-refuses a second hand-in without rewriting the grade rows the first wrote', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'kept' },
+      ]).expect(200);
+      const stored = await h.prisma.questionGrade.findMany({
+        where: { attemptId: attempt.body.id },
+        select: { id: true, questionId: true, state: true, updatedAt: true },
+        orderBy: { questionId: 'asc' },
+      });
+
+      const again = await submitAttempt(cookie, attempt.body.id, []).expect(409);
+
+      expect(again.body.message).toBe(ATTEMPT_ALREADY_SUBMITTED);
+      // The same rows, down to the ids and the update instants: the refusal comes
+      // before anything is written, so nothing was re-written.
+      expect(
+        await h.prisma.questionGrade.findMany({
+          where: { attemptId: attempt.body.id },
+          select: { id: true, questionId: true, state: true, updatedAt: true },
+          orderBy: { questionId: 'asc' },
+        }),
+      ).toEqual(stored);
+    });
+
+    it('carries no grade, state, score or rationale on the hand-in it answers with', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+
+      // Every Question blank, so the grade rows definitely exist — and the body
+      // still says nothing about them. Asserted over the raw JSON rather than field
+      // by field, so a key a later edit adds is caught too.
+      const response = await submitAttempt(cookie, attempt.body.id, []).expect(200);
+
+      expect(await h.prisma.questionGrade.count({ where: { attemptId: attempt.body.id } })).toBe(
+        questionIds.length,
+      );
+      const serialized = JSON.stringify(response.body);
+      expect(Object.keys(response.body).sort()).toEqual(['expired', 'gradeAt', 'submittedAt']);
+      for (const key of ['state', 'grades', 'grade', 'score', 'rationale', 'blankQuestionIds']) {
+        expect(serialized).not.toMatch(new RegExp(`"${key}"\\s*:`, 'iu'));
+      }
+      expect(serialized).not.toMatch(/unanswered|incorrect|ungraded|correct/iu);
+    });
+
+    it('reads Completed on Student Home once the Attempt has been handed in', async () => {
+      const { id, cookie } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      // In progress until it is in: the band is derived from Attempts, not stored.
+      expect((await readReleased(cookie).expect(200)).body[0].state).toBe('InProgress');
+
+      await submitAttempt(cookie, attempt.body.id, []).expect(200);
+
+      const response = await readReleased(cookie).expect(200);
+      expect(response.body).toHaveLength(1);
+      expect(response.body[0].id).toBe(id);
+      // Derived, with no `Completed` member on `PracticeTestStatus` and no status
+      // write on submit: the stored row is still `Released`.
+      expect(response.body[0].state).toBe('Completed');
+      expect(
+        (
+          await h.prisma.practiceTest.findUniqueOrThrow({
+            where: { id },
+            select: { status: true },
+          })
+        ).status,
+      ).toBe('Released');
+    });
   });
 });

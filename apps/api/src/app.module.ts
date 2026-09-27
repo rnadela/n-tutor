@@ -7,6 +7,7 @@ import { AiModule } from './ai/ai.module.js';
 import { CorrelationIdMiddleware } from './common/correlation.js';
 import { requireIntEnv } from './common/env.js';
 import { ExtractionModule } from './extraction/extraction.module.js';
+import { GradingModule } from './grading/grading.module.js';
 import { HealthController } from './health/health.controller.js';
 import { IdentityModule } from './identity/identity.module.js';
 import { PARENT_CREDENTIAL_ROUTE } from './identity/parent-credential-route.decorator.js';
@@ -64,6 +65,10 @@ export const PARENT_THROTTLER = 'parent';
     // Sole owner and sole writer of every Practice Test table, and the owner of
     // the generation prompt (AD-17).
     PracticeTestModule,
+    // Sole owner and sole writer of QuestionGrade (AD-6, AD-17), and the home of
+    // handing in: closing an Attempt and recording what its blanks mean are one
+    // transaction, so the route lives with the entity.
+    GradingModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
