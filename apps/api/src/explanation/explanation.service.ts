@@ -1,4 +1,10 @@
-import { ConflictException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai/ai.service.js';
 import { AllowanceService } from '../allowance/allowance.service.js';
 import type { RichText } from '../extraction/rich-text.js';
@@ -8,8 +14,17 @@ import {
 } from '../practicetest/practice-test.service.js';
 import { remainingFor } from '../practicetest/practice-test-policy.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  PARENT_FLAG_ORIGIN,
+  parentExplanationViews,
+  type ParentExplanationView,
+} from './explanation-flag.js';
 import { ExplanationPayloadInvalid, validateExplanationPayload } from './explanation-payload.js';
-import { EXPLANATION_FAILED, NO_EXPLANATION_ALLOWANCE } from './explanation-policy.js';
+import {
+  EXPLANATION_FAILED,
+  NO_EXPLANATION_ALLOWANCE,
+  NO_EXPLANATION_TO_FLAG,
+} from './explanation-policy.js';
 import { buildExplanationPrompt } from './explanation-prompt.js';
 import {
   EXPLANATION_SCHEMA_NAME,
@@ -28,6 +43,24 @@ import {
 export interface StudentScope {
   parentAccountId: string;
   studentProfileId: string;
+}
+
+/**
+ * A parent reading or flagging their child's Explanations, with **only** the
+ * account.
+ *
+ * Only the account, and deliberately not an optional profile beside it: a parent's
+ * entitlement *is* the account, and the child whose rows are read is resolved from
+ * the Attempt row through `attemptProfileFor`. A profile id that could be passed
+ * here is a profile id that could be paired with another child's Attempt, and the
+ * way to make that unexpressible is for the scope to have nowhere to put one.
+ *
+ * `GradingScope` makes the same distinction with an optional field, because the same
+ * method there serves both parties. These two paths serve only the parent, so the
+ * type says so.
+ */
+export interface ParentScope {
+  parentAccountId: string;
 }
 
 /** One Explanation as the child reading it gets it back. */
@@ -85,11 +118,17 @@ export class ExplanationUnavailable extends ServiceUnavailableException {
  *   period window is the usage (AD-14). Which is why the re-count and the insert
  *   share one transaction — outside it, two concurrent presses on a Free account
  *   with one unit left could each read "remaining = 1".
- * - **It holds no delegate of anybody else's tables.** One read crosses the
- *   boundary — `PracticeTestService.explanationInputFor` — and it brings the
- *   ownership proof, the Question, both answers and the Practice Test's Grade
- *   Level with it. There is no `practiceTest`, `attempt`, `answer`, `sourceTest`
- *   or taxonomy delegate here, and no `ai_call` write (AD-17).
+ * - **It holds no delegate of anybody else's tables.** Two reads cross the
+ *   boundary — `PracticeTestService.explanationInputFor` for the student path,
+ *   which brings the ownership proof, the Question, both answers and the Practice
+ *   Test's Grade Level with it, and `attemptProfileFor` for the parent paths,
+ *   which brings the ownership proof and which child sat the Attempt. There is no
+ *   `practiceTest`, `attempt`, `answer`, `sourceTest` or taxonomy delegate here,
+ *   and no `ai_call` write (AD-17).
+ * - **Since Story 6.2 it also owns `explanation_flag`, and is its sole writer**
+ *   (AD-17). The parent paths below are pure reads and one idempotent record:
+ *   neither generates, neither consumes allowance, and a flag changes nothing —
+ *   not the prose, not what the child is served, not a grade, not a score.
  * - **Nothing it logs or throws carries a fragment of generated content, a cost,
  *   a model name, a tier or an allowance figure** (AD-20, AD-26). Identifiers and
  *   counts only.
@@ -253,6 +292,179 @@ export class ExplanationService {
       view: { attemptId, questionId, body: row.body as RichText },
       generated: true,
     };
+  }
+
+  /**
+   * Every Explanation stored for one handed-in Attempt, as the parent reads them.
+   *
+   * **A pure read.** No provider call, no allowance read, no `Explanation` write and
+   * no `chargedAt` touched. An Explanation the child never asked for does not exist
+   * and is not generated here: a parent opening an Attempt with ten unexplained
+   * Questions would otherwise bill ten provider calls against their own Explanation
+   * Allowance for prose nobody asked for, and the child's own screen would then find
+   * it already there. So this method is `findMany` and nothing else, and it shares no
+   * code path with `explanationFor`.
+   *
+   * **The profile is resolved first, and never passed.** `attemptProfileFor` is both
+   * the ownership proof and the answer to "which child's rows": a foreign Attempt, an
+   * unknown id and one still open all throw the single `PRACTICE_TEST_NOT_FOUND`
+   * sentence from there, before this method reads a row (AD-18). The `where` below is
+   * then `(attemptId, studentProfileId)` with the profile off the Attempt itself,
+   * which is what makes a sibling's Explanation of the same Practice Test
+   * unreachable — a sibling sat a *different* Attempt, and their rows are keyed to it.
+   *
+   * A Question with no stored row is **absent**, not an empty entry: the screen is
+   * what says nothing was explained, and an invented entry would be
+   * indistinguishable from prose that came back blank.
+   *
+   * Only the parent-originated flag is read. Story 6.3's student-originated one has
+   * no reader here and Story 6.4's suppression has no column here, so neither can
+   * leak into this response ahead of the story that owns it.
+   */
+  async explanationsForAttempt(
+    scope: ParentScope,
+    attemptId: string,
+  ): Promise<ParentExplanationView[]> {
+    const { studentProfileId } = await this.practiceTests.attemptProfileFor(
+      scope.parentAccountId,
+      attemptId,
+    );
+
+    const rows = await this.prisma.explanation.findMany({
+      where: { attemptId, studentProfileId },
+      // The order the child asked in, which is a stable order and not a meaningful one:
+      // the screen keys these by Question id onto answer-key rows that are already in
+      // the order the child met them. It is stated so the response is deterministic
+      // rather than whatever the planner returns, and nothing downstream reads it.
+      orderBy: { createdAt: 'asc' },
+      select: {
+        questionId: true,
+        body: true,
+        // Filtered to the one origin this story writes, so the count of rows here is
+        // 0 or 1 by the unique key rather than by a mapper's discipline. `chargedAt`
+        // is deliberately not selected: what an Explanation cost is not a thing this
+        // response carries (AD-20, AD-26).
+        flags: { where: { origin: PARENT_FLAG_ORIGIN }, select: { createdAt: true } },
+      },
+    });
+    return parentExplanationViews(rows);
+  }
+
+  /**
+   * Records that a parent has a concern about one Explanation, and answers with the
+   * instant it was first recorded.
+   *
+   * **Idempotent per (Explanation, origin), by the index and not by a check.** The
+   * write is an `upsert` on `[explanationId, origin]` whose update arm sets nothing
+   * that matters, so a second press finds the first row, keeps its `createdAt` and
+   * answers the same instant. A parent pressing twice raised one concern; a `create`
+   * with a preceding existence check would race itself into a unique violation on
+   * exactly the double-tap this is about.
+   *
+   * **And the upsert is not atomic either**, which is why there is a P2002 arm below
+   * it. It reads and then writes, so two presses landing together can both find no row
+   * and both attempt the insert; the index refuses the loser, and the loser's answer is
+   * the winner's row, re-read by the same key. So idempotency holds under concurrency
+   * as well as in sequence, and the one case this method exists for cannot be the one
+   * case that 500s.
+   *
+   * **It changes nothing else.** Not the Explanation's body, not what the child is
+   * served, not the grade state, the Attempt's score or Mastery. There is no
+   * suppression here (Story 6.4), no disposition (Story 6.3) and no grade override
+   * (Story 6.5) — and no write to any other table, which is why this needs no
+   * transaction: there is one row to write and nothing anywhere that has to stay
+   * consistent with it.
+   *
+   * **The ownership proof runs first**, through `attemptProfileFor`, then the
+   * Explanation is found by `(attemptId, questionId, studentProfileId)` with the
+   * profile off the Attempt row. A Question the child never asked about has no row and
+   * answers the same `PRACTICE_TEST_NOT_FOUND` sentence a foreign Attempt gets: a
+   * flag is a record *about an Explanation*, so there is nothing to record against,
+   * and a second sentence would let the outside tell "no Explanation" from "not your
+   * Attempt".
+   *
+   * The two denormalized ids on the flag row are the **Explanation's own**, read back
+   * from the row this write is about — never the scope's account and never a
+   * parameter. They are the same by construction here, and taking them from the row
+   * means a future path that got the scoping wrong writes an inconsistent flag rather
+   * than a consistent lie.
+   */
+  async flagExplanation(
+    scope: ParentScope,
+    attemptId: string,
+    questionId: string,
+  ): Promise<ParentExplanationView> {
+    const { studentProfileId } = await this.practiceTests.attemptProfileFor(
+      scope.parentAccountId,
+      attemptId,
+    );
+
+    const stored = await this.prisma.explanation.findUnique({
+      where: {
+        attemptId_questionId_studentProfileId: { attemptId, questionId, studentProfileId },
+      },
+      select: {
+        id: true,
+        questionId: true,
+        body: true,
+        parentAccountId: true,
+        studentProfileId: true,
+      },
+    });
+    // A Question nobody asked about, on an Attempt this parent may read. The same
+    // sentence a foreign Attempt gets: there is no Explanation for a flag to be
+    // about.
+    if (stored === null) throw new NotFoundException(NO_EXPLANATION_TO_FLAG);
+
+    const key = { explanationId: stored.id, origin: PARENT_FLAG_ORIGIN };
+    let flag: { createdAt: Date };
+    try {
+      flag = await this.prisma.explanationFlag.upsert({
+        where: { explanationId_origin: key },
+        create: {
+          explanationId: stored.id,
+          // The Explanation's own columns, read back from the row above.
+          parentAccountId: stored.parentAccountId,
+          studentProfileId: stored.studentProfileId,
+          origin: PARENT_FLAG_ORIGIN,
+        },
+        // Nothing. The second press is the same concern, and `createdAt` is the instant
+        // it was first raised — an update arm that touched it would make a repeat press
+        // rewrite the one fact this row holds. `updatedAt` moves, which is Prisma's and
+        // is not read by anything.
+        update: {},
+        select: { createdAt: true },
+      });
+    } catch (cause) {
+      // Two first presses at once. An `upsert` is a read and then a write, not one
+      // atomic statement: both requests can find no row, both can attempt the insert,
+      // and the unique key refuses the loser with P2002 — which is exactly the
+      // double-tap this method exists to absorb, so answering 500 for it would be the
+      // one case it was written for. The recovery is the same one `explanationFor`
+      // makes for the same reason: the loser's answer is the winner's row.
+      if (!isUniqueViolation(cause)) throw cause;
+      flag = await this.prisma.explanationFlag.findUniqueOrThrow({
+        where: { explanationId_origin: key },
+        select: { createdAt: true },
+      });
+      this.logger.log(
+        `A parent flag against the explanation of question ${questionId} of attempt ${attemptId} was already recorded by a concurrent request.`,
+      );
+    }
+
+    // The Attempt, the Question and that a flag exists. Never a fragment of the
+    // prose it is about, and never a cost, a tier or a model name (AD-20, AD-26).
+    this.logger.log(
+      `A parent flag is recorded against the explanation of question ${questionId} of attempt ${attemptId}.`,
+    );
+
+    const [view] = parentExplanationViews([
+      { questionId: stored.questionId, body: stored.body, flags: [flag] },
+    ]);
+    // One row in, one row out. Stated rather than asserted away, so a future change
+    // to the mapper cannot make a non-null assertion quietly wrong.
+    if (view === undefined) throw new ExplanationUnavailable();
+    return view;
   }
 
   // --- Internals ---------------------------------------------------------

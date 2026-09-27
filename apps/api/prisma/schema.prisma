@@ -1266,6 +1266,7 @@ model Explanation {
   attempt        Attempt        @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   question       PracticeTestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  flags          ExplanationFlag[]
 
   /// The cache key, as a constraint rather than as an intention: two rows for one
   /// (Attempt, Question, child) would be two explanations of one thing, and the
@@ -1276,4 +1277,67 @@ model Explanation {
   /// period window. Equality then range, exactly as `practice_test`'s is.
   @@index([parentAccountId, chargedAt])
   @@map("explanation")
+}
+
+/// Who raised a flag against an Explanation.
+///
+/// **Both members are declared now, and only one of them is written yet.** Story
+/// 6.2 implements the parent route; the student route is Story 6.3's. Declaring
+/// `Student` here makes that story a code path rather than an enum migration — and
+/// an enum value a Postgres migration adds cannot be added inside the same
+/// transaction that first uses it, which is a cost paid once for nothing.
+///
+/// The origin is **part of the identity of a flag**, not a label on it: a parent
+/// and a child who each flag the same Explanation are two people raising a concern
+/// and must not overwrite each other, while one person pressing twice is one
+/// concern. That is what `@@unique([explanationId, origin])` below says.
+enum ExplanationFlagOrigin {
+  Parent
+  Student
+
+  @@map("explanation_flag_origin")
+}
+
+/// One recorded concern about one Explanation.
+///
+/// A flag is a **record and nothing more**. It does not change the Explanation's
+/// body, what the child is served, the grade state, the Attempt's score, Mastery or
+/// any other row: suppression is Story 6.4's and it is the destructive act, and a
+/// disposition (confirm/dismiss) is Story 6.3's. There is deliberately no
+/// `dispositionedAt`, no `suppressedAt` and no `reason` column here — a column with
+/// no writer is a promise the next reader will believe.
+///
+/// **There is no un-flagging.** No route deletes a row here, which is why the table
+/// carries no soft-delete column either. A concern that was raised was raised.
+///
+/// `parentAccountId` and `studentProfileId` are denormalized onto the row for the
+/// reason `Explanation`'s are: the Admin queue Story 6.3 builds reads flags by
+/// account without joining the Explanation, and `parentAccountId` in particular
+/// carries no foreign key so a flag can never be what blocks an account deletion.
+/// The `explanationId` edge cascades, because a flag on a row that is gone is a
+/// flag on nothing.
+model ExplanationFlag {
+  id               String                @id @default(uuid())
+  explanationId    String
+  /// Whose account the flagged Explanation belongs to. Denormalized so a queue read
+  /// is one statement over one index.
+  parentAccountId  String
+  /// The child the flagged Explanation was written for, copied off the Explanation
+  /// and never taken from a request.
+  studentProfileId String
+  origin           ExplanationFlagOrigin
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  explanation Explanation @relation(fields: [explanationId], references: [id], onDelete: Cascade)
+
+  /// What makes a second press the **same** flag rather than a second row: the
+  /// upsert that writes it targets this key, so idempotency is the index's promise
+  /// and not a check somebody has to remember to make. It also keeps the first
+  /// `createdAt`, because the instant a concern was first raised is the fact.
+  @@unique([explanationId, origin])
+  /// The one read index: this account's flags, newest first. Equality then range,
+  /// exactly as `explanation`'s own count index is ordered.
+  @@index([parentAccountId, createdAt])
+  @@map("explanation_flag")
 }

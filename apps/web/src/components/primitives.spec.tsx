@@ -22,10 +22,30 @@ import { TextField } from './TextField';
 
 const DIR = import.meta.dirname;
 
+/**
+ * Files in this folder that are **not** primitives.
+ *
+ * `components/` holds the primitive layer and, since Story 6.2, the two components
+ * two surfaces render in common: the answer-key row and the grade-state marker. Those
+ * moved here from `app/student/_components/` because the parent's Attempt detail
+ * renders the identical layout — a shared component inside one surface's folder is a
+ * component the other surface reaches across a boundary for.
+ *
+ * They are excluded from the sweeps below because the sweeps state rules about
+ * primitives: a marker whose whole job is to draw a grade state on five carriers at
+ * once necessarily names a rule texture's own geometry, and a token table cannot
+ * express a repeating gradient's stops. Their own specs assert what they must instead
+ * — that each of the four states stays distinguishable with every colour, class and
+ * inline style stripped.
+ */
+const NOT_PRIMITIVES = new Set(['AnswerKeyRow.tsx', 'GradeStateMarker.tsx']);
+
 /** Every primitive's source, keyed by file name. */
 const SOURCES = Object.fromEntries(
   readdirSync(DIR)
-    .filter((name) => name.endsWith('.tsx') && !name.endsWith('.spec.tsx'))
+    .filter(
+      (name) => name.endsWith('.tsx') && !name.endsWith('.spec.tsx') && !NOT_PRIMITIVES.has(name),
+    )
     .map((name) => [name, readFileSync(path.resolve(DIR, name), 'utf8')]),
 );
 

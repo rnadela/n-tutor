@@ -117,6 +117,12 @@ export const parentCopy = {
      * they paid for here.
      */
     drafts: 'Pending practice tests',
+    /**
+     * The way in to the child's handed-in runs, and the only way in there is.
+     * A destination with no link from Parent View is a destination a parent
+     * cannot reach — and this one is where they read what their child was told.
+     */
+    attempts: 'Practice tests a student has finished',
     loading: 'Loading Parent View…',
 
     /**
@@ -848,6 +854,125 @@ export const parentCopy = {
     /** Said after the timer is turned off, naming the state rather than the act. */
     timerOffSaved: 'There is no time limit on this practice test.',
     timerFailed: 'That time limit could not be saved. Try again.',
+  },
+  /**
+   * The parent's Attempt review: a child's handed-in runs, one run whole, and each
+   * Explanation the child was shown beneath the Question it is about.
+   *
+   * **Third person throughout, and never addressed to the child.** A parent reading
+   * this is reading *about* their child: "the student answered", never "you
+   * answered". The four grade-state literals are deliberately absent — they are
+   * `commonCopy.gradeState`'s, shared with the child's own screen on purpose, so the
+   * two surfaces cannot disagree about what `Unanswered` is called.
+   *
+   * Every figure is a parameter and every sentence is whole here rather than
+   * assembled at a call site. Nothing names an allowance, a cost, a tier or a model:
+   * a parent reading an Explanation is spending nothing, and the screen says so.
+   */
+  attempts: {
+    listTitle: 'Finished practice tests',
+    /**
+     * What the list is for, stated as the reason a parent is here: this is where
+     * what a child was told can be read.
+     */
+    listIntro:
+      'Choose a student to see the practice tests they have handed in. Opening one shows the answer key and anything that was explained to them.',
+    /** The child selector. One child at a time, because runs belong to one child. */
+    studentLabel: 'Student',
+    loading: 'Loading…',
+    /** No profile to choose from yet. The way on is the Students screen. */
+    noStudents: 'There is no student profile yet. Add one first.',
+    /** A child who has handed nothing in. A state, not a fault. */
+    empty: 'This student has not handed in a practice test yet.',
+    listFailed: 'The finished practice tests could not be listed. Try again.',
+    retry: 'Try again',
+    backToParentView: 'Back to Parent View',
+    backToList: 'Back to the finished practice tests',
+
+    /** Which run of its practice test this is. The server supplies the figure. */
+    run: (ordinal: number) => `Run ${ordinal}`,
+    /** When it was handed in, in the device's own formatting. */
+    submitted: (instant: string) => `Handed in ${instant}`,
+    /**
+     * The same fact with no date, for a stored instant that will not parse.
+     *
+     * The run was still handed in — that is why it is in this list at all — so the
+     * sentence states it and drops only the part that cannot be stated. The words
+     * "Invalid Date" on a parent's screen read as a fault in the practice test
+     * rather than in a string, and a screen reader says them out loud.
+     */
+    submittedUndated: 'Handed in',
+    /** A test whose Subject carries no classification or no longer resolves. */
+    unknownSubject: 'No subject',
+    open: 'Read it',
+
+    detailTitle: 'The practice test, as it was marked',
+    detailFailed: 'That practice test could not be opened. Try again.',
+    /** A run that is not there, or not this account's. One sentence for all of it. */
+    notFound: 'That practice test could not be found.',
+    /**
+     * The score, from the two figures the server computed over exactly the rows in
+     * the same response. The browser counts nothing (FR-37).
+     */
+    score: (correct: number, denominator: number) => `${correct} of ${denominator} marked correct`,
+    /** Stated when Questions were left out of the denominator, in words. */
+    excluded: (count: number) =>
+      count === 1
+        ? '1 question has not been graded and is not counted.'
+        : `${count} questions have not been graded and are not counted.`,
+    questionsHeading: 'Every question',
+
+    /** Each row's heading. Third person: the number, not "your question". */
+    question: (ordinal: number) => `Question ${ordinal}`,
+    /** What kind of question it was, in the parent's own wording. */
+    format: {
+      MultipleChoice: 'Multiple choice',
+      FillInTheBlank: 'Fill in the blank',
+      ShortAnswer: 'Short answer',
+    },
+    /** Above what the child put down. About them, never to them. */
+    studentAnswer: 'The student answered',
+    /** Instead of an empty space, for a Question left blank. */
+    noAnswer: 'The student left this one blank.',
+    correctAnswer: 'Correct answer',
+    answerUnavailable: 'The answer for this question is not available.',
+    rowUngraded: 'This one has not been graded yet.',
+    rowNewlyGraded: 'Just graded.',
+
+    /** The inline region beneath a row, headed as what it is. */
+    explanationHeading: 'What the student was told',
+    /**
+     * A Question the child never asked about. Stated as a fact about the asking,
+     * because nothing was generated and nothing will be: this screen does not
+     * explain anything, it reads what was already explained.
+     */
+    nothingExplained: 'The student did not ask about this question.',
+    flagControl: 'Report a problem with this explanation',
+    /** Once flagged. The state, named rather than the act that produced it. */
+    flagged: (instant: string) => `Reported ${instant}`,
+    /**
+     * The same state with no date, for a stored instant that will not parse.
+     *
+     * The concern was still recorded, which is the fact a parent needs; only the
+     * instant is unstateable, and "Reported Invalid Date" would put the fault on
+     * the report.
+     */
+    flaggedUndated: 'Reported',
+    /**
+     * What flagging does, said **before** it is pressed and kept beside the
+     * flagged state afterwards.
+     *
+     * It exists because a control with no consequence a parent can see teaches
+     * them it did something it did not. Suppression is the act that changes what a
+     * child is served, and it is not this one.
+     */
+    flagNote:
+      'Reporting an explanation records the concern for review. The student still sees the same explanation.',
+    /** Announced, and shown, in the same words. */
+    flagAnnouncement: (ordinal: number) =>
+      `The explanation for question ${ordinal} is reported. The student still sees the same explanation.`,
+    flagFailed: 'That explanation could not be reported. Try again.',
+    explanationsFailed: 'What the student was told could not be read. Try again.',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

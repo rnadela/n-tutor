@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import { RichText } from '@/components/RichText';
-import { studentCopy } from '@/copy/student';
 import type { AnswerKeyRowView } from '@/lib/parent-api';
 import { GRADE_PALETTE } from '@/theme/grade-state-palette';
 import {
@@ -15,6 +14,45 @@ import {
   typeRoles,
 } from '@/theme/tokens';
 import { GradeStateMarker } from './GradeStateMarker';
+
+/**
+ * Every user-facing string one answer-key row says, as a parameter.
+ *
+ * **Because two surfaces now render this row in two different persons.** The child
+ * reads "You answered"; the parent reads about their child in the third person, and
+ * never addressed to them. Duplicating the ~150 lines of grade-marker layout below
+ * into a parent copy would let the two drift on exactly the redundant carriers
+ * accessibility depends on — five carriers per state, on a component whose specs
+ * assert over markup with every colour stripped. So the layout is one component and
+ * the words are an argument.
+ *
+ * **Required, not defaulted.** A default would be the student's wording, which is
+ * the one thing a parent surface must not accidentally ship: an optional label is a
+ * label somebody forgets, and a parent being addressed as their own child is a bug
+ * nothing else here would catch.
+ *
+ * Every member is a plain string but `question` and `format`, which take the figure
+ * and the stored format they are about: a copy group states the sentence and the
+ * caller supplies the number, exactly as every other group in this app does.
+ */
+export interface AnswerKeyRowLabels {
+  /** This row's heading, from the ordinal the child was shown while they worked. */
+  question: (ordinal: number) => string;
+  /** What kind of question it was, in the same words the child saw. */
+  format: Record<AnswerKeyRowView['format'], string>;
+  /** Above what was put down. */
+  studentAnswer: string;
+  /** Instead of an empty space, for a Question left blank. */
+  noAnswer: string;
+  /** Above what the answer was. */
+  correctAnswer: string;
+  /** When the stored answer key could not be read back. */
+  answerUnavailable: string;
+  /** On a row nothing has judged yet. */
+  rowUngraded: string;
+  /** On a row this read is what judged. */
+  rowNewlyGraded: string;
+}
 
 /**
  * The left rule's texture, as a background rather than as a border.
@@ -53,6 +91,14 @@ function ruleBackground(rule: GradeStateMarkerToken['rule'], color: string): str
  * One row of the answer key: the Question, what the child put down, what the answer
  * was, and the state it is in. No hooks.
  *
+ * **One layout, two persons.** The child's results screen and the parent's Attempt
+ * detail render this same component and differ only in `labels`: the words are an
+ * argument (`AnswerKeyRowLabels`) precisely so that the state's five redundant
+ * carriers cannot come to disagree between the two surfaces. It lives in
+ * `components/` rather than under `app/student/` for that reason — a shared row
+ * inside one surface's folder is a row the other surface reaches across a boundary
+ * to import.
+ *
  * **The prop type is the guard.** `AnswerKeyRowView` has no `rationale` field, no
  * Topic label and no cost, tier or model figure, and the read that composes it never
  * selects the first — so there is no prose of that kind this component could render
@@ -70,7 +116,16 @@ function ruleBackground(rule: GradeStateMarkerToken['rule'], color: string): str
  * **Nothing here celebrates and nothing counts up.** A row appears drawn, in the
  * place the Question was, whatever state it is in.
  */
-export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?: ReactNode }) {
+export function AnswerKeyRow({
+  row,
+  labels,
+  explain,
+}: {
+  row: AnswerKeyRowView;
+  /** Every word this row says. Required, so neither surface can inherit the other's. */
+  labels: AnswerKeyRowLabels;
+  explain?: ReactNode;
+}) {
   const marker = gradeStateMarker[row.state];
   return (
     <Box
@@ -117,11 +172,11 @@ export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?
               outline. The visual type role is unchanged — level is structure and
               `typeRoles.label` is size. */}
           <Typography component="h4" sx={{ ...typeRoles.label }} data-testid="answer-key-ordinal">
-            {/* What kind of question this was, beside its number: the same three
-                literals the child was shown while they worked, reused rather than
-                restated, so the word for a format cannot come to differ between the
-                two screens. */}
-            {`${studentCopy.results.question(row.ordinal)} · ${studentCopy.takeTest.format[row.format]}`}
+            {/* What kind of question this was, beside its number. The words are the
+                caller's: the student surface passes the same three literals the
+                child was shown while they worked, so the word for a format cannot
+                come to differ between the two screens they see. */}
+            {`${labels.question(row.ordinal)} · ${labels.format[row.format]}`}
           </Typography>
           <GradeStateMarker state={row.state} />
         </Box>
@@ -137,7 +192,7 @@ export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?
         )}
 
         <Typography component="p" sx={{ ...typeRoles.caption }} data-testid="answer-key-your-label">
-          {studentCopy.results.yourAnswer}
+          {labels.studentAnswer}
         </Typography>
         {/* A sentence rather than an empty space: an empty space beside a label
             reads as something that failed to load. */}
@@ -147,7 +202,7 @@ export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?
             sx={{ ...typeRoles.questionBody }}
             data-testid="answer-key-no-answer"
           >
-            {studentCopy.results.noAnswer}
+            {labels.noAnswer}
           </Typography>
         ) : (
           <Typography
@@ -164,7 +219,7 @@ export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?
           sx={{ ...typeRoles.caption }}
           data-testid="answer-key-correct-label"
         >
-          {studentCopy.results.correctAnswer}
+          {labels.correctAnswer}
         </Typography>
         {/* The stored key could not be read back. The row still states its state:
             the work was graded, and only the words for the answer are gone. */}
@@ -174,7 +229,7 @@ export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?
             sx={{ ...typeRoles.questionBody }}
             data-testid="answer-key-unavailable"
           >
-            {studentCopy.results.answerUnavailable}
+            {labels.answerUnavailable}
           </Typography>
         ) : (
           <Typography
@@ -193,7 +248,7 @@ export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?
             sx={{ ...typeRoles.caption }}
             data-testid="answer-key-row-ungraded"
           >
-            {studentCopy.results.rowUngraded}
+            {labels.rowUngraded}
           </Typography>
         )}
         {/* In words, never as a highlight: the one fact that changed since last time
@@ -210,7 +265,7 @@ export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?
             sx={{ ...typeRoles.caption }}
             data-testid="answer-key-row-newly-graded"
           >
-            {studentCopy.results.rowNewlyGraded}
+            {labels.rowNewlyGraded}
           </Typography>
         )}
         {/* Whatever the screen put here, last inside this row's own content column

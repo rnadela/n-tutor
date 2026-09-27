@@ -348,6 +348,50 @@ export interface AttemptRun {
 }
 
 /**
+ * One **handed-in** run of one child, as the parent's list of their runs reads it.
+ *
+ * `AttemptRun` with a Subject label on it, and deliberately not that interface
+ * widened: `AttemptRun` is what `grading` composes a *child's* run history from, and
+ * the Subject is a label the parent's flat list needs to tell one run from another
+ * on a screen that spans every test. Widening it would put a batched cross-module
+ * label read on a path that has never needed one.
+ *
+ * Still **no grade, no score, no answer and no Question**. The score is
+ * `grading`'s one figure (FR-37) and arrives with the Attempt detail read; a figure
+ * computed here would be a second answer to it (AD-6, AD-17). And still no cost, no
+ * tier and no model name (AD-20, AD-26).
+ *
+ * `subjectName` is null for a test whose Subject carries no classification or no
+ * longer resolves. The row keeps its place and loses its label, exactly as
+ * `releasedFor`'s rows do.
+ */
+export interface ParentAttemptSummary {
+  attemptId: string;
+  practiceTestId: string;
+  ordinal: number;
+  submittedAt: string;
+  questionCount: number;
+  subjectName: string | null;
+}
+
+/**
+ * Which child sat one Attempt of this account — the whole of what a parent-scoped
+ * read of anything cached per child needs, and nothing else.
+ *
+ * It exists so that `explanation` can read an Explanation for a parent without
+ * acquiring an `attempt` delegate (AD-17), exactly as `explanationInputFor` exists
+ * so it can build a prompt without one. The profile id is **resolved from the
+ * Attempt row**, never passed in: an Explanation is cached under
+ * `(attemptId, questionId, studentProfileId)`, and taking the third id from a URL
+ * would let one child's id be paired with another child's Attempt. Resolved from
+ * the row, that pairing cannot be expressed.
+ */
+export interface AttemptProfile {
+  attemptId: string;
+  studentProfileId: string;
+}
+
+/**
  * What handing in answered.
  *
  * `expired` is the comparison **the server made, against its own clock and its
@@ -1265,6 +1309,106 @@ export class PracticeTestService {
       submittedAt: row.submittedAt!.toISOString(),
       questionCount: row.practiceTest.questionCount,
     }));
+  }
+
+  /**
+   * Every **handed-in** run one child of this account has, newest first, with the
+   * Subject label beside each — the parent's way in to an Attempt.
+   *
+   * **The account is the entitlement and the profile is a filter.** Both ids sit in
+   * the `where`, and the account one comes off the verified elevation rather than
+   * off the path (AD-18) — so a profile id belonging to another account matches no
+   * Attempt of *this* account and answers `[]`. That is the identical answer a child
+   * of this account with nothing handed in gets, which is what keeps this route from
+   * enumerating anybody's profile ids. There is deliberately **no 404 here**: a list
+   * that refused an unknown profile would be a list that confirmed a known one.
+   *
+   * **Newest first**, which is the opposite of `submittedRunsFor`'s order and for a
+   * different reader: that one is grouped by test so `grading` can walk it, and this
+   * one is a flat list a parent scans for the most recent thing their child did. So
+   * the order is `submittedAt desc` with `id desc` behind it, in the statement.
+   *
+   * The Subject label is batched through `SOURCE_TEST_READER` over every row's
+   * Source Test in one call, exactly as `releasedFor` does it: `practicetest` holds
+   * no `sourceTest` and no `subject` delegate and must not acquire one (AD-17), and
+   * one call per row across a module boundary would be an N+1. A label that no
+   * longer resolves costs the row nothing.
+   *
+   * No grade, no score, no answer and no allowance, tier, cost or model figure: none
+   * of those is a fact about which runs exist (AD-20, AD-26).
+   */
+  async parentSubmittedRunsFor(
+    parentAccountId: string,
+    studentProfileId: string,
+  ): Promise<ParentAttemptSummary[]> {
+    const rows = await this.prisma.attempt.findMany({
+      where: {
+        parentAccountId,
+        studentProfileId,
+        submittedAt: { not: null },
+        practiceTest: { status: 'Released' },
+      },
+      // Newest first, with the id behind it so two runs handed in inside the same
+      // millisecond still come back in a stable order.
+      orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        practiceTestId: true,
+        ordinal: true,
+        submittedAt: true,
+        practiceTest: { select: { questionCount: true, sourceTestId: true } },
+      },
+    });
+    if (rows.length === 0) return [];
+
+    const labels = await this.sourceTests.readSubjectLabels(
+      rows.map((row) => row.practiceTest.sourceTestId),
+    );
+
+    return rows.map((row) => ({
+      attemptId: row.id,
+      practiceTestId: row.practiceTestId,
+      ordinal: row.ordinal,
+      // Non-null by the `where` above, which is what makes the view's `string`
+      // honest rather than optimistic.
+      submittedAt: row.submittedAt!.toISOString(),
+      questionCount: row.practiceTest.questionCount,
+      subjectName: labels.get(row.practiceTest.sourceTestId) ?? null,
+    }));
+  }
+
+  /**
+   * Which child sat one handed-in Attempt of this account.
+   *
+   * **The boundary read the parent's Explanation surface is built on.** It is the
+   * sibling of `explanationInputFor` and it exists for the same reason: so the
+   * module that owns `Explanation` can serve a parent without acquiring an `attempt`
+   * delegate (AD-17). It returns the one fact that module cannot know and must not
+   * be told — which child's rows to read — and it returns it *from the Attempt row*.
+   *
+   * **It is also the ownership proof, and it runs first.** The `where` carries the
+   * account off the verified elevation and no profile id at all, because a parent's
+   * entitlement is the account: any child of *this* account is readable and nothing
+   * else is. A foreign Attempt, an unknown id and one still open all throw the single
+   * `PRACTICE_TEST_NOT_FOUND` sentence, never a 403 and never three sentences
+   * (AD-18) — an open Attempt has no results and no Explanations to read, and that
+   * is not a different flavour of refusal.
+   *
+   * One statement, two columns. No Question, no answer, no grade and nothing about
+   * the Practice Test: a caller that wanted any of those would be a caller asking
+   * the wrong module.
+   */
+  async attemptProfileFor(parentAccountId: string, attemptId: string): Promise<AttemptProfile> {
+    const attempt = await this.prisma.attempt.findFirst({
+      where: { id: attemptId, parentAccountId },
+      select: { id: true, studentProfileId: true, submittedAt: true },
+    });
+    // The one sentence a foreign Attempt, an unknown id and an Attempt still open
+    // all share.
+    if (attempt === null || attempt.submittedAt === null) {
+      throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+    }
+    return { attemptId: attempt.id, studentProfileId: attempt.studentProfileId };
   }
 
   /**

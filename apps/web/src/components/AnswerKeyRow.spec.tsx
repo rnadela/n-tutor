@@ -5,11 +5,42 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it } from 'vitest';
 import { commonCopy } from '@/copy/common';
+import { parentCopy } from '@/copy/parent';
 import { studentCopy } from '@/copy/student';
 import type { AnswerKeyRowView, GradeState } from '@/lib/parent-api';
 import { studentTheme } from '@/theme/theme';
 import { gradeStateMarker } from '@/theme/tokens';
-import { AnswerKeyRow } from './AnswerKeyRow';
+import { AnswerKeyRow, type AnswerKeyRowLabels } from './AnswerKeyRow';
+
+/**
+ * The child's words, as `AttemptResults` builds them.
+ *
+ * Restated here rather than imported from the screen: this spec is about what the
+ * row does with the labels it is given, and reaching into a screen for them would
+ * make a row's spec fail when that screen is refactored.
+ */
+const STUDENT_LABELS: AnswerKeyRowLabels = {
+  question: studentCopy.results.question,
+  format: studentCopy.takeTest.format,
+  studentAnswer: studentCopy.results.yourAnswer,
+  noAnswer: studentCopy.results.noAnswer,
+  correctAnswer: studentCopy.results.correctAnswer,
+  answerUnavailable: studentCopy.results.answerUnavailable,
+  rowUngraded: studentCopy.results.rowUngraded,
+  rowNewlyGraded: studentCopy.results.rowNewlyGraded,
+};
+
+/** The parent's words for the same row, in the third person about the child. */
+const PARENT_LABELS: AnswerKeyRowLabels = {
+  question: parentCopy.attempts.question,
+  format: parentCopy.attempts.format,
+  studentAnswer: parentCopy.attempts.studentAnswer,
+  noAnswer: parentCopy.attempts.noAnswer,
+  correctAnswer: parentCopy.attempts.correctAnswer,
+  answerUnavailable: parentCopy.attempts.answerUnavailable,
+  rowUngraded: parentCopy.attempts.rowUngraded,
+  rowNewlyGraded: parentCopy.attempts.rowNewlyGraded,
+};
 
 const STATES: GradeState[] = ['Correct', 'Incorrect', 'Unanswered', 'Ungraded'];
 
@@ -32,7 +63,7 @@ function render(view: AnswerKeyRowView): string {
     createElement(
       ThemeProvider,
       { theme: studentTheme },
-      createElement(AnswerKeyRow, { row: view }),
+      createElement(AnswerKeyRow, { row: view, labels: STUDENT_LABELS }),
     ),
   );
 }
@@ -183,6 +214,7 @@ describe('what one answer-key row shows a child', () => {
         { theme: studentTheme },
         createElement(AnswerKeyRow, {
           row: row(),
+          labels: STUDENT_LABELS,
           explain: createElement('p', { 'data-testid': 'slot-probe' }, 'slotted'),
         }),
       ),
@@ -207,5 +239,44 @@ describe('what one answer-key row shows a child', () => {
     // And it gained no notion of what the slot is for: the word appears only as the
     // prop's own name.
     expect(code).not.toMatch(/parentApi|explainQuestion|ExplainPanel/u);
+  });
+
+  it('says every word from the labels it was given, and imports no copy of its own', () => {
+    // The row is rendered by two surfaces in two different persons. Reading a copy
+    // group here would pin it to one of them, and the other would address a parent
+    // as their own child — a mistake nothing else on that screen would catch.
+    const source = readFileSync(path.resolve(import.meta.dirname, 'AnswerKeyRow.tsx'), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
+    expect(code).not.toMatch(/studentCopy|parentCopy/u);
+    // `commonCopy.gradeState` is still read — by `GradeStateMarker`, whose four
+    // literals are shared between the surfaces by design and are not this row's.
+    expect(code).not.toMatch(/commonCopy/u);
+  });
+
+  it('renders the same layout about a child in the third person', () => {
+    // Same markup, same five carriers, different person: what makes one component
+    // serve both surfaces rather than two components drifting apart.
+    const markup = renderToStaticMarkup(
+      createElement(
+        ThemeProvider,
+        { theme: studentTheme },
+        createElement(AnswerKeyRow, {
+          row: row({ state: 'Unanswered', studentAnswer: null, correctAnswer: null, ordinal: 4 }),
+          labels: PARENT_LABELS,
+        }),
+      ),
+    );
+    expect(markup).toContain(parentCopy.attempts.question(4));
+    expect(markup).toContain(parentCopy.attempts.studentAnswer);
+    expect(markup).toContain(parentCopy.attempts.noAnswer);
+    expect(markup).toContain(parentCopy.attempts.answerUnavailable);
+    // None of the child's second-person wording survives.
+    expect(markup).not.toContain(studentCopy.results.yourAnswer);
+    expect(markup).not.toContain(studentCopy.results.noAnswer);
+    // And the state is still carried every way it was: the marker's four literals
+    // are `commonCopy`'s, shared by both surfaces on purpose.
+    expect(markup).toContain(commonCopy.gradeState.Unanswered);
+    expect(markup).toContain('data-state="Unanswered"');
+    expect(markup).toContain(`data-rule="${gradeStateMarker.Unanswered.rule}"`);
   });
 });

@@ -11,6 +11,8 @@
  * the last place one should first appear.
  */
 
+import { PRACTICE_TEST_NOT_FOUND } from '../practicetest/practice-test-policy.js';
+
 /**
  * Nothing of the Explanation Allowance is left this period.
  *
@@ -63,3 +65,24 @@ export const EXPLANATION_FAILED = 'This explanation could not be written just no
  * who needed the detail.
  */
 export const MAX_EXPLANATION_LENGTH = 2_000;
+
+/**
+ * There is no Explanation here to raise a concern about.
+ *
+ * **It is `PRACTICE_TEST_NOT_FOUND`, deliberately and by value.** A parent flagging
+ * a Question their child never asked about, a parent flagging a Question of another
+ * account's Attempt, one flagging an Attempt that never existed and one flagging an
+ * Attempt still open are four facts, and a surface that spelled them apart would let
+ * anything outside read which of another account's ids exist by reading which
+ * sentence came back (AD-18). So the wording is the one sentence every ownership
+ * refusal in this system already reuses, aliased here rather than re-spelled —
+ * re-spelling it is how the two copies start to drift, and this file exists because
+ * a refusal written at its throw site gets reworded by the next person on that line.
+ *
+ * **A flag needs no 409 and has none.** The second press is not a conflict: it is
+ * the same concern, and the unique key `[explanationId, origin]` is what makes it
+ * the same row rather than a refusal. So a repeat answers 200 with the instant the
+ * flag was first recorded — there is nothing for a parent to resolve, nothing for
+ * them to be told they already did, and no sentence to write about it.
+ */
+export const NO_EXPLANATION_TO_FLAG = PRACTICE_TEST_NOT_FOUND;

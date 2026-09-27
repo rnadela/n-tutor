@@ -3,9 +3,11 @@ import { JwtModule } from '@nestjs/jwt';
 import { AiModule } from '../ai/ai.module.js';
 import { requireParentJwtSecret } from '../common/env.js';
 import { IdentityModule } from '../identity/identity.module.js';
+import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
 import { StudentModeGuard } from '../identity/student-mode.guard.js';
 import { PracticeTestModule } from '../practicetest/practice-test.module.js';
 import { GradingService } from './grading.service.js';
+import { ParentAttemptController } from './parent-attempt.controller.js';
 import { StudentAttemptController } from './student-attempt.controller.js';
 
 /**
@@ -20,8 +22,8 @@ import { StudentAttemptController } from './student-attempt.controller.js';
  * and no reversed edge — which is the whole reason the submit route moved in rather
  * than a grading service being called out of `practicetest`.
  *
- * `StudentModeGuard` is constructed here because Nest builds a controller's
- * enhancers in that controller's injector: `IdentityModule` exports the two
+ * `StudentModeGuard` and `ParentElevationGuard` are both constructed here because
+ * Nest builds a controller's enhancers in that controller's injector: `IdentityModule` exports the two
  * services the guard needs, and the `JwtModule` below registers the parent secret
  * the binding cookie is signed with, resolved in this injector through
  * `requireParentJwtSecret()` (AD-25). The same arrangement `practice-test.module.ts`
@@ -43,8 +45,8 @@ import { StudentAttemptController } from './student-attempt.controller.js';
     PracticeTestModule,
     AiModule,
   ],
-  controllers: [StudentAttemptController],
-  providers: [GradingService, StudentModeGuard],
+  controllers: [StudentAttemptController, ParentAttemptController],
+  providers: [GradingService, StudentModeGuard, ParentElevationGuard],
   exports: [GradingService],
 })
 export class GradingModule {}

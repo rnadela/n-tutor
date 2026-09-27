@@ -118,6 +118,14 @@ export default function ParentViewPage() {
             <Link component={NextLink} href="/parent/drafts">
               {parentCopy.parentView.drafts}
             </Link>
+            {/* The way in to what a child has finished — and the only way in
+                there is. It is where a parent reads what their child was told
+                about a Question, which is the whole reason ungated student-facing
+                explanations are answerable to somebody. Client-side for the same
+                reason as its neighbours. */}
+            <Link component={NextLink} href="/parent/attempts">
+              {parentCopy.parentView.attempts}
+            </Link>
             <Link component={NextLink} href="/parent/pin/change">
               {parentCopy.parentView.changePin}
             </Link>

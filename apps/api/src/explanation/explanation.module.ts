@@ -4,13 +4,16 @@ import { AiModule } from '../ai/ai.module.js';
 import { AllowanceModule } from '../allowance/allowance.module.js';
 import { requireParentJwtSecret } from '../common/env.js';
 import { IdentityModule } from '../identity/identity.module.js';
+import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
 import { StudentModeGuard } from '../identity/student-mode.guard.js';
 import { PracticeTestModule } from '../practicetest/practice-test.module.js';
 import { ExplanationService } from './explanation.service.js';
+import { ParentExplanationController } from './parent-explanation.controller.js';
 import { StudentExplanationController } from './student-explanation.controller.js';
 
 /**
- * The `explanation` module: sole owner and sole writer of `Explanation` (AD-17).
+ * The `explanation` module: sole owner and sole writer of `Explanation` **and**
+ * `ExplanationFlag` (AD-17).
  *
  * **Every arrow points out of it, and none points back.** `PracticeTestModule` for
  * the one read that crosses the boundary — `explanationInputFor`, which brings the
@@ -28,8 +31,14 @@ import { StudentExplanationController } from './student-explanation.controller.j
  * nothing, since what is counted is a column and not a behaviour. So there is no
  * `forwardRef` anywhere here.
  *
- * `StudentModeGuard` is constructed here because Nest builds a controller's
- * enhancers in that controller's injector: `IdentityModule` exports the two
+ * **`PracticeTestModule` also serves the parent paths**, through
+ * `attemptProfileFor`: which child sat a handed-in Attempt is the one fact a
+ * parent-scoped Explanation read cannot know and must not be told, and it arrives
+ * from the module that owns `Attempt`. So Story 6.2 added a parent controller here
+ * and still no `attempt` delegate.
+ *
+ * `StudentModeGuard` and `ParentElevationGuard` are both constructed here because
+ * Nest builds a controller's enhancers in that controller's injector: `IdentityModule` exports the two
  * services the guard needs, and the `JwtModule` below registers the parent secret
  * the binding cookie is signed with, resolved in this injector through
  * `requireParentJwtSecret()` (AD-25). The same arrangement `grading.module.ts`
@@ -45,8 +54,8 @@ import { StudentExplanationController } from './student-explanation.controller.j
     AllowanceModule,
     AiModule,
   ],
-  controllers: [StudentExplanationController],
-  providers: [ExplanationService, StudentModeGuard],
+  controllers: [StudentExplanationController, ParentExplanationController],
+  providers: [ExplanationService, StudentModeGuard, ParentElevationGuard],
   exports: [ExplanationService],
 })
 export class ExplanationModule {}

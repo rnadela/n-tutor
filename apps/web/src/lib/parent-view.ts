@@ -41,6 +41,32 @@ export function applyIfCurrent<T>(
   };
 }
 
+/**
+ * A stored instant, in the device's own formatting — or `null` when it is not an
+ * instant at all.
+ *
+ * Every parent screen states a stored instant by handing it to `Date` and then to
+ * `toLocaleString`, and `Date` answers an unparsable string with `Invalid Date`, whose
+ * `toLocaleString` is the literal words **"Invalid Date"**. Those words on a parent's
+ * screen are worse than no date: they read as a fault in the thing being described
+ * rather than in the string, and a screen reader says them.
+ *
+ * So the parse is checked here, once, and the caller chooses a sentence: the dated one
+ * for a real instant, an undated one for `null`. Which keeps "there is no date to show"
+ * a copy decision rather than a rendering accident.
+ *
+ * It is deliberately **not** a guard on the value's presence. Whether a flag exists is
+ * decided elsewhere, on the field being present, and an unreadable instant is still a
+ * flag that was raised — it is only the *date* that cannot be stated.
+ */
+export function readableInstant(value: string): string | null {
+  const instant = new Date(value);
+  // `NaN` is the only thing an unparsable date produces, and it is not equal to itself,
+  // which is why this is a `Number.isNaN` and never a comparison.
+  if (Number.isNaN(instant.getTime())) return null;
+  return instant.toLocaleString();
+}
+
 /** What the live region holds: the sentence, and which announcement it is. */
 export interface Announcement {
   text: string;

@@ -1621,3 +1621,75 @@ source_spec: `spec-6-1-on-demand-explanations.md`
 severity: medium
 reason: explanationFor re-reads consumptionFor after the AI call to derive windowStart/windowEnd instead of reusing the pre-call read, but every existing integration case that varies the count between check and write keeps the same period window; none advances or fakes the account's period boundary between the two reads.
 status: open
+
+### DW-204: The failure paths of both new parent screens are covered only by an e2e spec that could not be executed in this environment.
+origin: spec-deferred 2f2bab10a60a
+location: e2e/tests/parent-explanation-review.spec.ts
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: medium
+reason: apps/web runs vitest with environment: 'node' and no DOM library, so a failed flag press, a failed Explanations read and an empty runs list can only be exercised at the browser. Ports 3000/3001 were held by an unrelated dev server for the whole run, so Playwright could not start its own servers.
+status: open
+
+### DW-205: The stateful parent screens are verified by asserting their own source text rather than by rendering them.
+origin: spec-deferred c1ac4a56f4f4
+location: apps/web/src/app/parent/_components/ExplanationReview.spec.tsx
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: medium
+reason: ExplanationReview.spec.tsx and both attempts page specs readFileSync their subject and match substrings, so a refactor that preserves the strings while changing the behaviour passes. This is the house pattern the DOM-less unit environment forces, not a defect introduced here, but it caps what the unit tier can prove.
+status: open
+
+### DW-206: A parent opening a run whose Questions are still ungraded triggers grading re-asks, with no bound and no test.
+origin: spec-deferred 9e0f0422a09d
+location: apps/api/src/grading/parent-attempt.controller.ts
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: medium
+reason: resultsFor calls resolveUngraded first (FR-22 makes viewing the trigger), and the parent route reuses it unchanged. The integration fixtures pre-grade every Question, so the billing path a parent read can take is never exercised, and the parent's screen states nothing about it.
+status: open
+
+### DW-207: test/practice-test.int-spec.ts fails nondeterministically on this machine, a different single case each whole-file run.
+origin: spec-deferred e3095184265c
+location: apps/api/test/practice-test.int-spec.ts
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: medium
+reason: Four successive runs failed on four different cases (subject classification, a foreign draft read, the generation budget, a malformed-id 400), and each failing case passes in isolation. Pre-existing: story 6.1's own result recorded the same file flaking.
+status: open
+
+### DW-208: The parent run list is unbounded, with no page or cursor.
+origin: spec-deferred 3f58a2290ace
+location: apps/api/src/practicetest/practice-test.service.ts (parentSubmittedRunsFor)
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: low
+reason: parentSubmittedRunsFor selects every handed-in Attempt of a profile and batches Subject labels for all of them in one cross-module call, so both grow with a child's whole history.
+status: open
+
+### DW-209: The null arm of the run list's Subject label is never produced by a test.
+origin: spec-deferred b9ebfb47f737
+location: apps/api/test/parent-explanation-review.int-spec.ts
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: low
+reason: The service degrades an unresolvable Subject to null and the screen renders unknownSubject for it, but every integration fixture has a resolvable Subject and the spec asserts typeof subjectName === 'string' for every row.
+status: open
+
+### DW-210: A leftover review artifact is tracked at the repository root.
+origin: spec-deferred 8053ba9a5eac
+location: _tmp_review_diff.patch
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: low
+reason: _tmp_review_diff.patch was committed by an earlier story and is unrelated to any source or build path.
+status: open
+
+### DW-211: The concurrent-double-press recovery in the parent flag write is untested.
+origin: spec-deferred a82bcecacc38
+location: apps/api/src/explanation/explanation.service.ts (flagExplanation)
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: medium
+reason: flagExplanation recovers from a P2002 unique-violation race on [explanationId, origin] by re-reading the winning row, but every integration case presses the flag sequentially (first, second, third), which resolves the plain upsert's update arm and never forces two concurrent creates to collide. The same, pre-existing recovery in explanationFor is equally untested for the same reason. If the catch arm silently broke, nothing in the suite would notice.
+status: open
+
+### DW-212: Parent-facing question-format labels duplicate the student ones instead of sharing a table.
+origin: spec-deferred 9b07ea640432
+location: apps/web/src/copy/parent.ts (attempts.format)
+source_spec: `spec-6-2-parent-review-of-explanations.md`
+severity: low
+reason: parentCopy.attempts.format re-declares the same three labels (MultipleChoice, FillInTheBlank, ShortAnswer) already in studentCopy.takeTest.format. commonCopy.gradeState was deliberately factored out specifically so a parent and a student surface cannot disagree on that one; this format table is the same category of duplication left unfactored, so a fourth question format added later requires remembering to update both copy tables.
+status: open

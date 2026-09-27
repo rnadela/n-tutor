@@ -456,6 +456,48 @@ export interface ExplanationView {
 }
 
 /**
+ * One of a child's handed-in runs, exactly as the API states it.
+ *
+ * What a run *is*: which Attempt, which test, which run of it, when it went in, how
+ * long the paper was and which Subject it belongs to. **No grade and no score** — the
+ * score is the Attempt-detail read's one figure (FR-37), and a list that carried one
+ * per row would be a second denominator.
+ *
+ * `subjectName` is null for a test whose Subject carries no classification or no
+ * longer resolves. The row keeps its place and loses its label.
+ */
+export interface ParentAttemptSummary {
+  attemptId: string;
+  practiceTestId: string;
+  ordinal: number;
+  submittedAt: string;
+  questionCount: number;
+  subjectName: string | null;
+}
+
+/**
+ * One stored Explanation as the **parent** reads it, exactly as the API states it.
+ *
+ * One entry per Explanation the child actually asked for. A Question with no entry is
+ * a Question nobody asked about — the screen says so, and nothing is generated to
+ * fill the gap.
+ *
+ * `parentFlaggedAt` is when a parent first recorded a concern about it, or null. An
+ * instant rather than a boolean, and the *first* one: a second press cannot move it.
+ *
+ * There is no cost, no tier, no model name, no allowance figure, no grading rationale
+ * and no suppression field (AD-20, AD-26): the rationale is Story 6.5's and
+ * suppression is Story 6.4's, and neither has a shape here to travel in.
+ */
+export interface ParentExplanationView {
+  questionId: string;
+  /** The stored segments, drawn by `components/RichText` and by nothing else (AD-32). */
+  body: RichTextSegment[];
+  /** When a parent first reported it, or null. */
+  parentFlaggedAt: string | null;
+}
+
+/**
  * One finished run at a practice test, exactly as the API states it.
  *
  * Which run it is, when it went in, what it came to, and whether it is the one that
@@ -1401,6 +1443,73 @@ export const parentApi = {
    * timer is editable up to release and never after, and the API is where that
    * is decided.
    */
+  /**
+   * One child's handed-in runs, newest first.
+   *
+   * An empty list is the ordinary answer for a child who has handed nothing in —
+   * and it is also the answer for a profile id belonging to another account, which
+   * is why this app does not try to tell the two apart. There is nothing here to
+   * enumerate and no refusal to read.
+   */
+  studentAttempts: (token: string, studentProfileId: string) =>
+    call<ParentAttemptSummary[]>(
+      `/parent/students/${encodeURIComponent(studentProfileId)}/attempts`,
+      { headers: elevated(token) },
+      parentCopy.attempts.listFailed,
+    ),
+
+  /**
+   * One handed-in run's whole answer key and its score, read by account.
+   *
+   * The same `AttemptResultsView` the child's own results read answers with, reused
+   * exactly as it stands: a parent-shaped copy of it would be a second place a
+   * rationale could one day be added to (AD-20, AD-26).
+   *
+   * A 404 covers an id that never existed, one belonging to another account and one
+   * whose run is still open — the API states one sentence for all three.
+   */
+  parentAttemptResults: (token: string, attemptId: string) =>
+    call<AttemptResultsView>(
+      `/parent/attempts/${encodeURIComponent(attemptId)}/results`,
+      { headers: elevated(token) },
+      parentCopy.attempts.detailFailed,
+    ),
+
+  /**
+   * Every Explanation stored for one run, as the parent reads them.
+   *
+   * **A read that generates nothing.** It is a `GET`, no Explanation is written and
+   * no Explanation Allowance is consumed: what the child never asked for does not
+   * exist, and this call will not make it. A Question with no entry in the answer is
+   * a Question the screen states nothing was explained for.
+   */
+  attemptExplanations: (token: string, attemptId: string) =>
+    call<ParentExplanationView[]>(
+      `/parent/attempts/${encodeURIComponent(attemptId)}/explanations`,
+      { headers: elevated(token) },
+      parentCopy.attempts.explanationsFailed,
+    ),
+
+  /**
+   * Records a parent's concern about one Explanation, and answers with the state.
+   *
+   * **Idempotent, and there is no undo.** A second press is the same concern and
+   * answers the same `parentFlaggedAt` the first one did; nothing here un-flags,
+   * because a record of a concern is not a toggle. Nothing about the child's own
+   * screen changes — the same Explanation is still served — and the screen says so
+   * in words rather than leaving a parent to assume otherwise.
+   *
+   * A 404 covers a Question with no stored Explanation as well as an Attempt that is
+   * not this account's: there is nothing to record a concern against either way, and
+   * the API states one sentence for both.
+   */
+  flagExplanation: (token: string, attemptId: string, questionId: string) =>
+    call<ParentExplanationView>(
+      `/parent/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation-flag`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.attempts.flagFailed,
+    ),
+
   setPracticeTestTimer: (token: string, practiceTestId: string, minutes: number | null) =>
     call<PracticeTestDraftView>(
       `/parent/practice-tests/${encodeURIComponent(practiceTestId)}/timer`,

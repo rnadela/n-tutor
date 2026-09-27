@@ -25,6 +25,7 @@ import {
   type GenerationAllowanceView,
   type GenerationJobView,
   type GenerationTopicsView,
+  type ParentAttemptSummary,
   type PracticeTestDraftSummary,
   type PracticeTestDraftView,
 } from './practice-test.service.js';
@@ -302,5 +303,34 @@ export class PracticeTestController {
     @Body() dto: SetPracticeTestTimerDto,
   ): Promise<PracticeTestDraftView> {
     return this.practiceTests.setTimer(req.elevated!.parentAccountId, id, dto.minutes);
+  }
+
+  /**
+   * One child's handed-in runs, newest first — the parent's way in to an Attempt.
+   *
+   * **A foreign or unknown profile id answers `[]`.** The account comes off
+   * `req.elevated` and the profile id off the path, and both sit in the same `where`:
+   * a profile of another account matches no Attempt of *this* account, which is the
+   * identical answer a child of this account with nothing handed in gets. So this
+   * route tells nothing apart and nothing here enumerates — a 404 for an unknown
+   * profile would be a confirmation for a known one.
+   *
+   * `ParseUUIDPipe`, as every other parent route here carries: a malformed id on a
+   * parent surface is a fault in the caller and a 400 says so. The student routes
+   * deliberately omit it, because a child's surface answers every refusal with one
+   * sentence.
+   *
+   * No grade and no score: the score is `grading`'s one figure and arrives with the
+   * Attempt detail read (FR-37, AD-6).
+   */
+  @Get('students/:studentProfileId/attempts')
+  studentAttempts(
+    @Req() req: ElevatedRequest,
+    @Param('studentProfileId', ParseUUIDPipe) studentProfileId: string,
+  ): Promise<ParentAttemptSummary[]> {
+    return this.practiceTests.parentSubmittedRunsFor(
+      req.elevated!.parentAccountId,
+      studentProfileId,
+    );
   }
 }

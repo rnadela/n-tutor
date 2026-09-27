@@ -6,14 +6,33 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
+import { AnswerKeyRow, type AnswerKeyRowLabels } from '@/components/AnswerKeyRow';
 import { useAnnounce } from '@/components/LiveRegion';
 import { studentCopy } from '@/copy/student';
 import { parentApi, type AttemptResultsView } from '@/lib/parent-api';
 import { newlyGradedCount, summaryOf } from '@/lib/results-summary';
 import { comfortableDensity, typeRoles } from '@/theme/tokens';
 import { deviceIsUnbound } from '../page';
-import { AnswerKeyRow } from './AnswerKeyRow';
 import { ExplainPanel } from './ExplainPanel';
+
+/**
+ * The words the child reads on every answer-key row.
+ *
+ * Built here, once, from `studentCopy` — the row itself imports no copy at all, so
+ * that the parent's Attempt detail can render the identical layout in the third
+ * person. Module-level rather than per render: it is a constant, and a fresh object
+ * per render would be a new prop identity on every row of a long paper.
+ */
+const STUDENT_ROW_LABELS: AnswerKeyRowLabels = {
+  question: studentCopy.results.question,
+  format: studentCopy.takeTest.format,
+  studentAnswer: studentCopy.results.yourAnswer,
+  noAnswer: studentCopy.results.noAnswer,
+  correctAnswer: studentCopy.results.correctAnswer,
+  answerUnavailable: studentCopy.results.answerUnavailable,
+  rowUngraded: studentCopy.results.rowUngraded,
+  rowNewlyGraded: studentCopy.results.rowNewlyGraded,
+};
 
 /**
  * The answer key: what one handed-in Attempt came to, every Question of it.
@@ -260,6 +279,10 @@ export function AttemptResults({
           <AnswerKeyRow
             key={row.questionId}
             row={row}
+            // The child's own words. The row states no person of its own, which is
+            // what lets the parent's Attempt detail render this same layout about
+            // their child instead of to them.
+            labels={STUDENT_ROW_LABELS}
             // Handed to the row as a slot, so neither this component nor the row
             // gains a notion of explaining: all the state, the press, the request
             // and the four outcomes live in `ExplainPanel`, which is what keeps the
