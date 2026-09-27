@@ -376,6 +376,95 @@ export const studentCopy = {
      * control is still there to press again.
      */
     retakeFailed: 'Your retake could not be started.',
+    /**
+     * Everything the explain panel says, and the only place any of it is written.
+     *
+     * Four rules hold this group together, and they are the same four the panel's
+     * spec asserts over its own source.
+     *
+     * **Nothing here counts.** No "3 of 10 left", no "1 explanation used", no
+     * badge and no running total: an allowance is a billing fact and a child is
+     * never shown one (AD-26). The one sentence that mentions the limit at all is
+     * `atCap`, and it says the plan ran out rather than how far.
+     *
+     * **Blame lands on the plan, never on the child.** A child who has read ten
+     * explanations has done nothing wrong, and a sentence that implied otherwise
+     * would teach them not to ask. There is no apology either: an apology makes a
+     * system's bad minute into something the reader has to absorb.
+     *
+     * **No exclamation marks and no upsell.** Nothing here names a tier, a price
+     * or an upgrade, and nothing invites one.
+     *
+     * **Every figure is a parameter.** No instant, count or server sentence is
+     * restated here; `atCap` takes the API's own refusal and never rewrites it.
+     */
+    explain: {
+      /**
+       * The control that asks for an explanation, and the same control that hides
+       * one again.
+       *
+       * One label for both directions, because `aria-expanded` is what says which
+       * way the press goes and a label that changed under the finger would be a
+       * second, contradictory account of it. "Why?" is the child's own word for
+       * what they want — not "Explanation", which is the product's word for it.
+       */
+      control: 'Why is that the answer?',
+      /** The panel's own heading, above the prose. */
+      heading: 'Why that is the answer',
+      /**
+       * Said while nothing has been asked for yet and the panel is open.
+       *
+       * It exists because an open panel with nothing in it reads as something that
+       * failed to load. It promises nothing and starts nothing: the press is the
+       * only thing that asks.
+       */
+      idle: 'Press the button to see why.',
+      /** The request is out. Stated, so the press is never silent. */
+      loading: 'Working it out…',
+      /**
+       * It could not be written. One sentence for every failure class.
+       *
+       * It says what did not happen rather than what went wrong — there is no
+       * error code, no mention of a provider and nothing about the Question — and
+       * the rest of the results screen is untouched behind it. The control is
+       * still there to press, and nothing presses it on its own.
+       */
+      failed: 'This explanation could not be written just now.',
+      /**
+       * The press happened with no connection, so nothing was sent.
+       *
+       * Deliberately **distinct** from both `failed` and `atCap`: "there is no
+       * connection" is a thing a child can act on, and collapsing it into "it did
+       * not work" would send them pressing again at a wall.
+       */
+      offline: 'You are not connected right now, so this could not be asked for.',
+      /**
+       * Nothing is left of the plan's explanations this period.
+       *
+       * The sentence naming the limit is the **API's own**, handed in whole: it is
+       * written once, in the API's policy file, and a second spelling here would be
+       * two answers to one refusal. This wraps it in the one thing the server has
+       * no business knowing — that the reader is a child and the answer is not
+       * about them.
+       *
+       * `null` is the fallback for a refusal that arrived without its sentence, and
+       * it says the same thing in this module's own words rather than leaving a
+       * panel that refuses and will not say why.
+       */
+      atCap: (limitSentence: string | null) =>
+        limitSentence === null
+          ? 'Your plan has no more explanations this period. They come back at the start of the next one. Everything you have already opened is still here.'
+          : `${limitSentence} That is about the plan, not about you — everything you have already opened is still here.`,
+      /**
+       * Said to the live region when an Explanation appears, and it is **the same
+       * sentence the screen displays** beside the prose.
+       *
+       * The ordinal is handed in, because two panels open on one screen are two
+       * different facts and an announcement that did not say which Question it was
+       * about would be unusable to anyone reading the page by ear.
+       */
+      announcement: (ordinal: number) => `The explanation for question ${ordinal} is ready.`,
+    },
   },
   /**
    * What a row on Student Home says about a practice test the child has finished.

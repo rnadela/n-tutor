@@ -6,6 +6,7 @@ import { AdminModule } from './admin/admin.module.js';
 import { AiModule } from './ai/ai.module.js';
 import { CorrelationIdMiddleware } from './common/correlation.js';
 import { requireIntEnv } from './common/env.js';
+import { ExplanationModule } from './explanation/explanation.module.js';
 import { ExtractionModule } from './extraction/extraction.module.js';
 import { GradingModule } from './grading/grading.module.js';
 import { HealthController } from './health/health.controller.js';
@@ -69,6 +70,12 @@ export const PARENT_THROTTLER = 'parent';
     // handing in: closing an Attempt and recording what its blanks mean are one
     // transaction, so the route lives with the entity.
     GradingModule,
+    // Sole owner and sole writer of Explanation (AD-17). Registered after
+    // `GradingModule` because it depends on `practicetest` the same way and adds
+    // nothing either of them reads: no module imports this one, and `allowance`
+    // counts its charged rows through its own PrismaService rather than through a
+    // service here, which is what keeps the arrow one-way.
+    ExplanationModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

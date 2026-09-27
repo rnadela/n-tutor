@@ -13,6 +13,7 @@ import { newlyGradedCount, summaryOf } from '@/lib/results-summary';
 import { comfortableDensity, typeRoles } from '@/theme/tokens';
 import { deviceIsUnbound } from '../page';
 import { AnswerKeyRow } from './AnswerKeyRow';
+import { ExplainPanel } from './ExplainPanel';
 
 /**
  * The answer key: what one handed-in Attempt came to, every Question of it.
@@ -44,6 +45,12 @@ import { AnswerKeyRow } from './AnswerKeyRow';
  * **Nothing appears with a flourish.** No count-up, no reveal, no celebration and no
  * per-tick motion. The one thing announced is a Question this read just resolved,
  * and it is announced with the very sentence that is displayed.
+ *
+ * **Explaining is somebody else's state.** Since Story 6.1 each row carries an
+ * `ExplainPanel` in its own slot, and this component neither knows nor can act on
+ * what it does: the panel owns its press, its request and its four outcomes, which
+ * is why the one read above is still the only `parentApi.` call this file makes and
+ * why a failed explanation cannot take the answer key down with it.
  *
  * **`footer` is a slot and nothing more.** Since Story 5.7 the page renders a control
  * beneath the rows, and it passes it in rather than this component growing a notion of
@@ -250,7 +257,21 @@ export function AttemptResults({
         sx={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid' }}
       >
         {results.questions.map((row) => (
-          <AnswerKeyRow key={row.questionId} row={row} />
+          <AnswerKeyRow
+            key={row.questionId}
+            row={row}
+            // Handed to the row as a slot, so neither this component nor the row
+            // gains a notion of explaining: all the state, the press, the request
+            // and the four outcomes live in `ExplainPanel`, which is what keeps the
+            // one-read invariant above literally true and keeps the row hookless.
+            explain={
+              <ExplainPanel
+                attemptId={results.attemptId}
+                questionId={row.questionId}
+                ordinal={row.ordinal}
+              />
+            }
+          />
         ))}
       </Box>
       {/* Whatever the page put here, after everything this component owns. The

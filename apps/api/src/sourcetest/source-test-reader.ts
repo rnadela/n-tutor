@@ -89,6 +89,30 @@ export interface SourceTestReader {
    * itself. Nothing but a Subject *name* crosses back.
    */
   readSubjectLabels(sourceTestIds: readonly string[]): Promise<Map<string, string | null>>;
+  /**
+   * The Grade Level name of each of the given Source Tests, keyed by Source Test
+   * id — `null` where the upload carries no Grade Level or the stored id no
+   * longer names a row, and absent where the id names nothing this reader can
+   * see.
+   *
+   * The sibling of `readSubjectLabels`, and here for the same reason (AD-17):
+   * the Grade Level is `sourcetest`'s column and the *name* behind it is
+   * `admin`'s taxonomy to resolve, so a reader outside this module must never
+   * acquire a `sourceTest` or a `gradeLevel` delegate to reach it.
+   *
+   * Its caller is `explanation`, which pitches an Explanation's register at the
+   * **Practice Test's** Grade Level — the grade of the paper the child actually
+   * sat, never the grade on their Student Profile. The label is a prompt
+   * instruction and nothing more: an unresolvable one costs the prompt its grade
+   * clause and never costs the child their Explanation, which is why this
+   * degrades to `null` rather than refusing.
+   *
+   * Batched, and deliberately **not** account-scoped, for the two reasons
+   * `readSubjectLabels` states: one call site today asks about one id and a
+   * later list would ask about many, and ownership has already been proven in
+   * the `where` that found the row.
+   */
+  readGradeLevelLabels(sourceTestIds: readonly string[]): Promise<Map<string, string | null>>;
 }
 
 /**

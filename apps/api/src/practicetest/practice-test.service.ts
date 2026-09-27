@@ -491,6 +491,40 @@ export interface AttemptAnswerKey {
   questions: AnswerKeyQuestion[];
 }
 
+/**
+ * Everything an Explanation is written from, for one Question of one handed-in
+ * Attempt.
+ *
+ * The third view of a Question, beside `GradingQuestionInput`'s grader's view and
+ * `AnswerKeyQuestion`'s reader's view — and the only one that is **plain text
+ * throughout**. It is going into a prompt, and a prompt is a string: flattening
+ * the stored segments here keeps the module that must not know how a fraction is
+ * stored from having to flatten them itself (AD-17, AD-32).
+ *
+ * `studentAnswer` is an empty string for a Question the child left blank, and
+ * `correctAnswer` is an empty string where the stored key could not be read back.
+ * Both degrade rather than refuse, because this runs on work already done.
+ *
+ * `gradeLevelName` is the **Practice Test's** Grade Level, resolved through
+ * `sourcetest` — never the Student Profile's. It is `null` for a test carrying no
+ * Grade Level or one whose stored id no longer names a row, and the prompt drops
+ * its register clause rather than refusing.
+ */
+export interface ExplanationInput {
+  practiceTestId: string;
+  /** The number the child was shown while they worked. */
+  ordinal: number;
+  format: QuestionFormat;
+  /** Plain text of the stored prompt. Empty where it could not be read back. */
+  prompt: string;
+  /** What the child put down, as words. Empty for a Question left blank. */
+  studentAnswer: string;
+  /** What the answer was, as words. Empty where the stored key is unreadable. */
+  correctAnswer: string;
+  /** The Practice Test's Grade Level name, or null when it does not resolve. */
+  gradeLevelName: string | null;
+}
+
 /** One generated option, in the order it is to be shown. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -1589,6 +1623,110 @@ export class PracticeTestService {
         questions: rows,
       };
     });
+  }
+
+  /**
+   * Everything an Explanation is written from, for one Question of one handed-in
+   * Attempt — in one read across the module boundary.
+   *
+   * **It exists so `explanation` holds no delegate of this module's.** That module
+   * owns `Explanation` and nothing else (AD-17): no `practiceTest`, no `attempt`,
+   * no `answer`, no `sourceTest` and no taxonomy. Everything it needs to build a
+   * prompt is here, resolved once, by the module that owns the rows.
+   *
+   * Ownership is the same `where` `answerKeyFor` uses and refuses the same way: a
+   * foreign Attempt, a sibling's, an unknown id and one still open all answer the
+   * single `PRACTICE_TEST_NOT_FOUND` sentence by construction (AD-18). A
+   * `questionId` that is not on that Attempt's Practice Test answers it too — an
+   * alien Question is not a different flavour of refusal, and a second sentence
+   * would let the outside tell a real Question of another test from one that never
+   * existed.
+   *
+   * **`gradeLevelName` is the Practice Test's, never the child's.** It is resolved
+   * from `practiceTest.sourceTest.gradeLevelId` through `readGradeLevelLabels`, for
+   * the reason the Subject label is resolved through `readSubjectLabels`: the name
+   * is `sourcetest`'s to give and this module must not acquire a taxonomy delegate.
+   * `StudentProfile.gradeLevelId` is not read on this path at all — the register an
+   * Explanation is pitched at is the grade of the paper that was sat, and a child
+   * working a grade above or below their profile must be met where the paper is.
+   *
+   * Every text field is **plain text**, because it is going into a prompt. The
+   * prompt is a string; carrying segments across this boundary only to flatten them
+   * on the other side would put the flattening in the module that must not know how
+   * a fraction is stored. An unreadable stored field degrades to an empty string
+   * rather than throwing, for the reason `answerKeyFor`'s fields degrade to null:
+   * this runs on work already done.
+   */
+  async explanationInputFor(
+    parentAccountId: string,
+    studentProfileId: string,
+    attemptId: string,
+    questionId: string,
+  ): Promise<ExplanationInput> {
+    const found = await this.prisma.withTransaction(async (tx) => {
+      const attempt = await tx.attempt.findFirst({
+        where: { id: attemptId, parentAccountId, studentProfileId },
+        select: {
+          id: true,
+          practiceTestId: true,
+          submittedAt: true,
+          practiceTest: { select: { sourceTestId: true } },
+        },
+      });
+      // The one sentence a foreign Attempt, a sibling's, an unknown id and an
+      // Attempt still open all share.
+      if (attempt === null || attempt.submittedAt === null) {
+        throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      }
+
+      // Scoped by the Practice Test as well as by the id, so a real Question of
+      // another test is as absent as one that never existed.
+      const question = await tx.practiceTestQuestion.findFirst({
+        where: { id: questionId, practiceTestId: attempt.practiceTestId },
+        select: {
+          id: true,
+          ordinal: true,
+          format: true,
+          prompt: true,
+          answer: true,
+          choices: {
+            select: { ordinal: true, body: true, isCorrect: true },
+            orderBy: { ordinal: 'asc' },
+          },
+          answers: { where: { attemptId: attempt.id }, select: { value: true } },
+        },
+      });
+      if (question === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+
+      return { attempt, question };
+    });
+
+    // Outside the transaction, because it crosses a module boundary and resolves
+    // through `admin`'s taxonomy: holding a transaction open across a call this
+    // module does not control would pin a connection for the duration of somebody
+    // else's read.
+    const labels = await this.sourceTests.readGradeLevelLabels([
+      found.attempt.practiceTest.sourceTestId,
+    ]);
+
+    const { question } = found;
+    const value = question.answers[0]?.value ?? null;
+    const prompt = isRichText(question.prompt) ? plainTextOf(question.prompt as RichText) : '';
+    const correct = correctAnswerTextOf(question);
+    const student = studentAnswerTextOf(question, value);
+
+    return {
+      practiceTestId: found.attempt.practiceTestId,
+      ordinal: question.ordinal,
+      format: question.format,
+      prompt,
+      // An empty string for a Question left blank: the prompt says in its own words
+      // that a blank is a blank, and an invented answer would be an Explanation of
+      // something the child never wrote.
+      studentAnswer: student === null ? '' : plainTextOf(student),
+      correctAnswer: correct === null ? '' : plainTextOf(correct),
+      gradeLevelName: labels.get(found.attempt.practiceTest.sourceTestId) ?? null,
+    };
   }
 
   /**

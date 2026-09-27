@@ -86,9 +86,9 @@ export class AllowanceService {
    * charge — an abandoned or expired draft was never Submitted and so was
    * never charged, and a refused submit leaves the row a Draft.
    *
-   * `explanation` has no entity yet, so it reads zero and issues no query.
-   * When it arrives it is counted here and **nowhere else**, and no counter
-   * column, period column, or reset job is introduced anywhere.
+   * Explanation arrived with Story 6.1 and is counted here and **nowhere
+   * else**: charged `explanation` rows inside the window, with no counter
+   * column, period column or reset job introduced anywhere.
    *
    * Instance-bound rather than module-level, which is what puts the injected
    * services in reach; "counted here and nowhere else" is the part of the seam
@@ -106,7 +106,24 @@ export class AllowanceService {
           chargedAt: { gte: window.start, lt: window.end },
         },
       }),
-    explanation: async () => 0,
+    explanation: (accountId, window) =>
+      // The same half-open window and the same shape as `generation` above, over
+      // `explanation`'s own charging column. Counted **here and nowhere else**:
+      // there is no counter column, no period column and no reset job, and a row
+      // whose `chargedAt` is null — Story 6.4's free regeneration — is simply not
+      // counted, because it cost nothing.
+      //
+      // Through this module's own `PrismaService` rather than through
+      // `ExplanationService`, for the reason the note on the injection says:
+      // `explanation` imports `allowance`, so importing it back would be a cycle
+      // bought for nothing, since what is counted is a column and not a
+      // behaviour.
+      this.prisma.explanation.count({
+        where: {
+          parentAccountId: accountId,
+          chargedAt: { gte: window.start, lt: window.end },
+        },
+      }),
   };
 
   /** The window this account's counters are measured over, in its own zone. */

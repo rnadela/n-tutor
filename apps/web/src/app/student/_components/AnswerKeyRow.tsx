@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import { RichText } from '@/components/RichText';
@@ -69,7 +70,7 @@ function ruleBackground(rule: GradeStateMarkerToken['rule'], color: string): str
  * **Nothing here celebrates and nothing counts up.** A row appears drawn, in the
  * place the Question was, whatever state it is in.
  */
-export function AnswerKeyRow({ row }: { row: AnswerKeyRowView }) {
+export function AnswerKeyRow({ row, explain }: { row: AnswerKeyRowView; explain?: ReactNode }) {
   const marker = gradeStateMarker[row.state];
   return (
     <Box
@@ -212,6 +213,15 @@ export function AnswerKeyRow({ row }: { row: AnswerKeyRowView }) {
             {studentCopy.results.rowNewlyGraded}
           </Typography>
         )}
+        {/* Whatever the screen put here, last inside this row's own content column
+            and never outside it — an explanation belongs directly beneath the
+            Question it is about (UX-DR16).
+
+            A slot rather than a prop with a meaning, exactly as `AttemptResults`'
+            `footer` is: this component keeps knowing nothing about explaining, keeps
+            having no hooks, and stays assertable as a markup string. It does not
+            know what is in here and cannot act on it. */}
+        {explain}
       </Box>
     </Box>
   );

@@ -198,9 +198,11 @@ async function assertAnswerKey(page: Page, total: number, correct: number): Prom
     'Correct answer',
   );
 
-  // **Nothing parent-scoped, and nothing from a later epic.** No grading rationale,
-  // no Topic label, no Explanation control and no Retake: the response has no field
-  // for the first two and this surface mounts neither of the last two.
+  // **Nothing parent-scoped, and nothing from a later story.** No grading rationale
+  // and no Topic label: the response has no field for either. Since Story 6.1 each
+  // row does carry an explain control, but it is a closed disclosure that says
+  // nothing about explanations until a child presses it — which is why neither word
+  // appears here, and which is asserted properly in `student-explanations.spec.ts`.
   await expect(results.locator('[data-testid*="rationale"]')).toHaveCount(0);
   await expect(results.locator('[data-testid*="topic"]')).toHaveCount(0);
   await expect(results).not.toContainText(/explain|retake/iu);

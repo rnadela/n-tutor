@@ -210,6 +210,11 @@ model StudentProfile {
   /// answers, and neither is something a deletion has to preserve.
   attempts Attempt[]
 
+  /// The Explanations asked for under this child's binding. Cascades from here,
+  /// like `attempts`: an Explanation is prose written for this child about their
+  /// own run, and it goes with the run.
+  explanations Explanation[]
+
   /// The list read and the selectable read are both scoped by account and
   /// filtered by archive state.
   @@index([parentAccountId, archivedAt])
@@ -964,6 +969,10 @@ model PracticeTestQuestion {
   topics  PracticeTestQuestionTopic[]
   answers Answer[]
   grades  QuestionGrade[]
+  /// `explanation`'s rows, back-related here because Prisma requires both sides
+  /// of a relation to be named. It is a relation and not a licence: nothing in
+  /// `practicetest` reads or writes an Explanation (AD-17).
+  explanations Explanation[]
 
   @@unique([practiceTestId, ordinal])
   @@map("practice_test_question")
@@ -1072,6 +1081,10 @@ model Attempt {
   /// relation to be named. It is a relation and not a licence: nothing in
   /// `practicetest` reads or writes a grade (AD-6, AD-17).
   grades  QuestionGrade[]
+  /// `explanation`'s rows, back-related for the reason `grades` is. Cascade from
+  /// here: an Explanation is a reading of this run and has no existence apart
+  /// from it. The *charge* it carries is already spent and is never refunded.
+  explanations Explanation[]
 
   /// One row per child per run at a Practice Test.
   @@unique([practiceTestId, studentProfileId, ordinal])
@@ -1209,4 +1222,58 @@ model QuestionGrade {
   /// The read every later story makes: one Attempt's grades, whole.
   @@index([attemptId])
   @@map("question_grade")
+}
+
+/// One Explanation of one Question, written for the child who sat that Attempt.
+///
+/// **The row is the cache and the row is the charge.** The unique key
+/// `(attemptId, questionId, studentProfileId)` *is* the cache key: the first ask
+/// generates and writes, and every later ask for the same three ids finds this row
+/// and makes no provider call, counts no allowance and writes nothing. There is no
+/// second lookup table and no expiry — an Explanation of work already done does not
+/// go stale.
+///
+/// `chargedAt` is the Explanation Allowance (AD-14), exactly as `PracticeTest`'s is
+/// the Generation one: counting rows with a `chargedAt` inside a period window *is*
+/// the usage, so there is no counter column, no reset job, no decrement and no
+/// refund. It is **nullable** deliberately — Story 6.4's free regeneration needs
+/// somewhere to opt out of the charge, and a null there is "this row cost nothing"
+/// rather than "this row is not finished".
+///
+/// `parentAccountId` is a plain column rather than a relation, for the reason
+/// `Attempt`'s is: the account edge on a charged row would have to be `Restrict`
+/// to keep a charge from being deleted out from under the count, which contradicts
+/// the cascading edges the child-scoped rows beside it carry.
+///
+/// `body` holds `RichText` segments (AD-32), never a flat string: an Explanation is
+/// generated prose that talks about fractions, and a glyph cannot be read aloud.
+model Explanation {
+  id               String   @id @default(uuid())
+  /// Whose charge this is. Denormalized so the allowance count is one statement
+  /// over one index and never a join across the Attempt.
+  parentAccountId  String
+  studentProfileId String
+  attemptId        String
+  questionId       String
+  /// The explanation prose, as stored `RichText` segments (AD-32).
+  body             Json
+  /// When the Explanation Allowance was spent on this row, or null for a row that
+  /// cost nothing. Written once, by the transaction that writes the row.
+  chargedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  attempt        Attempt        @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question       PracticeTestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  /// The cache key, as a constraint rather than as an intention: two rows for one
+  /// (Attempt, Question, child) would be two explanations of one thing, and the
+  /// losing writer is refused by the index rather than by a check somebody has to
+  /// remember to make.
+  @@unique([attemptId, questionId, studentProfileId])
+  /// The one index the allowance count reads: this account's charged rows inside a
+  /// period window. Equality then range, exactly as `practice_test`'s is.
+  @@index([parentAccountId, chargedAt])
+  @@map("explanation")
 }

@@ -172,4 +172,40 @@ describe('what one answer-key row shows a child', () => {
       'studentAnswer',
     ]);
   });
+
+  it('renders whatever the screen put in the explain slot, last in its own column', () => {
+    // Directly beneath the Question it is about (UX-DR16), and inside the row's
+    // content column rather than after the row — an explanation that sat outside
+    // would be prose attached to nothing in particular.
+    const markup = renderToStaticMarkup(
+      createElement(
+        ThemeProvider,
+        { theme: studentTheme },
+        createElement(AnswerKeyRow, {
+          row: row(),
+          explain: createElement('p', { 'data-testid': 'slot-probe' }, 'slotted'),
+        }),
+      ),
+    );
+    expect(markup).toContain('data-testid="slot-probe"');
+    expect(markup.indexOf('slot-probe')).toBeGreaterThan(
+      markup.indexOf('data-testid="answer-key-correct-label"'),
+    );
+    // And it is still inside the row: the `li` has not closed yet.
+    expect(markup.slice(markup.indexOf('slot-probe'))).toContain('</li>');
+  });
+
+  it('renders nothing extra when no slot is given, and stays hookless either way', () => {
+    // The slot is optional because a results screen that did not offer explaining —
+    // or a row rendered by a test — is still a whole row.
+    expect(render(row())).not.toContain('slot-probe');
+    // Hookless is the property that keeps this component assertable as a markup
+    // string at all, and the slot must not have cost it.
+    const source = readFileSync(path.resolve(import.meta.dirname, 'AnswerKeyRow.tsx'), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
+    expect(code).not.toMatch(/\buse[A-Z]\w*\(/u);
+    // And it gained no notion of what the slot is for: the word appears only as the
+    // prop's own name.
+    expect(code).not.toMatch(/parentApi|explainQuestion|ExplainPanel/u);
+  });
 });

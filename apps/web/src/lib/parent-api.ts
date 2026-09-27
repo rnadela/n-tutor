@@ -435,6 +435,27 @@ export interface AttemptResultsView {
 }
 
 /**
+ * One Question's Explanation, exactly as the API states it.
+ *
+ * Segments and two ids, and **nothing else**. There is no cost, no model name, no
+ * tier, no allowance figure, no count of what is left and no grading rationale
+ * (AD-20, AD-26): none of those is a student-scoped fact, and the view having no
+ * field one could travel in is what makes that a property of the type rather than
+ * a habit.
+ *
+ * `AnswerKeyRowView` and `AttemptResultsView` are deliberately untouched by this.
+ * An Explanation is asked for one Question at a time, by a deliberate press, and
+ * widening the results read with a field for one would turn opening a results
+ * screen into a request for every Explanation on it.
+ */
+export interface ExplanationView {
+  attemptId: string;
+  questionId: string;
+  /** The stored segments, drawn by `components/RichText` and by nothing else (AD-32). */
+  body: RichTextSegment[];
+}
+
+/**
  * One finished run at a practice test, exactly as the API states it.
  *
  * Which run it is, when it went in, what it came to, and whether it is the one that
@@ -983,6 +1004,39 @@ export const parentApi = {
       `/student/attempts/${encodeURIComponent(attemptId)}/results`,
       {},
       studentCopy.results.failed,
+    ),
+
+  /**
+   * One Question's Explanation: the stored one if there is one, a new one if
+   * there is allowance for it.
+   *
+   * **A `POST`, because the first call bills a provider.** Nothing about opening a
+   * results screen asks for one — a child presses a control, deliberately, once
+   * per Question — so the method says that this changes something and costs
+   * something. Nothing here polls, prefetches, queues or retries on a timer; the
+   * only second call is a person pressing again.
+   *
+   * The server answers **201 when it generated and 200 when it read the stored
+   * row**, and this module deliberately does not surface which: the difference is
+   * about billing, and billing is not a thing a child is shown (AD-26). What the
+   * caller gets either way is the segments.
+   *
+   * A refusal at the cap is the one 409 on this surface, and its `reason` is the
+   * API's own sentence — written once, in the API's policy file, and rendered
+   * rather than restated. A provider fault is a 503 and carries the generic
+   * failure sentence below.
+   *
+   * No bearer, exactly as the other student calls: the binding cookie names the
+   * child server-side. The two ids in the path name only *which* Question — a
+   * sibling's Attempt, another account's, one still open, one that never existed
+   * and a Question of another test all answer the same 404 sentence, so there is
+   * nothing this browser could learn by asking.
+   */
+  explainQuestion: (attemptId: string, questionId: string) =>
+    call<ExplanationView>(
+      `/student/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation`,
+      { method: 'POST' },
+      studentCopy.results.explain.failed,
     ),
 
   // --- Uncommitted parent state ------------------------------------------

@@ -116,12 +116,11 @@ describe('what reads the answer key', () => {
   });
 
   it('holds nothing this story is not', () => {
-    // Explanations and the dispute flags are Epic 6's; Retake and the attempt-count
-    // line are Story 5.7's; a rationale, a Topic and any money figure are
-    // parent-scoped and have no field to travel in.
+    // The dispute flags are Stories 6.2-6.5'; Retake and the attempt-count line are
+    // Story 5.7's; a rationale, a Topic and any money figure are parent-scoped and
+    // have no field to travel in.
     for (const forbidden of [
       /rationale/iu,
-      /explain/iu,
       /dispute/iu,
       /retake/iu,
       /\btopic/iu,
@@ -129,6 +128,17 @@ describe('what reads the answer key', () => {
     ]) {
       expect(CODE).not.toMatch(forbidden);
     }
+  });
+
+  it('hands explaining to a slot and keeps none of its state', () => {
+    // Since Story 6.1 each row carries an `ExplainPanel`, and this file's whole
+    // involvement is constructing one with three facts it already has. No press, no
+    // request, no outcome and no copy of its own — which is what keeps the single
+    // `parentApi.` call above true and keeps a failed explanation from taking the
+    // answer key down with it.
+    expect(CODE).toMatch(/<ExplainPanel\s+attemptId=\{results\.attemptId\}/u);
+    expect(CODE.match(/<ExplainPanel/gu)).toHaveLength(1);
+    expect(CODE).not.toMatch(/explainQuestion|explainDecision|studentCopy\.results\.explain/u);
   });
 
   it('appears with no flourish', () => {

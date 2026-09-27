@@ -870,6 +870,65 @@ export class SourceTestService implements SourceTestReader {
   }
 
   /**
+   * The Grade Level name of each given Source Test, keyed by Source Test id.
+   *
+   * `readSubjectLabels`'s sibling, written the same way and for the same reason
+   * (AD-17): the column is this module's and the *name* behind it is `admin`'s,
+   * so a caller outside `sourcetest` reaches it through here rather than by
+   * acquiring a `sourceTest` or a `gradeLevel` delegate of its own.
+   *
+   * Every rule above applies unchanged. `resolveGradeLevel` **throws** for an id
+   * it cannot find, so each resolution is caught on its own and recorded as
+   * `null`; one unresolvable Grade Level costs that row its label and must never
+   * cost the caller its whole read. Resolution keeps succeeding for a **disabled**
+   * Grade Level, because a stored reference resolves for as long as it is stored —
+   * a grade retired after a test was classified must not blank the label on work
+   * already done. An id this reader cannot see is **absent** from the map, which
+   * is how a caller tells "no classification" from "no such row".
+   *
+   * Its one caller uses the label as a prompt instruction, so `null` there costs
+   * the prompt a clause and nothing else.
+   */
+  async readGradeLevelLabels(
+    sourceTestIds: readonly string[],
+  ): Promise<Map<string, string | null>> {
+    const labels = new Map<string, string | null>();
+    const ids = [...new Set(sourceTestIds)];
+    if (ids.length === 0) return labels;
+
+    const rows = await this.prisma.sourceTest.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, gradeLevelId: true },
+    });
+
+    const names = new Map<string, string | null>();
+    const distinctGradeLevelIds = [
+      ...new Set(rows.map((row) => row.gradeLevelId).filter((id): id is string => id !== null)),
+    ];
+    // Resolved together, for the reason the Subject labels are.
+    const resolved = await Promise.all(
+      distinctGradeLevelIds.map(async (gradeLevelId) => {
+        try {
+          return { gradeLevelId, name: (await this.taxonomy.resolveGradeLevel(gradeLevelId)).name };
+        } catch (cause) {
+          // Only the "no such Grade Level" refusal is absorbed; anything else is
+          // rethrown, so a dropped connection never quietly blanks a real label.
+          if (!(cause instanceof NotFoundException)) throw cause;
+          return { gradeLevelId, name: null };
+        }
+      }),
+    );
+    for (const { gradeLevelId, name } of resolved) {
+      names.set(gradeLevelId, name);
+    }
+
+    for (const row of rows) {
+      labels.set(row.id, row.gradeLevelId === null ? null : (names.get(row.gradeLevelId) ?? null));
+    }
+    return labels;
+  }
+
+  /**
    * Every `Ready` page's stored bytes, in ordinal order.
    *
    * This is how the Extraction job reaches the images, and it is deliberately

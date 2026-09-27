@@ -1573,3 +1573,51 @@ source_spec: `spec-5-7-retaking-a-practice-test.md`
 severity: medium
 reason: `POST /api/student/practice-tests/:id/retake` inserts at `latest.ordinal + 1` with no maximum ordinal, and `StudentPracticeTestController` declares no throttle stance for it. Every retake that is handed in costs a provider call at grading time, so a child pressing the control repeatedly is unbounded spend. Neither the intent contract nor the epic asks for a cap, which is why this is recorded rather than added here.
 status: open
+
+### DW-198: The explanation table indexes only (attemptId, questionId, studentProfileId) and (parentAccountId, chargedAt), so deleting a Student Profile or a Practice Test Question scans it sequentially.
+origin: spec-deferred 241152136017
+location: apps/api/prisma/schema.prisma (model Explanation)
+source_spec: `spec-6-1-on-demand-explanations.md`
+severity: low
+reason: Both foreign keys cascade. Only attemptId is covered, by the unique key's prefix. Profile deletion is a routine parent action.
+status: open
+
+### DW-199: Cascading a deleted Attempt or Profile removes charged Explanation rows, which silently returns spent allowance for the period.
+origin: spec-deferred 5b5a191022a8
+location: apps/api/prisma/migrations/20260928120000_add_explanation/migration.sql
+source_spec: `spec-6-1-on-demand-explanations.md`
+severity: medium
+reason: Usage is derived by counting rows with chargedAt in the window, so deleting a row is indistinguishable from never having charged it.
+status: open
+
+### DW-200: Multiple-choice distractors are read and then discarded, so the explainer never sees the option the child actually chose among the alternatives.
+origin: spec-deferred 91649b1304df
+location: apps/api/src/practicetest/practice-test.service.ts (explanationInputFor)
+source_spec: `spec-6-1-on-demand-explanations.md`
+severity: medium
+reason: explanationInputFor selects choices { ordinal, body, isCorrect } and flattens a single answer string out of them; format is still passed to the prompt as MultipleChoice.
+status: open
+
+### DW-201: Every cached re-read still performs the full cross-module ownership read plus a Grade Level label resolution that is then discarded.
+origin: spec-deferred 3008c1f1df59
+location: apps/api/src/explanation/explanation.service.ts
+source_spec: `spec-6-1-on-demand-explanations.md`
+severity: low
+reason: explanationFor calls explanationInputFor before the cache lookup. Ownership-first is required for the single 404 sentence, but the taxonomy resolution is not.
+status: open
+
+### DW-202: Unlimited tiers run both allowance counts even though remainingFor can never reach zero for them.
+origin: spec-deferred 07e8aefb3625
+location: apps/api/src/explanation/explanation.service.ts
+source_spec: `spec-6-1-on-demand-explanations.md`
+severity: low
+reason: limit === null makes remainingFor return the per-request ceiling; the pre-check and the in-transaction count are both still issued.
+status: open
+
+### DW-203: No dedicated regression test exercises a period-window rollover during a generation call, so a reintroduction of the "stale window" bug this pass's own triage log already fixed once would ship
+origin: spec-deferred 6b3ef2dab275
+location: apps/api/src/explanation/explanation.service.ts; apps/api/test/explanation.int-spec.ts
+source_spec: `spec-6-1-on-demand-explanations.md`
+severity: medium
+reason: explanationFor re-reads consumptionFor after the AI call to derive windowStart/windowEnd instead of reusing the pre-call read, but every existing integration case that varies the count between check and write keeps the same period window; none advances or fakes the account's period boundary between the two reads.
+status: open
