@@ -48,29 +48,34 @@ describe('what the page does with each outcome', () => {
     const handler = SOURCE.slice(SOURCE.indexOf('(cause: unknown) => {'), SOURCE.indexOf('};'));
     expect(handler).toContain('setError(');
     // Every navigation on the page is the unbound one — one per read, and each
-    // guarded by that one condition. A 500, a 429 or a dropped connection is a bad
+    // guarded by that one condition. Three reads now share the rule: the session,
+    // the list and the run history. A 500, a 429 or a dropped connection is a bad
     // moment, not a Student Mode that was taken away.
-    expect(CODE.match(/router\.replace/gu)).toHaveLength(2);
-    expect(CODE.match(/deviceIsUnbound\(cause\)/gu)).toHaveLength(2);
+    expect(CODE.match(/router\.replace/gu)).toHaveLength(3);
+    expect(CODE.match(/deviceIsUnbound\(cause\)/gu)).toHaveLength(3);
     expect(SOURCE).toContain('{studentCopy.retry}');
   });
 
   it('reaches no parent-scoped endpoint at all', () => {
     expect(SOURCE).toContain('parentApi.studentSession()');
     expect(SOURCE).toContain('parentApi.studentPracticeTests()');
-    // Exactly the two cookie-only calls, and nothing else: both answer from the
-    // binding alone, and a parent-scoped call here would need a bearer this page
+    expect(SOURCE).toContain('parentApi.practiceTestRuns()');
+    // Exactly the three cookie-only calls, and nothing else: all three answer from
+    // the binding alone, and a parent-scoped call here would need a bearer this page
     // must never hold.
-    expect(SOURCE).not.toMatch(/parentApi\.(?!studentSession|studentPracticeTests)/u);
+    expect(SOURCE).not.toMatch(
+      /parentApi\.(?!studentSession|studentPracticeTests|practiceTestRuns)/u,
+    );
     // And it never names a profile id: the binding names it, server-side.
     expect(SOURCE).not.toMatch(/studentProfileId/u);
   });
 
-  it('settles the two reads independently, so one failure keeps the other', () => {
+  it('settles the three reads independently, so one failure keeps the others', () => {
     // A list that could not be read must not blank a greeting that came back
     // perfectly well — the reason Pending drafts gives for the same arrangement.
     expect(SOURCE).not.toContain('Promise.all([');
     expect(SOURCE).toContain('const [tests, setTests]');
+    expect(SOURCE).toContain('const [runs, setRuns]');
   });
 
   it('gives the list read its own retryable failure, so no state says nothing at all', () => {
@@ -126,6 +131,43 @@ describe('what the page does with each outcome', () => {
       expect(region).not.toContain(verb);
     }
     expect(region).not.toContain('Object.entries(');
+  });
+
+  it('guards the run read behind the same stale-response check as the other two', () => {
+    // A read superseded by Retry must not resolve afterwards and put an old set of
+    // figures onto a new set of rows.
+    const handler = CODE.slice(CODE.indexOf('parentApi.practiceTestRuns()'));
+    expect(handler).toContain('if (requestId.current !== thisRequest) return');
+    expect(handler).toContain('setRuns(runsById(value))');
+    // Cleared on every re-issue, so a figure cannot outlive the read that replaced it.
+    expect(CODE).toContain('setRuns(null)');
+  });
+
+  it('says nothing at all when the run read fails, and never routes on it', () => {
+    // A score line is an annotation on rows that are fully usable without it, so its
+    // absence is the row that shipped in Story 5.1 rather than an alert about a
+    // figure the child never asked for. The list's read is different: the list *is*
+    // the screen.
+    const handler = CODE.slice(
+      CODE.indexOf('parentApi.practiceTestRuns()'),
+      CODE.indexOf('}, [router]);'),
+    );
+    expect(handler).toContain('deviceIsUnbound(cause)');
+    // No second failure state, no alert of its own and nothing re-issued on a timer.
+    expect(handler).not.toContain('setRunsError');
+    expect(handler).not.toContain('setTimeout');
+    expect(CODE).not.toContain('runsError');
+    expect(CODE).not.toContain('data-testid="student-runs-error"');
+  });
+
+  it('hands each row its own figures through a lookup, never an order', () => {
+    // The map is read per row. It decides nothing about which rows there are or what
+    // order they come in — an entry for a test not in the list is never looked up.
+    expect(SOURCE).toMatch(/<PracticeTestList\s+tests=\{tests\}\s+runs=\{runs \?\? undefined\}/u);
+    expect(CODE).toContain('runsById(value)');
+    // What the row and the list *render* from it is asserted where they can be
+    // rendered, in their own specs: this workspace runs with `environment: 'node'`
+    // and no router, so the page itself cannot be rendered at all.
   });
 
   it('shows no generated content, because none is on the wire', () => {

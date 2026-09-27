@@ -235,6 +235,28 @@ export const PRACTICE_TEST_NOT_FOUND = 'That practice test could not be found.';
 export const ATTEMPT_ALREADY_SUBMITTED = 'You have already handed this practice test in.';
 
 /**
+ * The one refusal a retake of its own can get: there is no finished run to
+ * practise again.
+ *
+ * A 409 rather than a 404 for the reason `ATTEMPT_ALREADY_SUBMITTED` is: it is a
+ * refusal on a **rule**, and the child is entitled to know which. A 404 here
+ * would say the practice test does not exist while it is on their screen, which
+ * is both false and an invitation to reload. Every *ownership* refusal on the
+ * retake route stays `PRACTICE_TEST_NOT_FOUND` — this sentence is only ever
+ * reached for a released test the binding already owns.
+ *
+ * **It deliberately covers both cases**: a latest Attempt still open, and a test
+ * never sat at all. "You have not finished this" is the same true statement about
+ * both, and two sentences would let a child tell "a run is open" from "no run
+ * exists" — which tells them nothing they cannot already see on the screen, on a
+ * surface whose whole discipline is that every refusal is one sentence.
+ *
+ * Second person, and it states nothing about the work: no count, no score, no
+ * grade word and no error code.
+ */
+export const ATTEMPT_NOT_RETAKEABLE = 'You can only retake a practice test you have finished.';
+
+/**
  * The weighted Topic asked for is not one this upload carries.
  *
  * It names no Topic — not the one asked for and not the ones available — for

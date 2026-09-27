@@ -12,13 +12,21 @@ import {
  * The student-scoped reads of a Practice Test: the list a child chooses from and
  * the one they work through, both mounted at `/api/student`.
  *
- * Shaped after `StudentModeController` and holding to the same claims. There is
- * exactly **one** student-scoped write mounted here, and it is the Attempt start:
- * a child may open an Attempt on a test released to them, and that write touches
- * only the Attempt's own instants, written by the server, from the server's clock,
- * once. A child still authors nothing about a Practice Test, nothing about a
- * profile, nothing about an account and nothing about their own binding, which is
- * changed only through the elevation-guarded parent routes.
+ * Shaped after `StudentModeController` and holding to the same claims. There are
+ * exactly **two** student-scoped writes mounted here, and both are about an
+ * Attempt's own instants: the Attempt start, which resumes the latest run or opens
+ * the first, and the retake, which opens the next run at a test the child has
+ * finished. Neither reads a body, and everything either writes is written by the
+ * server, from the server's clock, once. A child still authors nothing about a
+ * Practice Test, nothing about a Question, nothing about a profile, nothing about an
+ * account and nothing about their own binding, which is changed only through the
+ * elevation-guarded parent routes.
+ *
+ * The two are separate routes rather than one route with a mode, because the start
+ * route's whole promise is that it **never inserts while a row exists** — a query
+ * flag able to make it create would turn every reload, retry, second tab and
+ * reconnect into a path that could hand out a new deadline. `PracticeTestService`
+ * says so at length on both methods.
  *
  * **Handing in used to be mounted here and is now `grading`'s** — same path, same
  * body, same 200, same 409, same guard. It moved because closing an Attempt and
@@ -30,8 +38,8 @@ import {
  * conditional close behind the 409, and the raw answers — is
  * `PracticeTestService.closeAttempt`, called inside `grading`'s transaction.
  *
- * The start route carries no body at all, so nothing student-authored is read on
- * this controller: there is no grade, no score and no verdict it could accept.
+ * Neither write carries a body at all, so nothing student-authored is read on this
+ * controller: there is no grade, no score and no verdict it could accept.
  *
  * Since Story 5.2 the detail read **does** carry generated content, because
  * taking a test requires it: prompts and option bodies, in stored ordinal order.
@@ -143,6 +151,47 @@ export class StudentPracticeTestController {
     @Param('practiceTestId') practiceTestId: string,
   ): Promise<AttemptView> {
     return this.practiceTests.startOrResumeAttempt(
+      req.student!.parentAccountId,
+      req.student!.studentProfileId,
+      practiceTestId,
+    );
+  }
+
+  /**
+   * Opens the **next** run at a practice test this child has finished.
+   *
+   * **The second student-scoped write on this controller, and a route of its own
+   * rather than a mode of the start route.** The start route promises never to
+   * insert while a row exists, and that promise is what keeps a reload from handing
+   * out a fresh deadline; a flag able to make it create would break the promise on
+   * every path that calls it. So creating is here, where it is the whole point of
+   * the request, and where the 409 belongs.
+   *
+   * **201, Nest's `POST` default** — unlike handing in, something genuinely is
+   * created: a new Attempt, with its own `startedAt` and its own deadline. The
+   * response is the same `AttemptView` the start route answers with, so a screen
+   * begins the new run from what it already knows how to read.
+   *
+   * **No body**, exactly as the start route: both instants are the server's, and
+   * there is nowhere here for a browser to state a duration, a start, an expiry, a
+   * clock or anything at all about a Question. Nothing student-authored is read.
+   *
+   * The id in the path names *which* test and never *whose*: both ids come off
+   * `req.student`. A draft, a discarded row, a sibling's release, another account's
+   * test and an id that never existed are one indistinguishable 404 — and **no
+   * `ParseUUIDPipe`**, for the reason the detail read states at length.
+   *
+   * The one refusal of its own is **409 `ATTEMPT_NOT_RETAKEABLE`**, for a latest run
+   * still open *and* for a test never sat. Both are the same true statement to a
+   * child, and a 404 would claim a test that is visibly on their screen does not
+   * exist.
+   */
+  @Post('practice-tests/:practiceTestId/retake')
+  retake(
+    @Req() req: StudentRequest,
+    @Param('practiceTestId') practiceTestId: string,
+  ): Promise<AttemptView> {
+    return this.practiceTests.startRetake(
       req.student!.parentAccountId,
       req.student!.studentProfileId,
       practiceTestId,

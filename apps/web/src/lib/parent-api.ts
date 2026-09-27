@@ -434,6 +434,45 @@ export interface AttemptResultsView {
   questions: AnswerKeyRowView[];
 }
 
+/**
+ * One finished run at a practice test, exactly as the API states it.
+ *
+ * Which run it is, when it went in, what it came to, and whether it is the one that
+ * counts toward the child's progress. `score` is the server's one figure and this
+ * browser computes neither part of it.
+ *
+ * There is **no `rationale`** — the read that composes this never selects one (AD-20,
+ * AD-26) — and no Topic label, no cost, no tier, no allowance and no model name.
+ *
+ * `countsTowardMastery` arrives decided. The rule lives in one place server-side, so
+ * nothing here re-derives it from `ordinal`.
+ */
+export interface AttemptRunView {
+  attemptId: string;
+  ordinal: number;
+  submittedAt: string;
+  score: AttemptScore;
+  countsTowardMastery: boolean;
+}
+
+/**
+ * One practice test's run history, exactly as the API states it.
+ *
+ * `attemptCount` is over **finished** runs only: a run still going is not a figure
+ * and is not counted. A test with nothing finished has no entry at all.
+ *
+ * **One finished run answers with `first` and `latest` naming the same
+ * `attemptId`.** That is how a surface tells the single-run case from a history
+ * without arithmetic, and it is why a row showing one figure and a row showing two
+ * are one shape rather than two.
+ */
+export interface PracticeTestRunsView {
+  practiceTestId: string;
+  attemptCount: number;
+  first: AttemptRunView;
+  latest: AttemptRunView;
+}
+
 /** One generated option, in the order the API states it. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -824,6 +863,27 @@ export const parentApi = {
     call<StudentPracticeTestSummary[]>('/student/practice-tests', {}, studentCopy.failed),
 
   /**
+   * How the bound child's runs at each practice test stand: the first figure, the
+   * latest figure and how many finished runs there are.
+   *
+   * No bearer, like every other student call: the binding cookie names the child
+   * server-side, and nothing here sends a profile id.
+   *
+   * **It fires no re-ask, unlike `attemptResults`.** That read is FR-22's trigger and
+   * spends a provider call on one Attempt; this is a list read over a whole home
+   * screen, so it re-asks nothing and writes nothing. It is therefore safe to issue on
+   * every arrival at Student Home, which `attemptResults` would not be.
+   *
+   * The view **cannot carry** a grading rationale, a Topic label or an allowance,
+   * tier, cost or model figure: none is a student-scoped fact (AD-20, AD-26).
+   *
+   * A child with nothing finished answers `[]` — never a 404 — and a test with only a
+   * run still going simply has no entry.
+   */
+  practiceTestRuns: () =>
+    call<PracticeTestRunsView[]>('/student/practice-test-runs', {}, studentCopy.failed),
+
+  /**
    * One released practice test, whole, for the child to work through.
    *
    * No bearer, exactly as the other two student reads: the binding travels as its
@@ -854,6 +914,30 @@ export const parentApi = {
       `/student/practice-tests/${encodeURIComponent(practiceTestId)}/attempt`,
       { method: 'POST' },
       studentCopy.takeTest.attemptFailed,
+    ),
+
+  /**
+   * Opens the **next** run at a practice test the bound child has finished.
+   *
+   * **This one creates where `startAttempt` resumes**, which is the whole reason it
+   * is a call of its own: a screen must never reach for it to recover from a failed
+   * start, a dropped connection or a reload, because each of those would be a new
+   * Attempt with a new deadline the child never asked for. Exactly one press on one
+   * surface calls this.
+   *
+   * No bearer and **no body**: the binding names the child, both instants are the
+   * server's, and there is nowhere here to state a duration, a start, an expiry or
+   * anything at all about a Question.
+   *
+   * A latest run still going, and a test never sat, both surface as
+   * `CONFLICT_STATUS` carrying the server's own one sentence. The screen says it and
+   * re-sends nothing.
+   */
+  retakeTest: (practiceTestId: string) =>
+    call<AttemptView>(
+      `/student/practice-tests/${encodeURIComponent(practiceTestId)}/retake`,
+      { method: 'POST' },
+      studentCopy.results.retakeFailed,
     ),
 
   /**

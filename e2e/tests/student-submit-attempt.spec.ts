@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  countAttemptsFor,
   createGradeLevelFixture,
   createSubjectFixture,
   newestAttemptFixture,
@@ -389,6 +390,7 @@ test.describe('handing an Attempt in', () => {
     await untouched.getByRole('link').click();
 
     await expect(page.getByTestId('take-test-counter')).toBeVisible();
+    const secondId = practiceTestIdOf(page);
     const secondTotal = await totalOf(page);
     // The first Question rightly and every other one wrongly: the first option is
     // the right one, so the second option is a wrong answer the child actually gave
@@ -428,6 +430,102 @@ test.describe('handing an Attempt in', () => {
     // And the first Attempt's rows are exactly where they were: nothing this
     // hand-in wrote landed on somebody else's Attempt.
     expect((await questionGradesFor(email, partlyBlankAttemptId)).grades).toHaveLength(total);
+
+    // --- Practising it again: a second run at the same test ----------------
+    //
+    // The one thing in the product that gives a child a second Attempt at one
+    // Practice Test. Pressed from the results they are already standing on: no
+    // navigation, no route of its own, and the earlier run's rows untouched.
+    const firstRunOfSecondTest = second.attemptId;
+    const attemptsBeforeRetake = await countAttemptsFor(email);
+    expect(attemptsBeforeRetake).toBe(2);
+    // The order the child met the Questions in, read off the answer key that is on
+    // screen right now — so "the same Questions in the same order" is a comparison
+    // against what the first run actually presented.
+    const orderOfFirstRun = await page
+      .locator('[data-testid="answer-key-row"]')
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-ordinal')));
+
+    await page.getByTestId('take-test-retake').click();
+
+    // Back on Question 1 of the same paper, with nothing pre-filled.
+    await expect(page.getByTestId('take-test-counter')).toHaveText(`Question 1 of ${secondTotal}`);
+    expect(practiceTestIdOf(page)).toBe(secondId);
+    expect(await page.getByTestId('take-test-question').getByRole('radio').count()).toBeGreaterThan(
+      0,
+    );
+    await expect(
+      page.getByTestId('take-test-question').getByRole('radio', { checked: true }),
+    ).toHaveCount(0);
+    await expect(rail.getByTestId('question-map-summary')).toHaveText(
+      `0 answered · ${secondTotal} not answered`,
+    );
+    // Exactly one row more, and the earlier run still where it was.
+    expect(await countAttemptsFor(email)).toBe(attemptsBeforeRetake + 1);
+    expect((await questionGradesFor(email, firstRunOfSecondTest)).grades).toHaveLength(secondTotal);
+
+    // Answered differently this time: the second option everywhere, which is wrong
+    // everywhere — so the two runs of one test cannot be told apart by luck.
+    for (let at = 0; at < secondTotal; at += 1) {
+      await page.getByTestId('take-test-question').getByRole('radio').nth(1).check();
+      if (at < secondTotal - 1) await page.getByTestId('take-test-next').click();
+    }
+    await page.getByTestId('take-test-hand-in').click();
+    await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(submits()).toHaveLength(3);
+
+    // The retake's **own** answer key: the same Questions, the same order, its own
+    // verdicts.
+    await assertAnswerKey(page, secondTotal, 0);
+    expect(
+      await page
+        .locator('[data-testid="answer-key-row"]')
+        .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-ordinal'))),
+    ).toEqual(orderOfFirstRun);
+    const retakeRun = await questionGradesFor(email);
+    expect(retakeRun.attemptId).not.toBe(firstRunOfSecondTest);
+    expect(retakeRun.grades.filter((grade) => grade.state === 'Correct')).toEqual([]);
+    expect(retakeRun.grades.filter((grade) => grade.state === 'Incorrect')).toHaveLength(
+      secondTotal,
+    );
+    // And the first run of this test, still exactly as it was graded.
+    const firstRunAfter = await questionGradesFor(email, firstRunOfSecondTest);
+    expect(firstRunAfter.grades.filter((grade) => grade.state === 'Correct')).toHaveLength(1);
+    expect(firstRunAfter.grades.filter((grade) => grade.state === 'Incorrect')).toHaveLength(
+      secondTotal - 1,
+    );
+
+    // --- The row on Student Home, with both figures and the run count ------
+    await page.goto('/student');
+    await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
+    const retaken = page
+      .locator('[data-testid="student-practice-test"]')
+      .filter({ has: page.locator(`a[href="/student/tests/${secondId}"]`) });
+    // Cross-checked against the grade table for **both** runs, so the figures on the
+    // card are the figures the rows actually hold.
+    const firstCorrect = firstRunAfter.grades.filter((grade) => grade.state === 'Correct').length;
+    const latestCorrect = retakeRun.grades.filter((grade) => grade.state === 'Correct').length;
+    await expect(retaken.getByTestId('student-practice-test-runs')).toHaveText(
+      `First ${firstCorrect} out of ${secondTotal} · Latest ${latestCorrect} out of ${secondTotal} · 2 attempts`,
+    );
+    // Which run counts, said in the child's own plain word for it.
+    await expect(retaken.getByTestId('student-practice-test-runs-note')).toHaveText(
+      'Your first attempt is the one that counts toward your progress.',
+    );
+    // The test with one finished run states one figure, with no first/latest framing
+    // and no run count at all.
+    const onceOnly = page
+      .locator('[data-testid="student-practice-test"]')
+      .filter({ has: page.locator(`a[href="/student/tests/${partlyBlankId}"]`) });
+    await expect(onceOnly.getByTestId('student-practice-test-runs')).toHaveText(
+      `1 out of ${total}`,
+    );
+    await expect(onceOnly.getByTestId('student-practice-test-runs-note')).toHaveCount(0);
+    // And an open retake reads `In progress` rather than `Completed` — derived from
+    // the Attempt, with no status column written. Both rows here are finished, so
+    // both still read `Completed`.
+    await expect(retaken.getByTestId('student-practice-test-state')).toHaveText('Completed');
   });
 
   test('auto-submits on the deadline with no confirmation, and grades every blank Incorrect', async ({

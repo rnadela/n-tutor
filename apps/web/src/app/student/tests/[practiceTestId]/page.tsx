@@ -167,6 +167,10 @@ export default function TakeTestPage() {
    * as soon as there is.
    */
   const [submittedAttemptToClear, setSubmittedAttemptToClear] = useState<string | null>(null);
+  /** Whether a retake request is out, so the control can say so and refuse a second. */
+  const [retaking, setRetaking] = useState(false);
+  /** What to say about a retake that did not open, or null while there is nothing to say. */
+  const [retakeNote, setRetakeNote] = useState<string | null>(null);
 
   // A response is applied only while it is still the most recent request, so a
   // read superseded by Retry cannot resolve afterwards and overwrite it.
@@ -243,6 +247,8 @@ export default function TakeTestPage() {
     setAutoSubmitting(false);
     setWaitingForOnline(false);
     setSubmittedAttemptToClear(null);
+    setRetaking(false);
+    setRetakeNote(null);
     // Refs are not state and the reset above does not reach them. Both are *about one
     // practice test*: a deadline already acted on, and the previous reading the
     // warning crossings are measured against.
@@ -792,6 +798,83 @@ export default function TakeTestPage() {
     setMapOpen(false);
   }, []);
 
+  /**
+   * A press of `Practise this again`, and **the only thing in this file that can
+   * create an Attempt**.
+   *
+   * `retakeTest` is not `startAttempt`: it inserts. So it is called from exactly one
+   * place, by a person, and never to recover from anything — a retake reached from a
+   * failed read, a reconnect or a reload would be a new run with a new deadline the
+   * child never asked for. `retaking` is the single in-flight guard, so a second press
+   * before the first settles is not a second run.
+   *
+   * **The new run begins in place, from the response.** Everything the render-phase
+   * reset clears is cleared here too, *minus* `test` and `error`: the Questions are
+   * unchanged by a retake — same rows, same stored order — so re-reading them would be
+   * a second answer to a question already answered, and blanking `test` would put the
+   * loading alert over a screen that has everything it needs.
+   *
+   * **The reset is duplicated rather than extracted**, and deliberately. The
+   * render-phase one is a *different event*: a different practice test, whose Questions
+   * must be re-read and whose failure state belongs to the new read. Folding the two
+   * into one helper would make a retake able to blank the test read — which is exactly
+   * the bug the difference between the two lists prevents.
+   *
+   * `hydratedFor` is left alone on purpose: it is compared against `attempt.id`, so the
+   * new Attempt's id re-runs hydration by itself, finds nothing stored under it, and
+   * starts the run empty.
+   *
+   * A failure is **stated beside the control** and nothing else: the results stay on
+   * screen untouched, the control stays pressable, and nothing retries on its own. It
+   * routes nowhere — `deviceIsUnbound` is the one exception every read here shares.
+   */
+  const retake = useCallback(() => {
+    if (retaking) return;
+    setRetaking(true);
+    setRetakeNote(null);
+    // The same stale-response check every other settle on this screen makes, read
+    // rather than bumped: the test read owns the counter, so a route change to another
+    // practice test raises it and this response — which is an Attempt at the test the
+    // child *was* on — is dropped instead of being installed as the current run.
+    const thisRequest = requestId.current;
+    parentApi.retakeTest(practiceTestId).then(
+      (value) => {
+        if (requestId.current !== thisRequest) return;
+        setRetaking(false);
+        setAttempt(value);
+        // The pair the countdown is computed through, stamped the moment the response
+        // landed — exactly as the start effect does it, because this is a new run with
+        // a deadline of its own.
+        setSyncedAt(Date.now());
+        setNow(Date.now());
+        setAnswers({});
+        setIndex(0);
+        setMapOpen(false);
+        setConfirmingHandIn(false);
+        setWarning(null);
+        setSubmitState('open');
+        setSubmitNote(null);
+        setAutoSubmitting(false);
+        setWaitingForOnline(false);
+        setSubmittedAttemptToClear(null);
+        // Refs are not state. A deadline already acted on belongs to the run that is
+        // over, and the previous reading the warning crossings are measured against
+        // belongs to its clock.
+        deadlineActedFor.current = null;
+        previousRemaining.current = null;
+      },
+      (cause: unknown) => {
+        if (requestId.current !== thisRequest) return;
+        if (deviceIsUnbound(cause)) {
+          router.replace('/auth/sign-in');
+          return;
+        }
+        setRetaking(false);
+        setRetakeNote(cause instanceof Error ? cause.message : studentCopy.results.retakeFailed);
+      },
+    );
+  }, [practiceTestId, retaking, router]);
+
   /** The handed-in heading, focused on arrival so the move is never silent. */
   const handedInHeading = useRef<HTMLHeadingElement | null>(null);
   useEffect(() => {
@@ -852,7 +935,45 @@ export default function TakeTestPage() {
             Guarded on the Attempt rather than asserted: every path into this state
             has one — the reset clears `attempt` and `submitState` together — and a
             guard says that without a non-null assertion standing in for it. */}
-        {attempt !== null && <AttemptResults attemptId={attempt.id} />}
+        {attempt !== null && (
+          <AttemptResults
+            attemptId={attempt.id}
+            // Passed in rather than owned there: `AttemptResults` keeps its own read
+            // and its own failure and gains no notion of a second run, because the run
+            // state a retake replaces is this page's.
+            footer={
+              <Box sx={{ display: 'grid', gap: `${comfortableDensity.gap}px` }}>
+                {/* The failure, beside the control and never over the results. The
+                    work above is still in and still true; only this did not open. A
+                    `status` rather than an `alert`: the child pressed, so nothing here
+                    is news that has to interrupt. Nothing retries it. */}
+                {retakeNote !== null && (
+                  <Alert
+                    severity="error"
+                    role="status"
+                    variant="outlined"
+                    data-testid="take-test-retake-error"
+                  >
+                    {retakeNote}
+                  </Alert>
+                )}
+                {/* No flourish: no count, no badge, no streak and no promise about
+                    doing better. One control, with the tap-target floor from the
+                    token. Disabled only while a request is out — a failure leaves it
+                    pressable, because pressing again is the whole recovery. */}
+                <Button
+                  variant="outlined"
+                  disabled={retaking}
+                  onClick={retake}
+                  sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
+                  data-testid="take-test-retake"
+                >
+                  {retaking ? studentCopy.results.retakeStarting : studentCopy.results.retake}
+                </Button>
+              </Box>
+            }
+          />
+        )}
       </Screen>
     );
   }

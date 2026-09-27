@@ -14,10 +14,12 @@ import { PracticeTestList } from './_components/PracticeTestList';
 import {
   ParentApiError,
   parentApi,
+  type PracticeTestRunsView,
   type StudentPracticeTestSummary,
   type StudentSession,
 } from '@/lib/parent-api';
 import { attemptStorage, clearAll, retainOnly } from '@/lib/attempt-store';
+import { runsById } from '@/lib/practice-test-runs';
 import { comfortableDensity } from '@/theme/tokens';
 
 /**
@@ -38,16 +40,28 @@ export function deviceIsUnbound(cause: unknown): boolean {
 /**
  * Student Mode: the device's default state, and the whole of what a child sees.
  *
- * It reads two endpoints, `GET /api/student/session` and
- * `GET /api/student/practice-tests`, both of which answer from the binding cookie
- * alone — nothing here names a profile id, and no parent-scoped call exists on
- * this page. The one control leads to the PIN gate, which is the only way out.
+ * It reads three endpoints, `GET /api/student/session`,
+ * `GET /api/student/practice-tests` and `GET /api/student/practice-test-runs`, all of
+ * which answer from the binding cookie alone — nothing here names a profile id, and
+ * no parent-scoped call exists on this page. The one control leads to the PIN gate,
+ * which is the only way out.
  *
- * The two reads settle **independently**. The session read is the screen; the
- * practice-test read fills it. One failing read must not blank what the other
- * answered, which is the reason Pending drafts gives for the same arrangement —
- * and each carries its **own** failure state with its own way to try again, so a
- * bad moment on one is never a child left holding a greeting and no way forward.
+ * The three reads settle **independently**. The session read is the screen; the
+ * practice-test read fills it; the run read annotates it. One failing read must not
+ * blank what the others answered, which is the reason Pending drafts gives for the
+ * same arrangement — and the first two carry their **own** failure state with their
+ * own way to try again, so a bad moment on one is never a child left holding a
+ * greeting and no way forward.
+ *
+ * **The run read degrades silently, where the list's does not.** The list *is* the
+ * screen: its absence leaves a child with nothing to act on, so it gets an alert and
+ * a control. A run figure is an **annotation** on rows that are fully usable without
+ * it — the Subject, the link and the state word are unchanged — and an alert about a
+ * figure the child never asked for would be noise on a child's home screen. So a
+ * failed run read renders every row exactly as it does today: no line, no alert, no
+ * routing, and nothing re-issued on a timer. `deviceIsUnbound` stays the one
+ * exception that routes, because the binding is what all three reads share and a
+ * refusal of it is not about any one of them.
  *
  * The list itself belongs to `PracticeTestList`, and this page's whole job on
  * that path is to hand the array over exactly as the server sent it: the order
@@ -84,6 +98,16 @@ export default function StudentModePage() {
    * answered stays on screen beside it.
    */
   const [testsError, setTestsError] = useState<string | null>(null);
+  /**
+   * Each test's finished runs, by practice test id, or `null` while the read has not
+   * answered — **and also after it failed**.
+   *
+   * There is deliberately no error state beside it. Nothing on this screen says
+   * anything about a run read that did not come back: the rows are complete without
+   * a figure, and the one honest rendering of "we could not get the figures" is the
+   * row that has never had one.
+   */
+  const [runs, setRuns] = useState<ReadonlyMap<string, PracticeTestRunsView> | null>(null);
   // A response is applied only while it is still the most recent request, so a
   // read superseded by Retry cannot resolve afterwards and overwrite it.
   const requestId = useRef(0);
@@ -94,6 +118,7 @@ export default function StudentModePage() {
     setError(null);
     setTests(null);
     setTestsError(null);
+    setRuns(null);
     parentApi.studentSession().then(
       (value) => {
         if (requestId.current !== thisRequest) return;
@@ -138,6 +163,25 @@ export default function StudentModePage() {
         // said where the list would have been, with a control that re-issues both
         // reads, and it never routes a child anywhere.
         setTestsError(cause instanceof Error ? cause.message : studentCopy.failed);
+      },
+    );
+
+    // The third, settled on its own like the other two — and the one that says
+    // nothing at all when it fails. An annotation on rows that are already usable is
+    // not worth an alert on a child's home screen, and there is no timer, no backoff
+    // and no second attempt anywhere on this path: the control beside the list
+    // re-issues all three, because a person asking again is the only retry here.
+    parentApi.practiceTestRuns().then(
+      (value) => {
+        if (requestId.current !== thisRequest) return;
+        setRuns(runsById(value));
+      },
+      (cause: unknown) => {
+        if (requestId.current !== thisRequest) return;
+        // The binding refusal is the one failure every read on this page acts on, and
+        // it acts on it the same way: it is not about the figures.
+        if (deviceIsUnbound(cause)) router.replace('/auth/sign-in');
+        // And nothing else is stated. The rows render exactly as they do without it.
       },
     );
   }, [router]);
@@ -212,7 +256,7 @@ export default function StudentModePage() {
                       order — what there is to do first, then what is finished
                       — and this page neither sorts it, filters it nor groups it
                       by Subject. */}
-                  <PracticeTestList tests={tests} />
+                  <PracticeTestList tests={tests} runs={runs ?? undefined} />
                 </>
               ))}
             {/* A client-side link on purpose: leaving Student Mode means

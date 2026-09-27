@@ -11,6 +11,7 @@ import {
   type GradingQuestionInput,
 } from '../practicetest/practice-test.service.js';
 import { buildGradingPrompt, type GradingPromptQuestion } from './grading-prompt.js';
+import { runsOf, type PracticeTestRunsView } from './grading-history.js';
 import { answerKeyRows, type AttemptResultsView } from './grading-results.js';
 import {
   GradingPayloadInvalid,
@@ -29,6 +30,20 @@ export interface GradingScope {
    * child of this account", which is what a parent may read.
    */
   studentProfileId?: string;
+}
+
+/**
+ * A child asking about their own work, with **both** ids required.
+ *
+ * `GradingScope` admits either party, because an Attempt's answer key is a thing a
+ * parent may legitimately read by account. A run history is not: there is no
+ * parent-facing Attempt history surface in this story (Epic 6, Parent View), so the
+ * profile is not optional here and the read cannot be reached without one — which is
+ * a type saying so rather than a non-null assertion standing in for it.
+ */
+export interface StudentScope {
+  parentAccountId: string;
+  studentProfileId: string;
 }
 
 /** What one retry pass came to, for the read that triggered it. */
@@ -359,6 +374,74 @@ export class GradingService {
       score,
       questions: rows,
     };
+  }
+
+  /**
+   * This child's run history: one entry per Practice Test they have finished at least
+   * once, with the first run's figure, the latest run's figure and how many runs there
+   * are.
+   *
+   * **`resolveUngraded` is deliberately not called here**, even though FR-22 makes
+   * viewing the trigger. This is a **list** read over every test on Student Home: a
+   * re-ask per row would spend a provider call per card on every visit to a child's
+   * home screen, which is a bill that grows with how often they look rather than with
+   * how much work there is. The trigger FR-22 names is the **results** screen, and
+   * that is still exactly where it fires — one Attempt, one re-ask, on a read the
+   * child navigated to. A run whose Questions nothing has judged is reported here as
+   * what it is: a figure with them excluded.
+   *
+   * **Two round trips, and no more.** The runs come from `practicetest` — `Attempt`
+   * is its entity, and this module reaches it only through `PracticeTestService`, so
+   * the arrow stays `grading -> practicetest` — and the grade states come from one
+   * `questionGrade.findMany` over **only the first and latest Attempt of each test**,
+   * because those are the only two runs anything states. The runs in between are
+   * counted and never scored.
+   *
+   * **`attemptId`, `questionId` and `state` only.** A rationale never selected is a
+   * rationale no mapper can leak onto a child's screen (AD-20, AD-26), and
+   * `AttemptRunView` has no field one could sit in. `questionId` is selected not to be
+   * shown but so two runs of the same test cannot score each other: the states are
+   * keyed by Attempt, and the count per Attempt is what `scoreOf` is given.
+   *
+   * A child with nothing handed in answers `[]`, and never a 404: having finished
+   * nothing yet is a state a home screen renders as rows with no figure on them.
+   */
+  async runHistoryFor(scope: StudentScope): Promise<PracticeTestRunsView[]> {
+    const runs = await this.practiceTests.submittedRunsFor(
+      scope.parentAccountId,
+      scope.studentProfileId,
+    );
+    if (runs.length === 0) return [];
+
+    // Exactly the runs that get a figure. A test with five finished runs contributes
+    // two ids here, not five.
+    const scored = new Set<string>();
+    const byTest = new Map<string, typeof runs>();
+    for (const run of runs) {
+      const group = byTest.get(run.practiceTestId);
+      if (group === undefined) byTest.set(run.practiceTestId, [run]);
+      else group.push(run);
+    }
+    for (const group of byTest.values()) {
+      scored.add(group[0]!.attemptId);
+      scored.add(group[group.length - 1]!.attemptId);
+    }
+
+    const stored = await this.prisma.questionGrade.findMany({
+      where: { attemptId: { in: [...scored] } },
+      // Two columns. No rationale, so there is nothing here to leak — and no
+      // `questionId` either: `scoreOf` tallies states and reads no Question, so the
+      // run a verdict belongs to is the only thing that has to come back with it.
+      select: { attemptId: true, state: true },
+    });
+    const statesByAttempt = new Map<string, GradeState[]>();
+    for (const row of stored) {
+      const states = statesByAttempt.get(row.attemptId);
+      if (states === undefined) statesByAttempt.set(row.attemptId, [row.state]);
+      else states.push(row.state);
+    }
+
+    return runsOf(runs, statesByAttempt);
   }
 
   // --- Internals ---------------------------------------------------------

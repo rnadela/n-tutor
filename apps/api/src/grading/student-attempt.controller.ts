@@ -13,12 +13,14 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { StudentModeGuard, type StudentRequest } from '../identity/student-mode.guard.js';
 import type { AttemptSubmissionView } from '../practicetest/practice-test.service.js';
 import { SubmitAttemptDto } from './dto/attempt-submit.dto.js';
+import type { PracticeTestRunsView } from './grading-history.js';
 import type { AttemptResultsView } from './grading-results.js';
 import { GradingService } from './grading.service.js';
 
 /**
- * The student-scoped Attempt endpoints `grading` mounts: handing an Attempt in,
- * and reading what it came to.
+ * The student-scoped grade endpoints `grading` mounts: handing an Attempt in,
+ * reading what it came to, and reading how a child's runs at each practice test
+ * stand.
  *
  * **Same path, same body, same answers as before Story 5.4.**
  * `POST /api/student/attempts/:attemptId/submit`, the same `StudentModeGuard`, the
@@ -83,7 +85,8 @@ export class StudentAttemptController {
   }
 
   /**
-   * The one **read** this controller mounts: one handed-in Attempt's answer key.
+   * One handed-in Attempt's answer key, and the one read on this controller that
+   * writes.
    *
    * **A `GET` that legitimately writes grades.** FR-22 makes viewing the trigger,
    * so the read *is* the retry: `resultsFor` calls `resolveUngraded` before it reads
@@ -115,5 +118,46 @@ export class StudentAttemptController {
       },
       attemptId,
     );
+  }
+
+  /**
+   * This child's run history: one entry per practice test they have finished at least
+   * once, with the first run's figure, the latest run's figure and the run count.
+   *
+   * **Mounted here and not beside the practice-test list**, because a score is a grade
+   * fact and `grading` is its sole reader (AD-6, AD-17). A `practicetest` controller
+   * reaching for a grading service to annotate its own list would reverse the module
+   * arrow into the `forwardRef` cycle both modules say they have no reason to have.
+   * So the list stays `practicetest`'s, the figures are their own read, and Student
+   * Home composes the two — which is also why one of them failing cannot blank the
+   * other.
+   *
+   * **`GET /api/student/practice-test-runs`, a sibling path and not
+   * `practice-tests/runs`.** `practicetest` mounts `GET student/practice-tests/:id`,
+   * and Nest registers that controller's routes *before* this one's because
+   * `GradingModule` depends on `PracticeTestModule` — so a literal `runs` segment
+   * under `practice-tests` is swallowed by the parameter and answers the detail
+   * read's 404. A sibling path is the only arrangement whose reachability does not
+   * depend on module registration order.
+   *
+   * **No re-ask, unlike the results read.** FR-22's trigger is the results screen,
+   * one Attempt at a time; this is a list read over every test on a child's home
+   * screen, and a re-ask per row would spend a provider call per card on every visit.
+   * Nothing here writes, nothing polls it and nothing retries it on a timer.
+   *
+   * It carries **no grading rationale, no Topic label and no cost, tier, allowance or
+   * model name** (AD-20, AD-26): the read does not select the first at all and the
+   * view has no field any of them could travel in. No path parameter either — both
+   * ids come off `req.student`, so there is nothing here to name whose history it is.
+   *
+   * A child with nothing handed in answers `[]` and never a 404: having finished
+   * nothing yet is a state the rows render without a figure, not a refusal.
+   */
+  @Get('practice-test-runs')
+  practiceTestRuns(@Req() req: StudentRequest): Promise<PracticeTestRunsView[]> {
+    return this.grading.runHistoryFor({
+      parentAccountId: req.student!.parentAccountId,
+      studentProfileId: req.student!.studentProfileId,
+    });
   }
 }

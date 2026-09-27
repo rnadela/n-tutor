@@ -87,11 +87,12 @@ describe('what the screen reaches for', () => {
     expect(CODE).toContain('parentApi.startAttempt(practiceTestId)');
     expect(CODE).toContain('parentApi.studentSession()');
     expect(CODE).toMatch(/parentApi\s*\.\s*submitAttempt\(/u);
-    // Four members, every one of them student-scoped and cookie-carried. A
+    expect(CODE).toContain('parentApi.retakeTest(practiceTestId)');
+    // Five members, every one of them student-scoped and cookie-carried. A
     // parent-scoped call here would be a child's screen holding a parent's reach.
     for (const member of CODE.match(/parentApi\s*\.?\s*\n?\s*(\w+)/gu) ?? []) {
       expect(member.replace(/parentApi\s*\.?\s*\n?\s*/u, '')).toMatch(
-        /^(studentPracticeTest|studentSession|startAttempt|submitAttempt)$/u,
+        /^(studentPracticeTest|studentSession|startAttempt|submitAttempt|retakeTest)$/u,
       );
     }
     // And it never names a profile id on the wire: the binding names which child,
@@ -112,7 +113,7 @@ describe('the handed-in state', () => {
     // So "on screen the instant the work is in" and "reachable from history" are one
     // surface, with `attempt.id` already in hand.
     const done = regionOf("if (submitState === 'done') {", 'if (loading ||');
-    expect(done).toContain('<AttemptResults attemptId={attempt.id} />');
+    expect(done).toMatch(/<AttemptResults\s+attemptId=\{attempt\.id\}/u);
     // Once in the import's braces, once in its path, once in the JSX. Rendered in
     // exactly one place, so there is no second mount to make a second read.
     expect(CODE.match(/AttemptResults/gu)).toHaveLength(3);
@@ -146,9 +147,10 @@ describe('the handed-in state', () => {
     // announcement across it, and either a practice-test-to-Attempt resolution read
     // or a `POST` that can *create* an Attempt from a results URL.
     expect(CODE).not.toMatch(/\/results/u);
-    // The same four reads as before: the results read is the child component's, made
-    // once per Attempt, and this file gained none of its own.
-    expect(CODE.match(/parentApi\s*\.\s*\w+\(/gu)).toHaveLength(4);
+    // Four reads and one write. The results read is still the child component's, made
+    // once per Attempt; this file has gained no read of its own since Story 5.6, and
+    // the one call it did gain is the retake, which is a person's press.
+    expect(CODE.match(/parentApi\s*\.\s*\w+\(/gu)).toHaveLength(5);
   });
 });
 
@@ -180,10 +182,13 @@ describe('what this screen itself says about the work', () => {
     expect(CODE).toContain('notAnswered(questions, answers)');
   });
 
-  it('holds no retake, no attempt list and no second open Attempt', () => {
-    // Story 5.7 and Parent View. The start route resumes; nothing here starts a
-    // second one.
-    expect(CODE).not.toMatch(/retake|attempts\.map|attemptList/iu);
+  it('holds no attempt list and no way to open a second run beside the first', () => {
+    // Parent View's, and still not here. Since Story 5.7 this file *can* open a
+    // second run — deliberately, by one press, in the handed-in state — but it holds
+    // no list of a child's Attempts and no second Attempt alongside the current one:
+    // `attempt` is one Attempt, replaced by the retake rather than joined by it.
+    expect(CODE).not.toMatch(/attempts\.map|attemptList|attempts\[/iu);
+    expect(CODE).not.toMatch(/setAttempts\(/u);
   });
 });
 
@@ -663,5 +668,151 @@ describe('what the confirmation says', () => {
     expect(studentCopy.takeTest.confirmHandIn(2)).toMatch(/^You\b/u);
     expect(studentCopy.takeTest.confirmHandInBack).toMatch(/questions/u);
     expect(studentCopy.takeTest.confirmHandInAnyway).toMatch(/^Hand in/u);
+  });
+});
+
+describe('opening another run at a finished test', () => {
+  it('offers the control in the handed-in state and nowhere else', () => {
+    const done = regionOf("if (submitState === 'done') {", 'if (loading ||');
+    expect(done).toContain('data-testid="take-test-retake"');
+    expect(done).toContain('studentCopy.results.retake');
+    expect(done).toContain('studentCopy.results.retakeStarting');
+    // Beneath the results, passed in as the slot — so `AttemptResults` keeps its own
+    // read and its own failure and gains no notion of a second run.
+    expect(done).toMatch(/<AttemptResults[\s\S]*footer=\{/u);
+    // Exactly one control, reachable from exactly one branch.
+    expect(CODE.match(/data-testid="take-test-retake"/gu)).toHaveLength(1);
+    const beforeHandIn = CODE.slice(CODE.indexOf('if (loading ||'));
+    expect(beforeHandIn).not.toContain('take-test-retake');
+    expect(beforeHandIn).not.toContain('retakeTest');
+  });
+
+  it('calls the creating route from one person’s press, never to recover', () => {
+    // `retakeTest` inserts where `startAttempt` resumes, so a screen reaching for it
+    // on a failed read, a reconnect or a reload would hand the child a new deadline
+    // they never asked for. One call site, in a handler, behind an in-flight guard.
+    expect(CODE.match(/parentApi\.retakeTest\(/gu)).toHaveLength(1);
+    const handler = regionOf('const retake = useCallback(', 'const handedInHeading');
+    expect(handler).toMatch(/if \(retaking\) return;\s*setRetaking\(true\)/u);
+    // And nothing automatic anywhere near it: no timer, no re-arming, no loop.
+    expect(handler).not.toContain('setTimeout');
+    expect(handler).not.toContain('setInterval');
+    // The control is disabled only while the request is out.
+    expect(CODE).toContain('disabled={retaking}');
+  });
+
+  it('begins the new run in place, from the Attempt the server answered with', () => {
+    const handler = regionOf('const retake = useCallback(', 'const handedInHeading');
+    expect(handler).toContain('setAttempt(value)');
+    // The clock pair, stamped at the instant the response landed: a new run has a
+    // deadline of its own.
+    expect(handler).toContain('setSyncedAt(Date.now())');
+    expect(handler).toContain('setNow(Date.now())');
+    // Everything about the run that is over, cleared.
+    for (const cleared of [
+      'setAnswers({})',
+      'setIndex(0)',
+      'setMapOpen(false)',
+      'setConfirmingHandIn(false)',
+      'setWarning(null)',
+      "setSubmitState('open')",
+      'setSubmitNote(null)',
+      'setAutoSubmitting(false)',
+      'setWaitingForOnline(false)',
+      'setSubmittedAttemptToClear(null)',
+    ]) {
+      expect(handler).toContain(cleared);
+    }
+    // Refs are not state, and both are about the run that ended.
+    expect(handler).toContain('deadlineActedFor.current = null');
+    expect(handler).toContain('previousRemaining.current = null');
+  });
+
+  it('drops a response that landed after the child moved to another test', () => {
+    const handler = regionOf('const retake = useCallback(', 'const handedInHeading');
+    // Read, never bumped: the test read owns the counter, so raising it here would
+    // cancel the read this screen is waiting on.
+    expect(handler).toContain('const thisRequest = requestId.current;');
+    expect(handler).not.toContain('requestId.current +=');
+    // Both callbacks, because a stale failure would state a message about a test the
+    // child is no longer on just as a stale success would install its Attempt.
+    expect(handler.match(/if \(requestId\.current !== thisRequest\) return;/gu)).toHaveLength(2);
+  });
+
+  it('does not re-read the test and does not blank it', () => {
+    // The Questions are unchanged by a retake — same rows, same stored order — so
+    // re-reading them would be a second answer to a question already answered, and
+    // blanking `test` would put the loading alert over a screen that has everything.
+    const handler = regionOf('const retake = useCallback(', 'const handedInHeading');
+    expect(handler).not.toContain('setTest(');
+    expect(handler).not.toContain('setError(');
+    expect(handler).not.toContain('setReload(');
+    expect(handler).not.toContain('studentPracticeTest(');
+    // `hydratedFor` is left alone deliberately: it is compared against `attempt.id`,
+    // so the new id re-runs hydration by itself and finds nothing stored.
+    expect(handler).not.toContain('setHydratedFor(');
+  });
+
+  it('keeps the two resets separate, so a retake cannot blank the test read', () => {
+    // The render-phase reset is a *different* event — a different practice test,
+    // whose Questions must be re-read. Folding the two into one helper would make a
+    // retake able to clear `test`, which is the bug the difference prevents.
+    const move = regionOf('if (loadedTestId !== practiceTestId) {', 'useEffect(() => {');
+    expect(move).toContain('setTest(null)');
+    expect(move).toContain('setHydratedFor(null)');
+    // And the move clears the retake's own state too: a failure stated about the
+    // previous test has no business on a different one.
+    expect(move).toContain('setRetaking(false)');
+    expect(move).toContain('setRetakeNote(null)');
+  });
+
+  it('states a failure beside the control and leaves the results in place', () => {
+    const handler = regionOf('const retake = useCallback(', 'const handedInHeading');
+    expect(handler).toContain('setRetakeNote(cause instanceof Error ? cause.message');
+    // Nothing about the results or the run is touched on a failure, so the work
+    // above stays on screen exactly as it was and the Attempt in hand is still the
+    // one the answer key belongs to.
+    const failed = handler.slice(handler.lastIndexOf('(cause: unknown) => {'));
+    expect(failed).not.toContain('setAttempt(');
+    expect(failed).not.toContain("setSubmitState('open')");
+    expect(failed).not.toContain('setAnswers(');
+    const done = regionOf("if (submitState === 'done') {", 'if (loading ||');
+    expect(done).toContain('data-testid="take-test-retake-error"');
+    // The one navigation is the shared unbound-device rule, which every read here
+    // acts on identically.
+    expect(handler).toContain("router.replace('/auth/sign-in')");
+  });
+
+  it('spaces and sizes the control from the tokens, with no flourish at all', () => {
+    const done = regionOf("if (submitState === 'done') {", 'if (loading ||');
+    expect(done).toContain('comfortableDensity.tapTarget');
+    // No count-up, no reveal, no celebration, no badge, no streak, no personal best.
+    expect(done).not.toMatch(/animate|transition|confetti|badge|streak|celebrat/iu);
+  });
+});
+
+describe('the retake’s copy', () => {
+  it('names the doing of it rather than a record of how many times', () => {
+    expect(studentCopy.results.retake).toBe('Practise this again');
+    expect(studentCopy.results.retakeStarting).not.toBe(studentCopy.results.retake);
+  });
+
+  it('addresses the child, with no exclamation mark and no error code', () => {
+    for (const line of [
+      studentCopy.results.retake,
+      studentCopy.results.retakeStarting,
+      studentCopy.results.retakeFailed,
+    ]) {
+      expect(line).not.toContain('!');
+      expect(line).not.toMatch(/\b[45]\d\d\b/u);
+      expect(line).not.toMatch(/\d/u);
+    }
+    expect(studentCopy.results.retakeFailed).toMatch(/^Your\b/u);
+  });
+
+  it('promises nothing about doing better, and states no figure', () => {
+    for (const line of [studentCopy.results.retake, studentCopy.results.retakeFailed]) {
+      expect(line).not.toMatch(/better|improve|best|streak|attempt|limit/iu);
+    }
   });
 });

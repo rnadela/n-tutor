@@ -1017,10 +1017,12 @@ model PracticeTestQuestionTopic {
 ///   extended, never paused, never recomputed — because a timer that could be
 ///   moved would retroactively change how a past Attempt graded, and expiry is
 ///   what decides `unanswered` from `incorrect` downstream.
-/// - `submittedAt` is null while the Attempt is open. Exactly one Attempt per
-///   Practice Test and profile is ever open, which is what `ordinal` plus the
-///   unique index below expresses: a re-open resumes the open row rather than
-///   inserting a second one.
+/// - `submittedAt` is null while the Attempt is open. At most one Attempt per
+///   Practice Test and profile is ever open at a time: a re-open resumes the
+///   latest row rather than inserting a second one, and a retake is refused
+///   while the latest row is still open. Several rows per test and profile do
+///   exist — one per run — which is exactly what `ordinal` plus the unique index
+///   below expresses.
 /// - `expired` records the comparison the server itself made at submit, against
 ///   its own clock and its own column. A client claim about expiry is never
 ///   stored, because a browser that could claim it could buy time.
@@ -1039,8 +1041,15 @@ model Attempt {
   parentAccountId  String
   studentProfileId String
   /// This Attempt's place in the child's runs at this Practice Test, 1-based.
-  /// Retakes are Story 5.7's; the column exists so the unique index below can
-  /// express "one open Attempt" without a partial index.
+  /// A first run is 1; every retake is the latest ordinal plus one, written by
+  /// `PracticeTestService.startRetake` and by nothing else. The resume read takes
+  /// the highest, so the run a child is on is the run they get back.
+  ///
+  /// **`ordinal === 1` is the one definition of "counts toward Mastery"**, stated
+  /// in `grading/mastery-eligibility.ts` and nowhere else: a retake is excluded by
+  /// being a later run rather than by a filter at each call site (FR-26, Epic 7).
+  /// There is no per-Attempt Question order column and no shuffle — every run of a
+  /// released test presents the same Questions in the same stored order.
   ordinal          Int
   /// The server's clock when the Attempt began. Written once.
   startedAt        DateTime

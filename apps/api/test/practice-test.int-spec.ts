@@ -19,6 +19,7 @@ const {
   NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
   ATTEMPT_ALREADY_SUBMITTED,
+  ATTEMPT_NOT_RETAKEABLE,
   MAX_ANSWERS_PER_SUBMISSION,
   MAX_ANSWER_LENGTH,
   MAX_QUESTION_ID_LENGTH,
@@ -172,6 +173,75 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       sourceTestId,
       studentProfileId: profile.id,
     };
+  }
+
+  /**
+   * A released Practice Test belonging to **an existing profile on an existing
+   * account**, whole pipeline and all.
+   *
+   * `generatable` opens a parent account of its own, which is exactly what a case
+   * about two children under one parent cannot use. This runs the same flow with the
+   * profile and elevation token it is handed, so both children's tests sit on one
+   * `parentAccountId` and an account-scoped read cannot be mistaken for a
+   * profile-scoped one.
+   */
+  async function releasedFor(
+    token: string,
+    studentProfileId: string,
+    gradeLevelId: string,
+    pageCount = 2,
+  ): Promise<string> {
+    const draft = await server()
+      .post('/api/parent/source-tests')
+      .set('Authorization', bearer(token))
+      .send({ studentProfileId })
+      .expect(200);
+    const sourceTestId: string = draft.body.id;
+
+    const subject = await createSubject(h, { gradeLevelId });
+    await server()
+      .patch(`/api/parent/source-tests/${sourceTestId}/classification`)
+      .set('Authorization', bearer(token))
+      .send({ subjectId: subject.id })
+      .expect(200);
+
+    for (let index = 0; index < pageCount; index += 1) {
+      await server()
+        .post(`/api/parent/source-tests/${sourceTestId}/pages`)
+        .set('Authorization', bearer(token))
+        .attach('file', await photo(index + 1), {
+          filename: 'page.jpg',
+          contentType: 'image/jpeg',
+        })
+        .expect(201);
+    }
+
+    await checkLegibility(h, token, sourceTestId);
+    await server()
+      .post(`/api/parent/source-tests/${sourceTestId}/submit`)
+      .set('Authorization', bearer(token))
+      .expect(200);
+    expect(await h.extractionRunner.runOnce()).toBe(true);
+    h.ai.reset();
+
+    await server()
+      .post(`/api/parent/source-tests/${sourceTestId}/practice-tests`)
+      .set('Authorization', bearer(token))
+      .send({ count: 1 })
+      .expect(202);
+    expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+    const stored = await h.prisma.practiceTest.findMany({
+      where: { sourceTestId },
+      select: { id: true },
+    });
+    expect(stored).toHaveLength(1);
+    const practiceTestId = stored[0]!.id;
+    await server()
+      .post(`/api/parent/practice-tests/${practiceTestId}/release`)
+      .set('Authorization', bearer(token))
+      .expect(200);
+    return practiceTestId;
   }
 
   /** How many Practice Tests the derived allowance count says were charged. */
@@ -5102,6 +5172,521 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       // And not the model's own words anywhere in the body, under any key.
       expect(serialized).not.toContain(stored.get(questionIds[0]!)!.rationale);
       expect(serialized).not.toMatch(/allowance|tier|unlimited|gpt|model/iu);
+    });
+
+    // --- A second run: Story 5.7's retake and run history -------------------
+    //
+    // Every case here goes over the real HTTP path, and every one of them is about a
+    // *row that already exists staying exactly as it is*: a retake inserts, and it
+    // is the only thing in the product that ever gives a child a second Attempt at
+    // one Practice Test.
+
+    /** Opens the next run, carrying the binding cookie and no bearer. */
+    function retake(cookie: string, practiceTestId: string) {
+      return server()
+        .post(`/api/student/practice-tests/${practiceTestId}/retake`)
+        .set('Cookie', cookie);
+    }
+
+    /** This child's run history: one entry per test they have finished at least once. */
+    function readRuns(cookie: string) {
+      return server().get('/api/student/practice-test-runs').set('Cookie', cookie);
+    }
+
+    /** One Attempt's whole stored row, so "unchanged" can be asserted field by field. */
+    function attemptRowOf(attemptId: string) {
+      return h.prisma.attempt.findUniqueOrThrow({
+        where: { id: attemptId },
+        select: {
+          id: true,
+          ordinal: true,
+          startedAt: true,
+          expiresAt: true,
+          submittedAt: true,
+          expired: true,
+        },
+      });
+    }
+
+    /** The answers stored against one Attempt, by Question. */
+    async function answersOf(attemptId: string): Promise<Map<string, string>> {
+      const rows = await h.prisma.answer.findMany({
+        where: { attemptId },
+        select: { questionId: true, value: true },
+      });
+      return new Map(rows.map((row) => [row.questionId, row.value]));
+    }
+
+    /** How many Attempts exist at all for this child at this test. */
+    function attemptCountFor(practiceTestId: string, studentProfileId: string) {
+      return h.prisma.attempt.count({ where: { practiceTestId, studentProfileId } });
+    }
+
+    /** Answers every Question of a test with the flagged option, and hands it in. */
+    async function answerWholeAndSubmit(
+      cookie: string,
+      attemptId: string,
+      questionIds: string[],
+    ): Promise<void> {
+      const flagged = await Promise.all(questionIds.map((id) => correctChoiceOf(id)));
+      await submitAttempt(
+        cookie,
+        attemptId,
+        questionIds.map((questionId, at) => ({
+          questionId,
+          value: String(flagged[at]!.ordinal),
+        })),
+      ).expect(200);
+    }
+
+    it('inserts a second Attempt at ordinal 2 and leaves the first run byte-identical', async () => {
+      const { ready, id, cookie, questionIds } = await releasedForChild(null);
+      const first = await startAttempt(cookie, id).expect(201);
+      await answerWholeAndSubmit(cookie, first.body.id, questionIds);
+      // Read *before* the retake, so "unchanged" is a comparison rather than a hope.
+      const firstRowBefore = await attemptRowOf(first.body.id);
+      const firstAnswersBefore = await answersOf(first.body.id);
+      const firstGradesBefore = await gradeRowsOf(first.body.id);
+      expect(firstAnswersBefore.size).toBe(questionIds.length);
+      expect(firstGradesBefore.size).toBe(questionIds.length);
+
+      const before = Date.now();
+      const response = await retake(cookie, id).expect(201);
+      const after = Date.now();
+
+      // The same view shape the start route answers with, so a screen begins the new
+      // run from what it already knows how to read.
+      expect(Object.keys(response.body).sort()).toEqual([
+        'expiresAt',
+        'id',
+        'practiceTestId',
+        'serverNow',
+        'startedAt',
+        'submittedAt',
+      ]);
+      expect(response.body.id).not.toBe(first.body.id);
+      expect(response.body.practiceTestId).toBe(id);
+      expect(response.body.submittedAt).toBeNull();
+      // Untimed, so no deadline at all -- and the instants are the server's own.
+      expect(response.body.expiresAt).toBeNull();
+      const startedAt = Date.parse(response.body.startedAt);
+      expect(startedAt).toBeGreaterThanOrEqual(before - 1000);
+      expect(startedAt).toBeLessThanOrEqual(after + 1000);
+
+      const retakeRow = await attemptRowOf(response.body.id);
+      expect(retakeRow.ordinal).toBe(2);
+      // Exactly two rows: a retake inserts one, and nothing else.
+      expect(await attemptCountFor(id, ready.studentProfileId)).toBe(2);
+
+      // And the first run, untouched: its row, its answers and its grades.
+      expect(await attemptRowOf(first.body.id)).toEqual(firstRowBefore);
+      expect(await answersOf(first.body.id)).toEqual(firstAnswersBefore);
+      expect(await gradeRowsOf(first.body.id)).toEqual(firstGradesBefore);
+      // The retake carries no answers and no grades of its own yet.
+      expect((await answersOf(response.body.id)).size).toBe(0);
+      expect((await gradeRowsOf(response.body.id)).size).toBe(0);
+    });
+
+    it('resumes the retake from the start route, never the earlier Attempt', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const first = await startAttempt(cookie, id).expect(201);
+      await answerWholeAndSubmit(cookie, first.body.id, questionIds);
+      const second = await retake(cookie, id).expect(201);
+
+      const resumed = await startAttempt(cookie, id).expect(201);
+
+      // The latest row by `ordinal desc`, with its own instants and still open.
+      expect(resumed.body.id).toBe(second.body.id);
+      expect(resumed.body.id).not.toBe(first.body.id);
+      expect(resumed.body.startedAt).toBe(second.body.startedAt);
+      expect(resumed.body.submittedAt).toBeNull();
+      // And resuming inserted nothing: the promise the start route makes is unchanged.
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: id } })).toBe(2);
+    });
+
+    it('presents the same Questions in the same order, and grades each run on its own rows', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const first = await startAttempt(cookie, id).expect(201);
+      const flagged = await Promise.all(questionIds.map((qid) => correctChoiceOf(qid)));
+      // Everything right on the first run.
+      await submitAttempt(
+        cookie,
+        first.body.id,
+        questionIds.map((questionId, at) => ({
+          questionId,
+          value: String(flagged[at]!.ordinal),
+        })),
+      ).expect(200);
+
+      const second = await retake(cookie, id).expect(201);
+      // The detail read is unchanged by a retake: same Questions, same stored order.
+      const detail = await readReleasedTest(cookie, id).expect(200);
+      expect(detail.body.questions.map((q: { id: string }) => q.id)).toEqual(questionIds);
+      // Everything wrong on the second: the flagged option is ordinal 1, so 2 is a
+      // wrong answer the child actually gave.
+      await submitAttempt(
+        cookie,
+        second.body.id,
+        questionIds.map((questionId) => ({ questionId, value: '2' })),
+      ).expect(200);
+
+      const firstResults = await readResults(cookie, first.body.id).expect(200);
+      const secondResults = await readResults(cookie, second.body.id).expect(200);
+
+      // The same Questions, in the same order, on both runs.
+      for (const results of [firstResults, secondResults]) {
+        expect(results.body.practiceTestId).toBe(id);
+        expect(results.body.questions.map((row: { questionId: string }) => row.questionId)).toEqual(
+          questionIds,
+        );
+      }
+      // Each run's own answers and its own verdicts.
+      expect(firstResults.body.score).toEqual({
+        correct: questionIds.length,
+        denominator: questionIds.length,
+        excludedUngraded: 0,
+      });
+      expect(secondResults.body.score).toEqual({
+        correct: 0,
+        denominator: questionIds.length,
+        excludedUngraded: 0,
+      });
+      for (const row of firstResults.body.questions) expect(row.state).toBe('Correct');
+      for (const row of secondResults.body.questions) expect(row.state).toBe('Incorrect');
+    });
+
+    it('answers the winner’s Attempt when two retake presses race, never a third row', async () => {
+      const { ready, id, cookie, questionIds } = await releasedForChild(null);
+      const first = await startAttempt(cookie, id).expect(201);
+      await answerWholeAndSubmit(cookie, first.body.id, questionIds);
+
+      // Two presses of one control. Both read `ordinal: 1` as the latest and both
+      // insert `ordinal: 2`; the unique index refuses the loser, which then re-reads
+      // the latest row rather than re-running its own decision. Re-running would
+      // compute `ordinal + 2` and leave a child who pressed once with two open runs.
+      const [a, b] = await Promise.all([retake(cookie, id), retake(cookie, id)]);
+
+      // Whether the two transactions genuinely interleave is the database's business,
+      // not this case's: they may collide on the unique index, and the loser then
+      // re-reads the winner's row; or they may serialize, and the second press simply
+      // finds the retake already open and is refused like any other press at an open
+      // run. Both are correct, and asserting one of them would make this case a test
+      // of the scheduler. What is *never* correct is a third row, and that is what is
+      // asserted here.
+      const statuses = [a.status, b.status].sort();
+      expect(statuses[0]).toBe(201);
+      expect([201, 409]).toContain(statuses[1]);
+      const winner = a.status === 201 ? a : b;
+      expect((await attemptRowOf(winner.body.id)).ordinal).toBe(2);
+      expect(winner.body.submittedAt).toBeNull();
+      if (statuses[1] === 201) {
+        // The collision happened: one insert landed and the loser came back with the
+        // winner's row and the winner's instants, never `ordinal + 2`.
+        expect(a.body.id).toBe(b.body.id);
+        expect(a.body.startedAt).toBe(b.body.startedAt);
+        expect(a.body.expiresAt).toBe(b.body.expiresAt);
+      } else {
+        const loser = a.status === 409 ? a : b;
+        expect(loser.body.message).toBe(ATTEMPT_NOT_RETAKEABLE);
+      }
+      // Two rows in total, either way: the finished first run and the one retake they
+      // asked for.
+      expect(await attemptCountFor(id, ready.studentProfileId)).toBe(2);
+    });
+
+    it('refuses a retake while a run is open and on a test never sat, with the one sentence', async () => {
+      const { ready, id, cookie, questionIds } = await releasedForChild(null);
+
+      // Never sat: there is nothing to retake.
+      const neverSat = await retake(cookie, id).expect(409);
+      expect(await attemptCountFor(id, ready.studentProfileId)).toBe(0);
+
+      const open = await startAttempt(cookie, id).expect(201);
+      // A run still going: two open Attempts would give the resume read two answers.
+      const stillOpen = await retake(cookie, id).expect(409);
+      expect(await attemptCountFor(id, ready.studentProfileId)).toBe(1);
+
+      // One sentence for both, because "you have not finished this" is the same true
+      // statement about each and a child can already see which it is.
+      expect(neverSat.body.message).toBe(ATTEMPT_NOT_RETAKEABLE);
+      expect(stillOpen.body.message).toBe(neverSat.body.message);
+      // And it is not the ownership refusal: the test is on their screen.
+      expect(neverSat.body.message).not.toBe(PRACTICE_TEST_NOT_FOUND);
+
+      // Handed in, and now it is allowed -- so the refusal was about the rule and not
+      // about the route.
+      await submitAttempt(cookie, open.body.id, [
+        { questionId: questionIds[0]!, value: '1' },
+      ]).expect(200);
+      await retake(cookie, id).expect(201);
+      expect(await attemptCountFor(id, ready.studentProfileId)).toBe(2);
+    });
+
+    it('answers the one shared 404 for a sibling’s test, another account’s, a draft and a malformed id', async () => {
+      const ready = await withLandedDrafts(2);
+      const releasedId = ready.draftIds[0]!;
+      const draftId = ready.draftIds[1]!;
+      await release(ready.token, releasedId).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+      const strangers = await releasedForChild(null);
+      const grade = await createGradeLevel(h);
+      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+        gradeLevelId: grade.id,
+      });
+      const siblingCookie = await bindDevice(h, ready.token, sibling.id);
+
+      // A draft is not a released test, so it is simply absent from this surface.
+      const draft = await retake(cookie, draftId).expect(404);
+      // This account's own released test, asked for under a sibling's binding.
+      const wrongChild = await retake(siblingCookie, releasedId).expect(404);
+      // Another account's test entirely.
+      const foreign = await retake(cookie, strangers.id).expect(404);
+      // Deliberately not a 400 on shape: a second kind of refusal would tell a child
+      // *something* on a surface whose discipline is one sentence.
+      const malformed = await retake(cookie, 'not-a-uuid').expect(404);
+      const unknown = await retake(cookie, randomUUID()).expect(404);
+
+      for (const refusal of [draft, wrongChild, foreign, malformed, unknown]) {
+        expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      }
+      // Nothing was inserted by any of them, on either test.
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: draftId } })).toBe(0);
+      expect(await h.prisma.attempt.count({ where: { practiceTestId: releasedId } })).toBe(0);
+    });
+
+    it('states one child’s runs and never a sibling’s, on one account with two profiles', async () => {
+      const ready = await withLandedDrafts(1);
+      const mine = ready.draftIds[0]!;
+      await release(ready.token, mine).expect(200);
+      const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
+
+      // A second child on the **same** account, with a released test of their own.
+      // Two profiles under one parent is the only state that can tell this read's
+      // profile scoping apart from its ownership scoping: an account filter alone
+      // answers identically for a single-profile account, so a case built on one
+      // would pass with `studentProfileId` dropped from the query.
+      const grade = await createGradeLevel(h);
+      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+        gradeLevelId: grade.id,
+      });
+      const siblingCookie = await bindDevice(h, ready.token, sibling.id);
+      const theirs = await releasedFor(ready.token, sibling.id, grade.id);
+
+      const questionsOf = async (practiceTestId: string) =>
+        (
+          await h.prisma.practiceTestQuestion.findMany({
+            where: { practiceTestId },
+            orderBy: { ordinal: 'asc' },
+            select: { id: true },
+          })
+        ).map((question) => question.id);
+      const myAttempt = await startAttempt(cookie, mine).expect(201);
+      await answerWholeAndSubmit(cookie, myAttempt.body.id, await questionsOf(mine));
+      const theirAttempt = await startAttempt(siblingCookie, theirs).expect(201);
+      await answerWholeAndSubmit(siblingCookie, theirAttempt.body.id, await questionsOf(theirs));
+
+      const own = await readRuns(cookie).expect(200);
+      const other = await readRuns(siblingCookie).expect(200);
+
+      expect(own.body).toHaveLength(1);
+      expect(own.body[0].practiceTestId).toBe(mine);
+      expect(own.body[0].first.attemptId).toBe(myAttempt.body.id);
+      expect(other.body).toHaveLength(1);
+      expect(other.body[0].practiceTestId).toBe(theirs);
+      expect(other.body[0].first.attemptId).toBe(theirAttempt.body.id);
+      // Over the raw JSON too, so a leak under any key is caught rather than only one
+      // that happens to land in the entry this case reads.
+      expect(JSON.stringify(own.body)).not.toContain(theirAttempt.body.id);
+      expect(JSON.stringify(own.body)).not.toContain(theirs);
+      expect(JSON.stringify(other.body)).not.toContain(myAttempt.body.id);
+      expect(JSON.stringify(other.body)).not.toContain(mine);
+    });
+
+    it('snapshots the timer as it stands now rather than copying the first run’s deadline', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(20);
+      const first = await startAttempt(cookie, id).expect(201);
+      expect(Date.parse(first.body.expiresAt) - Date.parse(first.body.startedAt)).toBe(20 * 60_000);
+      await submitAttempt(cookie, first.body.id, [
+        { questionId: questionIds[0]!, value: '1' },
+      ]).expect(200);
+
+      // Written straight to the column: `PUT .../timer` is a draft-only write and
+      // answers 404 once a test is released (Epic 4's write barrier), so no route can
+      // produce this state. The claim under test is unchanged -- the retake reads the
+      // column *as it stands now* instead of shifting the first run's instants.
+      await h.prisma.practiceTest.update({ where: { id }, data: { timerMinutes: 35 } });
+
+      const second = await retake(cookie, id).expect(201);
+
+      expect(Date.parse(second.body.expiresAt) - Date.parse(second.body.startedAt)).toBe(
+        35 * 60_000,
+      );
+      // And not the earlier deadline moved: both instants are new.
+      expect(second.body.startedAt).not.toBe(first.body.startedAt);
+      expect(second.body.expiresAt).not.toBe(first.body.expiresAt);
+      // The first run's stored deadline is untouched by any of it.
+      const firstRow = await attemptRowOf(first.body.id);
+      expect(firstRow.expiresAt!.toISOString()).toBe(first.body.expiresAt);
+    });
+
+    it('states the run history over two finished runs, marking only the first as counting', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const first = await startAttempt(cookie, id).expect(201);
+      await answerWholeAndSubmit(cookie, first.body.id, questionIds);
+      const second = await retake(cookie, id).expect(201);
+      // Everything wrong on the second run, so the two figures differ.
+      await submitAttempt(
+        cookie,
+        second.body.id,
+        questionIds.map((questionId) => ({ questionId, value: '2' })),
+      ).expect(200);
+
+      const response = await readRuns(cookie).expect(200);
+
+      expect(response.body).toHaveLength(1);
+      const entry = response.body[0];
+      expect(entry.practiceTestId).toBe(id);
+      expect(entry.attemptCount).toBe(2);
+      expect(entry.first.attemptId).toBe(first.body.id);
+      expect(entry.first.ordinal).toBe(1);
+      expect(entry.first.countsTowardMastery).toBe(true);
+      expect(entry.first.score).toEqual({
+        correct: questionIds.length,
+        denominator: questionIds.length,
+        excludedUngraded: 0,
+      });
+      expect(entry.latest.attemptId).toBe(second.body.id);
+      expect(entry.latest.ordinal).toBe(2);
+      // A retake is excluded by being a later run, not by a filter at a call site.
+      expect(entry.latest.countsTowardMastery).toBe(false);
+      expect(entry.latest.score).toEqual({
+        correct: 0,
+        denominator: questionIds.length,
+        excludedUngraded: 0,
+      });
+    });
+
+    it('names the same Attempt as first and latest for a single finished run', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const only = await startAttempt(cookie, id).expect(201);
+      await answerWholeAndSubmit(cookie, only.body.id, questionIds);
+
+      const response = await readRuns(cookie).expect(200);
+
+      expect(response.body).toHaveLength(1);
+      const entry = response.body[0];
+      expect(entry.attemptCount).toBe(1);
+      // The shape the card tells the two cases apart by, without arithmetic.
+      expect(entry.first.attemptId).toBe(only.body.id);
+      expect(entry.latest.attemptId).toBe(entry.first.attemptId);
+      expect(entry.latest).toEqual(entry.first);
+      expect(entry.first.countsTowardMastery).toBe(true);
+      expect(entry.latest.countsTowardMastery).toBe(true);
+    });
+
+    it('leaves a test out entirely while its only run is still open', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+
+      // Nothing sat at all: an empty list, never a 404.
+      const nothing = await readRuns(cookie).expect(200);
+      expect(nothing.body).toEqual([]);
+
+      const open = await startAttempt(cookie, id).expect(201);
+      // A run still going is not a figure and is not counted.
+      const stillOpen = await readRuns(cookie).expect(200);
+      expect(stillOpen.body).toEqual([]);
+
+      await submitAttempt(cookie, open.body.id, [
+        { questionId: questionIds[0]!, value: '1' },
+      ]).expect(200);
+      const afterHandIn = await readRuns(cookie).expect(200);
+      expect(afterHandIn.body).toHaveLength(1);
+      expect(afterHandIn.body[0].practiceTestId).toBe(id);
+    });
+
+    it('reports a run’s Ungraded Questions as excluded rather than folding them in', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      // One free-text Question the provider is asked about, and a transport fault on
+      // the way -- so the row lands `Ungraded` and nothing has judged it.
+      await asFreeText(questionIds[0]!, 'ShortAnswer', 'Two halves');
+      const attempt = await startAttempt(cookie, id).expect(201);
+      h.ai.failNext('transport');
+      const flagged = await Promise.all(questionIds.slice(1).map((qid) => correctChoiceOf(qid)));
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'Two halves' },
+        ...questionIds.slice(1).map((questionId, at) => ({
+          questionId,
+          value: String(flagged[at]!.ordinal),
+        })),
+      ]).expect(200);
+      expect((await gradeRowsOf(attempt.body.id)).get(questionIds[0]!)!.state).toBe('Ungraded');
+
+      // Read through the history, which never re-asks -- so the row is still
+      // `Ungraded` when the figure is computed.
+      const response = await readRuns(cookie).expect(200);
+
+      const entry = response.body[0];
+      expect(entry.first.score).toEqual({
+        correct: questionIds.length - 1,
+        denominator: questionIds.length - 1,
+        excludedUngraded: 1,
+      });
+      // The history is not FR-22's trigger: the results screen is, and this read must
+      // not spend a provider call per card on every visit to a child's home screen.
+      const callsBefore = gradingCalls().length;
+      await readRuns(cookie).expect(200);
+      expect(gradingCalls()).toHaveLength(callsBefore);
+    });
+
+    it('carries no rationale, Topic, cost, tier or model on the run history', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      // A free-text Question the provider does judge, so a rationale genuinely exists
+      // in the table while the body says nothing about it.
+      await asFreeText(questionIds[0]!, 'ShortAnswer', 'Two halves');
+      const attempt = await startAttempt(cookie, id).expect(201);
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'Two halves' },
+      ]).expect(200);
+      const stored = await gradeRowsOf(attempt.body.id);
+      expect(stored.get(questionIds[0]!)!.rationale!.trim().length).toBeGreaterThan(0);
+
+      const response = await readRuns(cookie).expect(200);
+
+      expect(response.body[0].practiceTestId).toBe(id);
+      // Asserted over the raw JSON rather than field by field, so a key a later edit
+      // adds is caught too.
+      const serialized = JSON.stringify(response.body);
+      expect(Object.keys(response.body[0]).sort()).toEqual(
+        ['practiceTestId', 'attemptCount', 'first', 'latest'].sort(),
+      );
+      // Both named runs, not only the first: a key added to one view is a key on the
+      // other, and asserting one of the two would say nothing about the other.
+      for (const run of [response.body[0].first, response.body[0].latest]) {
+        expect(Object.keys(run).sort()).toEqual(
+          ['attemptId', 'ordinal', 'submittedAt', 'score', 'countsTowardMastery'].sort(),
+        );
+      }
+      for (const key of [
+        'rationale',
+        'topic',
+        'topics',
+        'cost',
+        'costMicros',
+        'tier',
+        'model',
+        'allowance',
+        'isCorrect',
+        'timerMinutes',
+        'studentProfileId',
+        'parentAccountId',
+        'questions',
+        'prompt',
+      ]) {
+        expect(serialized).not.toMatch(new RegExp(`"${key}"\\s*:`, 'iu'));
+      }
+      // And not the model's own words anywhere in the body, under any key.
+      expect(serialized).not.toContain(stored.get(questionIds[0]!)!.rationale);
+      expect(serialized).not.toMatch(/allowance|tier|unlimited|gpt/iu);
     });
   });
 });

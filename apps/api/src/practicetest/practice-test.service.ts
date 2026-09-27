@@ -33,6 +33,7 @@ import { renumbered } from '../sourcetest/source-test-policy.js';
 import { SOURCE_TEST_READER, type SourceTestReader } from '../sourcetest/source-test-reader.js';
 import {
   ATTEMPT_ALREADY_SUBMITTED,
+  ATTEMPT_NOT_RETAKEABLE,
   EXTRACTION_NOT_READY,
   GENERATION_CLOCK_ANOMALY,
   GENERATION_FAILED,
@@ -319,6 +320,31 @@ export interface AttemptView {
   serverNow: string;
   /** Null while the Attempt is open. */
   submittedAt: string | null;
+}
+
+/**
+ * One **handed-in** run at a Practice Test, as `grading` reads it to build a run
+ * history.
+ *
+ * An identifier, which test it belongs to, which run of that test it is, when it
+ * went in, and how many Questions the paper presented. Nothing else, and in
+ * particular **no grade, no answer, no Question and no score**: the module that
+ * owns `QuestionGrade` is the one asking, and a figure computed here would be a
+ * second answer to FR-37 (AD-6, AD-17).
+ *
+ * `submittedAt` is a `string` rather than a nullable one because an open run is not
+ * in this list at all.
+ *
+ * `questionCount` is the **owning test's** presented count. It is the same for every
+ * run of a released test — Epic 4's write barrier freezes the presented set — which
+ * is why it travels on the run rather than being looked up again per test.
+ */
+export interface AttemptRun {
+  attemptId: string;
+  practiceTestId: string;
+  ordinal: number;
+  submittedAt: string;
+  questionCount: number;
 }
 
 /**
@@ -914,11 +940,16 @@ export class PracticeTestService {
    * absence inserts. Without that, every reload would hand the child a fresh
    * deadline and the timer the parent configured would mean nothing.
    *
-   * "Existing" means **any** Attempt on this Practice Test for this child, not only
-   * an open one. A child who re-opens a test they handed in gets that Attempt back
-   * with its `submittedAt` set, and the screen states that the work is in. A second
-   * row would be a retake, and retakes are Story 5.7's — so the only way to get one
-   * is a story that deliberately adds it.
+   * "Existing" means the **latest** Attempt on this Practice Test for this child by
+   * `ordinal desc`, not only an open one. A child who re-opens a test they handed in
+   * gets that Attempt back with its `submittedAt` set, and the screen states that
+   * the work is in. A second row is a retake, and the only thing that inserts one is
+   * `startRetake` — never this method, on any path, with any argument.
+   *
+   * **After a retake this resumes the retake**, because the retake is now the latest
+   * row: the `orderBy` is what makes that true rather than a branch, so a reload, a
+   * second tab and a re-entry all reach the run the child is actually on and the
+   * earlier Attempt is never handed back out.
    *
    * **The server writes both instants, from its own clock, once.** `startedAt` is
    * `now`. `expiresAt` is `startedAt` plus the Practice Test's `timerMinutes`
@@ -969,7 +1000,7 @@ export class PracticeTestService {
       // submitted Attempt comes back carrying its `submittedAt`, which is how the
       // screen knows to state that the work is in rather than to offer a second run
       // at it — there is **no retake here**, and inserting a second row for a test
-      // this child has already handed in would be exactly that (Story 5.7's).
+      // this child has already handed in is `startRetake`'s and nothing else's.
       if (existing !== null) return existing;
 
       const startedAt = new Date();
@@ -978,10 +1009,11 @@ export class PracticeTestService {
           practiceTestId: test.id,
           parentAccountId,
           studentProfileId,
-          // Always 1 while there are no retakes: the branch above returns any row
-          // that exists, so this insert is only ever the first. The column is here
-          // so Story 5.7 has somewhere to put a second run, and so the unique index
-          // can express "one row per run" without a partial index.
+          // Always 1 here: the branch above returns the latest row whenever one
+          // exists, so this insert is only ever the child's **first** run at this
+          // test. Every later ordinal is `startRetake`'s, computed from the latest
+          // row it found — and the unique index is what makes "one row per run" a
+          // database fact rather than an ordering accident.
           ordinal: 1,
           startedAt,
           // Minutes converted here and nowhere else: the column is what a parent
@@ -1019,6 +1051,186 @@ export class PracticeTestService {
       attempt = await this.prisma.withTransaction(open);
     }
     return attemptViewOf(attempt, new Date());
+  }
+
+  /**
+   * Opens a **second** run at a Practice Test the child has already finished: a new
+   * Attempt at the next `ordinal`, with the same Questions and a fresh deadline.
+   *
+   * **Its own method rather than a flag on `startOrResumeAttempt`.** That route's
+   * whole promise is that it never inserts while a row exists — it is what keeps a
+   * reload, a second tab and a reconnect from handing out a fresh deadline, and it is
+   * asserted from outside in several places. A query flag or a body field able to
+   * make it create would turn every one of those paths into a path that could start a
+   * run the child never asked for. A separate write is the smallest change that keeps
+   * that promise literally true, and it is also where the 409 belongs.
+   *
+   * **Nothing about a Question is read here, and nothing about one is written.** The
+   * new Attempt presents the same `PracticeTestQuestion` rows in the same stored
+   * `ordinal` order, because it presents *the test* and the test did not change:
+   * there is no per-Attempt order column and no shuffle, so a retake cannot alter a
+   * prompt, an answer key or the order any run's results are read in. This method
+   * does not touch `practiceTestQuestion` at all.
+   *
+   * **Prior Attempts are read to decide, never to write.** The latest row is read for
+   * its `ordinal` and its `submittedAt` and for nothing else; no earlier `Attempt`,
+   * no `Answer` row and no `QuestionGrade` row appears in any statement this method
+   * makes, so there is no path by which a retake could move, blank or delete a
+   * finished run's work.
+   *
+   * **Refused unless the latest Attempt is handed in**, which deliberately covers a
+   * test never sat as well: `ATTEMPT_NOT_RETAKEABLE`, one 409 and one sentence, for
+   * the reason the constant states at length. Two open Attempts would give the resume
+   * read two answers and split the client-held store.
+   *
+   * **Both instants are the server's, written from its own clock at this moment**,
+   * exactly as the first run's are — and `timerMinutes` is snapshotted *as the column
+   * stands now* rather than copied from the earlier Attempt's instants, so a retake
+   * of a timed test gets the duration the test currently carries.
+   *
+   * Ownership is the same one-`where` released lookup and the same shared 404: a
+   * draft, a discarded row, a sibling's release, another account's test and an id
+   * that never existed are one indistinguishable refusal by construction.
+   */
+  async startRetake(
+    parentAccountId: string,
+    studentProfileId: string,
+    practiceTestId: string,
+  ): Promise<AttemptView> {
+    /** This child's latest run at this released test, or null for a test never sat. */
+    const latestAttemptOf = async (tx: TransactionClient): Promise<AttemptRow | null> => {
+      const test = await tx.practiceTest.findFirst({
+        where: { id: practiceTestId, parentAccountId, studentProfileId, status: 'Released' },
+        select: { id: true },
+      });
+      if (test === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      return tx.attempt.findFirst({
+        where: { practiceTestId: test.id, studentProfileId },
+        orderBy: { ordinal: 'desc' },
+        select: ATTEMPT_SELECT,
+      });
+    };
+
+    const retake = async (tx: TransactionClient): Promise<AttemptRow> => {
+      const test = await tx.practiceTest.findFirst({
+        where: { id: practiceTestId, parentAccountId, studentProfileId, status: 'Released' },
+        select: { id: true, timerMinutes: true },
+      });
+      // The one sentence every student ownership refusal shares, from the one
+      // statement that cannot tell the cases apart either.
+      if (test === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+
+      const latest = await tx.attempt.findFirst({
+        where: { practiceTestId: test.id, studentProfileId },
+        // The same `ordinal desc` the resume read uses, so "the latest run" is one
+        // definition rather than two that could disagree.
+        orderBy: { ordinal: 'desc' },
+        select: { ordinal: true, submittedAt: true },
+      });
+      // Both cases, one sentence: nothing to retake, and a run still going.
+      if (latest === null || latest.submittedAt === null) {
+        throw new ConflictException(ATTEMPT_NOT_RETAKEABLE);
+      }
+
+      const startedAt = new Date();
+      return tx.attempt.create({
+        data: {
+          practiceTestId: test.id,
+          parentAccountId,
+          studentProfileId,
+          // The next run, from the row that is currently the last one. Nothing about
+          // the earlier Attempt is carried over but this number.
+          ordinal: latest.ordinal + 1,
+          startedAt,
+          // The column as it stands **now**, converted here and nowhere else — never
+          // the first run's `expiresAt` shifted, which would make a past Attempt's
+          // deadline the authority over a new one.
+          expiresAt:
+            test.timerMinutes === null
+              ? null
+              : new Date(startedAt.getTime() + test.timerMinutes * 60_000),
+        },
+        select: ATTEMPT_SELECT,
+      });
+    };
+
+    let attempt: AttemptRow;
+    try {
+      attempt = await this.prisma.withTransaction(retake);
+    } catch (cause: unknown) {
+      // Two presses, one run. The read and the insert are one decision but not one
+      // lock, so two requests can both compute the same `ordinal + 1` and the loser
+      // trips `attempt_practiceTestId_studentProfileId_ordinal_key`. Caught out here
+      // because Postgres aborts the whole transaction on a constraint violation.
+      //
+      // **The loser does not re-run the decision.** `startOrResumeAttempt` recovers
+      // by running its whole transaction again, which is safe there because the
+      // second run finds the winner's row and returns it. Here a second run would
+      // re-read the latest ordinal — now the winner's — and insert *again*, leaving a
+      // child who pressed once with two open runs. So the recovery is a read: the
+      // latest row, which is the winner's retake, returned as the answer to the press
+      // that lost. The unique index is the only thing that can tell us we lost.
+      if (!isUniqueViolation(cause)) throw cause;
+      const latest = await this.prisma.withTransaction(latestAttemptOf);
+      // Unreachable in practice — the violation means a row at that ordinal exists —
+      // and stated rather than asserted away, so a future change cannot make a
+      // non-null assertion quietly wrong.
+      if (latest === null) throw new ConflictException(ATTEMPT_NOT_RETAKEABLE);
+      attempt = latest;
+    }
+    return attemptViewOf(attempt, new Date());
+  }
+
+  /**
+   * Every **handed-in** run this child has at a released Practice Test, in run order,
+   * with the owning test's presented count beside each.
+   *
+   * The one read `grading` composes a child's run history off. It carries **no grade,
+   * no answer and no Question**: the module that reads `QuestionGrade` is the caller
+   * (AD-6, AD-17), and this read's whole job is to say which runs exist and how long
+   * the paper was.
+   *
+   * **A run still open is absent.** An open Attempt is not a score and is not a run
+   * anything can be said about yet, so the filter is `submittedAt: { not: null }`
+   * rather than a flag the caller has to remember.
+   *
+   * `questionCount` travels **with the run** rather than being looked up per test,
+   * because Epic 4's write barrier freezes the presented set of a released test: every
+   * run of it met the same Questions, so the count is the same for all of them and
+   * one join answers it in the same round trip.
+   *
+   * Ordered `practiceTestId asc, ordinal asc`, so the caller groups by walking rather
+   * than by sorting — and "first" and "latest" are the ends of each group by
+   * construction.
+   */
+  async submittedRunsFor(parentAccountId: string, studentProfileId: string): Promise<AttemptRun[]> {
+    const rows = await this.prisma.attempt.findMany({
+      where: {
+        parentAccountId,
+        studentProfileId,
+        submittedAt: { not: null },
+        practiceTest: { status: 'Released' },
+      },
+      orderBy: [{ practiceTestId: 'asc' }, { ordinal: 'asc' }],
+      select: {
+        id: true,
+        practiceTestId: true,
+        ordinal: true,
+        submittedAt: true,
+        // The owning test's presented count, in the same statement. Not its status,
+        // not its timer and not its Subject: none of those is a fact about a run.
+        practiceTest: { select: { questionCount: true } },
+      },
+    });
+    return rows.map((row) => ({
+      attemptId: row.id,
+      practiceTestId: row.practiceTestId,
+      ordinal: row.ordinal,
+      // Non-null by the `where` above, which is what makes the view's `string`
+      // honest rather than optimistic.
+      submittedAt: row.submittedAt!.toISOString(),
+      questionCount: row.practiceTest.questionCount,
+    }));
   }
 
   /**

@@ -358,6 +358,71 @@ export const studentCopy = {
     loading: 'Loading…',
     /** The read failed. The work is still in; only this could not be read. */
     failed: 'Your results could not be loaded.',
+    /**
+     * The control that opens another run at this practice test.
+     *
+     * "Practise" rather than "retake": the child's word for what they are about to
+     * do is the doing of it, not a record of how many times they have. No flourish,
+     * no count, no "personal best" and no promise about doing better.
+     */
+    retake: 'Practise this again',
+    /** The same control while the request is out. Stated, so the press is never silent. */
+    retakeStarting: 'Starting…',
+    /**
+     * The retake could not be opened.
+     *
+     * One sentence, no error code, and it says what did *not* happen rather than
+     * what went wrong: the results are still on screen and still true, and the
+     * control is still there to press again.
+     */
+    retakeFailed: 'Your retake could not be started.',
+  },
+  /**
+   * What a row on Student Home says about a practice test the child has finished.
+   *
+   * **Every figure is handed in.** This module states no denominator, computes no
+   * fraction and never turns one into a percentage: the score is the server's one
+   * answer to FR-37, exactly as on the results screen.
+   *
+   * The count is over **finished** runs only. A run still going is not a figure and
+   * is not counted, so nothing here has a word for one.
+   *
+   * The word for Mastery on a child's screen is `progress` — plain, second person,
+   * and never the parent's term. Nothing here says "mastery", "average", "best" or
+   * anything comparative: it names which run counts and stops.
+   */
+  runs: {
+    /**
+     * One run's figure, as it appears on a row.
+     *
+     * Bare rather than a sentence, because it is one part of a line joined by `·`
+     * and three sentences on one row would read as a paragraph.
+     */
+    figure: (correct: number, denominator: number) => `${correct} out of ${denominator}`,
+    /**
+     * Said in place of a figure when there is nothing to divide.
+     *
+     * `AttemptScore.denominator` may legitimately be 0 — a run nothing could judge —
+     * and `0 out of 0` is not a sentence. Replaced rather than divided, exactly as
+     * `results.nothingToScore` already does on the results screen.
+     */
+    notGradedYet: 'Not graded yet',
+    /** The first run's part of the multi-run line. */
+    first: (figure: string) => `First ${figure}`,
+    /** The latest run's part of the same line. */
+    latest: (figure: string) => `Latest ${figure}`,
+    /** How many finished runs there are. Singular, because `1 attempts` is not English. */
+    count: (n: number) => (n === 1 ? '1 attempt' : `${n} attempts`),
+    /** What joins the three parts of the multi-run line. */
+    separator: ' · ',
+    /**
+     * Which run counts, said once and beneath the figures.
+     *
+     * It names the first run as the one that counts and promises nothing about the
+     * others — they are practice, which is what the whole surface is for. `progress`
+     * rather than the parent's word for it.
+     */
+    countsTowardProgress: 'Your first attempt is the one that counts toward your progress.',
   },
   /** The one control out of Student Mode. It leads to the PIN, never past it. */
   parent: 'Parent',

@@ -1,0 +1,9 @@
+{
+  "actions": [
+    "Free TCP ports 3000 and 3001 by stopping the n-electric dev servers currently holding them (a Next server on 3000 and apps/api/dist/main on 3001), then run `pnpm db:up && pnpm db:migrate && pnpm e2e -- student-submit-attempt` plus `pnpm e2e -- student-attempt-resilience`, `pnpm e2e -- student-take-test` and `pnpm e2e -- student-mode`, and report any failure. The e2e layer is the only verification this story could not perform: `apps/web`'s start script pins port 3000 and `NEXT_PUBLIC_API_URL` is baked at build time, so the suite cannot be moved to other ports without editing repository files outside this story."
+  ],
+  "parked_at": "2026-09-27",
+  "run_id": "20260926-202152-4fb2",
+  "spec_file": "_bmad-output/implementation-artifacts/spec-5-7-retaking-a-practice-test.md",
+  "story_key": "5-7-retaking-a-practice-test"
+}

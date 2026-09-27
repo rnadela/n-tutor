@@ -1,12 +1,21 @@
 'use client';
 
 import Box from '@mui/material/Box';
-import type { StudentPracticeTestSummary } from '@/lib/parent-api';
+import type { PracticeTestRunsView, StudentPracticeTestSummary } from '@/lib/parent-api';
 import { comfortableDensity } from '@/theme/tokens';
 import { PracticeTestRow } from './PracticeTestRow';
 
 export interface PracticeTestListProps {
   tests: readonly StudentPracticeTestSummary[];
+  /**
+   * Each test's finished runs, by practice test id.
+   *
+   * **A lookup, never an order.** It is read once per row to hand that row its own
+   * entry, and it decides nothing about which rows there are or what order they come
+   * in — an entry for a test not in `tests` is simply never looked up. Absent, or
+   * absent for a row, means that row renders exactly as it did in Story 5.1.
+   */
+  runs?: ReadonlyMap<string, PracticeTestRunsView>;
 }
 
 /**
@@ -25,7 +34,7 @@ export interface PracticeTestListProps {
  * flat list, and the Subject is a label on a row rather than a heading over a
  * section.
  */
-export function PracticeTestList({ tests }: PracticeTestListProps) {
+export function PracticeTestList({ tests, runs }: PracticeTestListProps) {
   return (
     <Box
       component="ul"
@@ -37,7 +46,10 @@ export function PracticeTestList({ tests }: PracticeTestListProps) {
       data-testid="student-practice-test-list"
     >
       {tests.map((test) => (
-        <PracticeTestRow key={test.id} test={test} />
+        // Its own entry, looked up by its own id. A row with none renders no run line
+        // at all, which is what a failed run read and a test with nothing finished
+        // both come to.
+        <PracticeTestRow key={test.id} test={test} runs={runs?.get(test.id)} />
       ))}
     </Box>
   );

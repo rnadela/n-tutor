@@ -6,11 +6,21 @@ import Box from '@mui/material/Box';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { studentCopy } from '@/copy/student';
-import type { StudentPracticeTestSummary } from '@/lib/parent-api';
-import { comfortableDensity } from '@/theme/tokens';
+import type { PracticeTestRunsView, StudentPracticeTestSummary } from '@/lib/parent-api';
+import { runLineOf } from '@/lib/practice-test-runs';
+import { comfortableDensity, typeRoles } from '@/theme/tokens';
 
 export interface PracticeTestRowProps {
   test: StudentPracticeTestSummary;
+  /**
+   * This test's finished runs, or absent.
+   *
+   * Absent covers both "the run read failed" and "nothing is finished here yet", and
+   * both render the same thing: **nothing at all**. A row with no figure on it is the
+   * row that shipped in Story 5.1 and is still complete — the Subject, the link and
+   * the state word are the whole of what a child needs to act on.
+   */
+  runs?: PracticeTestRunsView;
 }
 
 /**
@@ -34,9 +44,18 @@ export interface PracticeTestRowProps {
  *
  * The Subject line is omitted on a falsy label, empty string included: a
  * styled line with nothing in it is worse than no line.
+ *
+ * **The run line is an annotation, not a requirement.** It renders only when this
+ * row was handed an entry, and both figures in it are the server's — this component
+ * states no denominator and computes no fraction. Which figure is the first and
+ * which is the latest lives in the words, so the distinction survives with all
+ * colour, class and inline style stripped away.
  */
-export function PracticeTestRow({ test }: PracticeTestRowProps) {
+export function PracticeTestRow({ test, runs }: PracticeTestRowProps) {
   const state = studentCopy.practiceTestState(test.state);
+  // Chosen by `practice-test-runs`, so the single-run and history shapes are one
+  // rule with its own spec rather than a branch in a render.
+  const line = runs === undefined ? null : runLineOf(runs);
   return (
     <Box
       component="li"
@@ -69,6 +88,20 @@ export function PracticeTestRow({ test }: PracticeTestRowProps) {
       </Link>
       {state === null ? null : (
         <Typography data-testid="student-practice-test-state">{state}</Typography>
+      )}
+      {/* Beneath the state label, and absent entirely without an entry. */}
+      {line !== null && (
+        <Typography sx={{ ...typeRoles.caption }} data-testid="student-practice-test-runs">
+          {line.kind === 'single' ? line.figure : line.parts.join(studentCopy.runs.separator)}
+        </Typography>
+      )}
+      {/* Which run counts, said once and only where there is more than one. With a
+          single run there is nothing to distinguish, and the sentence would be
+          telling a child that the only thing they did is the thing that counted. */}
+      {line !== null && line.kind === 'multi' && (
+        <Typography sx={{ ...typeRoles.caption }} data-testid="student-practice-test-runs-note">
+          {line.note}
+        </Typography>
       )}
     </Box>
   );

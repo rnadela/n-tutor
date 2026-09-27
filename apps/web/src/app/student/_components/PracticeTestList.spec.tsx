@@ -2,7 +2,13 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it } from 'vitest';
-import type { StudentPracticeTestSummary } from '@/lib/parent-api';
+import { studentCopy } from '@/copy/student';
+import type {
+  AttemptRunView,
+  PracticeTestRunsView,
+  StudentPracticeTestSummary,
+} from '@/lib/parent-api';
+import { runsById } from '@/lib/practice-test-runs';
 import { studentTheme } from '@/theme/theme';
 import { PracticeTestList } from './PracticeTestList';
 
@@ -120,5 +126,118 @@ describe('what the list is, structurally', () => {
     // "There is nothing to practise yet" is the page's sentence to say, not
     // this component's — and an empty list must not invent a row.
     expect(render([])).not.toContain('<li');
+  });
+});
+
+/**
+ * The run figures, row by row.
+ *
+ * The lookup is what makes "each row's own figures" a claim rather than a hope, and
+ * it is only observable with two rows side by side: a list that handed every row the
+ * same entry, or the first entry it found, would pass every single-row assertion.
+ */
+describe('which row gets which figures', () => {
+  function runsFor(
+    practiceTestId: string,
+    overrides: Partial<PracticeTestRunsView> = {},
+  ): PracticeTestRunsView {
+    const only: AttemptRunView = {
+      attemptId: `${practiceTestId}-a1`,
+      ordinal: 1,
+      submittedAt: '2026-09-01T10:00:00.000Z',
+      score: { correct: 2, denominator: 4, excludedUngraded: 0 },
+      countsTowardMastery: true,
+    };
+    return { practiceTestId, attemptCount: 1, first: only, latest: only, ...overrides };
+  }
+
+  function renderWithRuns(
+    tests: StudentPracticeTestSummary[],
+    runs: PracticeTestRunsView[],
+  ): string {
+    return renderToStaticMarkup(
+      createElement(
+        ThemeProvider,
+        { theme: studentTheme },
+        createElement(PracticeTestList, { tests, runs: runsById(runs) }),
+      ),
+    );
+  }
+
+  it('puts each entry on its own row and on no other', () => {
+    const markup = renderWithRuns(
+      [summary('a', { subjectName: 'Alpha' }), summary('b', { subjectName: 'Beta' })],
+      [
+        runsFor('a', {
+          first: {
+            attemptId: 'a-a1',
+            ordinal: 1,
+            submittedAt: '2026-09-01T10:00:00.000Z',
+            score: { correct: 1, denominator: 4, excludedUngraded: 0 },
+            countsTowardMastery: true,
+          },
+          latest: {
+            attemptId: 'a-a1',
+            ordinal: 1,
+            submittedAt: '2026-09-01T10:00:00.000Z',
+            score: { correct: 1, denominator: 4, excludedUngraded: 0 },
+            countsTowardMastery: true,
+          },
+        }),
+        runsFor('b', {
+          attemptCount: 2,
+          first: {
+            attemptId: 'b-a1',
+            ordinal: 1,
+            submittedAt: '2026-09-01T10:00:00.000Z',
+            score: { correct: 2, denominator: 4, excludedUngraded: 0 },
+            countsTowardMastery: true,
+          },
+          latest: {
+            attemptId: 'b-a2',
+            ordinal: 2,
+            submittedAt: '2026-09-02T10:00:00.000Z',
+            score: { correct: 3, denominator: 4, excludedUngraded: 0 },
+            countsTowardMastery: false,
+          },
+        }),
+      ],
+    );
+    const items = markup.split('<li').slice(1);
+    expect(items).toHaveLength(2);
+    // One finished run: one figure, with no framing and no count.
+    expect(items[0]).toContain('1 out of 4');
+    expect(items[0]).not.toContain('First');
+    expect(items[0]).not.toContain('attempt');
+    // Two finished runs: both figures, the count, and which one counts.
+    expect(items[1]).toContain('First 2 out of 4');
+    expect(items[1]).toContain('Latest 3 out of 4');
+    expect(items[1]).toContain('2 attempts');
+    expect(items[1]).toContain(studentCopy.runs.countsTowardProgress);
+    // And neither row wearing the other's figures.
+    expect(items[0]).not.toContain('3 out of 4');
+    expect(items[1]).not.toContain('1 out of 4');
+  });
+
+  it('ignores an entry for a test that is not in the list', () => {
+    // The map is a lookup, never a source of rows: an entry nothing looks up cannot
+    // add a row, reorder one or annotate the wrong one.
+    const markup = renderWithRuns([summary('a', { subjectName: 'Alpha' })], [runsFor('ghost')]);
+    expect(markup.match(/<li/gu)).toHaveLength(1);
+    expect(markup).not.toContain('student-practice-test-runs');
+    expect(markup).not.toContain('2 out of 4');
+  });
+
+  it('renders every row exactly as before when it was handed no map at all', () => {
+    // What a failed run read comes to. A row with no figure is the row that shipped
+    // in Story 5.1, and it is still complete.
+    const tests = [summary('a', { subjectName: 'Alpha', state: 'Completed' })];
+    const without = render(tests);
+    expect(without).not.toContain('student-practice-test-runs');
+    expect(without).toContain('Completed');
+    expect(without).toContain('A practice test with 4 questions');
+    // Byte-for-byte the same as an empty map: absent and absent-for-this-row are one
+    // rendering.
+    expect(renderWithRuns(tests, [])).toBe(without);
   });
 });

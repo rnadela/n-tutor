@@ -1565,3 +1565,11 @@ source_spec: `spec-5-6-results-answer-key.md`
 severity: low
 reason: Every existing re-ask/resolution case uses exactly one ungraded Question, so the per-row correctness of a genuinely mixed outcome (some rows newly graded, others still stuck) within the same response is unverified.
 status: open
+
+### DW-197: The retake route has no ceiling on runs and no per-child rate limit, so Attempt rows and the grading spend each handed-in run costs are both unbounded.
+origin: spec-deferred 16b9d07e184e
+location: apps/api/src/practicetest/student-practice-test.controller.ts
+source_spec: `spec-5-7-retaking-a-practice-test.md`
+severity: medium
+reason: `POST /api/student/practice-tests/:id/retake` inserts at `latest.ordinal + 1` with no maximum ordinal, and `StudentPracticeTestController` declares no throttle stance for it. Every retake that is handed in costs a provider call at grading time, so a child pressing the control repeatedly is unbounded spend. Neither the intent contract nor the epic asks for a cap, which is why this is recorded rather than added here.
+status: open

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -44,8 +44,28 @@ import { AnswerKeyRow } from './AnswerKeyRow';
  * **Nothing appears with a flourish.** No count-up, no reveal, no celebration and no
  * per-tick motion. The one thing announced is a Question this read just resolved,
  * and it is announced with the very sentence that is displayed.
+ *
+ * **`footer` is a slot and nothing more.** Since Story 5.7 the page renders a control
+ * beneath the rows, and it passes it in rather than this component growing a notion of
+ * retaking: what a retake replaces is the run state the *page* holds, and a component
+ * that owns one Attempt's read has no business starting a second one.
  */
-export function AttemptResults({ attemptId }: { attemptId: string }) {
+export function AttemptResults({
+  attemptId,
+  footer,
+}: {
+  attemptId: string;
+  /**
+   * Rendered after the rows, once there are rows.
+   *
+   * A slot rather than a prop with a meaning: this component keeps owning its own
+   * read, its own loading state and its own failure, and **gains no knowledge of
+   * retaking** — it does not know what is in here and cannot act on it. Nothing is
+   * rendered in the loading or failure branches, because a control that replaces a
+   * finished run belongs under a run that was actually read.
+   */
+  footer?: ReactNode;
+}) {
   const router = useRouter();
   const { announce } = useAnnounce();
   const [results, setResults] = useState<AttemptResultsView | null>(null);
@@ -233,6 +253,10 @@ export function AttemptResults({ attemptId }: { attemptId: string }) {
           <AnswerKeyRow key={row.questionId} row={row} />
         ))}
       </Box>
+      {/* Whatever the page put here, after everything this component owns. The
+          control that opens another run is the **page's**, because only the page
+          holds the run state a retake replaces. */}
+      {footer}
     </Box>
   );
 }
