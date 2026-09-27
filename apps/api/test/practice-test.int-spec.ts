@@ -4697,5 +4697,411 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
         ).status,
       ).toBe('Released');
     });
+
+    // --- What the work came to: Story 5.6's answer key ---------------------
+    //
+    // The first student-scoped read of a grade anywhere in the product, and every
+    // case here goes over the real HTTP path. It is a `GET` that legitimately
+    // writes: FR-22 makes viewing the trigger, so opening results is what re-asks
+    // for anything nothing has judged.
+
+    /** The results read, carrying the binding cookie and no bearer. */
+    function readResults(cookie: string, attemptId: string) {
+      return server().get(`/api/student/attempts/${attemptId}/results`).set('Cookie', cookie);
+    }
+
+    /** The flagged option of a Multiple Choice Question: its ordinal and its body. */
+    function correctChoiceOf(questionId: string) {
+      return h.prisma.practiceTestChoice.findFirstOrThrow({
+        where: { questionId, isCorrect: true },
+        select: { ordinal: true, body: true },
+      });
+    }
+
+    /** The Subject name actually classified onto a released test's source, read straight from storage. */
+    async function subjectNameOf(practiceTestId: string): Promise<string> {
+      const practiceTest = await h.prisma.practiceTest.findUniqueOrThrow({
+        where: { id: practiceTestId },
+        select: { sourceTestId: true },
+      });
+      const sourceTest = await h.prisma.sourceTest.findUniqueOrThrow({
+        where: { id: practiceTest.sourceTestId },
+        select: { subjectId: true },
+      });
+      const subject = await h.prisma.subject.findUniqueOrThrow({
+        where: { id: sourceTest.subjectId! },
+        select: { name: true },
+      });
+      return subject.name;
+    }
+
+    it('answers a fully answered Attempt with one row per Question in ordinal order, as option bodies', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const flagged = await Promise.all(
+        questionIds.map((questionId) => correctChoiceOf(questionId)),
+      );
+      await submitAttempt(
+        cookie,
+        attempt.body.id,
+        questionIds.map((questionId, at) => ({ questionId, value: String(flagged[at]!.ordinal) })),
+      ).expect(200);
+
+      const response = await readResults(cookie, attempt.body.id).expect(200);
+
+      expect(response.body.attemptId).toBe(attempt.body.id);
+      expect(response.body.practiceTestId).toBe(id);
+      expect(response.body.questionCount).toBe(questionIds.length);
+      // Proves `readSubjectLabels` is actually wired to this read, not just
+      // present as a key on the wire.
+      expect(response.body.subjectName).toBe(await subjectNameOf(id));
+      // Every presented Question, in the order the child was shown them.
+      expect(response.body.questions.map((row: { questionId: string }) => row.questionId)).toEqual(
+        questionIds,
+      );
+      expect(response.body.questions.map((row: { ordinal: number }) => row.ordinal)).toEqual(
+        questionIds.map((_, at) => at + 1),
+      );
+      // **Option bodies on both sides, never a bare ordinal**: the browser submits
+      // `2` and a child cannot read `2` as an answer.
+      for (const [at, row] of response.body.questions.entries()) {
+        expect(row.state).toBe('Correct');
+        expect(row.studentAnswer).toEqual(flagged[at]!.body);
+        expect(row.correctAnswer).toEqual(flagged[at]!.body);
+        expect(row.newlyGraded).toBe(false);
+        // The direct claim: the answer is the option's **stored body**, which is a
+        // segment array carrying the option's words — and specifically not the
+        // one-text-segment form a bare ordinal would have travelled as.
+        expect(Array.isArray(row.studentAnswer)).toBe(true);
+        expect(row.studentAnswer).not.toEqual([
+          { kind: 'text', value: String(flagged[at]!.ordinal) },
+        ]);
+        expect(row.studentAnswer[0].value).toContain('Option A for');
+      }
+      // The presented count, with nothing excluded and nothing newly graded.
+      expect(response.body.score).toEqual({
+        correct: questionIds.length,
+        denominator: questionIds.length,
+        excludedUngraded: 0,
+      });
+    });
+
+    it('reads a blank on a manual hand-in as Unanswered, with no answer of its own, and still counts it', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const flagged = await correctChoiceOf(questionIds[0]!);
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: String(flagged.ordinal) },
+      ]).expect(200);
+
+      const response = await readResults(cookie, attempt.body.id).expect(200);
+
+      const blanks = response.body.questions.slice(1);
+      expect(blanks.length).toBeGreaterThan(0);
+      for (const row of blanks) {
+        expect(row.state).toBe('Unanswered');
+        // Null rather than an empty string: the blank is the fact.
+        expect(row.studentAnswer).toBeNull();
+        // The answer is still shown — this is the answer key, and a Question the
+        // child skipped is a Question they most need the answer to.
+        expect(row.correctAnswer).not.toBeNull();
+      }
+      // `Unanswered` is in the denominator and earns no credit: a Question left
+      // blank is one they got no marks for.
+      expect(response.body.score).toEqual({
+        correct: 1,
+        denominator: questionIds.length,
+        excludedUngraded: 0,
+      });
+    });
+
+    it('resolves Ungraded rows on the first results read and reports the same score on the second', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      await asFreeText(questionIds[0]!, 'FillInTheBlank', 'Two halves');
+      const attempt = await startAttempt(cookie, id).expect(201);
+      h.ai.failNext('transport');
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'Two halves' },
+      ]).expect(200);
+      expect((await gradesOf(attempt.body.id)).get(questionIds[0]!)).toBe('Ungraded');
+      const callsBefore = gradingCalls().length;
+
+      const first = await readResults(cookie, attempt.body.id).expect(200);
+
+      // **The read is the retry.** One provider call, made by the view.
+      expect(gradingCalls()).toHaveLength(callsBefore + 1);
+      const resolved = first.body.questions.find(
+        (row: { questionId: string }) => row.questionId === questionIds[0],
+      );
+      expect(resolved.state).toBe('Correct');
+      expect(resolved.newlyGraded).toBe(true);
+      // Its own typed words, not an ordinal: this is a free-text Question.
+      expect(resolved.studentAnswer).toEqual([{ kind: 'text', value: 'Two halves' }]);
+      // Exactly one row newly graded, and the denominator now covers the paper.
+      expect(
+        first.body.questions.filter((row: { newlyGraded: boolean }) => row.newlyGraded),
+      ).toHaveLength(1);
+      expect(first.body.score).toEqual({
+        correct: 1,
+        denominator: questionIds.length,
+        excludedUngraded: 0,
+      });
+
+      const second = await readResults(cookie, attempt.body.id).expect(200);
+
+      // Nothing outstanding: no second provider call, nothing newly graded, and the
+      // same score — `newlyGraded` is about the response it is on and nothing else.
+      expect(gradingCalls()).toHaveLength(callsBefore + 1);
+      expect(second.body.score).toEqual(first.body.score);
+      expect(
+        second.body.questions.filter((row: { newlyGraded: boolean }) => row.newlyGraded),
+      ).toEqual([]);
+    });
+
+    it('still answers 200 with the gap named when the re-ask fails again', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      await asFreeText(questionIds[0]!, 'FillInTheBlank', 'Two halves');
+      const attempt = await startAttempt(cookie, id).expect(201);
+      h.ai.failNext('transport');
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'Two halves' },
+      ]).expect(200);
+
+      h.ai.failNext('transport');
+      const response = await readResults(cookie, attempt.body.id).expect(200);
+
+      // A read that could not improve a score is not a read that should refuse.
+      const stuck = response.body.questions.find(
+        (row: { questionId: string }) => row.questionId === questionIds[0],
+      );
+      expect(stuck.state).toBe('Ungraded');
+      expect(stuck.newlyGraded).toBe(false);
+      // The gap is named rather than folded into the fraction: the score is over
+      // the gradable Questions only, and `excludedUngraded` says how many were left
+      // out.
+      expect(response.body.score).toEqual({
+        correct: 0,
+        denominator: questionIds.length - 1,
+        excludedUngraded: 1,
+      });
+    });
+
+    it('reads a row-less Question as Ungraded once nothing can judge it', async () => {
+      // The crash between a hand-in's two transactions: the rows are deleted to
+      // stand in for it, and the free-text answer is then unaskable because the
+      // provider keeps failing. A Question with no row and a stored `Ungraded` are
+      // the same fact on the wire.
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      await asFreeText(questionIds[0]!, 'FillInTheBlank', 'Two halves');
+      const attempt = await startAttempt(cookie, id).expect(201);
+      h.ai.failNext('transport');
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'Two halves' },
+      ]).expect(200);
+      await h.prisma.questionGrade.deleteMany({ where: { attemptId: attempt.body.id } });
+
+      h.ai.failNext('transport');
+      const response = await readResults(cookie, attempt.body.id).expect(200);
+
+      // The deterministic verdicts were rewritten by the retry; the one Question
+      // that needed a provider is still `Ungraded`, which is what "nothing has
+      // judged this" reads as.
+      expect(response.body.questions).toHaveLength(questionIds.length);
+      const byQuestion = new Map(
+        response.body.questions.map((row: { questionId: string; state: string }) => [
+          row.questionId,
+          row.state,
+        ]),
+      );
+      expect(byQuestion.get(questionIds[0]!)).toBe('Ungraded');
+      for (const blank of questionIds.slice(1)) expect(byQuestion.get(blank)).toBe('Unanswered');
+      expect(response.body.score.excludedUngraded).toBe(1);
+    });
+
+    it('still answers 200 with null text when a stored prompt and answer cannot be read back', async () => {
+      // The degrade-don't-throw branch, which is documented and would otherwise be
+      // unexercised: a schema change or a bad write leaves a row whose stored `Json`
+      // no longer passes `isRichText`, and the Attempt is already closed — so a
+      // refusal here would make work that is safely graded unreadable for good. The
+      // row is mutated straight through Prisma, as `asFreeText` does.
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const flagged = await correctChoiceOf(questionIds[0]!);
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: String(flagged.ordinal) },
+      ]).expect(200);
+      const graded = await gradesOf(attempt.body.id);
+      expect(graded.get(questionIds[1]!)).toBe('Unanswered');
+      // An empty array is not rich text — `parseRichText` refuses it as "a field the
+      // model declined to fill while claiming to have filled it" — so both fields on
+      // this Question now fail the check. The choice bodies go the same way, which is
+      // what takes `correctAnswer` with them.
+      await h.prisma.practiceTestQuestion.update({
+        where: { id: questionIds[1]! },
+        data: { prompt: [], answer: [] },
+      });
+      await h.prisma.practiceTestChoice.updateMany({
+        where: { questionId: questionIds[1]! },
+        data: { body: [] },
+      });
+
+      const response = await readResults(cookie, attempt.body.id).expect(200);
+
+      const row = response.body.questions.find(
+        (each: { questionId: string }) => each.questionId === questionIds[1],
+      );
+      expect(row.prompt).toBeNull();
+      expect(row.correctAnswer).toBeNull();
+      // The grade is untouched: the work was judged, and only the words are gone.
+      expect(row.state).toBe('Unanswered');
+      // And every other row is exactly as it was, so one unreadable Question costs
+      // one row's text rather than the whole answer key.
+      expect(response.body.questions).toHaveLength(questionIds.length);
+      expect(
+        response.body.questions.find(
+          (each: { questionId: string }) => each.questionId === questionIds[0],
+        ).correctAnswer,
+      ).not.toBeNull();
+      expect(response.body.score.denominator).toBe(questionIds.length);
+    });
+
+    it('answers a Multiple Choice value that matches no option with the raw stored string', async () => {
+      // The other documented branch. The child's own answer is the one thing the row
+      // must not invent, and `null` would tell them they did not answer — which is a
+      // different fact with a different state beside it. The stored value is rewritten
+      // to an ordinal this Question has no option for, standing in for a renumbered or
+      // deleted choice.
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const flagged = await correctChoiceOf(questionIds[0]!);
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: '99' },
+      ]).expect(200);
+      // An ordinal no option carries is judged `Incorrect` by the comparison, never
+      // `Ungraded`: no provider was asked and none could have failed.
+      expect((await gradesOf(attempt.body.id)).get(questionIds[0]!)).toBe('Incorrect');
+
+      const response = await readResults(cookie, attempt.body.id).expect(200);
+
+      const row = response.body.questions[0];
+      expect(row.state).toBe('Incorrect');
+      // The raw string, as one text segment. Not null, and not a resolved body.
+      expect(row.studentAnswer).toEqual([{ kind: 'text', value: '99' }]);
+      // The answer key beside it still resolves, because that option does exist.
+      expect(row.correctAnswer).toEqual(flagged.body);
+    });
+
+    it('answers null, not the raw ordinal, for a chosen Multiple Choice option whose stored body cannot be read back', async () => {
+      // The degrade-don't-throw branch for a matched choice specifically: an ordinal
+      // that resolves to a real option but whose stored `body` fails `isRichText`
+      // must not fall through to the raw stored string -- that fallback is reserved
+      // for the other branch, where the ordinal matches no option at all. Only the
+      // chosen option is corrupted; the flagged option supplying `correctAnswer` is
+      // untouched, so the two failure modes stay distinguishable.
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      const attempt = await startAttempt(cookie, id).expect(201);
+      const flagged = await correctChoiceOf(questionIds[0]!);
+      const wrong = await h.prisma.practiceTestChoice.findFirstOrThrow({
+        where: { questionId: questionIds[0]!, isCorrect: false },
+        select: { id: true, ordinal: true },
+      });
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: String(wrong.ordinal) },
+      ]).expect(200);
+      expect((await gradesOf(attempt.body.id)).get(questionIds[0]!)).toBe('Incorrect');
+      await h.prisma.practiceTestChoice.update({
+        where: { id: wrong.id },
+        data: { body: [] },
+      });
+
+      const response = await readResults(cookie, attempt.body.id).expect(200);
+
+      const row = response.body.questions[0];
+      // The grade already written is untouched by an unreadable body.
+      expect(row.state).toBe('Incorrect');
+      expect(row.studentAnswer).toBeNull();
+      // The correct answer is unaffected -- only the chosen option was corrupted.
+      expect(row.correctAnswer).toEqual(flagged.body);
+    });
+
+    it('answers the one shared 404 for an open Attempt, a sibling’s, another account’s and a malformed id', async () => {
+      const { ready, id, cookie, questionIds } = await releasedForChild(null);
+      const strangers = await releasedForChild(null);
+      const open = await startAttempt(cookie, id).expect(201);
+      const grade = await createGradeLevel(h);
+      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+        gradeLevelId: grade.id,
+      });
+      const siblingCookie = await bindDevice(h, ready.token, sibling.id);
+
+      // Still open: nothing has been handed in, and that is not a different flavour
+      // of refusal (AD-18).
+      const stillOpen = await readResults(cookie, open.body.id).expect(404);
+      await submitAttempt(cookie, open.body.id, [
+        { questionId: questionIds[0]!, value: '1' },
+      ]).expect(200);
+      // This account's own Attempt, asked for under a sibling's binding.
+      const wrongChild = await readResults(siblingCookie, open.body.id).expect(404);
+      // Another account's Attempt entirely.
+      const strangerAttempt = await startAttempt(strangers.cookie, strangers.id).expect(201);
+      await submitAttempt(strangers.cookie, strangerAttempt.body.id, []).expect(200);
+      const foreign = await readResults(cookie, strangerAttempt.body.id).expect(404);
+      // A malformed id, and an id that never existed. Deliberately not a 400: a
+      // second kind of refusal here would tell a child *something*.
+      const malformed = await readResults(cookie, 'not-a-uuid').expect(404);
+      const unknown = await readResults(cookie, randomUUID()).expect(404);
+
+      for (const refusal of [stillOpen, wrongChild, foreign, malformed, unknown]) {
+        expect(refusal.body.message).toBe(PRACTICE_TEST_NOT_FOUND);
+      }
+    });
+
+    it('carries no rationale, Topic, cost, tier or model on the results it answers with', async () => {
+      const { id, cookie, questionIds } = await releasedForChild(null);
+      // A free-text Question the provider does judge, so a rationale genuinely
+      // exists in the table while the body says nothing about it.
+      await asFreeText(questionIds[0]!, 'ShortAnswer', 'Two halves');
+      const attempt = await startAttempt(cookie, id).expect(201);
+      await submitAttempt(cookie, attempt.body.id, [
+        { questionId: questionIds[0]!, value: 'Two halves' },
+      ]).expect(200);
+      const stored = await gradeRowsOf(attempt.body.id);
+      expect(stored.get(questionIds[0]!)!.rationale!.trim().length).toBeGreaterThan(0);
+
+      const response = await readResults(cookie, attempt.body.id).expect(200);
+
+      // Asserted over the raw JSON rather than field by field, so a key a later edit
+      // adds is caught too.
+      const serialized = JSON.stringify(response.body);
+      expect(Object.keys(response.body).sort()).toEqual(
+        [
+          'attemptId',
+          'practiceTestId',
+          'questionCount',
+          'score',
+          'subjectName',
+          'questions',
+        ].sort(),
+      );
+      for (const key of [
+        'rationale',
+        'topic',
+        'topics',
+        'cost',
+        'costMicros',
+        'tier',
+        'model',
+        'allowance',
+        'isCorrect',
+        'timerMinutes',
+        'studentProfileId',
+        'parentAccountId',
+      ]) {
+        expect(serialized).not.toMatch(new RegExp(`"${key}"\\s*:`, 'iu'));
+      }
+      // And not the model's own words anywhere in the body, under any key.
+      expect(serialized).not.toContain(stored.get(questionIds[0]!)!.rationale);
+      expect(serialized).not.toMatch(/allowance|tier|unlimited|gpt|model/iu);
+    });
   });
 });

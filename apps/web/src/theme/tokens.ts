@@ -1,3 +1,8 @@
+// Type-only, so it is erased at compile time: this module is imported by the
+// theme itself and must not acquire a runtime dependency on a `'use client'`
+// module. The four states are the API's own literals, named once.
+import type { GradeState } from '@/lib/parent-api';
+
 /**
  * DESIGN tokens as data, not CSS. Every colour token carries both a light and
  * a dark value — dark mode is scope, not polish (AD-32). `theme.ts` is the only
@@ -109,6 +114,57 @@ export interface DensitySet {
 export const rounded = { paper: 2, control: 8, none: 0 } as const;
 
 export const focusRing = { width: 2, offset: 2 } as const;
+
+/**
+ * How one grade state is drawn, on five carriers.
+ *
+ * `frame` and `border` are the icon's shape and its outline; `glyph` is the mark
+ * inside it; `rule` is the texture of the row's left rule; `color` is a token name.
+ * **Colour is the fifth carrier and never alone** — strip every colour, class and
+ * inline style and the four states are still told apart by the shape, the outline,
+ * the glyph, the rule texture and the literal text label beside them (UX-DR33).
+ */
+export interface GradeStateMarker {
+  frame: 'circle' | 'square';
+  border: 'solid' | 'dashed' | 'dotted';
+  /** Drawn `aria-hidden`: the label beside it is what is announced. */
+  glyph: string;
+  rule: 'solid' | 'hatch' | 'dashed' | 'dotted';
+  color: ColorTokenName;
+}
+
+/** The left rule's width, in px. One figure, so no component writes its own. */
+export const GRADE_RULE_WIDTH = 4;
+
+/**
+ * The four states as data, and the only place their drawing is decided.
+ *
+ * **`Correct` and `Incorrect` share a frame shape on purpose.** They are the two
+ * verdicts — the same *kind* of fact about the work — and giving them different
+ * outlines would group `Incorrect` with the two non-verdicts instead. They separate
+ * on every other axis: the glyph, the row rule's texture and the colour. The two
+ * non-verdicts take the other shapes, so "nothing judged this" is legible as a
+ * different kind of row before a word is read.
+ *
+ * `hatch` for `Incorrect` rather than a second solid: a solid rule in another
+ * colour is a colour-only distinction, which is the one thing this table exists to
+ * avoid. The rule is `GRADE_RULE_WIDTH` px wide in every state, so the texture and
+ * never the weight is what differs.
+ *
+ * **No new colour token.** All four name tokens that already exist.
+ */
+export const gradeStateMarker = {
+  Correct: { frame: 'circle', border: 'solid', glyph: '✓', rule: 'solid', color: 'success' },
+  Incorrect: { frame: 'circle', border: 'solid', glyph: '✗', rule: 'hatch', color: 'error' },
+  Unanswered: {
+    frame: 'circle',
+    border: 'dashed',
+    glyph: '—',
+    rule: 'dashed',
+    color: 'textSecondary',
+  },
+  Ungraded: { frame: 'square', border: 'dotted', glyph: '⋯', rule: 'dotted', color: 'info' },
+} as const satisfies Record<GradeState, GradeStateMarker>;
 
 /** MUI's 8px base, named. No component writes a raw spacing number (UX-DR9). */
 export const spacing = {

@@ -155,6 +155,57 @@ async function totalOf(page: Page): Promise<number> {
   return Number(/of (\d+)/u.exec(counter)![1]);
 }
 
+/** The four literal grade labels, exactly as `commonCopy.gradeState` fixes them. */
+const GRADE_LABELS = ['Correct', 'Not correct', 'Unanswered', 'Not graded yet'];
+
+/**
+ * The answer key as it reaches a child, whole.
+ *
+ * Asserted here rather than inline because the same claims have to hold on two
+ * arrivals at the same surface — the hand-in itself, and the completed row opened
+ * from Student Home — and a second copy of them would be a second standard.
+ */
+async function assertAnswerKey(page: Page, total: number, correct: number): Promise<void> {
+  const results = page.getByTestId('attempt-results');
+  await expect(results).toBeVisible();
+  await expect(results.getByRole('heading', { name: 'Your results', level: 2 })).toBeVisible();
+  // The server's one figure, stated as a fraction and never as a percentage.
+  await expect(page.getByTestId('attempt-results-score')).toHaveText(
+    `You got ${correct} out of ${total} right.`,
+  );
+  // Nothing excluded, so no gap sentence at all.
+  await expect(page.getByTestId('attempt-results-gap')).toHaveCount(0);
+
+  // One row per presented Question, in the order the child was shown them.
+  const rows = page.locator('[data-testid="answer-key-row"]');
+  await expect(rows).toHaveCount(total);
+  expect(
+    await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-ordinal'))),
+  ).toEqual(Array.from({ length: total }, (_unused, at) => String(at + 1)));
+
+  // Every row carries its state as a literal label, in real text — never colour
+  // alone, and never a glyph on its own.
+  const labels = await results
+    .locator('[data-testid="grade-state-label"]')
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent));
+  expect(labels).toHaveLength(total);
+  for (const label of labels) expect(GRADE_LABELS).toContain(label);
+
+  // Both answers are labelled, so the child's and the right one are never confused.
+  await expect(results.getByTestId('answer-key-your-label').first()).toHaveText('You answered');
+  await expect(results.getByTestId('answer-key-correct-label').first()).toHaveText(
+    'Correct answer',
+  );
+
+  // **Nothing parent-scoped, and nothing from a later epic.** No grading rationale,
+  // no Topic label, no Explanation control and no Retake: the response has no field
+  // for the first two and this surface mounts neither of the last two.
+  await expect(results.locator('[data-testid*="rationale"]')).toHaveCount(0);
+  await expect(results.locator('[data-testid*="topic"]')).toHaveCount(0);
+  await expect(results).not.toContainText(/explain|retake/iu);
+  await expect(results).not.toContainText(/allowance|unlimited|gpt-|claude/iu);
+}
+
 test.describe('handing an Attempt in', () => {
   test('asks about the Questions that are not answered, then grades every Question of the paper', async ({
     page,
@@ -286,6 +337,25 @@ test.describe('handing an Attempt in', () => {
       Array.from({ length: total }, () => null),
     );
 
+    // --- The answer key, on screen the instant the work is in --------------
+    // No further press and no navigation: the results render beneath the handed-in
+    // panel, which is untouched above.
+    await assertAnswerKey(page, total, 1);
+    // Every row's state agrees with the table the grades were read from: one
+    // `Correct` and the rest `Unanswered`, in the order the child met them.
+    const statesFromTable = first.grades.map((grade) => grade.state);
+    const statesOnScreen = await page
+      .locator('[data-testid="answer-key-row"]')
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-state')));
+    expect(statesOnScreen).toEqual(statesFromTable);
+    // The blank rows say so on their own row, and the answered one carries its
+    // verdict — each as the literal label, as real text.
+    const firstRow = page.locator('[data-testid="answer-key-row"]').first();
+    await expect(firstRow.getByTestId('grade-state-label')).toHaveText('Correct');
+    await expect(
+      page.locator('[data-testid="answer-key-row"]').nth(1).getByTestId('grade-state-label'),
+    ).toHaveText('Unanswered');
+
     // --- Student Home reads Completed --------------------------------------
     await page.goto('/student');
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
@@ -294,8 +364,22 @@ test.describe('handing an Attempt in', () => {
       .filter({ has: page.locator(`a[href="/student/tests/${partlyBlankId}"]`) });
     await expect(handedIn.getByTestId('student-practice-test-state')).toHaveText('Completed');
     // Derived from the Attempt, with no status column written and nothing on this
-    // row about a grade or a score.
+    // row about a grade or a score. **Student Home only**: the answer key lives on
+    // the test's own route, and the row that leads to it says nothing about verdicts.
     await expect(page.locator('body')).not.toContainText(/unanswered|correct|wrong|score|%/iu);
+
+    // --- And the same answer key again, opened from history ----------------
+    // The completed row leads back to the same route, the start route answers with a
+    // `submittedAt`, and the screen reaches the same handed-in state — so "reachable
+    // thereafter" is the same surface rather than a second one. No new Attempt is
+    // started: the count is asserted below, after the second test.
+    await handedIn.getByRole('link').click();
+    await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+    await assertAnswerKey(page, total, 1);
+    expect(submits()).toHaveLength(1);
+
+    await page.goto('/student');
+    await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
 
     // --- The second test, answered whole: no confirmation at all -----------
     const untouched = page
@@ -405,5 +489,251 @@ test.describe('handing an Attempt in', () => {
     await page.waitForTimeout(3_000);
     expect(submits()).toHaveLength(1);
     await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+});
+
+/**
+ * The results branches a real hand-in cannot reach, driven by a crafted response.
+ *
+ * Four of this surface's most intent-bearing branches — the partial score, the two
+ * ungraded-gap sentences, the newly-graded line with its announcement, and a failed
+ * read with its retry — depend on a server state that is genuinely hard to produce on
+ * demand: a provider that failed once and then succeeded, or a 500 from a route that
+ * does not otherwise fail. `apps/web` runs its specs without a DOM, so the unit tier
+ * can only assert over the component's own source, and a source assertion cannot say
+ * what a child sees.
+ *
+ * So the read is intercepted and fulfilled with a body chosen to put the screen in
+ * each state, exactly as `student-take-test.spec.ts` intercepts the practice-test read
+ * to prove its retry control actually retries. Everything up to the interception is
+ * real: the parent flow, the release, the binding, the Attempt and the hand-in.
+ */
+const RESULTS_ROUTE = '**/api/student/attempts/*/results';
+
+interface CraftedRow {
+  ordinal: number;
+  state: 'Correct' | 'Incorrect' | 'Unanswered' | 'Ungraded';
+  newlyGraded?: boolean;
+}
+
+/** A results body in the shape the API states, with the states and score given. */
+function craftedResults(
+  rows: CraftedRow[],
+  score: { correct: number; denominator: number; excludedUngraded: number },
+) {
+  return {
+    attemptId: '00000000-0000-4000-8000-0000000000a1',
+    practiceTestId: '00000000-0000-4000-8000-0000000000b1',
+    subjectName: 'Submit Subject',
+    questionCount: rows.length,
+    score,
+    questions: rows.map((row) => ({
+      questionId: `00000000-0000-4000-8000-00000000000${row.ordinal}`,
+      ordinal: row.ordinal,
+      format: 'ShortAnswer' as const,
+      prompt: [{ kind: 'text', value: `Crafted question ${row.ordinal}.` }],
+      studentAnswer:
+        row.state === 'Unanswered' ? null : [{ kind: 'text', value: `Answer ${row.ordinal}` }],
+      correctAnswer: [{ kind: 'text', value: `Answer ${row.ordinal}` }],
+      state: row.state,
+      newlyGraded: row.newlyGraded ?? false,
+    })),
+  };
+}
+
+/**
+ * A real Attempt of a real released test, handed in, with the child left on the
+ * handed-in state.
+ *
+ * The whole parent flow every time, because a released practice test is the only
+ * thing a child can open and there is no shortcut to one that does not also skip the
+ * release.
+ */
+async function handedIn(page: Page, email: string): Promise<void> {
+  await releaseTests(page, email, 1);
+  await page.locator('[data-testid="student-practice-test"]').first().getByRole('link').click();
+  await expect(page.getByTestId('take-test-counter')).toBeVisible();
+  await page.getByTestId('take-test-question').getByRole('radio').first().check();
+  await page.getByTestId('take-test-hand-in').click();
+  // Blanks remain, so the press meets the confirmation and goes through it.
+  await page.getByTestId('take-test-confirm-hand-in').click();
+  await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+}
+
+/** The one polite live region, mounted once in `ThemeRegistry`. */
+function liveRegion(page: Page) {
+  return page.locator('[role="status"][aria-live="polite"]');
+}
+
+test.describe('what the results say in the states a hand-in cannot produce', () => {
+  test('scores only the graded Questions and names the gap, in both its forms', async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    await handedIn(page, uniqueParentEmail('results-gap'));
+
+    // --- Something graded, something not ----------------------------------
+    await page.route(RESULTS_ROUTE, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          craftedResults(
+            [
+              { ordinal: 1, state: 'Correct' },
+              { ordinal: 2, state: 'Incorrect' },
+              { ordinal: 3, state: 'Ungraded' },
+            ],
+            { correct: 1, denominator: 2, excludedUngraded: 1 },
+          ),
+        ),
+      });
+    });
+    await page.reload();
+    await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+
+    // The fraction says what it is **over**: the denominator is not the paper, it is
+    // the part of the paper that has been judged.
+    await expect(page.getByTestId('attempt-results-score')).toHaveText(
+      'You got 1 out of 2 graded questions right.',
+    );
+    const gap = page.getByTestId('attempt-results-gap');
+    await expect(gap).toBeVisible();
+    await expect(gap).toContainText('1 question has not been graded yet');
+    await expect(gap).toContainText('not counted in the figure above');
+    // And why the total may go up next time: the grading finishing, not the work
+    // changing.
+    await expect(gap).toContainText('may go up');
+    // The row says it on its own row too, so a row read alone is never silent.
+    const ungradedRow = page.locator('[data-testid="answer-key-row"][data-state="Ungraded"]');
+    await expect(ungradedRow).toHaveCount(1);
+    await expect(ungradedRow.getByTestId('answer-key-row-ungraded')).toBeVisible();
+    await expect(ungradedRow.getByTestId('grade-state-label')).toHaveText('Not graded yet');
+    // Which test this is, for a child arriving from history rather than a hand-in.
+    await expect(page.getByTestId('attempt-results-test')).toHaveText(
+      'Submit Subject · 3 questions',
+    );
+
+    // --- Nothing graded at all: no figure, so no reference to one ----------
+    await page.unroute(RESULTS_ROUTE);
+    await page.route(RESULTS_ROUTE, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          craftedResults(
+            [
+              { ordinal: 1, state: 'Ungraded' },
+              { ordinal: 2, state: 'Ungraded' },
+            ],
+            { correct: 0, denominator: 0, excludedUngraded: 2 },
+          ),
+        ),
+      });
+    });
+    await page.reload();
+    await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+
+    // `0 out of 0` is not a sentence and dividing by it is not a thing this screen
+    // does, so it says something true instead.
+    await expect(page.getByTestId('attempt-results-score')).toHaveText(
+      'There is nothing to score yet. Nothing on this test has been graded.',
+    );
+    const gapOnly = page.getByTestId('attempt-results-gap');
+    await expect(gapOnly).toContainText('2 questions have not been graded yet');
+    // **The variant that points at no figure**, because none was stated above it.
+    await expect(gapOnly).not.toContainText('figure above');
+    await expect(gapOnly).toContainText('open this again later');
+    // Nothing correct and nothing blank, so the meta line is absent rather than
+    // reading `0 not correct · 0 unanswered`.
+    await expect(page.getByTestId('attempt-results-meta')).toHaveCount(0);
+  });
+
+  test('says a Question was just graded, and announces it in the words it shows', async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    await handedIn(page, uniqueParentEmail('results-newly'));
+
+    let reads = 0;
+    await page.route(RESULTS_ROUTE, async (route) => {
+      reads += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          craftedResults(
+            [
+              { ordinal: 1, state: 'Correct' },
+              { ordinal: 2, state: 'Correct', newlyGraded: true },
+            ],
+            { correct: 2, denominator: 2, excludedUngraded: 0 },
+          ),
+        ),
+      });
+    });
+    await page.reload();
+    await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+
+    const sentence = '1 more question has just been graded. Your results have been updated.';
+    // Displayed…
+    await expect(page.getByTestId('attempt-results-newly-graded')).toHaveText(sentence);
+    // …and announced through the one polite region, in **the same words**: there is
+    // one string behind both, so what is spoken and what is shown cannot come apart.
+    await expect(liveRegion(page)).toHaveText(sentence);
+    // On one read. A second announcement would need a second read, and there was not
+    // one — nothing polls and nothing retries on a timer.
+    await page.waitForTimeout(2_000);
+    await expect.poll(() => reads).toBe(1);
+    await expect(liveRegion(page)).toHaveText(sentence);
+    // The row itself says so too, in words rather than by a highlight.
+    const newly = page.locator('[data-testid="answer-key-row"][data-ordinal="2"]');
+    await expect(newly.getByTestId('answer-key-row-newly-graded')).toHaveText('Just graded.');
+    await expect(
+      page
+        .locator('[data-testid="answer-key-row"][data-ordinal="1"]')
+        .getByTestId('answer-key-row-newly-graded'),
+    ).toHaveCount(0);
+    // A perfect paper, so no `0 not correct · 0 unanswered` line.
+    await expect(page.getByTestId('attempt-results-meta')).toHaveCount(0);
+    await expect(page.getByTestId('attempt-results-score')).toHaveText('You got 2 out of 2 right.');
+  });
+
+  test('states a failed read where the child is, and tries again when asked', async ({ page }) => {
+    test.setTimeout(300_000);
+    await handedIn(page, uniqueParentEmail('results-failed'));
+
+    // Counted at the network, because "there is a retry control" and "the retry
+    // control retries" are different claims: gutting the wiring behind it would leave
+    // a child on the error with a button that does nothing, and a presence assertion
+    // alone would still be green.
+    let reads = 0;
+    await page.route(RESULTS_ROUTE, async (route) => {
+      reads += 1;
+      await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+    });
+    await page.reload();
+
+    // The handed-in panel is untouched: the work **is** in, and a results read that
+    // failed says nothing about that.
+    await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+    await expect(page.getByTestId('attempt-results-error')).toHaveText(
+      'Your results could not be loaded.',
+    );
+    await expect.poll(() => reads).toBe(1);
+    // **Not routed away.** A 500 here is a bad moment, not a Student Mode taken away:
+    // the only refusal that sends a child to the front door is the binding's own.
+    await expect(page).toHaveURL(/\/student\/tests\//u);
+    await expect(page).not.toHaveURL(/\/auth\/sign-in/u);
+    // And nothing retried on its own while it sat there.
+    await page.waitForTimeout(3_000);
+    await expect.poll(() => reads).toBe(1);
+
+    await page.getByTestId('attempt-results-retry').click();
+
+    // A second read actually went out, rather than the failure being re-rendered.
+    await expect.poll(() => reads).toBe(2);
+    await expect(page.getByTestId('attempt-results-error')).toBeVisible();
+    await expect(page).toHaveURL(/\/student\/tests\//u);
   });
 });

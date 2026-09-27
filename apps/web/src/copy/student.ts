@@ -222,6 +222,143 @@ export const studentCopy = {
     // questions" — is its accessible name. A second string over the top of it
     // would read the same on every row and hide the count that tells them apart.
   },
+  /**
+   * The answer key: what the work came to, once it is in.
+   *
+   * Second person, no exclamation mark and no flourish. There is no count-up, no
+   * reveal and no celebration anywhere on this surface — a result is information,
+   * and a child who got most of a paper wrong should not have it announced at them.
+   *
+   * **Not one figure is written into a sentence here.** Every number is handed in,
+   * and the score's own two figures are the server's single answer to FR-37: this
+   * file states no denominator and computes none.
+   *
+   * The four grade labels are deliberately **not** here. They are cross-surface
+   * literals and they live in `commonCopy.gradeState`, so a parent surface and this
+   * one cannot come to say different words for the same state.
+   */
+  results: {
+    /** The section's own heading, and where the score sits under. */
+    heading: 'Your results',
+    /**
+     * Which test these results are of: the Subject it is and how long it was.
+     *
+     * The line exists because these results are reached from history as well as from
+     * a hand-in — a child opening a finished test weeks later has nothing else on the
+     * screen that says which one it is. The Subject is dropped when the server sent
+     * none, rather than rendered as an empty half of a separator: a test whose
+     * Subject does not resolve keeps its place and loses its label, exactly as it
+     * does on Student Home.
+     *
+     * Both figures are handed in. Nothing here is a grade.
+     */
+    testMeta: (subjectName: string | null, questionCount: number) => {
+      const questions = questionCount === 1 ? '1 question' : `${questionCount} questions`;
+      const subject = subjectName?.trim();
+      return subject ? `${subject} · ${questions}` : questions;
+    },
+    /**
+     * The score, when every presented Question was judged.
+     *
+     * Both figures handed in, and no percentage: a fraction is the figure the
+     * server stated, and a percentage would be a second one computed here.
+     */
+    score: (correct: number, denominator: number) =>
+      `You got ${correct} out of ${denominator} right.`,
+    /**
+     * The score while something is excluded, which says **what it is over**.
+     *
+     * `graded questions` rather than `questions`, because the denominator is not the
+     * paper: it is the part of the paper that has been judged, and a fraction that
+     * did not say so would quietly restate how long the test was.
+     */
+    scorePartial: (correct: number, denominator: number) =>
+      `You got ${correct} out of ${denominator} graded questions right.`,
+    /**
+     * The one line for an Attempt nothing could grade at all.
+     *
+     * A zero denominator is a legitimate answer, and this is said instead of the
+     * fraction rather than beside it: `0 out of 0` is not a sentence, and dividing
+     * by it is not a thing this screen does.
+     */
+    nothingToScore: 'There is nothing to score yet. Nothing on this test has been graded.',
+    /** How many were wrong, for the line under the score. Singular and plural. */
+    metaIncorrect: (n: number) => (n === 1 ? '1 not correct' : `${n} not correct`),
+    /** How many were left blank. The grade word, because the work is in now. */
+    metaUnanswered: (n: number) => (n === 1 ? '1 unanswered' : `${n} unanswered`),
+    /** The answer key's own heading. It says what the order is, because the order matters. */
+    questionsHeading: 'Every question, in order',
+    /** One row's own heading. The stored ordinal, which is the number the child was shown. */
+    question: (ordinal: number) => `Question ${ordinal}`,
+    /** What the child put down. A label, so the two answers are never confused. */
+    yourAnswer: 'You answered',
+    /** What the answer was. */
+    correctAnswer: 'Correct answer',
+    /**
+     * Said in place of the child's answer on a Question they left blank.
+     *
+     * A sentence rather than an empty space, because an empty space beside a label
+     * reads as something that failed to load.
+     */
+    noAnswer: 'You didn’t answer this one.',
+    /**
+     * Said in place of an answer the stored key could not give back.
+     *
+     * It states what is missing and nothing about why. The row still shows its state
+     * — the work was graded, and only the words for the answer are gone.
+     */
+    answerUnavailable: 'The answer for this question is not available.',
+    /**
+     * The gap, stated in the header: how many are excluded, that they are **not** in
+     * the figure above, and that the total may go up next time.
+     *
+     * The last clause is the whole point of the sentence. A score that grows between
+     * two visits looks like the work changed, and it did not — the grading finished.
+     * Said in that order, so the reassurance lands after the fact.
+     */
+    ungradedGap: (n: number) =>
+      n === 1
+        ? '1 question has not been graded yet. It is not counted in the figure above, so the total may go up the next time you open this.'
+        : `${n} questions have not been graded yet. They are not counted in the figure above, so the total may go up the next time you open this.`,
+    /**
+     * The gap when there is **no figure above it at all**.
+     *
+     * A zero denominator with Questions excluded is the one case where
+     * `nothingToScore` is stated instead of a fraction, and `ungradedGap` would then
+     * point at "the figure above" — which was never given. So this variant names the
+     * count and promises the same thing about next time, without referring to a
+     * number nobody was shown.
+     */
+    ungradedGapOnly: (n: number) =>
+      n === 1
+        ? '1 question has not been graded yet. You can open this again later to see it.'
+        : `${n} questions have not been graded yet. You can open this again later to see them.`,
+    /** The same fact on the row it is about, so a row read alone still says it. */
+    rowUngraded: 'This one has not been graded yet.',
+    /**
+     * Said on a row this very read judged, in words rather than by a highlight.
+     *
+     * "Newly graded" has to be a thing the row *says*: a colour or an animation on
+     * it would be unreadable to anyone the row is read aloud to, and would be the
+     * only account of the one fact that changed since last time.
+     */
+    rowNewlyGraded: 'Just graded.',
+    /**
+     * The announcement for a read that resolved something, and it is **the same
+     * sentence the screen displays** — the count handed in, once per read.
+     *
+     * One string for both, so the words announced and the words shown cannot come
+     * apart. Nothing else on this surface announces: results appearing is not a
+     * state change a child needs narrated.
+     */
+    newlyGradedAnnouncement: (n: number) =>
+      n === 1
+        ? '1 more question has just been graded. Your results have been updated.'
+        : `${n} more questions have just been graded. Your results have been updated.`,
+    loading: 'Loading…',
+    /** The read failed. The work is still in; only this could not be read. */
+    failed: 'Your results could not be loaded.',
+  },
   /** The one control out of Student Mode. It leads to the PIN, never past it. */
   parent: 'Parent',
   notBound: 'This device is not set up for a student yet.',

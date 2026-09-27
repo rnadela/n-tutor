@@ -358,6 +358,82 @@ export interface AttemptSubmissionView {
   gradeAt: string;
 }
 
+/**
+ * The four states a graded Question can be in, and there is no fifth.
+ *
+ * `Ungraded` is "nothing has judged this yet" — not "being graded": there is no
+ * state for in-flight, because nothing about grading is in flight from a browser's
+ * point of view. `Unanswered` is a Question the child chose to leave blank, which
+ * counts against them; `Ungraded` is excluded from the score entirely.
+ */
+export type GradeState = 'Correct' | 'Incorrect' | 'Unanswered' | 'Ungraded';
+
+/**
+ * What one Attempt came to, over its **presented** Questions, exactly as the API
+ * states it.
+ *
+ * `correct` over `denominator` is the fraction a surface states, and this browser
+ * computes **neither** figure: FR-37's denominator is the server's one answer, and
+ * a second derivation here would be a second answer to the same question.
+ *
+ * `excludedUngraded` is not a footnote. While it is above zero the score is over
+ * fewer Questions than the child sat, and a screen showing the fraction without
+ * the count would be quietly restating the paper. `denominator` may legitimately
+ * be 0 — an Attempt nothing could grade at all — and the screen has to say
+ * something true about that rather than divide.
+ */
+export interface AttemptScore {
+  correct: number;
+  denominator: number;
+  excludedUngraded: number;
+}
+
+/**
+ * One row of an Attempt's answer key, exactly as the API states it.
+ *
+ * The prompt, what the child put down, what the answer was, and which state it is
+ * in. Every text field is **resolved display text**: a Multiple Choice answer
+ * arrives as the option's own body, never as the ordinal that was submitted, so
+ * nothing here builds a sentence out of a number.
+ *
+ * There is **no `rationale`** — not omitted by this type, but never selected by the
+ * read that composes it: a grading rationale is parent-scoped (AD-20, AD-26). There
+ * is no Topic label either, and no cost, tier, allowance or model figure.
+ *
+ * `studentAnswer` is null for a Question left blank; `correctAnswer` is null only
+ * where the stored answer key could not be read back, and the row says so rather
+ * than showing nothing.
+ */
+export interface AnswerKeyRowView {
+  questionId: string;
+  ordinal: number;
+  format: 'MultipleChoice' | 'FillInTheBlank' | 'ShortAnswer';
+  prompt: RichTextSegment[] | null;
+  studentAnswer: RichTextSegment[] | null;
+  correctAnswer: RichTextSegment[] | null;
+  state: GradeState;
+  /** True when **this read** is what judged it. About this response, nothing else. */
+  newlyGraded: boolean;
+}
+
+/**
+ * One handed-in Attempt's whole results, exactly as the API states it.
+ *
+ * Every presented Question in the order the child met them, and never a page: the
+ * screen shows the whole paper. The browser renders `questions` as it arrives — it
+ * does not sort, filter or group it, and it never puts the wrong answers together,
+ * because that would be re-writing the paper.
+ */
+export interface AttemptResultsView {
+  attemptId: string;
+  practiceTestId: string;
+  /** Null for a test whose Subject carries no classification or no longer resolves. */
+  subjectName: string | null;
+  questionCount: number;
+  score: AttemptScore;
+  questions: AnswerKeyRowView[];
+}
+
 /** One generated option, in the order the API states it. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -798,6 +874,31 @@ export const parentApi = {
       `/student/attempts/${encodeURIComponent(attemptId)}/submit`,
       { method: 'POST', body: JSON.stringify({ answers }) },
       studentCopy.takeTest.submitFailed,
+    ),
+
+  /**
+   * One handed-in Attempt's results: every presented Question, what the child put
+   * down, what the answer was, and the state it is in.
+   *
+   * **Reading it is what re-asks.** FR-22 makes viewing the trigger, so the server
+   * re-asks for anything nothing has judged *before* it answers — which is why this
+   * is a `GET` that legitimately writes grades, and why nothing here polls, queues
+   * or retries on a timer. One call per Attempt; a second call is a second re-ask.
+   *
+   * The view **cannot carry** a grading rationale, a Topic label or an allowance,
+   * tier, cost or model figure: none is a student-scoped fact (AD-20, AD-26), and
+   * the read does not select the first at all.
+   *
+   * No bearer, exactly as the other student calls: the binding cookie names the
+   * child server-side. The id in the path names only *which* Attempt — a sibling's,
+   * another account's, one still open and one that never existed all answer the same
+   * 404 sentence, so there is nothing this browser could learn by asking.
+   */
+  attemptResults: (attemptId: string) =>
+    call<AttemptResultsView>(
+      `/student/attempts/${encodeURIComponent(attemptId)}/results`,
+      {},
+      studentCopy.results.failed,
     ),
 
   // --- Uncommitted parent state ------------------------------------------

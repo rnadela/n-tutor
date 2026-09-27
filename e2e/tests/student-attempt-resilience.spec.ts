@@ -257,6 +257,16 @@ test.describe('an Attempt that survives an interruption', () => {
     // screen needs the network until the child hands in.
     expect(apiCalls()).toBe(quietFrom);
 
+    // **Nothing anywhere on the page claims a verdict while the Attempt is open.**
+    // Body-wide, and it can be body-wide here because the answer key genuinely does
+    // not exist yet: correctness is something only a hand-in can claim, and the whole
+    // discipline of this screen is that it marks nothing while the child is still
+    // working. Once the work is in, the same claim narrows to the handed-in panel,
+    // because the answer key then renders beneath it on purpose.
+    await expect(page.locator('body')).not.toContainText(
+      /unanswered|correct|wrong|score|grade|%/iu,
+    );
+
     // --- Handing in while offline -----------------------------------------
     // Every Question on this paper is answered — the summary above says so — so
     // there is nothing to ask about and the press goes straight to the decision.
@@ -299,8 +309,13 @@ test.describe('an Attempt that survives an interruption', () => {
     );
     expect(residue).toEqual([]);
 
-    // And nothing anywhere on the screen claims a verdict.
-    await expect(page.locator('body')).not.toContainText(/correct|wrong|score|grade|%/iu);
+    // And the handed-in panel itself still claims no verdict: it states that the
+    // work is in and nothing about what it came to. Since Story 5.6 the answer key
+    // renders **beneath** it, so this is scoped to the panel rather than to the whole
+    // body — the verdicts belong to the results section and to nothing above it.
+    await expect(page.getByTestId('take-test-handed-in')).not.toContainText(
+      /correct|wrong|score|grade|%/iu,
+    );
 
     // --- A second press sends nothing -------------------------------------
     await page.reload();
@@ -382,7 +397,10 @@ test.describe('an Attempt that survives an interruption', () => {
       Object.keys({ ...window.localStorage }).filter((key) => key.startsWith('ntr.attempt.')),
     );
     expect(residue).toEqual([]);
-    await expect(page.locator('body')).not.toContainText(/correct|wrong|score|grade|%/iu);
+    // The panel, not the body: the answer key renders beneath it since Story 5.6.
+    await expect(page.getByTestId('take-test-handed-in')).not.toContainText(
+      /correct|wrong|score|grade|%/iu,
+    );
 
     // A settle, then a final count: nothing loops, and nothing sends a second time.
     await page.waitForTimeout(3_000);
@@ -434,7 +452,10 @@ test.describe('an Attempt that survives an interruption', () => {
       Object.keys({ ...window.localStorage }).filter((key) => key.startsWith('ntr.attempt.')),
     );
     expect(residue).toEqual([]);
-    await expect(page.locator('body')).not.toContainText(/correct|wrong|score|grade|%/iu);
+    // The panel, not the body: the answer key renders beneath it since Story 5.6.
+    await expect(page.getByTestId('take-test-handed-in')).not.toContainText(
+      /correct|wrong|score|grade|%/iu,
+    );
   });
 
   test('states a hand-in the server already has, and keeps nothing on the device', async ({
@@ -482,7 +503,10 @@ test.describe('an Attempt that survives an interruption', () => {
       Object.keys({ ...window.localStorage }).filter((key) => key.startsWith('ntr.attempt.')),
     );
     expect(residue).toEqual([]);
-    await expect(second.locator('body')).not.toContainText(/correct|wrong|score|grade|%/iu);
+    // The panel, not the body: the answer key renders beneath it since Story 5.6.
+    await expect(second.getByTestId('take-test-handed-in')).not.toContainText(
+      /correct|wrong|score|grade|%/iu,
+    );
     await second.close();
   });
 });

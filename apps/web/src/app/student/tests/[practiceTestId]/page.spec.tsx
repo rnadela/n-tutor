@@ -104,20 +104,78 @@ describe('what the screen reaches for', () => {
   });
 });
 
-describe('what this story is not', () => {
-  it('holds no score, no grade and no answer key', () => {
-    // Grading is Stories 5.5–5.6. Handing in states two instants and a boolean
-    // about *time*; nothing on this screen claims anything about the work.
+describe('the handed-in state', () => {
+  it('renders the answer key beneath the panel, for the Attempt in hand', () => {
+    // The one insertion point, and the reason it is one: a hand-in, the 409 on a
+    // second one and the start route answering with a `submittedAt` all converge
+    // here — and the third is how a finished test opened from Student Home arrives.
+    // So "on screen the instant the work is in" and "reachable from history" are one
+    // surface, with `attempt.id` already in hand.
+    const done = regionOf("if (submitState === 'done') {", 'if (loading ||');
+    expect(done).toContain('<AttemptResults attemptId={attempt.id} />');
+    // Once in the import's braces, once in its path, once in the JSX. Rendered in
+    // exactly one place, so there is no second mount to make a second read.
+    expect(CODE.match(/AttemptResults/gu)).toHaveLength(3);
+    expect(CODE.match(/<AttemptResults/gu)).toHaveLength(1);
+  });
+
+  it('leaves the three things already in that state exactly as they were', () => {
+    // Eleven end-to-end assertions rest on these. The results render **beneath**
+    // them: nothing is replaced and nothing redirects.
+    const done = regionOf("if (submitState === 'done') {", 'if (loading ||');
+    expect(done).toContain('data-testid="take-test-auto-submit"');
+    expect(done).toContain('role="alert"');
+    expect(done).toContain('data-testid="take-test-handed-in-heading"');
+    expect(done).toContain('ref={handedInHeading}');
+    expect(done).toContain('data-testid="take-test-handed-in"');
+    expect(done).toContain('{submitNote ?? studentCopy.takeTest.handedIn}');
+    // And the results sit after all three, not among them.
+    expect(done.indexOf('AttemptResults')).toBeGreaterThan(
+      done.indexOf('data-testid="take-test-handed-in"'),
+    );
+  });
+
+  it('still focuses the heading of the state the screen moved to', () => {
+    expect(CODE).toMatch(
+      /if \(submitState === 'done'\) handedInHeading\.current\?\.focus\(\);\s*\}, \[submitState\]\);/u,
+    );
+  });
+
+  it('adds no route, no redirect and no second read to reach the results', () => {
+    // A dedicated route would need a redirect, a query flag to carry the auto-submit
+    // announcement across it, and either a practice-test-to-Attempt resolution read
+    // or a `POST` that can *create* an Attempt from a results URL.
+    expect(CODE).not.toMatch(/\/results/u);
+    // The same four reads as before: the results read is the child component's, made
+    // once per Attempt, and this file gained none of its own.
+    expect(CODE.match(/parentApi\s*\.\s*\w+\(/gu)).toHaveLength(4);
+  });
+});
+
+describe('what this screen itself says about the work', () => {
+  it('states no score, grade or answer key of its own, in any state', () => {
+    // **Re-scoped by Story 5.6, not weakened.** The answer key now exists on this
+    // route, but it is `AttemptResults`' — mounted in the handed-in branch and
+    // nowhere else. What this file must not hold is any *second* account of a grade:
+    // no score sentence, no correctness word and no answer-key rendering written
+    // here. That keeps the pre-hand-in states — every branch below `submitState ===
+    // 'done'` — free of grade vocabulary by construction, because the vocabulary is
+    // not in the module at all.
     for (const forbidden of [/score/iu, /\bcorrect/iu, /grade(?!At)/iu, /answerKey/iu]) {
       expect(CODE).not.toMatch(forbidden);
     }
+    // And the one thing that does claim a verdict is reachable from exactly one
+    // branch: the state a hand-in, the 409 and a resumed submitted Attempt reach.
+    const beforeHandIn = CODE.slice(CODE.indexOf('if (loading ||'));
+    expect(beforeHandIn).not.toContain('AttemptResults');
   });
 
   it('asks about blanks without ever assigning a state to one', () => {
     // Since Story 5.4 the screen *does* ask: a person's press passes through a
     // question naming how many Questions are not answered. What it still never does
     // is say what a blank means — `Unanswered` is a grade state, written server-side
-    // inside the submit transaction, and it is not a word this surface holds.
+    // inside the submit transaction, and it is not a word this surface holds. The
+    // results section says it, on the row it is about; this file never does.
     expect(CODE).not.toMatch(/unanswered/iu);
     expect(CODE).toContain('notAnswered(questions, answers)');
   });

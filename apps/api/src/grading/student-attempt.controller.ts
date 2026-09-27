@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -12,10 +13,12 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { StudentModeGuard, type StudentRequest } from '../identity/student-mode.guard.js';
 import type { AttemptSubmissionView } from '../practicetest/practice-test.service.js';
 import { SubmitAttemptDto } from './dto/attempt-submit.dto.js';
+import type { AttemptResultsView } from './grading-results.js';
 import { GradingService } from './grading.service.js';
 
 /**
- * The one student-scoped write `grading` mounts: handing an Attempt in.
+ * The student-scoped Attempt endpoints `grading` mounts: handing an Attempt in,
+ * and reading what it came to.
  *
  * **Same path, same body, same answers as before Story 5.4.**
  * `POST /api/student/attempts/:attemptId/submit`, the same `StudentModeGuard`, the
@@ -76,6 +79,41 @@ export class StudentAttemptController {
       req.student!.studentProfileId,
       attemptId,
       body.answers,
+    );
+  }
+
+  /**
+   * The one **read** this controller mounts: one handed-in Attempt's answer key.
+   *
+   * **A `GET` that legitimately writes grades.** FR-22 makes viewing the trigger,
+   * so the read *is* the retry: `resultsFor` calls `resolveUngraded` before it reads
+   * anything. A `POST` would be honest about the write and wrong about everything
+   * else — a screen navigating to its own results would either fire it twice or skip
+   * it, and nothing about opening results is a thing the child is asking to change.
+   * Nothing polls it, nothing queues behind it and no route retries on a timer.
+   *
+   * It carries **no grading rationale, no Topic label and no cost, tier, allowance
+   * or model name** (AD-20, AD-26). The rationale is not selected by the read at
+   * all, and `AttemptResultsView` has no field one could travel in.
+   *
+   * Both ids come off `req.student`, so a foreign Attempt, a sibling's Attempt, an
+   * unknown id and an Attempt that is still open all answer the one shared
+   * `PRACTICE_TEST_NOT_FOUND` 404 — by construction rather than by a check somebody
+   * has to remember. **No `ParseUUIDPipe`**, for the reason the submit route carries
+   * none: a 400 on shape would be a second kind of refusal on a surface whose whole
+   * discipline is that every refusal is one sentence.
+   */
+  @Get('attempts/:attemptId/results')
+  attemptResults(
+    @Req() req: StudentRequest,
+    @Param('attemptId') attemptId: string,
+  ): Promise<AttemptResultsView> {
+    return this.grading.resultsFor(
+      {
+        parentAccountId: req.student!.parentAccountId,
+        studentProfileId: req.student!.studentProfileId,
+      },
+      attemptId,
     );
   }
 }

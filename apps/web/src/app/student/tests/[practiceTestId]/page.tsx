@@ -29,6 +29,7 @@ import {
 import { comfortableDensity, measure, rounded, typeRoles } from '@/theme/tokens';
 import { deviceIsUnbound } from '../../page';
 import { AnswerInput } from '../../_components/AnswerInput';
+import { AttemptResults } from '../../_components/AttemptResults';
 import { AttemptTimer } from '../../_components/AttemptTimer';
 import { QuestionMap } from '../../_components/QuestionMap';
 
@@ -837,6 +838,21 @@ export default function TakeTestPage() {
         >
           {submitNote ?? studentCopy.takeTest.handedIn}
         </Alert>
+        {/* The answer key, **beneath** the three things above and replacing none of
+            them.
+
+            It appears here because this is the one state three paths converge on: a
+            hand-in, the 409 on a second one, and the start route answering with a
+            `submittedAt` — which is exactly how a finished test opened from Student
+            Home arrives. So "on screen the instant the work is in" and "reachable
+            from history afterwards" are one surface rather than two, with the
+            Attempt id already in hand and no redirect, no query flag and no second
+            resolution read between them.
+
+            Guarded on the Attempt rather than asserted: every path into this state
+            has one — the reset clears `attempt` and `submitState` together — and a
+            guard says that without a non-null assertion standing in for it. */}
+        {attempt !== null && <AttemptResults attemptId={attempt.id} />}
       </Screen>
     );
   }

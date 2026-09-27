@@ -1517,3 +1517,51 @@ source_spec: `spec-5-5-grading-engine-four-grade-states.md`
 severity: low
 reason: `gradingInputFor` and `resolveUngraded` both re-read the current Practice Test state at grading time, so a changed answer key silently changes the verdict of an already-answered Question; this drift scenario is absent from the I/O matrix and the tests.
 status: open
+
+### DW-191: Opening one results screen does the same expensive work twice: two full question/choice/answer joins and three grade reads per view.
+origin: spec-deferred cf73dedc0d2b
+location: apps/api/src/grading/grading.service.ts
+source_spec: `spec-5-6-results-answer-key.md`
+severity: medium
+reason: `resultsFor` calls `resolveUngraded`, which already runs `gradingInputFor`, a `questionGrade.findMany` and `scoreFor` (a second grade read) inside its transaction -- then runs `answerKeyFor` (the same join in a different shape) and a third grade read, and discards `resolution.score`. The two reads are deliberate: one serves the provider and one serves the screen, and the score is recomputed so it describes exactly the rows in the same response. Collapsing them means either widening `resolveUngraded`'s return to carry the states it already read, or an internal variant that skips `scoreFor` -- both touch a method three other paths call, so it is recorded rather than done here.
+status: open
+
+### DW-192: Story 5.5's unbounded ungraded re-ask is now reachable from a child's screen: every results open with an outstanding Question spends a fresh Grading call.
+origin: spec-deferred ee03670630ed
+location: apps/api/src/grading/grading.service.ts:231
+source_spec: `spec-5-6-results-answer-key.md`
+severity: medium
+reason: Already recorded on Story 5.5 as a product decision (FR-22 makes viewing the trigger and grading is exempt from every allowance, so a cap would make some views not retry). This story is what turns it from a service method with no caller into a `GET` a child reaches by reloading, and a React StrictMode double-mount or a second tab doubles it again. No attempt counter, cooldown column or minimum interval exists, and the controller carries only the class-level `@SkipThrottle({ login: true })`.
+status: open
+
+### DW-193: `answerKeyFor`'s call to `readSubjectLabels` has no error handling of its own, unlike every other degrade-don't-throw branch in the same read.
+origin: spec-deferred 4df26108aeda
+location: apps/api/src/practicetest/practice-test.service.ts (answerKeyFor)
+source_spec: `spec-5-6-results-answer-key.md`
+severity: medium
+reason: A transient failure in the Subject-label lookup (the module down, a timeout) throws out of `answerKeyFor` and 500s the whole results read, even though the Attempt is already graded and every other unreadable field in this method (`prompt`, `studentAnswer`, `correctAnswer`) degrades to `null` instead. The call is the same shape `releasedFor` already uses without a guard, so this is an existing pattern this story reused rather than one it introduced -- fixing it means deciding a shared fallback for both callers, not a one-line patch here.
+status: open
+
+### DW-194: `AnswerKeyRowView`'s type still allows `newlyGraded: true` together with `state: 'Ungraded'`, a combination the service is documented to never produce.
+origin: spec-deferred 8212997251d7
+location: apps/api/src/grading/grading-results.ts (AnswerKeyRowView)
+source_spec: `spec-5-6-results-answer-key.md`
+severity: low
+reason: `AnswerKeyRow.tsx` guards against the pairing defensively (`row.newlyGraded && row.state !== 'Ungraded'`) rather than the type ruling it out. A future consumer of `AttemptResultsView` (the parent-facing read the service already leaves room for) has to remember to repeat the same guard. Closing it means a discriminated union keyed on `state`, which is a shape change beyond a trivial patch.
+status: open
+
+### DW-195: No integration case exercises `subjectName` genuinely failing to resolve (a deleted or reclassified Subject) on the results endpoint specifically.
+origin: spec-deferred 7ba522faa018
+location: apps/api/test/practice-test.int-spec.ts (Story 5.6 results block)
+source_spec: `spec-5-6-results-answer-key.md`
+severity: low
+reason: The existing results cases only assert the happy-path label match via `subjectNameOf`. The "keeps its place and loses its label" degradation that `readSubjectLabels` documents is proven for Student Home's equivalent read elsewhere in the suite, but not for this endpoint.
+status: open
+
+### DW-196: No test covers two Questions simultaneously left `Ungraded`, where only some of them resolve on a given results read.
+origin: spec-deferred 737ecda8801c
+location: apps/api/test/practice-test.int-spec.ts (Story 5.6 results block)
+source_spec: `spec-5-6-results-answer-key.md`
+severity: low
+reason: Every existing re-ask/resolution case uses exactly one ungraded Question, so the per-row correctness of a genuinely mixed outcome (some rows newly graded, others still stuck) within the same response is unverified.
+status: open

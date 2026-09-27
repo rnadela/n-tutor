@@ -11,6 +11,7 @@ import {
   type GradingQuestionInput,
 } from '../practicetest/practice-test.service.js';
 import { buildGradingPrompt, type GradingPromptQuestion } from './grading-prompt.js';
+import { answerKeyRows, type AttemptResultsView } from './grading-results.js';
 import {
   GradingPayloadInvalid,
   validateGradingPayload,
@@ -212,8 +213,10 @@ export class GradingService {
    *
    * FR-22 makes **viewing** the trigger: there is no background job, no queue, no
    * scheduled retry and nothing polling, so this is what a results read calls on
-   * its way to answering. It has no route of its own yet — the results surface is
-   * Story 5.6's, and a route here would be this story guessing at its shape.
+   * its way to answering. Its caller is `resultsFor`, which calls it **before** it
+   * reads anything — the retry is not a step beside the read, it is the first half
+   * of it. It has no route of its own and needs none: `GET
+   * /api/student/attempts/:attemptId/results` is how it is reached.
    *
    * The scope is a stored `Ungraded` **or no row at all**. On a submitted Attempt
    * those are one fact — nothing has judged this — because the deterministic
@@ -295,6 +298,67 @@ export class GradingService {
     // touched.
     const score = await this.scoreFor(attemptId, input);
     return { score, newlyGradedQuestionIds };
+  }
+
+  /**
+   * One handed-in Attempt's results: every presented Question, what the child put
+   * down, what the answer was, and which of the four states it is in.
+   *
+   * **The read is FR-22's retry.** `resolveUngraded` runs first, so opening results
+   * is what re-asks for anything nothing has judged — and it is also what refuses:
+   * a foreign Attempt, a sibling's, an unknown id and an Attempt still open all
+   * throw the one shared 404 from there, before this method reads a row. A re-ask
+   * that fails does not fail the read; that promise is `resolveUngraded`'s own, and
+   * this method answers with the rows exactly as they stand.
+   *
+   * **The score is recomputed here rather than taken from the resolution.**
+   * `resolveUngraded` answers with a score of its own, but that one was computed
+   * before this read and over the states as they were then — and the figure a
+   * surface states must describe exactly the rows in the same response. So the
+   * states are read once more and `scoreOf` is applied to the states of the rows
+   * being returned. One `scoreOf`, one denominator, no second answer to FR-37.
+   *
+   * **`questionGrade` is selected for `questionId` and `state` only.** The rationale
+   * is not read at all, so no mapper downstream of this can leak one onto a child's
+   * screen (AD-20, AD-26), and `AnswerKeyRowView` has no field it could sit in.
+   *
+   * The signature admits either party — a parent by account, a child by both
+   * ids — which is why the answer key read takes a nullable profile id, though
+   * this story wires up only the student route; a parent-facing caller is not
+   * implemented here.
+   */
+  async resultsFor(scope: GradingScope, attemptId: string): Promise<AttemptResultsView> {
+    // First, and the whole reason this is a `GET` that writes: viewing is the
+    // trigger. It is also where every refusal comes from.
+    const resolution = await this.resolveUngraded(scope, attemptId);
+
+    const key = await this.practiceTests.answerKeyFor(
+      scope.parentAccountId,
+      scope.studentProfileId ?? null,
+      attemptId,
+    );
+    const stored = await this.prisma.questionGrade.findMany({
+      where: { attemptId },
+      // Two columns. A rationale this never selects is a rationale no mapper can
+      // put on a student response.
+      select: { questionId: true, state: true },
+    });
+    const states = new Map(stored.map((row) => [row.questionId, row.state]));
+
+    // Not `resolveUngraded`'s score: that one was computed before this read, and a
+    // header must describe exactly the rows in the same response. One `scoreOf`,
+    // so no surface can reach a second denominator.
+    const rows = answerKeyRows(key, states, resolution.newlyGradedQuestionIds);
+    const score = scoreOf(rows.map((row) => row.state));
+
+    return {
+      attemptId: key.attemptId,
+      practiceTestId: key.practiceTestId,
+      subjectName: key.subjectName,
+      questionCount: key.questionCount,
+      score,
+      questions: rows,
+    };
   }
 
   // --- Internals ---------------------------------------------------------

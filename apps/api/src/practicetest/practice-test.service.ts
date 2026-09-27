@@ -415,6 +415,56 @@ export interface AttemptGradingInput {
   questions: GradingQuestionInput[];
 }
 
+/**
+ * One Question of a handed-in Attempt as **the child reading their results**
+ * sees it: the prompt, what they answered, and what the answer was.
+ *
+ * The reader's view, beside `GradingQuestionInput`'s grader's view. Every text
+ * field is **resolved display text**: a Multiple Choice answer is the chosen
+ * option's stored body rather than the ordinal the browser submitted, because a
+ * child cannot read "2" as an answer and no screen may build that sentence for
+ * itself.
+ *
+ * There is **no Topic label** on it and no flagged ordinal — the first is not a
+ * student-scoped fact (AD-20, AD-26) and the second is not a thing to show — and
+ * there is no grade state either: which state a Question is in is `grading`'s to
+ * say, and this module neither reads nor writes one (AD-6, AD-17).
+ *
+ * `studentAnswer` is null for a Question left blank. `correctAnswer` is null only
+ * where the stored answer key cannot be read back — a degradation, never a
+ * refusal, for the reason `landedPromptsFor` states.
+ */
+export interface AnswerKeyQuestion {
+  questionId: string;
+  ordinal: number;
+  format: QuestionFormat;
+  /** The stored segments, exactly as stored (AD-32). Null when unreadable. */
+  prompt: RichText | null;
+  /** What the child answered, as words. Null for a Question left blank. */
+  studentAnswer: RichText | null;
+  /** What the answer was, as words. Null when the stored key is unreadable. */
+  correctAnswer: RichText | null;
+}
+
+/**
+ * One handed-in Attempt's whole answer key, in one read.
+ *
+ * Every **presented** Question in stored `ordinal` order and never a page: the
+ * results screen shows the whole paper, and this is the read that criterion is
+ * met by.
+ *
+ * It carries no score and no grade: FR-37's denominator is `scoreOf`'s and grade
+ * state is `grading`'s, so the module that owns them composes this with them.
+ */
+export interface AttemptAnswerKey {
+  attemptId: string;
+  practiceTestId: string;
+  /** Null for a test whose Subject carries no classification or no longer resolves. */
+  subjectName: string | null;
+  questionCount: number;
+  questions: AnswerKeyQuestion[];
+}
+
 /** One generated option, in the order it is to be shown. */
 export interface DraftChoiceView {
   ordinal: number;
@@ -1190,6 +1240,143 @@ export class PracticeTestService {
         answerValue: question.answers[0]?.value ?? null,
       })),
     };
+  }
+
+  /**
+   * One handed-in Attempt's answer key, as **the reader** needs it.
+   *
+   * The sibling of `gradingInputFor` and deliberately **not** that read widened.
+   * They read the same rows and answer different questions: the grader needs the
+   * raw typed string, the flagged *ordinal* and the Topic labels; the screen needs
+   * words a child can read, and must never be one mapper away from a Topic label.
+   * Keeping them apart is what makes "no Topic reaches a student response"
+   * structural rather than remembered — the duplication here is a select shape,
+   * not a rule. Merging them would put `topics` one `.map` from a student body.
+   *
+   * It **resolves the ordinal into words**. What the browser submits for a Multiple
+   * Choice Question is the chosen option's ordinal as a string, and `2` is not an
+   * answer anybody can read: so the stored option body travels instead, matched on
+   * the trimmed digits-only ordinal. A value that is no ordinal of this Question —
+   * which is a value the grader has already judged `Incorrect` — travels as the raw
+   * stored string, because what the child actually put down is the one thing the
+   * row must not invent.
+   *
+   * Found by the attempt id **and** both binding ids, and refused when
+   * `submittedAt` is null: a foreign Attempt, a sibling's, an unknown id and one
+   * still open all answer the one shared 404 by construction (AD-18). An open
+   * Attempt has no answer key to read — the work is not in — and that is not a
+   * different flavour of refusal.
+   *
+   * `studentProfileId` is nullable for the reason `gradingInputFor`'s is: the child
+   * reads their own results under their binding, and the parent surface a later
+   * story builds reads them under none, so neither needs a second read.
+   *
+   * The Attempt, its questions, their choices and this Attempt's answers are read
+   * in **one transaction** in `ordinal` order, for the reason `draftViewIn` joins
+   * in one round trip: a row-set assembled from two snapshots could answer with a
+   * Question that had no place in the list it is being ordered into.
+   *
+   * The Subject label is resolved through `readSubjectLabels` exactly as
+   * `releasedFor` does it. `practicetest` holds no `subject` delegate and must not
+   * acquire one (AD-17), and a test whose Subject does not resolve keeps its place
+   * and loses its label.
+   *
+   * Unreadable stored segments **degrade to null** rather than throwing, for the
+   * reason `:1184` states: this read runs on work already done, so a row a schema
+   * change left unreadable must not make a closed Attempt unreadable too. Only ids
+   * are logged — never a prompt, an answer or an option body (AD-20).
+   */
+  async answerKeyFor(
+    parentAccountId: string,
+    studentProfileId: string | null,
+    attemptId: string,
+  ): Promise<AttemptAnswerKey> {
+    return this.prisma.withTransaction(async (tx) => {
+      const attempt = await tx.attempt.findFirst({
+        where: {
+          id: attemptId,
+          parentAccountId,
+          ...(studentProfileId === null ? {} : { studentProfileId }),
+        },
+        select: {
+          id: true,
+          practiceTestId: true,
+          submittedAt: true,
+          practiceTest: { select: { sourceTestId: true } },
+        },
+      });
+      // The one sentence a foreign Attempt, a sibling's, an unknown id and an
+      // Attempt still open all share.
+      if (attempt === null || attempt.submittedAt === null) {
+        throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
+      }
+
+      const questions = await tx.practiceTestQuestion.findMany({
+        where: { practiceTestId: attempt.practiceTestId },
+        orderBy: { ordinal: 'asc' },
+        select: {
+          id: true,
+          ordinal: true,
+          format: true,
+          prompt: true,
+          answer: true,
+          // No `isCorrect`-only projection: the flagged option's *body* is what a
+          // reader needs, and the ordinal the child chose has to be matched against
+          // the same list.
+          choices: {
+            select: { ordinal: true, body: true, isCorrect: true },
+            orderBy: { ordinal: 'asc' },
+          },
+          answers: { where: { attemptId: attempt.id }, select: { value: true } },
+        },
+      });
+
+      // Batched across the module boundary, exactly as `releasedFor` does it. One
+      // Attempt is one Practice Test, so this is one id — stated through the same
+      // reader rather than through a delegate this module does not own (AD-17).
+      const labels = await this.sourceTests.readSubjectLabels([attempt.practiceTest.sourceTestId]);
+
+      const unreadable: string[] = [];
+      const rows = questions.map((question) => {
+        // One row at most, by `answer_attemptId_questionId_key`. No row is a
+        // Question the child left blank, which is a null answer and never an empty
+        // one — the blank is the fact, and `grading` is what says what it means.
+        const value = question.answers[0]?.value ?? null;
+        const correct = correctAnswerTextOf(question);
+        const prompt = isRichText(question.prompt) ? (question.prompt as RichText) : null;
+        const studentAnswer = studentAnswerTextOf(question, value);
+        // Any of the three can independently fail to read back; the log below
+        // exists to say how many rows degraded, not which field did.
+        if (correct === null || prompt === null || (value !== null && studentAnswer === null)) {
+          unreadable.push(question.id);
+        }
+        return {
+          questionId: question.id,
+          ordinal: question.ordinal,
+          format: question.format,
+          prompt,
+          studentAnswer,
+          correctAnswer: correct,
+        };
+      });
+      if (unreadable.length > 0) {
+        // Ids and a count. Never a prompt, an answer or an option body (AD-20).
+        this.logger.warn(
+          `The stored answer key of ${unreadable.length} question(s) of attempt ${attempt.id} could not be read back: ${unreadable.join(', ')}.`,
+        );
+      }
+
+      return {
+        attemptId: attempt.id,
+        practiceTestId: attempt.practiceTestId,
+        subjectName: labels.get(attempt.practiceTest.sourceTestId) ?? null,
+        // The presented count, counted from the rows this read returned rather than
+        // taken from the stored column: they are the Questions the results are
+        // about, and one figure derived from two sources is two figures.
+        questionCount: rows.length,
+        questions: rows,
+      };
+    });
   }
 
   /**
@@ -2514,4 +2701,64 @@ function resolveWeightedTopic(
   const matched = matchTopic(topicsOf(extraction), wanted);
   if (matched === undefined) throw new ConflictException(WEIGHTED_TOPIC_UNKNOWN);
   return matched;
+}
+
+/** One stored row, as much of it as the answer key's text resolution needs. */
+interface AnswerKeySource {
+  format: QuestionFormat;
+  answer: Prisma.JsonValue | null;
+  choices: readonly { ordinal: number; body: Prisma.JsonValue; isCorrect: boolean }[];
+}
+
+/**
+ * What the answer **was**, as words.
+ *
+ * The flagged option's stored body for Multiple Choice, the stored free-text
+ * answer for everything else. `null` is the one degradation: a stored segment
+ * array that no longer reads back, or a Multiple Choice row that somehow lost its
+ * flag. The caller renders the row and says the answer is unavailable — throwing
+ * would make a closed Attempt unreadable over a field nobody is being marked on.
+ */
+function correctAnswerTextOf(question: AnswerKeySource): RichText | null {
+  if (question.format === 'MultipleChoice') {
+    const flagged = question.choices.find((choice) => choice.isCorrect);
+    if (flagged === undefined) return null;
+    return isRichText(flagged.body) ? (flagged.body as RichText) : null;
+  }
+  return isRichText(question.answer) ? (question.answer as RichText) : null;
+}
+
+/**
+ * What the child **put down**, as words.
+ *
+ * `null` for a Question with no `Answer` row — the blank is the fact, and what a
+ * blank *means* is `grading`'s to say.
+ *
+ * For Multiple Choice the stored value is the chosen option's ordinal as a string,
+ * so it is matched against this Question's own options on the trimmed digits-only
+ * form and the option's **body** is what travels. A value that is no ordinal of
+ * this Question, or an ordinal no option carries, travels as the raw stored string:
+ * the child's own answer is the one thing this row must not invent, and the grader
+ * has already judged it.
+ *
+ * Free text travels as **one text segment**, exactly as stored. Nothing here parses
+ * a fraction out of it — a child's typed answer is not generated content, and a
+ * reading built here would be this module deciding what they meant.
+ *
+ * An ordinal that matches no option of this Question is not this degradation —
+ * it travels as the raw stored string, per the rule above. An ordinal that *does*
+ * match an option whose stored body no longer reads back is the degradation: it
+ * must not fall back to the raw digits, which would show the child a bare ordinal
+ * for an answer they did give.
+ */
+function studentAnswerTextOf(question: AnswerKeySource, value: string | null): RichText | null {
+  if (value === null) return null;
+  if (question.format === 'MultipleChoice') {
+    const trimmed = value.trim();
+    if (/^\d+$/u.test(trimmed)) {
+      const chosen = question.choices.find((choice) => choice.ordinal === Number(trimmed));
+      if (chosen !== undefined) return isRichText(chosen.body) ? (chosen.body as RichText) : null;
+    }
+  }
+  return [{ kind: 'text', value }];
 }
