@@ -517,6 +517,82 @@ export interface AttemptGradingInput {
   questions: GradingQuestionInput[];
 }
 
+/** One Question of an Attempt, with the raw labels generation emitted for it. */
+export interface MasteryContextQuestion {
+  questionId: string;
+  /**
+   * The free-form labels, exactly as stored and in stored order. Raw because
+   * canonicalizing them is the caller's job and `practicetest` must never do it:
+   * `Topic` is `topics`' table and the cascade that fills it is `topics`' (AD-11,
+   * AD-17).
+   */
+  labels: string[];
+}
+
+/**
+ * Everything canonicalizing and recomputing one Attempt's Topics needs, in one
+ * read.
+ *
+ * An **internal** read, like `AttemptGradingInput`, and for the same reason: Mastery
+ * is `grading`'s (AD-6) while `attempt`, `practice_test_question_topic` and the
+ * Source Test's classification are not, so the grader asks for this rather than
+ * acquiring three delegates it does not own. Not a response shape — no route reads
+ * Mastery at all in this story — and deliberately **not** a widening of
+ * `gradingInputFor`: that read is the answer key and every one of its callers grades
+ * with it, so adding a profile id and a Subject to it would make four fields travel
+ * on every hand-in for the sake of one path.
+ *
+ * `subjectId` is `null` for a Practice Test behind an unclassified Source Test.
+ * `isClassified` gates submission, so a released test always carries one in
+ * practice — but the column is nullable and a caller that assumed otherwise would
+ * canonicalize against `undefined` and mint a Topic under no Subject at all.
+ */
+export interface AttemptMasteryContext {
+  practiceTestId: string;
+  studentProfileId: string;
+  /** This Attempt's place in the child's runs at this test. What decides eligibility. */
+  ordinal: number;
+  /** The Subject the canonical Topic set is scoped by, or null if unclassified. */
+  subjectId: string | null;
+  questions: MasteryContextQuestion[];
+}
+
+/**
+ * One of a child's submitted Attempts, as the Mastery window rule needs it.
+ *
+ * `ordinal` rides along rather than being filtered here, because the predicate that
+ * decides which run counts is `grading/mastery-eligibility.ts`'s and is stated there
+ * and nowhere else. Applying it in this module would either duplicate the rule or
+ * reverse the module arrow — `grading -> practicetest` is never `practicetest ->
+ * grading` — so this read narrows to what it *can* state from its own columns (the
+ * work was handed in) and hands the ordinal over for the one predicate to judge.
+ */
+export interface SubmittedAttemptRow {
+  attemptId: string;
+  practiceTestId: string;
+  /** Never null: the read filters open Attempts out. */
+  submittedAt: Date;
+  /** Judged by `countsTowardMastery`, in `grading`, and never compared here. */
+  ordinal: number;
+}
+
+/**
+ * The three facts a Mastery recompute needs about the Attempt whose grade changed:
+ * whose run it is, which paper it was at, and which run it is.
+ *
+ * **One statement on `attempt` and nothing else**, which is the whole reason it is not
+ * `masteryContextFor`. That read resolves the Subject through `SOURCE_TEST_READER`,
+ * which runs on `sourcetest`'s own client — a second pooled connection taken while the
+ * caller's interactive transaction holds locks — and it loads every Question of the
+ * paper with its labels. The recompute path is inside that transaction and needs none
+ * of it, so it asks for exactly this instead.
+ */
+export interface AttemptMasteryKey {
+  practiceTestId: string;
+  studentProfileId: string;
+  ordinal: number;
+}
+
 /**
  * One Question of a handed-in Attempt as **the child reading their results**
  * sees it: the prompt, what they answered, and what the answer was.
@@ -1754,6 +1830,140 @@ export class PracticeTestService {
         answerValue: question.answers[0]?.value ?? null,
       })),
     };
+  }
+
+  /**
+   * What canonicalizing and recomputing one Attempt's Topics needs: whose run it
+   * is, which run it is, which Subject the canonical set is scoped by, and every
+   * Question's raw labels.
+   *
+   * **It is not an ownership proof and does not pretend to be one.** There is no
+   * account in the `where`, because every caller has already proved its entitlement
+   * — the hand-in closed the Attempt under both binding ids, the results read and
+   * the override both went through their own 404 first — and a second proof here
+   * would be a second place that proof could disagree with itself. It refuses
+   * nothing: an unknown id answers `null`, which the caller treats as nothing to
+   * tag and nothing to recompute rather than as a refusal, because this read runs
+   * beside work that is already committed and must never turn a committed hand-in
+   * into a 500.
+   *
+   * `tx` is required, exactly as on `gradingInputFor`: every caller is inside a
+   * transaction or is about to open one, and a read of its own would be a second
+   * snapshot of rows the caller is writing against.
+   *
+   * The Subject arrives through `SOURCE_TEST_READER`, one batched call over one id,
+   * because this module holds no `sourceTest` delegate and must not acquire one
+   * (AD-17). The **id** and not the label: a canonical Topic set is keyed by
+   * Subject, and a name is not a key.
+   *
+   * No grade, no answer, no score: none of those is a fact about which Topics a
+   * paper is on.
+   */
+  async masteryContextFor(
+    tx: TransactionClient,
+    attemptId: string,
+  ): Promise<AttemptMasteryContext | null> {
+    const attempt = await tx.attempt.findUnique({
+      where: { id: attemptId },
+      select: {
+        practiceTestId: true,
+        studentProfileId: true,
+        ordinal: true,
+        practiceTest: { select: { sourceTestId: true } },
+      },
+    });
+    if (attempt === null) return null;
+
+    const subjectIds = await this.sourceTests.readSubjectIds([attempt.practiceTest.sourceTestId]);
+
+    const questions = await tx.practiceTestQuestion.findMany({
+      where: { practiceTestId: attempt.practiceTestId },
+      orderBy: { ordinal: 'asc' },
+      select: { id: true, topics: { select: { label: true }, orderBy: { label: 'asc' } } },
+    });
+
+    return {
+      practiceTestId: attempt.practiceTestId,
+      studentProfileId: attempt.studentProfileId,
+      ordinal: attempt.ordinal,
+      // Absent from the map — a Source Test this reader cannot see — is treated
+      // exactly as an unclassified one: there is no Subject to scope a canonical set
+      // by either way, and the caller's one log line says the same thing about both.
+      subjectId: subjectIds.get(attempt.practiceTest.sourceTestId) ?? null,
+      questions: questions.map((question) => ({
+        questionId: question.id,
+        labels: question.topics.map((topic) => topic.label),
+      })),
+    };
+  }
+
+  /**
+   * Whose run one Attempt is, at which paper, and which run it is — and nothing else.
+   *
+   * **The recompute path's read, and deliberately not `masteryContextFor`.** It runs
+   * inside the caller's open transaction, where that read would be two faults at once:
+   * it resolves the Subject through `SOURCE_TEST_READER`, which runs on `sourcetest`'s
+   * own client and so takes a **second pooled connection while this transaction holds
+   * locks**, and it loads every Question of the paper with all of its labels. The
+   * recompute needs neither — the Subject only scopes canonicalization, which happened
+   * outside every transaction — so this is one statement on `attempt` and stops there.
+   *
+   * Not an ownership proof, for the reason `masteryContextFor` states: every caller has
+   * already proved its entitlement, and an unknown id answers `null` rather than
+   * refusing, because this runs beside work that is already committed.
+   */
+  async attemptMasteryKeyFor(
+    tx: TransactionClient,
+    attemptId: string,
+  ): Promise<AttemptMasteryKey | null> {
+    return tx.attempt.findUnique({
+      where: { id: attemptId },
+      select: { practiceTestId: true, studentProfileId: true, ordinal: true },
+    });
+  }
+
+  /**
+   * Every submitted Attempt of one child, newest first, for the Mastery window to
+   * choose five from — **every** one of them, retakes included.
+   *
+   * Named for what it returns rather than for what its caller wants: which run counts
+   * toward Mastery is `grading/mastery-eligibility.ts`'s one predicate, applied by
+   * `grading` to the `ordinal` this hands over, so a name promising "qualifying" rows
+   * would be a second, silent statement of that rule living in the wrong module.
+   *
+   * **`(submittedAt desc, id desc)` and never `submittedAt` alone.** The column is
+   * `TIMESTAMP(3)`, so two Attempts handed in within the same millisecond tie — and
+   * on a tie the order is Postgres's choice, which would make two recomputes over
+   * identical rows answer differently. The id breaks it, exactly as
+   * `topic.service.ts`'s candidate read does on `createdAt`.
+   *
+   * Open Attempts are filtered out here, in SQL, because "was it handed in" is a fact
+   * about this module's own column. Which *run* counts is not: that is
+   * `grading/mastery-eligibility.ts`'s one predicate, so the ordinal is returned
+   * rather than compared, and the arrow stays `grading -> practicetest`.
+   *
+   * Uncapped deliberately. The window is five Attempts *that included the Topic*, and
+   * which those are is not knowable from this table — so a `take` here would silently
+   * hide a child's fractions history behind five recent papers about something else.
+   * The rows are three columns each and one child's runs are tens of them.
+   */
+  async submittedAttemptsFor(
+    tx: TransactionClient,
+    studentProfileId: string,
+  ): Promise<SubmittedAttemptRow[]> {
+    const rows = await tx.attempt.findMany({
+      where: { studentProfileId, submittedAt: { not: null } },
+      orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, practiceTestId: true, submittedAt: true, ordinal: true },
+    });
+    return rows.map((row) => ({
+      attemptId: row.id,
+      practiceTestId: row.practiceTestId,
+      // Non-null by the `where` above. Asserted rather than defaulted: a default
+      // would invent an instant the window would then order by.
+      submittedAt: row.submittedAt as Date,
+      ordinal: row.ordinal,
+    }));
   }
 
   /**

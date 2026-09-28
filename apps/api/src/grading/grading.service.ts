@@ -10,7 +10,10 @@ import {
   type AttemptSubmissionView,
   type GradingQuestionInput,
 } from '../practicetest/practice-test.service.js';
+import { TopicService } from '../topics/topic.service.js';
 import { buildGradingPrompt, type GradingPromptQuestion } from './grading-prompt.js';
+import { countsTowardMastery } from './mastery-eligibility.js';
+import { hasEvidence, masteryFrom, masteryWindowOf } from './mastery.js';
 import { runsOf, type PracticeTestRunsView } from './grading-history.js';
 import { answerKeyRows, type AttemptResultsView } from './grading-results.js';
 import { effectiveStateOf, overrideDecision } from './grading-override.js';
@@ -112,9 +115,13 @@ function isFreeText(question: GradingQuestionInput): boolean {
  * the server judged expired, `Unanswered` for a blank on a manual hand-in, and
  * `Ungraded` only where grading *failed*.
  *
- * No Mastery recompute: FR-26 is Epic 7's, and AD-10's "recompute inside the
- * transaction that changed a grade" is satisfied here by there being nothing yet to
- * recompute.
+ * It is also the sole owner and sole writer of the canonical Topic tag and of stored
+ * Mastery (`recomputeMastery` below). AD-10 is honoured literally: each of the three
+ * statements that can change a grade — the hand-in's verdict write, a results read
+ * that resolves an `Ungraded`, a parent's override — recomputes from the window inside
+ * the very transaction that wrote the change, so the figure and the grades it is over
+ * are one commit. Canonicalization is asked of `topics` and never performed here, and
+ * it always runs outside a transaction.
  */
 @Injectable()
 export class GradingService {
@@ -124,6 +131,10 @@ export class GradingService {
     private readonly prisma: PrismaService,
     private readonly practiceTests: PracticeTestService,
     private readonly ai: AiService,
+    // `topics`' sole writer of `Topic`, and the only entry point the AD-11 cascade
+    // has. The arrow is `grading -> topics`: canonicalization is asked for here and
+    // is never performed here.
+    private readonly topics: TopicService,
   ) {}
 
   /**
@@ -226,12 +237,28 @@ export class GradingService {
     // dropped connection or a fault class nobody anticipated would not be, so the
     // whole of it is guarded rather than the parts of it that were foreseen.
     try {
+      // **Canonicalization sits here, beside the provider call and outside both
+      // transactions**, which is the one region it can sit in: `normalize` makes
+      // provider calls and may not run inside a transaction at all, and this region's
+      // documented rule is that nothing may throw. It swallows every fault itself.
+      await this.tagTopicsFor(parentAccountId, attemptId);
+
       const asked = input.questions.filter((question) => askable(question));
       if (asked.length > 0) {
         const verdicts = await this.judge(parentAccountId, attemptId, asked);
-        await this.prisma.withTransaction((tx) =>
-          this.writeGuarded(tx, attemptId, rowsFromVerdicts(asked, verdicts)),
-        );
+        await this.prisma.withTransaction(async (tx) => {
+          await this.writeGuarded(tx, attemptId, rowsFromVerdicts(asked, verdicts));
+          // **The recompute rides the last transaction that writes a grade for this
+          // request** (AD-10), so the figure a parent can read is never newer than
+          // the grades it is over — and a rollback here takes both.
+          await this.recomputeMasteryForAttempt(tx, attemptId);
+        });
+      } else {
+        // No free-text Question to ask about, so the last transaction that wrote a
+        // grade was the one that closed the Attempt — and the tags did not exist yet
+        // when it committed. Its own immediately-following transaction, therefore,
+        // rather than a recompute inside a transaction that ran before the tags.
+        await this.prisma.withTransaction((tx) => this.recomputeMasteryForAttempt(tx, attemptId));
       }
     } catch (cause) {
       // The Attempt and the class of fault. Never a Question, an answer, a
@@ -309,6 +336,14 @@ export class GradingService {
     // race on the unique index, a dropped connection or a fault class nobody
     // anticipated would not be, so the whole of it is guarded rather than the parts
     // that were foreseen.
+    // Canonicalization, outside every transaction and swallowing every fault, for the
+    // reason `submitAttempt` states. It runs on **every** results read and not only
+    // on the first: tagging is idempotent by its unique index, a label already
+    // canonicalized is answered by stage 1 of the cascade with no provider call at
+    // all, and a label whose normalization failed at hand-in has no other retry —
+    // there is no queue and nothing polls, so the next read is the retry.
+    await this.tagTopicsFor(scope.parentAccountId, attemptId);
+
     let newlyGradedQuestionIds: string[] = [];
     if (outstanding.length > 0) {
       try {
@@ -321,15 +356,32 @@ export class GradingService {
         // Only what this pass actually turned into a verdict: a row it left
         // `Ungraded`, and a row it declined to overwrite, are neither of them newly
         // graded.
-        newlyGradedQuestionIds = await this.prisma.withTransaction((tx) =>
-          this.writeGuarded(tx, attemptId, rows),
-        );
+        newlyGradedQuestionIds = await this.prisma.withTransaction(async (tx) => {
+          const written = await this.writeGuarded(tx, attemptId, rows);
+          // The last transaction that writes a grade for this request, so the figure
+          // and the verdicts it is over commit together (AD-10).
+          await this.recomputeMasteryForAttempt(tx, attemptId);
+          return written;
+        });
       } catch (cause) {
         // The Attempt and the class of fault. Never a Question, an answer, a
         // rationale or a word the model wrote (AD-20). Those Questions are left
         // exactly as they were — outstanding, not lost — for the next read to try.
         this.logger.error(
           `resolveUngraded for attempt ${attemptId} failed (${faultNameOf(cause)}); its outstanding questions are left unjudged.`,
+        );
+      }
+    } else {
+      // Nothing outstanding to ask about, so the grades this Mastery is over were
+      // written by an earlier request — but the tags may have only just arrived, or
+      // this may be the read that first resolved a label. Its own transaction,
+      // therefore, and guarded for the reason the branch above is: a results read
+      // whose recompute failed must still answer.
+      try {
+        await this.prisma.withTransaction((tx) => this.recomputeMasteryForAttempt(tx, attemptId));
+      } catch (cause) {
+        this.logger.error(
+          `The mastery recompute for attempt ${attemptId} failed (${faultNameOf(cause)}); its stored figures are left as they were.`,
         );
       }
     }
@@ -685,6 +737,14 @@ export class GradingService {
     // still open all answer the one shared sentence before a grade row is read (AD-18).
     await this.practiceTests.attemptProfileFor(scope.parentAccountId, attemptId);
 
+    // Canonicalization **before** the transaction opens and never inside it: it makes
+    // provider calls, and a transaction held open around one is a row lock held for
+    // the length of an outage. It swallows every fault itself, so a provider outage
+    // costs the tags and never the parent's decision. Ordinarily there is nothing left
+    // to do here — the hand-in tagged this paper — and stage 1 of the cascade answers
+    // each label with a lookup and no call.
+    await this.tagTopicsFor(scope.parentAccountId, attemptId);
+
     await this.prisma.withTransaction(async (tx) => {
       // Read inside the transaction, so the decision below is made against the row the
       // write lands on rather than against a snapshot from before it opened.
@@ -746,13 +806,17 @@ export class GradingService {
       });
       scoreOf(committed.map((row) => effectiveStateOf(row)));
 
-      // **The Mastery recompute seam, and it is here on purpose.** AD-10 puts the
-      // recompute of whatever a grade changes inside the transaction that changed it,
-      // and an override changes a grade — so this is the second trigger, beside the
-      // hand-in. FR-26 and every Mastery figure are Epic 7's: there is no Mastery table
-      // and nothing yet to recompute, which is exactly what
-      // `mastery-eligibility.ts` records for the hand-in. When Epic 7 writes one, the
-      // call goes on this line, inside this transaction, and not on a queue.
+      // **The Mastery recompute, and it is here on purpose.** AD-10 puts the recompute
+      // of whatever a grade changes inside the transaction that changed it, and an
+      // override changes a grade — so this is the second trigger, beside the hand-in.
+      // The flip and the figure that follows from it commit together, so no reader can
+      // see one without the other and a rollback takes both. Not on a queue, not on a
+      // timer, and not derived at read time.
+      //
+      // It exits before any read on a retake: which run counts is still decided by
+      // which run it is, and a parent adjusting a grade on a later run does not promote
+      // that run to the one that counts.
+      await this.recomputeMasteryForAttempt(tx, attemptId);
     });
 
     // The Attempt, the Question and which way. Never the Question's content, the child's
@@ -950,7 +1014,324 @@ export class GradingService {
     return runsOf(runs, statesByAttempt);
   }
 
+  /**
+   * Recomputes the stored Mastery of the given Topics for one child, from scratch,
+   * inside the caller's transaction.
+   *
+   * **The one recompute path, and public on purpose.** Every trigger that can change
+   * a grade calls exactly this — the hand-in's verdict write, a results read that
+   * resolves an `Ungraded`, a parent's override — and AD-12 requires Story 7.6's
+   * Topic merge to re-point tags and then reuse this same path rather than grow a
+   * second one. A second implementation would be a second window definition and a
+   * second formula, and the two would disagree the first time either was tuned.
+   *
+   * **From the window, never incremented** (AD-6). Nothing here reads the stored row
+   * before writing it: every figure is recounted from the five most recent qualifying
+   * Attempts that included the Topic, so a lost update, a replayed trigger and a
+   * grade that changed twice all converge on the same answer. An increment would be a
+   * running total that could only ever drift.
+   *
+   * **`tx` comes from the caller**, because AD-10 puts the recompute inside the
+   * transaction that wrote the grade change: the flip and the figure that follows
+   * from it commit together, so no reader can see one without the other and a
+   * rollback takes both. It is a parameter and not a transaction opened here for
+   * exactly that reason.
+   *
+   * Three reads and then pure arithmetic: the child's submitted Attempts, this
+   * story's tags for the Topics in question, and — once the windows are settled and
+   * can narrow it — the grades of the window's Attempts on the tagged Questions alone.
+   * No `normalize` call and no provider call at all: the canonical tag was resolved
+   * once, when the paper was handed in, which is what makes this safe inside a
+   * transaction.
+   *
+   * A Topic left with no evidence — every tagged Question of its window `Ungraded` or
+   * row-less, or no qualifying Attempt including it at all — has its row **deleted**
+   * rather than stored as `0/0`, so Story 7.4's empty state stays distinguishable
+   * from a real zero.
+   */
+  async recomputeMastery(
+    tx: TransactionClient,
+    studentProfileId: string,
+    topicIds: readonly string[],
+  ): Promise<void> {
+    const topics = [...new Set(topicIds)];
+    if (topics.length === 0) return;
+
+    // Which of the child's runs count at all: handed in, and a first run. The
+    // ordinal is judged by the one predicate rather than compared here — `1` never
+    // appears as a literal on this path.
+    const qualifying = (await this.practiceTests.submittedAttemptsFor(tx, studentProfileId)).filter(
+      (attempt) => countsTowardMastery(attempt.ordinal),
+    );
+
+    // No qualifying run at all still runs the loop below: every Topic comes out with
+    // no evidence, which is a delete, which is exactly right for a child whose only
+    // graded work has since been removed.
+    const tags =
+      qualifying.length === 0
+        ? []
+        : await tx.questionTopic.findMany({
+            where: {
+              topicId: { in: topics },
+              practiceTestId: { in: [...new Set(qualifying.map((a) => a.practiceTestId))] },
+            },
+            select: { topicId: true, questionId: true, practiceTestId: true },
+          });
+
+    // Tags grouped two ways, because the window rule and the counting rule ask two
+    // different questions: "which papers mention this Topic" and "which Questions of
+    // this paper are on it".
+    const testIdsByTopic = new Map<string, Set<string>>();
+    const questionIdsByTopicAndTest = new Map<string, string[]>();
+    for (const tag of tags) {
+      const testIds = testIdsByTopic.get(tag.topicId);
+      if (testIds === undefined) testIdsByTopic.set(tag.topicId, new Set([tag.practiceTestId]));
+      else testIds.add(tag.practiceTestId);
+
+      const key = topicTestKey(tag.topicId, tag.practiceTestId);
+      const questionIds = questionIdsByTopicAndTest.get(key);
+      if (questionIds === undefined) questionIdsByTopicAndTest.set(key, [tag.questionId]);
+      else questionIds.push(tag.questionId);
+    }
+
+    // **The windows are settled before a single grade is read**, because they are what
+    // narrows that read. A child who has sat forty papers has forty qualifying
+    // Attempts and at most five per Topic in scope, so reading grades by the
+    // qualifying set would grow without bound as they work — inside a transaction
+    // they are waiting on — to fetch rows the arithmetic then throws away.
+    const windowByTopic = new Map<string, ReturnType<typeof masteryWindowOf>>();
+    const windowAttemptIds = new Set<string>();
+    const taggedQuestionIds = new Set<string>();
+    for (const topicId of topics) {
+      const window = masteryWindowOf(qualifying, testIdsByTopic.get(topicId) ?? new Set());
+      windowByTopic.set(topicId, window);
+      for (const attempt of window) {
+        windowAttemptIds.add(attempt.attemptId);
+        for (const questionId of questionIdsByTopicAndTest.get(
+          topicTestKey(topicId, attempt.practiceTestId),
+        ) ?? []) {
+          taggedQuestionIds.add(questionId);
+        }
+      }
+    }
+
+    // One statement for every Topic rather than one per Topic: the Topics of one paper
+    // overlap heavily, and a read per Topic would be N round trips in the same
+    // transaction. Narrowed on **both** axes — the Attempts that survived the window,
+    // and the Questions actually tagged with one of these Topics — so nothing comes
+    // back that no count is over.
+    const grades =
+      windowAttemptIds.size === 0 || taggedQuestionIds.size === 0
+        ? []
+        : await tx.questionGrade.findMany({
+            where: {
+              attemptId: { in: [...windowAttemptIds] },
+              questionId: { in: [...taggedQuestionIds] },
+            },
+            select: {
+              attemptId: true,
+              questionId: true,
+              state: true,
+              overrideState: true,
+            },
+          });
+    const effectiveByRef = new Map(
+      grades.map((row) => [refKey(row.attemptId, row.questionId), effectiveStateOf(row)]),
+    );
+
+    for (const topicId of topics) {
+      const window = windowByTopic.get(topicId) ?? [];
+      const states: (GradeState | null)[] = [];
+      for (const attempt of window) {
+        const questionIds =
+          questionIdsByTopicAndTest.get(topicTestKey(topicId, attempt.practiceTestId)) ?? [];
+        for (const questionId of questionIds) {
+          // A Question with no row is pushed as null, which `masteryFrom` treats
+          // exactly as `Ungraded`: the two are one fact, and a Mastery that told them
+          // apart would count a different denominator than the retry path works from.
+          states.push(effectiveByRef.get(refKey(attempt.attemptId, questionId)) ?? null);
+        }
+      }
+
+      const counts = masteryFrom(states);
+      if (!hasEvidence(counts)) {
+        // `deleteMany` and not `delete`: there is nothing to delete for a Topic that
+        // never had a row, and that is the ordinary case rather than an error.
+        await tx.topicMastery.deleteMany({ where: { studentProfileId, topicId } });
+        continue;
+      }
+
+      // An upsert on the unique pair, so no reader can observe the gap a
+      // delete-then-insert would leave. `attemptsCounted` is how many Attempts the
+      // window held: fewer than five is a child who has sat fewer, not a gap.
+      const row = { ...counts, attemptsCounted: window.length };
+      try {
+        await tx.topicMastery.upsert({
+          where: { studentProfileId_topicId: { studentProfileId, topicId } },
+          create: { studentProfileId, topicId, ...row },
+          update: row,
+        });
+      } catch (cause) {
+        // **A concurrent first recompute is a loser on the index, and losing must not
+        // abort a grade change.** Prisma's upsert is a read-then-write, so two
+        // transactions computing this pair's first row both find nothing and both
+        // insert — two parent tabs overriding two Questions of one paper is enough.
+        // The loser's P2002 would otherwise take the parent's flip down with it, so it
+        // falls through to the update the winner's row now admits. Every figure here
+        // is recomputed from the window rather than incremented, so both statements
+        // write the same values and the order they land in does not matter.
+        if (!isUniqueViolation(cause)) throw cause;
+        await tx.topicMastery.update({
+          where: { studentProfileId_topicId: { studentProfileId, topicId } },
+          data: row,
+        });
+      }
+    }
+  }
+
   // --- Internals ---------------------------------------------------------
+
+  /**
+   * Resolves the canonical Topic of every label on one Attempt's paper, and writes
+   * the tags.
+   *
+   * **It runs outside every transaction and it never throws.** `normalize` makes
+   * provider calls — an embedding, then possibly a structured-output call — which
+   * take seconds and are retried; a transaction held open around one is a row lock
+   * held for the length of an outage, which is why `topic.service.ts`'s own doc
+   * forbids it. And the region it runs in is the region whose documented rule is that
+   * nothing may throw: the hand-in is already committed and a parent's override is
+   * about to be, so a provider outage must cost the tags and never the answer. Every
+   * fault class is swallowed, per label and again around the whole of it.
+   *
+   * **A partial result is kept.** The labels that did resolve are tagged even when a
+   * sibling label's normalization failed, because a later results read calls this
+   * again and completes what is missing — there is no queue and nothing polls, so the
+   * next read *is* the retry.
+   *
+   * Two early exits, and both are silent about content. A Practice Test behind an
+   * unclassified Source Test has no Subject to scope a canonical set by, so nothing
+   * is tagged and one log line names the Practice Test. A retake is excluded by
+   * `countsTowardMastery`, so its labels are never resolved at all — a run that can
+   * never contribute to Mastery must not spend a provider call.
+   *
+   * Idempotent by the unique index rather than by a check: `createMany` with
+   * `skipDuplicates` means a second read, a concurrent one, and two labels on one
+   * Question that canonicalize to the same Topic all come to one row.
+   */
+  private async tagTopicsFor(parentAccountId: string, attemptId: string): Promise<void> {
+    try {
+      // `this.prisma` and not a transaction client, deliberately: there is no
+      // transaction here, and there must not be one.
+      const context = await this.practiceTests.masteryContextFor(this.prisma, attemptId);
+      // An Attempt that no longer resolves. Nothing to tag, and not a fault worth a
+      // line: the caller is running beside work that is already committed.
+      if (context === null) return;
+      // A retake's labels are never resolved: it can never contribute to Mastery, so
+      // canonicalizing its paper would be provider calls spent on nothing.
+      if (!countsTowardMastery(context.ordinal)) return;
+      if (context.subjectId === null) {
+        // The Practice Test id and the class of fault, and nothing else — never a
+        // label, a Topic name or a Question (AD-20).
+        this.logger.warn(
+          `Practice test ${context.practiceTestId} sits behind an unclassified source test; its topics are not canonicalized.`,
+        );
+        return;
+      }
+      const { subjectId } = context;
+
+      // **Distinct labels, resolved once each.** A paper of twenty Questions on four
+      // Topics spells the same four labels twenty times, and normalizing per
+      // occurrence would be sixteen provider calls bought for nothing.
+      const labels = [...new Set(context.questions.flatMap((question) => question.labels))];
+      const topicIdByLabel = new Map<string, string>();
+      for (const label of labels) {
+        try {
+          topicIdByLabel.set(
+            label,
+            await this.topics.normalize({ label, subjectId, parentAccountId }),
+          );
+        } catch (cause) {
+          // The class of fault alone. Never the label — a generated Topic name is
+          // content (AD-20) — and never a throw: the labels that did resolve are
+          // still worth tagging, and the next results read re-asks for this one.
+          this.logger.warn(
+            `A topic label of attempt ${attemptId} could not be canonicalized (${faultNameOf(cause)}); it is left untagged.`,
+          );
+        }
+      }
+
+      const rows = context.questions.flatMap((question) =>
+        [...new Set(question.labels)]
+          .map((label) => topicIdByLabel.get(label))
+          .filter((topicId): topicId is string => topicId !== undefined)
+          .map((topicId) => ({
+            questionId: question.questionId,
+            practiceTestId: context.practiceTestId,
+            topicId,
+          })),
+      );
+      if (rows.length === 0) return;
+      // `skipDuplicates` rather than a read-then-write: the unique index is the
+      // guard, so a second pass over the same paper writes nothing and two labels
+      // that canonicalized to one Topic come to one row. Duplicates within `rows`
+      // are absorbed by the same index.
+      await this.prisma.questionTopic.createMany({ data: rows, skipDuplicates: true });
+    } catch (cause) {
+      // The Attempt and the class of fault. The whole of it is guarded rather than
+      // the parts that were foreseen, for the reason `submitAttempt`'s own guard
+      // states: a lost race, a dropped connection or a fault class nobody
+      // anticipated must not answer a child 500 for work the server kept.
+      this.logger.error(
+        `Canonicalizing the topics of attempt ${attemptId} failed (${faultNameOf(cause)}); no tag was written for it.`,
+      );
+    }
+  }
+
+  /**
+   * Recomputes the Mastery every Topic of one Attempt's paper feeds, inside the
+   * caller's transaction.
+   *
+   * The adapter between "a grade on this Attempt changed" and `recomputeMastery`'s
+   * "these Topics of this child": it resolves whose run it is, which run it is, and
+   * which Topics the paper is tagged with, and then calls the one path.
+   *
+   * **It exits before any read on a retake**, which is the whole of the retake rule:
+   * a later run is excluded by `countsTowardMastery` rather than by a filter at each
+   * call site, so handing in a retake, resolving one of its `Ungraded` rows and
+   * overriding one of its grades all change no Mastery row at all.
+   *
+   * Reads the tags of the paper rather than being told them, because what a Question
+   * is about is a stored fact and a caller that passed a list would be a second place
+   * that list could be wrong. A paper with no tags — nothing generated a label, or
+   * every label's normalization failed — recomputes nothing, which is correct: there
+   * is no Topic for the evidence to be about.
+   *
+   * **`attemptMasteryKeyFor` and not `masteryContextFor`**: this runs inside the
+   * caller's transaction, and that read would take a second pooled connection through
+   * `sourcetest` while this one holds locks, for a Subject nothing here reads.
+   */
+  private async recomputeMasteryForAttempt(
+    tx: TransactionClient,
+    attemptId: string,
+  ): Promise<void> {
+    const key = await this.practiceTests.attemptMasteryKeyFor(tx, attemptId);
+    if (key === null) return;
+    if (!countsTowardMastery(key.ordinal)) return;
+
+    const tagged = await tx.questionTopic.findMany({
+      where: { practiceTestId: key.practiceTestId },
+      select: { topicId: true },
+      distinct: ['topicId'],
+    });
+    if (tagged.length === 0) return;
+
+    await this.recomputeMastery(
+      tx,
+      key.studentProfileId,
+      tagged.map((tag) => tag.topicId),
+    );
+  }
 
   /**
    * One batched `Grading` call, re-issued while the post-hoc pass keeps rejecting
@@ -1148,6 +1529,18 @@ function correctAnswerOf(question: GradingQuestionInput): string {
 /** One `(Attempt, Question)` pair as a single map key. Two ids, one lookup. */
 function refKey(attemptId: string, questionId: string): string {
   return `${attemptId}:${questionId}`;
+}
+
+/**
+ * One `(Topic, Practice Test)` pair as a single map key.
+ *
+ * Its own function beside `refKey` rather than that one reused: the two compose
+ * different pairs, and a single "two ids, one string" helper would let a key built
+ * from one pair be looked up in a map keyed by the other without a word of
+ * complaint from the compiler.
+ */
+function topicTestKey(topicId: string, practiceTestId: string): string {
+  return `${topicId}:${practiceTestId}`;
 }
 
 /**

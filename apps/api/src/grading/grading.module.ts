@@ -6,6 +6,7 @@ import { IdentityModule } from '../identity/identity.module.js';
 import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
 import { StudentModeGuard } from '../identity/student-mode.guard.js';
 import { PracticeTestModule } from '../practicetest/practice-test.module.js';
+import { TopicsModule } from '../topics/topics.module.js';
 import { GradingService } from './grading.service.js';
 import { ParentAttemptController } from './parent-attempt.controller.js';
 import { ParentGradeDisputesController } from './parent-grade-disputes.controller.js';
@@ -30,6 +31,12 @@ import { StudentAttemptController } from './student-attempt.controller.js';
  * `requireParentJwtSecret()` (AD-25). The same arrangement `practice-test.module.ts`
  * makes, for the same reason.
  *
+ * **`TopicsModule`, for the one thing Mastery may not do itself.** A generated label
+ * is canonicalized by `TopicService.normalize` and by nothing else (AD-11), so the
+ * arrow is `grading -> topics` and `Topic` stays a table this module never writes.
+ * It is imported here rather than reached for lazily so that boot fails — rather
+ * than the first hand-in drifting — if the cascade is unreachable.
+ *
  * **`AiModule` and no allowance module.** A provider call is made here now, as its
  * own call class (`Grading`), with its own pin and its own price — and it is
  * **never gated by an allowance**: an unaffordable grade would be a child punished
@@ -44,6 +51,7 @@ import { StudentAttemptController } from './student-attempt.controller.js';
     }),
     IdentityModule,
     PracticeTestModule,
+    TopicsModule,
     AiModule,
   ],
   // `ParentGradeDisputesController` is its own controller because it is its own

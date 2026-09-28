@@ -14,23 +14,21 @@
  * grade means, not a rule about how an Attempt is stored.
  *
  * Pure and dependency-free, so the rule is assertable without a database, without a
- * provider and without a Mastery table — which does not exist yet and is not this
- * story's to write.
+ * provider and without a Mastery table.
  *
- * **Two triggers will call Epic 7's recompute, and both from inside a transaction.**
- * AD-10 puts the recompute of whatever a grade changes inside the transaction that
- * changed it, and there are exactly two statements in this system that change one:
+ * **Every trigger calls the recompute from inside a transaction.** AD-10 puts the
+ * recompute of whatever a grade changes inside the transaction that changed it, and
+ * these are the statements in this system that change one:
  *
  * 1. **Handing in** (`submitAttempt`), which writes every verdict a paper comes to.
  * 2. **A parent's override** (`overrideGrade`, Story 6.5), which changes what one
  *    Question counts as and therefore what the Attempt's score is.
+ * 3. **A results read** (`resolveUngraded`), which re-asks for the Questions nothing
+ *    judged and writes the verdicts that come back.
  *
- * Both already read the recomputed score back **inside** the transaction that wrote the
- * change, and both carry the seam on that line. Nothing yet recomputes because there is
- * nothing to recompute: FR-26 and every Mastery figure are Epic 7's, so what this story
- * owes Epic 7 is that the seam is one line in one unit of work per trigger, not a queue,
- * not a timer and not a read-time derivation — and that "which run counts" is already
- * decided below.
+ * All three call `GradingService.recomputeMastery` inside their own transaction — one line in one unit
+ * of work per trigger, never a queue, a timer or a read-time derivation — and "which run
+ * counts" is decided below and nowhere else.
  *
  * The override does not widen `countsTowardMastery`: which run counts is still decided by
  * *which run it is*, and a parent adjusting a grade on a retake does not promote that

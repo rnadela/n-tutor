@@ -870,6 +870,35 @@ export class SourceTestService implements SourceTestReader {
   }
 
   /**
+   * The Subject id of each given Source Test, keyed by Source Test id.
+   *
+   * One statement and no taxonomy call: the column *is* the answer, so unlike
+   * `readSubjectLabels` there is nothing to resolve, nothing that can throw and
+   * nothing to degrade. A disabled Subject answers with its id unchanged, because a
+   * stored reference resolves for as long as it is stored — a Subject retired after a
+   * test was classified must not cost a child their Mastery history.
+   *
+   * Its caller is `grading`, through `practicetest`, on the canonicalization path:
+   * AD-11's canonical Topic set is scoped by Subject, and a Subject *name* is not a
+   * key. An id this reader cannot see is **absent** from the map, which is how the
+   * caller tells "no classification" (`null`) from "no such row".
+   */
+  async readSubjectIds(sourceTestIds: readonly string[]): Promise<Map<string, string | null>> {
+    const subjectIds = new Map<string, string | null>();
+    const ids = [...new Set(sourceTestIds)];
+    if (ids.length === 0) return subjectIds;
+
+    const rows = await this.prisma.sourceTest.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, subjectId: true },
+    });
+    for (const row of rows) {
+      subjectIds.set(row.id, row.subjectId);
+    }
+    return subjectIds;
+  }
+
+  /**
    * The Grade Level name of each given Source Test, keyed by Source Test id.
    *
    * `readSubjectLabels`'s sibling, written the same way and for the same reason

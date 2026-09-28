@@ -1869,3 +1869,59 @@ source_spec: `spec-7-1-topic-canonicalization.md`
 severity: medium
 reason: topic-normalization.int-spec.ts's only over-the-cap test ("caps the stage-3 candidate list and offers the strongest candidates first") gives every filler and the target Topic a real embedding, so embedded is never null in that test. The two tests that do produce embedded === null each use only 1-2 candidates, well under TOPIC_CANDIDATE_LIMIT, so the newest-first ordering never determines what gets dropped. A regression in that branch's tiebreak (e.g. reverting to oldest-first, the same class of bug the first review pass already fixed for the cosine-ranked branch) would ship undetected and could silently drop a Subject's newest Topics from the stage-3 offer, minting duplicates for concepts already present but excluded by the cap.
 status: open
+
+### DW-235: The Mastery recompute reads a child's whole submitted-Attempt history on every grade change, with no cap and no time bound.
+origin: spec-deferred 828270d47acf
+location: apps/api/src/practicetest/practice-test.service.ts (submittedAttemptsFor)
+source_spec: `spec-7-2-mastery-computation.md`
+severity: medium
+reason: `PracticeTestService.submittedAttemptsFor` deliberately has no `take` and no lower `submittedAt` bound, because the per-Topic window can only be taken after the Attempts are filtered to the papers that mention each Topic. The row set is small per read (three columns), but it grows for the life of a Student Profile and is read inside the transaction a child's hand-in is waiting on. A cap would need a rule for "old enough that no Topic's five newest can be there", which this story has no basis to choose.
+status: open
+
+### DW-236: A label that can never canonicalize is re-normalized on every results read, forever, with no negative cache and no backoff.
+origin: spec-deferred c3764b039c24
+location: apps/api/src/grading/grading.service.ts (resolveUngraded -> tagTopicsFor)
+source_spec: `spec-7-2-mastery-computation.md`
+severity: medium
+reason: `resolveUngraded` calls `tagTopicsFor` unconditionally so that a label whose normalization failed at hand-in is retried — there is no queue, so the next read is the retry. For a label that resolves, the retry costs one stage-1 lookup. For one that cannot (a provider outage that persists, or a label the cascade keeps refusing), it costs a provider call on every page view of that Attempt's results, unbounded. Nothing records that a label was already tried and failed.
+status: open
+
+### DW-237: recomputeMastery's own question_topic read is unbounded across a child's whole qualifying-Attempt history, independent of the already-deferred Attempt-history read.
+origin: spec-deferred 70f53728e113
+location: apps/api/src/grading/grading.service.ts (recomputeMastery)
+source_spec: `spec-7-2-mastery-computation.md`
+severity: medium
+reason: `tx.questionTopic.findMany` is scoped to `practiceTestId: { in: [...qualifying practice test ids] } }` — every qualifying Attempt the child has ever submitted, not the window — because the per-Topic window can only be taken after tags are read. This grows with the child's whole history the same way the deferred `submittedAttemptsFor` read does, and runs inside the same hot transaction.
+status: open
+
+### DW-238: Distinct topic labels on one paper are normalized sequentially, not in parallel, inside the hand-in/override request's own latency.
+origin: spec-deferred 643d6d1235a1
+location: apps/api/src/grading/grading.service.ts (tagTopicsFor)
+source_spec: `spec-7-2-mastery-computation.md`
+severity: low
+reason: `tagTopicsFor` awaits `topics.normalize` once per distinct label in a `for...of` loop rather than `Promise.all`. A paper with many distinct labels serializes that many embedding/LLM round trips directly into the child's or parent's request latency.
+status: open
+
+### DW-239: A Practice Test behind a Source Test that will never be classified logs a warning on every trigger that touches it, forever, with no negative cache.
+origin: spec-deferred 146ce174c8ba
+location: apps/api/src/grading/grading.service.ts (tagTopicsFor)
+source_spec: `spec-7-2-mastery-computation.md`
+severity: low
+reason: `tagTopicsFor`'s `subjectId === null` early exit logs unconditionally and is called from every hand-in, every results read and every override on that Attempt. For a Source Test that is structurally never going to be classified, this is the same "retried forever, no negative cache" shape as the already-deferred label-canonicalization item, but for a different and more permanent trigger.
+status: open
+
+### DW-240: TopicMastery rows are never invalidated by a structural deletion of a Question or its tags outside of a grade-changing trigger.
+origin: spec-deferred 4a9ed8a804ec
+location: apps/api/src/grading/grading.service.ts (recomputeMastery triggers)
+source_spec: `spec-7-2-mastery-computation.md`
+severity: medium
+reason: Both new tables cascade on delete, but nothing recomputes a TopicMastery row when a Question (and its QuestionTopic tags) is deleted independently of the three grade-changing triggers this story wires. If no further grade event ever touches that (student, topic) pair, a stale Mastery value can persist with no recompute path to catch it. This is a consequence of the story's trigger set (AD-10) rather than a defect in it — deletion is not one of the three named triggers — but the residual staleness risk has no owner.
+status: open
+
+### DW-241: The topicMastery upsert's unique-violation fallback assumes the row it lost the insert race on still exists; a concurrent delete between the two leaves it unhandled.
+origin: spec-deferred d711549372f8
+location: apps/api/src/grading/grading.service.ts (recomputeMastery, topicMastery upsert)
+source_spec: `spec-7-2-mastery-computation.md`
+severity: low
+reason: On `P2002` the code falls through to `tx.topicMastery.update(...)` on the same pair, which assumes the winner's row is still there. A third, concurrent recompute for the same (studentProfileId, topicId) that lands `hasEvidence(counts) === false` between this transaction's failed insert and its fallback update would delete that row first, so the fallback update hits nothing (Prisma `P2025`) and is not classified the way `P2002` is — the whole grade-change transaction would fail instead of falling through again. Narrow (needs three transactions racing the same pair with opposite evidence outcomes) and not covered by the story's I/O matrix.
+status: open

@@ -37,6 +37,7 @@ import { STUDENT_MODE_AUDIENCE, STUDENT_MODE_COOKIE } from '../src/identity/stud
 import { MailDispatchError, MailService } from '../src/mail/mail.service.js';
 import { AiService } from '../src/ai/ai.service.js';
 import { TopicService } from '../src/topics/topic.service.js';
+import { GradingService } from '../src/grading/grading.service.js';
 import { ExtractionRunner } from '../src/extraction/extraction.runner.js';
 import { PracticeTestRunner } from '../src/practicetest/practice-test.runner.js';
 import type { AiFakeFailure } from '../src/ai/ai-config.js';
@@ -72,6 +73,13 @@ export interface Harness {
    * no route: canonicalization is an internal seam in this story.
    */
   topics: TopicService;
+  /**
+   * `grading`'s sole writer of every grade row, of the canonical Topic tags and of
+   * stored Mastery. Exposed as a service rather than driven through a route for the
+   * reason `topics` is: the Mastery triggers are internal seams, and the int-spec
+   * drives them and then asserts the rows they wrote.
+   */
+  grading: GradingService;
   /**
    * The extraction worker, so a spec drives exactly one pass rather than
    * waiting on a poll timer. The timer itself is off in the test tier.
@@ -109,6 +117,7 @@ export async function createHarness(): Promise<Harness> {
     mail: captureMail(moduleRef.get(MailService)),
     ai: captureAi(moduleRef.get(AiService)),
     topics: moduleRef.get(TopicService),
+    grading: moduleRef.get(GradingService),
     extractionRunner: moduleRef.get(ExtractionRunner),
     practiceTestRunner: moduleRef.get(PracticeTestRunner),
     operatorId: '',

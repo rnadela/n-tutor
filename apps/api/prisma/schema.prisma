@@ -218,6 +218,12 @@ model StudentProfile {
   /// own run, and it goes with the run.
   explanations Explanation[]
 
+  /// `grading`'s stored Mastery, one row per Topic this child has evidence on.
+  /// Cascades from here, like `attempts`: a Mastery figure is a derived statement
+  /// about runs that are themselves cascading, so it is never something a
+  /// deletion has to preserve and never something that can block one (Epic 8).
+  topicMasteries TopicMastery[]
+
   /// The list read and the selectable read are both scoped by account and
   /// filtered by archive state.
   @@index([parentAccountId, archivedAt])
@@ -972,6 +978,11 @@ model PracticeTestQuestion {
   topics  PracticeTestQuestionTopic[]
   answers Answer[]
   grades  QuestionGrade[]
+  /// `grading`'s canonical Topic tags over this Question — the resolved
+  /// counterpart of the raw `topics` above. Back-related for the reason `grades`
+  /// is: it is a relation and not a licence, and nothing in `practicetest` reads
+  /// or writes one (AD-17).
+  canonicalTopics QuestionTopic[]
   /// `grading`'s dispute rows, back-related for the reason `grades` is. It is a
   /// relation and not a licence: nothing in `practicetest` reads or writes one.
   gradeDisputes GradeDispute[]
@@ -1607,6 +1618,14 @@ model Topic {
   /// set that could vanish would take a child's whole Mastery history with it.
   subject Subject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
 
+  /// `grading`'s canonical tags on this Topic, back-related here because Prisma
+  /// requires both sides of a relation to be named. It is a relation and not a
+  /// licence: nothing in `topics` reads or writes a tag (AD-17).
+  questionTopics QuestionTopic[]
+  /// `grading`'s stored Mastery rows over this Topic, back-related for the reason
+  /// `questionTopics` is. Nothing in `topics` reads or writes one.
+  masteries      TopicMastery[]
+
   /// What makes stage 1 a lookup and a concurrent mint a loser rather than a
   /// duplicate. The cascade catches the unique violation and re-reads by this
   /// exact pair, so "one row exists and both callers get its id" is the index's
@@ -1618,4 +1637,128 @@ model Topic {
   /// place once Story 7.6's queue reads `(subjectId, provisional)` together.
   @@index([subjectId, provisional])
   @@map("topic")
+}
+
+// Mastery entity cluster (AD-6, AD-12, AD-17).
+// `grading` is the sole owner and sole writer of both tables below. They sit here,
+// after `Topic`, because both point at it — but the arrow is still one way:
+// `grading -> topics`, and nothing in `topics` or `practicetest` reads or writes a
+// row of either.
+
+/// The canonical Topic a generated Question is actually about: one row per
+/// (Question, Topic), resolved once through `TopicService.normalize`.
+///
+/// **The resolved counterpart of `practice_test_question_topic`, and never a
+/// replacement for it.** That table keeps the free-form label generation emitted,
+/// which is the evidence AD-11 works from; this one keeps the answer. Resolving
+/// once and storing it is what makes a Mastery recompute pure SQL: the window spans
+/// up to five Attempts of a full paper each, and re-normalizing those on every
+/// recompute would put embedding and structured-output calls on the hand-in path
+/// over and over — and `normalize` may not run inside a transaction at all.
+///
+/// It is also the row Story 7.6's merge re-points, which is why AD-12 requires it
+/// to exist from the start rather than be retrofitted around a read-time cascade.
+model QuestionTopic {
+  id             String   @id @default(uuid())
+  questionId     String
+  /// The owning Practice Test, denormalized off the Question.
+  ///
+  /// Here so the recompute can ask "which of this child's runs included this
+  /// Topic" from this table alone. Joining `practice_test_question` to reach it
+  /// would mean `grading` holding a delegate of a table `practicetest` owns, which
+  /// AD-17 forbids — and the column cannot drift, because a Question never moves
+  /// between Practice Tests.
+  practiceTestId String
+  topicId        String
+  createdAt      DateTime @default(now())
+
+  /// Both `Cascade`: a tag is a derived fact about a Question and a Topic, so it
+  /// never blocks Epic 8's deletions and leaves no tombstone behind it.
+  question PracticeTestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  topic    Topic                @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  /// What makes the tag idempotent. Two labels on one Question that canonicalize
+  /// to the same Topic are one row, so the Question contributes once — and the
+  /// writer inserts with `skipDuplicates` rather than checking first, so a
+  /// concurrent second hand-in read is a loser on this index rather than a
+  /// duplicate.
+  @@unique([questionId, topicId])
+  /// The recompute's own read, in its own shape: this Topic's tags, narrowed to the
+  /// Practice Tests of the Attempt window. Equality then equality, which is the
+  /// whole of the `where`.
+  @@index([topicId, practiceTestId])
+  /// The same read from the other end, and the one every grade-changing trigger
+  /// makes first: "which Topics is this paper tagged with". Neither index above leads
+  /// with `practiceTestId` — the unique one leads with the Question — so without this
+  /// that lookup is a sequential scan inside the transaction a child is waiting on.
+  /// `topicId` is the second column so the `distinct` is answered from the index
+  /// alone rather than by fetching every tag row of the paper.
+  @@index([practiceTestId, topicId])
+  @@map("question_topic")
+}
+
+/// What one child has shown on one Topic: the counts of the window and the
+/// fraction they come to.
+///
+/// **Stored and recomputed from scratch, never incremented** (AD-6). Every trigger
+/// that changes a grade — the hand-in's verdict write, a results read that resolves
+/// an `Ungraded`, a parent's override — recomputes this row from the window inside
+/// the very transaction that wrote the change (AD-10), so the figure a parent reads
+/// is never newer or older than the grades it is over. There is no queue, no timer
+/// and no read-time derivation.
+///
+/// The window is the five most recent qualifying Attempts that included the Topic,
+/// each weighted equally; "qualifying" is `grading/mastery-eligibility.ts`'s one
+/// predicate and nothing else.
+model TopicMastery {
+  id               String   @id @default(uuid())
+  studentProfileId String
+  topicId          String
+  /// How many Questions of the window counted as `Correct` — effective state, so a
+  /// parent's override counts and the stored verdict does not.
+  correct          Int
+  /// How many counted as `Incorrect`. `correct + incorrect` is the denominator.
+  incorrect        Int
+  /// How many were left blank on an unexpired hand-in.
+  ///
+  /// **Stored beside the counts rather than derived at read time**, because every
+  /// Epic 7 surface states a Mastery figure with its skipped count and that count is
+  /// a property of the same window as the value. Deriving it separately would be a
+  /// second window definition to keep in step with the first. It is in neither term
+  /// of the fraction: a Question nobody answered is not a Question anybody got
+  /// wrong. A timer-expiry auto-submit contributes nothing here and needs no code to
+  /// say so — its blanks are already stored `Incorrect`.
+  unanswered       Int
+  /// How many Attempts the window held, one to five. Fewer than five is a child who
+  /// has sat fewer, not a gap.
+  ///
+  /// **The window's size and not a count of contributions**: an Attempt whose tagged
+  /// Questions were all `Ungraded` is still one of the runs this figure is over, and
+  /// excluding it would make `attemptsCounted` a second, quieter statement of the
+  /// same thing `correct + incorrect + unanswered` already says.
+  attemptsCounted  Int
+  /// `correct / (correct + incorrect)`, or null when that denominator is zero.
+  ///
+  /// Nullable rather than `0`, because a Topic whose whole window was skipped is not
+  /// a Topic the child got nothing right on, and a surface that showed `0%` for it
+  /// would be an accusation. A row with no evidence at all is **deleted** rather
+  /// than stored as `0/0`: Story 7.4's empty state has to be distinguishable from a
+  /// real zero.
+  value            Float?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  /// Both `Cascade`, for the reason `question_topic`'s are: a Mastery row is
+  /// derived, so it never blocks Epic 8's deletions and leaves nothing behind.
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  topic          Topic          @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  /// One row per child and Topic, which is what makes the recompute an upsert
+  /// rather than a delete-and-insert somebody could observe half of.
+  @@unique([studentProfileId, topicId])
+  /// The dashboard's read (Story 7.4): every Topic of one child. Served by the
+  /// unique index's prefix too, and stated separately because it is the read the
+  /// table exists for and the unique index exists for a different reason.
+  @@index([studentProfileId])
+  @@map("topic_mastery")
 }

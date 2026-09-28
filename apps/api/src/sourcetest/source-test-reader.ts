@@ -90,6 +90,29 @@ export interface SourceTestReader {
    */
   readSubjectLabels(sourceTestIds: readonly string[]): Promise<Map<string, string | null>>;
   /**
+   * The Subject **id** of each of the given Source Tests, keyed by Source Test id —
+   * `null` where the upload carries no classification, and absent where the id
+   * names nothing this reader can see.
+   *
+   * `readSubjectLabels`'s sibling, and here because they answer two different
+   * questions. A *name* is what a list renders; an *id* is what canonicalization
+   * needs, because AD-11's canonical Topic set is scoped by Subject and a name is
+   * not a key. Resolving the id back out of a name would be a lookup that fails the
+   * day two Subjects are spelled alike.
+   *
+   * No taxonomy call at all, which is the other difference: the column *is* the
+   * answer, so there is nothing to resolve and nothing to degrade. A disabled
+   * Subject answers with its id unchanged — a stored reference resolves for as long
+   * as it is stored, and a Subject retired after a test was classified must not cost
+   * a child their Mastery history.
+   *
+   * Batched, and deliberately **not** account-scoped, for the two reasons
+   * `readSubjectLabels` states: the caller has already proved whose the row is in the
+   * `where` that found it, and re-proving ownership here would be a second place that
+   * proof could disagree with itself. Nothing but a Subject id crosses back.
+   */
+  readSubjectIds(sourceTestIds: readonly string[]): Promise<Map<string, string | null>>;
+  /**
    * The Grade Level name of each of the given Source Tests, keyed by Source Test
    * id — `null` where the upload carries no Grade Level or the stored id no
    * longer names a row, and absent where the id names nothing this reader can
