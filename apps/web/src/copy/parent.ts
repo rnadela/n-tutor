@@ -123,6 +123,13 @@ export const parentCopy = {
      * cannot reach — and this one is where they read what their child was told.
      */
     attempts: 'Practice tests a student has finished',
+    /**
+     * The way in to what a student has reported, and the only way in there is.
+     *
+     * A destination with no link from Parent View is a destination a parent cannot
+     * reach — and a report they cannot reach is a report that did not surface.
+     */
+    explanationFlags: 'Explanations a student has reported',
     loading: 'Loading Parent View…',
 
     /**
@@ -973,6 +980,124 @@ export const parentCopy = {
       `The explanation for question ${ordinal} is reported. The student still sees the same explanation.`,
     flagFailed: 'That explanation could not be reported. Try again.',
     explanationsFailed: 'What the student was told could not be read. Try again.',
+
+    // --- What the student reported, and what the parent decides ----------
+    //
+    // Third person about the child throughout, every figure a parameter, and every
+    // sentence whole here rather than assembled at a call site.
+    //
+    // **The confirm copy states what confirming does and what it does not.** It sends
+    // the report on for review; it does not remove the explanation, and the student is
+    // served exactly the same one afterwards. A control whose consequence a parent
+    // cannot see teaches them it did something it did not — and here the wrong
+    // assumption would be that confirming took something away from their child.
+    //
+    // **Nothing here names an operator, a queue, a tier or a cost.** "Sent on for
+    // review" is the whole of what a parent is told about what happens next, because it
+    // is the whole of what is true.
+
+    /** The student has reported this one. The state, not the act. */
+    studentFlagged: (instant: string) => `The student reported this explanation on ${instant}.`,
+    /** The same state with no date, for a stored instant that will not parse. */
+    studentFlaggedUndated: 'The student reported this explanation.',
+    /**
+     * What the parent has to do about it, said once, above the two controls.
+     *
+     * It names the choice rather than urging it: a report nobody has decided about is
+     * not a problem a parent has caused, and a sentence that pressed them would turn
+     * their child raising a hand into a chore.
+     */
+    studentFlagAwaiting: 'The student says this explanation is wrong. Decide what happens next.',
+    /** Agreeing with the child. */
+    confirm: 'Agree and send it on for review',
+    /** Disagreeing with the child. */
+    dismiss: 'Decide the explanation is fine',
+    /**
+     * What each decision does, in words, beside the two controls.
+     *
+     * Both halves matter. Confirming sends it on and **does not remove the
+     * explanation**, which is the assumption a parent would otherwise make; dismissing
+     * records the decision and tells the student nothing, which is the assumption they
+     * would otherwise make about that one.
+     */
+    dispositionNote:
+      'Agreeing sends the report on for review. It does not remove the explanation, and the student still sees the same one either way. The student is not told what you decide.',
+    /** Decided, and which way. */
+    confirmed: (instant: string) => `Agreed and sent on for review on ${instant}.`,
+    dismissed: (instant: string) => `Decided the explanation is fine on ${instant}.`,
+    /** The same two states with no date, for a stored instant that will not parse. */
+    confirmedUndated: 'Agreed and sent on for review.',
+    dismissedUndated: 'Decided the explanation is fine.',
+    /** Announced, and shown, in the same words. */
+    confirmAnnouncement: (ordinal: number) =>
+      `The report about question ${ordinal} is sent on for review. The student still sees the same explanation.`,
+    dismissAnnouncement: (ordinal: number) =>
+      `The explanation for question ${ordinal} is decided to be fine. The student is not told.`,
+    disposeFailed: 'That decision could not be recorded. Try again.',
+  },
+
+  /**
+   * The list of what one student has reported, and the only place its copy is written.
+   *
+   * **A list, not a dashboard band.** It states what the student reported and what has
+   * been decided, and nothing else: no Mastery figure, no score, no grade and no
+   * analytics of any kind. Third person about the child throughout.
+   *
+   * Every figure is a parameter. Not one instant, ordinal or count is written into a
+   * sentence here.
+   */
+  flags: {
+    title: 'What a student has reported',
+    /**
+     * Why a parent is here, stated as what the screen is for: their child said an
+     * explanation was wrong, and this is where those are found.
+     */
+    intro:
+      'A student can say an explanation is wrong. Everything they have reported is listed here, newest first, with what has been decided about it.',
+    /** The child selector. One child at a time, because a report belongs to one. */
+    studentLabel: 'Student',
+    loading: 'Loading…',
+    /** No profile to choose from yet. The way on is the Students screen. */
+    noStudents: 'There is no student profile yet. Add one first.',
+    /** A child who has reported nothing. A state, not a fault, and the common one. */
+    empty: 'This student has not reported an explanation.',
+    listFailed: 'What the student has reported could not be listed. Try again.',
+    /**
+     * The **profiles** read failed, which is a different claim from the one above.
+     *
+     * Two sentences because two reads can fail independently, and saying "what the student
+     * has reported could not be listed" when it was the list of students that could not be
+     * read names the wrong thing — beside a selector that is empty for a reason the
+     * sentence does not give.
+     */
+    profilesFailed: 'The students could not be listed. Try again.',
+    retry: 'Try again',
+    backToParentView: 'Back to Parent View',
+    /** Which run and which question a report points at. Both figures the server's. */
+    where: (runOrdinal: number, questionOrdinal: number) =>
+      `Run ${runOrdinal}, question ${questionOrdinal}`,
+    /**
+     * The same entry with no run or question to name, for a context that no longer
+     * resolves.
+     *
+     * The report was still made, which is why it is in this list at all: the entry keeps
+     * its place and loses only its label.
+     */
+    whereUnknown: 'The practice test this belongs to is no longer available.',
+    /** A test whose Subject carries no classification or no longer resolves. */
+    unknownSubject: 'No subject',
+    /** When the student reported it. */
+    reported: (instant: string) => `Reported ${instant}`,
+    reportedUndated: 'Reported',
+    /** Awaiting a decision, which is the absence of one rather than a state somebody set. */
+    awaiting: 'Waiting for a decision',
+    /** Decided, and which way. Both figures the response's. */
+    confirmed: (instant: string) => `Sent on for review ${instant}`,
+    dismissed: (instant: string) => `Decided to be fine ${instant}`,
+    confirmedUndated: 'Sent on for review',
+    dismissedUndated: 'Decided to be fine',
+    /** The way through to the explanation itself, which is read beside its question. */
+    open: 'Read the explanation',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

@@ -698,6 +698,19 @@ describe('Explanations: asked for once, generated once, charged once', () => {
     for (const forbidden of [/cost/iu, /tier\b/iu, /model/iu, /token/iu, /allowance/iu, /gpt/iu]) {
       expect(body).not.toMatch(forbidden);
     }
-    expect(Object.keys(response.body).sort()).toEqual(['attemptId', 'body', 'questionId']);
+    // `studentFlaggedAt` joined this view in Story 6.3: the child's **own** flag, and
+    // the only flag fact a student-scoped response carries. There is still nowhere here
+    // for a parent's flag, a disposition or a count of anything to travel — which the
+    // flagging story's own spec holds to account against every parent-side state
+    // existing at once (`test/student-explanation-flag.int-spec.ts`).
+    expect(Object.keys(response.body).sort()).toEqual([
+      'attemptId',
+      'body',
+      'questionId',
+      'studentFlaggedAt',
+    ]);
+    // Null on a row nobody has reported, rather than an absent field: a panel reading
+    // the state cannot take "the field is not there" for "there is no report".
+    expect(response.body.studentFlaggedAt).toBeNull();
   });
 });

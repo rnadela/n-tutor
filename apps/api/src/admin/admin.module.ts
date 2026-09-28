@@ -2,11 +2,13 @@ import { Module } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { AllowanceModule } from '../allowance/allowance.module.js';
 import { requireIntEnv, requireJwtSecret } from '../common/env.js';
+import { ExplanationModule } from '../explanation/explanation.module.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { ADMIN_JWT } from './admin-auth.constants.js';
 import { AdminAuthController } from './admin-auth.controller.js';
 import { AdminAuthGuard } from './admin-auth.guard.js';
 import { AdminAuthService } from './admin-auth.service.js';
+import { FlaggedExplanationController } from './flagged-explanation.controller.js';
 import { ParentAccountAdminService } from './parent-account-admin.service.js';
 import { ParentAccountController } from './parent-account.controller.js';
 import { TaxonomyController } from './taxonomy.controller.js';
@@ -34,8 +36,20 @@ import { TaxonomyModule } from './taxonomy.module.js';
     // The taxonomy providers live in their own module so `identity` can read
     // them without importing this one, which already imports `identity`.
     TaxonomyModule,
+    // The Flagged Explanations queue reads through `ExplanationService`, the sole
+    // owner and sole writer of `explanation` and `explanation_flag` (AD-17) -- this
+    // module acquires no delegate of either. The arrow points this way because
+    // `AdminAuthGuard` is constructed here and not exported, so an admin-guarded
+    // controller has to live in this injector; and because `admin` is imported by
+    // nothing but `app.module.ts`, which is what makes this direction the acyclic one.
+    ExplanationModule,
   ],
-  controllers: [AdminAuthController, TaxonomyController, ParentAccountController],
+  controllers: [
+    AdminAuthController,
+    TaxonomyController,
+    ParentAccountController,
+    FlaggedExplanationController,
+  ],
   providers: [
     { provide: ADMIN_JWT, useExisting: JwtService },
     AdminAuthService,

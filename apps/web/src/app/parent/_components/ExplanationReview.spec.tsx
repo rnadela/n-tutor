@@ -16,11 +16,43 @@ const CODE = SOURCE.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
  * in a browser is proved by `e2e/tests/parent-explanation-review.spec.ts`.
  */
 describe('what a parent can do with one Explanation', () => {
-  it('makes exactly one `parentApi.` call, and it is the flag', () => {
-    // The prose arrives with the Attempt, in the screen's own read. A second call
-    // here would be a second read of rows the screen already holds.
+  it('makes exactly three `parentApi.` calls, with a press behind every one', () => {
+    // The prose arrives with the Attempt, in the screen's own read, so nothing here reads
+    // on mount. The third call is the reconcile, and it is reachable only from a decision
+    // that was refused.
     const calls = CODE.match(/parentApi\.\w+/gu) ?? [];
-    expect(calls).toEqual(['parentApi.flagExplanation']);
+    expect(calls).toEqual([
+      'parentApi.flagExplanation',
+      'parentApi.disposeExplanationFlag',
+      'parentApi.attemptExplanations',
+    ]);
+    expect(CODE.indexOf('parentApi.attemptExplanations')).toBeGreaterThan(
+      CODE.indexOf('cause.status === CONFLICT_STATUS'),
+    );
+  });
+
+  it('catches this region up when a decision is refused as already recorded', () => {
+    // Without it, both controls stay on screen offering a decision the API will refuse for
+    // ever, and the parent cannot learn which one was actually recorded short of reloading
+    // the whole paper.
+    expect(CODE).toContain('cause.status === CONFLICT_STATUS');
+    expect(CODE).toContain('parentApi.attemptExplanations(token, attemptId)');
+    expect(CODE).toContain('views.find((view) => view.questionId === questionId)');
+    expect(CODE).toContain('if (current !== undefined) onFlagged(current);');
+  });
+
+  it('reconciles only on the conflict, and announces nothing for it', () => {
+    // Every other failure is transient and leaves the controls exactly where they were, to
+    // be pressed again — and the refusal sentence is already in the live region, so a
+    // second announcement for a read the parent never asked for would narrate the screen's
+    // own housekeeping at them.
+    const reconcile = CODE.slice(
+      CODE.indexOf('if (cause instanceof ParentApiError && cause.status === CONFLICT_STATUS)'),
+    );
+    expect(reconcile).not.toContain('announce(');
+    expect(reconcile).not.toContain('setDecisionFailed');
+    // And a failed reconcile cannot replace the sentence that is already on screen.
+    expect(reconcile).toContain('() => {},');
   });
 
   it('never generates an Explanation, on a press or otherwise', () => {
@@ -104,7 +136,78 @@ describe('what a parent can do with one Explanation', () => {
     // Suppression is the act that changes what a child is served, and it is not this
     // one. A confirmation dialog here would teach a parent otherwise.
     expect(CODE).toContain('parentCopy.attempts.flagNote');
-    expect(CODE).not.toMatch(/Dialog|confirm/u);
+    // Narrowed away from a bare `/confirm/`, because the copy legitimately contains the
+    // word — but still catching every spelling of the blocking native dialog this
+    // assertion exists to forbid: a bare `confirm(...)` and the two qualified forms. The
+    // lookbehind excludes `.` so a copy member read as `something.confirm(...)` could
+    // never be mistaken for one, which is why the qualified spellings are named outright
+    // rather than left to it. `decide('Confirmed')` and `parentCopy.attempts.confirm` are
+    // not calls and match nothing here.
+    expect(CODE).not.toMatch(
+      /Dialog|Modal|window\.confirm|globalThis\.confirm|(?<![A-Za-z.])confirm\(/u,
+    );
+  });
+
+  it('draws the child’s report as its own fact, never folded into the parent’s', () => {
+    // Two people raising a concern, and two independent pure decisions. A region that
+    // read either one for the other would tell a parent their child said something they
+    // did not.
+    expect(CODE).toContain('const state = reviewStateFor(explanation);');
+    expect(CODE).toContain('const studentState = studentFlagStateFor(explanation);');
+    expect(CODE).toContain('data-testid="explanation-student-flag"');
+    // And nothing here re-derives either from the raw fields.
+    expect(CODE).not.toMatch(/explanation\?\.studentFlagDisposition ===/u);
+  });
+
+  it('shows the child’s report only where there is one', () => {
+    // On a twenty-Question paper where the child reported two, an unconditional block
+    // would give a screen reader eighteen statements that nothing was reported.
+    expect(CODE).toContain("{studentState !== 'none' && (");
+  });
+
+  it('offers exactly two decisions, and only while none is recorded', () => {
+    // A closed set of two, and the first decision stands — so a control after one is
+    // recorded would be an offer to do something the API refuses with a 409.
+    expect(CODE).toContain("studentState === 'awaiting' ? (");
+    expect(CODE).toContain("decide('Confirmed')");
+    expect(CODE).toContain("decide('Dismissed')");
+    expect(CODE.match(/decide\('\w+'\)/gu)).toHaveLength(2);
+    // The decided arm carries the outcome and no control at all.
+    const decidedArm = CODE.slice(CODE.indexOf('data-testid="explanation-decided"'));
+    expect(decidedArm.slice(0, 400)).not.toContain('<Button');
+  });
+
+  it('says in words that confirming sends the report on and does not remove anything', () => {
+    // The assumption a parent would otherwise make is that agreeing takes the
+    // explanation away from their child. It does not, and the note says so *before*
+    // either control is pressed.
+    expect(CODE).toContain('parentCopy.attempts.dispositionNote');
+    expect(CODE.indexOf('parentCopy.attempts.dispositionNote')).toBeLessThan(
+      CODE.indexOf("decide('Confirmed')"),
+    );
+    // And nothing here suppresses, hides or regenerates: there is no such call to make.
+    expect(CODE).not.toMatch(/suppress|regenerat|explainQuestion/iu);
+  });
+
+  it('moves focus to the sentence that replaced the two controls', () => {
+    // Deciding unmounts both, and a browser drops focus to `document.body` when the
+    // focused element disappears — out of the paper, mid-list.
+    expect(CODE).toContain('ref={decidedSentence}');
+    expect(CODE).toContain('decidedSentence.current?.focus()');
+    // Guarded on this component's own press, so an Attempt opened with three decisions
+    // already made does not pull focus to one of them on load.
+    expect(CODE).toContain('decided.current = true');
+    expect(CODE).toContain('!decided.current');
+  });
+
+  it('issues one decision per press, and renders the API’s own refusal', () => {
+    // A double-tap would otherwise issue two calls whose responses land in either order.
+    // A second, *different* decision is refused with a 409 whose sentence is written once,
+    // in the API's policy file — rendered here rather than restated.
+    expect(CODE).toContain('if (deciding || explanation === undefined) return;');
+    expect(CODE).toContain('disabled={deciding}');
+    expect(CODE).toContain('parentCopy.attempts.disposeFailed');
+    expect(CODE).toContain('data-testid="explanation-dispose-failed"');
   });
 
   it('announces the sentence it displays, once, through the screen’s region', () => {
@@ -113,12 +216,15 @@ describe('what a parent can do with one Explanation', () => {
     expect(CODE).toContain('announce: (text: string) => void');
     expect(CODE).not.toMatch(/useAnnounce/u);
     const announced = CODE.match(/announce\((?!text)/gu) ?? [];
-    // Two call sites — the outcome and the failure — and each announces the sentence
-    // it also renders.
-    expect(announced).toHaveLength(2);
+    // Four call sites — each write's outcome and each write's failure — and every one
+    // announces the sentence it also renders.
+    expect(announced).toHaveLength(4);
     expect(CODE).toContain('announce(parentCopy.attempts.flagAnnouncement(ordinal))');
+    expect(CODE).toContain('parentCopy.attempts.confirmAnnouncement(ordinal)');
+    expect(CODE).toContain('parentCopy.attempts.dismissAnnouncement(ordinal)');
     expect(CODE).toContain('announce(sentence)');
     expect(CODE).toContain('setFailed(sentence)');
+    expect(CODE).toContain('setDecisionFailed(sentence)');
   });
 
   it('issues one request per press, however fast the pressing', () => {
@@ -128,17 +234,27 @@ describe('what a parent can do with one Explanation', () => {
     expect(CODE).toContain('disabled={flagging}');
   });
 
-  it('ends Parent View only on the guard’s own refusal', () => {
+  it('ends Parent View only on the guard’s own refusal, on both writes', () => {
     // A transient failure is a sentence in this region with the control still there
-    // to press. An expired elevation is not about this Explanation.
-    expect(CODE).toContain('cause.notElevated || cause.status === 401');
-    expect(CODE).toContain('onElevationLost()');
+    // to press. An expired elevation is not about this Explanation — and the decision
+    // route is a write too, so a check it did not carry would be the one that mattered.
+    expect(CODE.match(/cause\.notElevated \|\| cause\.status === 401/gu)).toHaveLength(2);
+    expect(CODE.match(/onElevationLost\(\)/gu)?.length).toBeGreaterThanOrEqual(2);
     expect(CODE).toContain('parentCopy.attempts.flagFailed');
   });
 
   it('draws the stored prose through the one renderer of segments', () => {
     // A fraction arrives as structure and keeps its spoken reading (AD-32).
     expect(CODE).toContain('<RichText segments={explanation!.body} />');
+  });
+
+  it('shows a decision without a date rather than the words “Invalid Date”', () => {
+    // A decided report whose instant will not parse still says which decision was made —
+    // that is the fact — and only the date is unstateable.
+    expect(CODE).toContain('parentCopy.attempts.confirmedUndated');
+    expect(CODE).toContain('parentCopy.attempts.dismissedUndated');
+    expect(CODE).toContain('parentCopy.attempts.studentFlaggedUndated');
+    expect(CODE).not.toMatch(/new Date\([^)]*\)\.toLocaleString/u);
   });
 
   it('sits at h5, under the row’s own h4', () => {

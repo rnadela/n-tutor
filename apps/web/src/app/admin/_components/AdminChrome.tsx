@@ -41,6 +41,12 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
             <Button component={Link} href="/admin/accounts">
               {adminCopy.nav.accounts}
             </Button>
+            {/* The queue of Explanations to judge. A destination with no nav entry is a
+                destination an operator cannot reach, and a confirmed report nobody can
+                open is a report that went nowhere. */}
+            <Button component={Link} href="/admin/flagged-explanations">
+              {adminCopy.nav.flaggedExplanations}
+            </Button>
             <Button
               onClick={() => {
                 clearToken();

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { explanationsByQuestion, reviewStateFor } from '@/lib/explanation-review';
+import {
+  explanationsByQuestion,
+  reviewStateFor,
+  studentFlagStateFor,
+} from '@/lib/explanation-review';
 import type { ParentExplanationView } from '@/lib/parent-api';
 
 function view(overrides: Partial<ParentExplanationView> = {}): ParentExplanationView {
@@ -7,6 +11,9 @@ function view(overrides: Partial<ParentExplanationView> = {}): ParentExplanation
     questionId: 'q1',
     body: [{ kind: 'text', value: 'Half of six is three.' }],
     parentFlaggedAt: null,
+    studentFlaggedAt: null,
+    studentFlagDisposition: null,
+    studentFlagDispositionAt: null,
     ...overrides,
   };
 }
@@ -74,5 +81,64 @@ describe('what the region beneath one row is', () => {
       reviewStateFor(view({ parentFlaggedAt: '2026-09-28T10:15:00.000Z' })),
     ]);
     expect([...states].sort()).toEqual(['absent', 'flagged', 'unflagged']);
+  });
+});
+
+describe('what one row’s student flag is', () => {
+  it('is nothing for an Explanation with no entry at all', () => {
+    // A Question the child never asked about has nothing for a parent to decide, and the
+    // `absent` case is `reviewStateFor`'s to state, once.
+    expect(studentFlagStateFor(undefined)).toBe('none');
+  });
+
+  it('is nothing for an Explanation the child never reported', () => {
+    // The common case, and not an error: the child read it and moved on.
+    expect(studentFlagStateFor(view())).toBe('none');
+  });
+
+  it('is awaiting when the child reported it and nobody has decided', () => {
+    // Awaiting is the **absence** of a decision rather than a value anybody wrote, which
+    // is why it is decided on two fields rather than on a third enum member the API does
+    // not have. This is the one state the screen has controls for.
+    expect(studentFlagStateFor(view({ studentFlaggedAt: '2026-09-20T08:00:00.000Z' }))).toBe(
+      'awaiting',
+    );
+  });
+
+  it('is the decision once one is recorded, either way', () => {
+    expect(
+      studentFlagStateFor(
+        view({
+          studentFlaggedAt: '2026-09-20T08:00:00.000Z',
+          studentFlagDisposition: 'Confirmed',
+          studentFlagDispositionAt: '2026-09-21T08:00:00.000Z',
+        }),
+      ),
+    ).toBe('confirmed');
+    expect(
+      studentFlagStateFor(
+        view({
+          studentFlaggedAt: '2026-09-20T08:00:00.000Z',
+          studentFlagDisposition: 'Dismissed',
+          studentFlagDispositionAt: '2026-09-21T08:00:00.000Z',
+        }),
+      ),
+    ).toBe('dismissed');
+  });
+
+  it('never reads the parent’s own flag as the child’s concern', () => {
+    // Two people raising a concern, and two independent facts. A region that read either
+    // one for the other would tell a parent their child said something they did not.
+    expect(studentFlagStateFor(view({ parentFlaggedAt: '2026-09-28T09:00:00.000Z' }))).toBe('none');
+    // And `reviewStateFor` stays exactly what it was: it reads the parent's flag alone.
+    expect(reviewStateFor(view({ studentFlaggedAt: '2026-09-20T08:00:00.000Z' }))).toBe(
+      'unflagged',
+    );
+  });
+
+  it('is still a report when the instant will not parse', () => {
+    // Decided on the field being **present**, never on a truthiness test of a string: an
+    // unreadable instant is still a report, and only the date is unstateable.
+    expect(studentFlagStateFor(view({ studentFlaggedAt: 'not-an-instant' }))).toBe('awaiting');
   });
 });

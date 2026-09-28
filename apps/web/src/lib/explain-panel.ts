@@ -16,10 +16,31 @@ import type { RichTextSegment } from './parent-api';
 export type ExplainState =
   | { kind: 'idle' }
   | { kind: 'loading' }
-  | { kind: 'loaded'; body: RichTextSegment[] }
+  | { kind: 'loaded'; body: RichTextSegment[]; studentFlaggedAt: string | null }
   | { kind: 'failed' }
   | { kind: 'offline' }
   | { kind: 'atCap'; limitSentence: string | null };
+
+/**
+ * Whether this child has reported the explanation they are reading.
+ *
+ * On the `loaded` state and nowhere else, because reporting is only possible when there
+ * is prose to report: a panel with nothing in it has nothing to be wrong. An instant
+ * rather than a boolean, and the *first* one -- the API keeps it, so a second press
+ * cannot move it -- and `null` for one nobody has reported.
+ *
+ * **It is the child's own report and never anybody else's.** The API's response has
+ * nowhere for a parent's flag or a decision about this one to travel, so there is
+ * nothing here to hold one either (AD-20, AD-26). Whether a grown-up later agreed or
+ * disagreed is not a thing this panel can learn.
+ *
+ * It is carried on the state rather than fetched, because it arrives on the same
+ * response the prose does: the panel unmounts on collapse, so reopening it re-issues
+ * the explanation request, which answers 200 from the stored row with this beside it.
+ */
+export function flaggedAtOf(state: ExplainState): string | null {
+  return state.kind === 'loaded' ? state.studentFlaggedAt : null;
+}
 
 /**
  * What a press should do, given the connection and what the panel already holds.
@@ -58,3 +79,45 @@ export function explainDecision(input: { online: boolean; state: ExplainState })
   if (!input.online) return 'offline';
   return 'request';
 }
+
+/**
+ * What a press of the **report** control should do, given the panel and the connection.
+ *
+ * - `noProse` -- there is nothing on screen to report. A press cannot happen here,
+ *   because the control is only rendered inside the `loaded` branch; it is a value
+ *   rather than an impossibility so the rule is stated once instead of resting on where
+ *   a control happens to be drawn today.
+ * - `already` -- this child has already reported it. There is **no un-reporting**, so a
+ *   second press must send nothing: a record of a concern is not a toggle, and the API
+ *   would answer the first instant anyway, which makes the round trip one nobody needs.
+ * - `busy` -- a report is already out. A second press must not start a second one, or
+ *   two responses land in either order and the child is told twice that something
+ *   happened once.
+ * - `offline` -- no connection, so nothing is sent at all. Distinct from a failure,
+ *   because "you are not connected" is a thing a child can act on.
+ * - `request` -- send it. A first press, or a person pressing again after a failure.
+ *
+ * The order of the arms is the rule. No prose wins over everything; an existing report
+ * wins over being busy, because it means nothing needs sending whatever else is in
+ * flight; `busy` is swallowed before the connection is consulted; and only then does a
+ * press become something that leaves the device.
+ *
+ * It is a pure function here rather than a branch inside an event handler for the reason
+ * `explainDecision` is: `apps/web` runs its unit tests with `environment: 'node'` and no
+ * DOM, and a rule that only exists inside a handler is a rule nothing can assert.
+ */
+export function flagDecision(input: {
+  online: boolean;
+  state: ExplainState;
+  /** Whether a report this panel sent is still out. */
+  sending: boolean;
+}): FlagPressDecision {
+  if (input.state.kind !== 'loaded') return 'noProse';
+  if (input.state.studentFlaggedAt !== null) return 'already';
+  if (input.sending) return 'busy';
+  if (!input.online) return 'offline';
+  return 'request';
+}
+
+/** What a press of the report control means. Five outcomes and no sixth. */
+export type FlagPressDecision = 'noProse' | 'already' | 'busy' | 'offline' | 'request';

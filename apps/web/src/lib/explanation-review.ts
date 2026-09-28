@@ -61,3 +61,36 @@ export function reviewStateFor(view: ParentExplanationView | undefined): Explana
   if (view === undefined) return 'absent';
   return view.parentFlaggedAt === null ? 'unflagged' : 'flagged';
 }
+
+/**
+ * What one row's **student** flag is: nothing, a concern nobody has decided about, or a
+ * decision that has been made.
+ *
+ * Four states and no fifth, and its own function rather than a widening of
+ * `reviewStateFor`: the parent's own flag and their child's are two independent facts
+ * about one Explanation, and a single state that tried to carry both would have twelve
+ * members describing two things. Each is its own pure decision, and the region draws
+ * both.
+ *
+ * `'awaiting'` is the case the screen has controls for, and it is the **absence** of a
+ * decision rather than a value anybody wrote: a report with no disposition is one nobody
+ * has read yet. That is why it is decided on `studentFlaggedAt` being present *and* the
+ * disposition being absent, rather than on a third enum member the API does not have.
+ *
+ * `'none'` covers both no Explanation at all and one the child never reported: neither
+ * has anything for a parent to decide, and there is nothing a screen would do
+ * differently between them — the `absent` case is `reviewStateFor`'s to state, once.
+ *
+ * Decided on the fields being **present**, never on a truthiness test of a string that
+ * could legitimately be empty: an instant is the fact, and a report whose instant will
+ * not parse is still a report.
+ */
+export function studentFlagStateFor(view: ParentExplanationView | undefined): StudentFlagState {
+  if (view === undefined || view.studentFlaggedAt === null) return 'none';
+  if (view.studentFlagDisposition === 'Confirmed') return 'confirmed';
+  if (view.studentFlagDisposition === 'Dismissed') return 'dismissed';
+  return 'awaiting';
+}
+
+/** The four states a row's student flag can be in. */
+export type StudentFlagState = 'none' | 'awaiting' | 'confirmed' | 'dismissed';

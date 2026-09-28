@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { explainDecision, type ExplainState } from './explain-panel';
+import { explainDecision, flagDecision, flaggedAtOf, type ExplainState } from './explain-panel';
 
 /**
  * What a press means, pinned as a function.
@@ -12,7 +12,11 @@ import { explainDecision, type ExplainState } from './explain-panel';
 const LOADED: ExplainState = {
   kind: 'loaded',
   body: [{ kind: 'text', value: 'Halving six gives three.' }],
+  studentFlaggedAt: null,
 };
+
+/** The same prose, already reported by this child. */
+const REPORTED: ExplainState = { ...LOADED, studentFlaggedAt: '2026-09-28T10:00:00.000Z' };
 
 describe('what pressing the explain control decides', () => {
   it('asks, on a first press with a connection', () => {
@@ -64,5 +68,72 @@ describe('what pressing the explain control decides', () => {
 
   it('re-asks after an offline press once the connection is back', () => {
     expect(explainDecision({ online: true, state: { kind: 'offline' } })).toBe('request');
+  });
+});
+
+describe('what pressing the report control decides', () => {
+  it('sends it, on a first press with prose on screen and a connection', () => {
+    expect(flagDecision({ online: true, state: LOADED, sending: false })).toBe('request');
+  });
+
+  it('sends nothing when there is no prose to report', () => {
+    // A panel with nothing in it has nothing to be wrong. The control is only rendered
+    // inside the `loaded` branch; this states the rule once instead of leaving it resting
+    // on where a control happens to be drawn.
+    for (const state of [
+      { kind: 'idle' } as const,
+      { kind: 'loading' } as const,
+      { kind: 'failed' } as const,
+      { kind: 'offline' } as const,
+      { kind: 'atCap', limitSentence: null } as const,
+    ]) {
+      expect(flagDecision({ online: true, state, sending: false })).toBe('noProse');
+    }
+  });
+
+  it('sends nothing for a concern already recorded', () => {
+    // **There is no un-reporting.** A record of a concern is not a toggle, and the API
+    // would answer the first instant anyway — which makes the round trip one nobody needs.
+    expect(flagDecision({ online: true, state: REPORTED, sending: false })).toBe('already');
+  });
+
+  it('prefers an existing report over a request still in flight', () => {
+    // If nothing needs sending, nothing needs sending whatever else is out.
+    expect(flagDecision({ online: true, state: REPORTED, sending: true })).toBe('already');
+  });
+
+  it('swallows a double-tap rather than starting a second request', () => {
+    // Two responses landing in either order would tell a child twice that something
+    // happened once.
+    expect(flagDecision({ online: true, state: LOADED, sending: true })).toBe('busy');
+  });
+
+  it('sends nothing at all with no connection, and says so as its own outcome', () => {
+    // Distinct from a failure, because "you are not connected" is a thing a child can
+    // act on.
+    expect(flagDecision({ online: false, state: LOADED, sending: false })).toBe('offline');
+  });
+
+  it('swallows a double-tap before the connection is consulted', () => {
+    expect(flagDecision({ online: false, state: LOADED, sending: true })).toBe('busy');
+  });
+});
+
+describe('the report a panel is holding', () => {
+  it('is the instant on the loaded state, or null', () => {
+    expect(flaggedAtOf(REPORTED)).toBe('2026-09-28T10:00:00.000Z');
+    expect(flaggedAtOf(LOADED)).toBeNull();
+  });
+
+  it('is null for every state that has no prose, because there is nothing to report', () => {
+    for (const state of [
+      { kind: 'idle' } as const,
+      { kind: 'loading' } as const,
+      { kind: 'failed' } as const,
+      { kind: 'offline' } as const,
+      { kind: 'atCap', limitSentence: 'No allowance.' } as const,
+    ]) {
+      expect(flaggedAtOf(state)).toBeNull();
+    }
   });
 });

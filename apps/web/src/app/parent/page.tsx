@@ -126,6 +126,15 @@ export default function ParentViewPage() {
             <Link component={NextLink} href="/parent/attempts">
               {parentCopy.parentView.attempts}
             </Link>
+            {/* The way in to what a child has *reported*, and the only way in there
+                is. The Attempt-detail region shows a concern only to somebody who
+                already opened that Attempt, so without this link a child raising a
+                hand would be a record nobody ever sees — and a report a parent
+                cannot reach is a report that did not surface. Client-side for the
+                same reason as its neighbours. */}
+            <Link component={NextLink} href="/parent/explanation-flags">
+              {parentCopy.parentView.explanationFlags}
+            </Link>
             <Link component={NextLink} href="/parent/pin/change">
               {parentCopy.parentView.changePin}
             </Link>

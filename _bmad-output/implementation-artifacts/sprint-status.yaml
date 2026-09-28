@@ -81,7 +81,7 @@ development_status:
   epic-6: backlog
   6-1-on-demand-explanations: done
   6-2-parent-review-of-explanations: done
-  6-3-student-explanation-flagging: backlog
+  6-3-student-explanation-flagging: done
   6-4-explanation-suppression-free-regeneration: backlog
   6-5-grade-dispute-override: backlog
   epic-6-retrospective: optional

@@ -16,7 +16,72 @@ export const adminCopy = {
   nav: {
     taxonomy: 'Subjects & Grade Levels',
     accounts: 'Parent Accounts',
+    /**
+     * The way in to the queue of Explanations to judge.
+     *
+     * A destination with no nav entry is a destination an operator cannot reach — and a
+     * confirmed report nobody can open is a report that went nowhere.
+     */
+    flaggedExplanations: 'Flagged Explanations',
     signOut: 'Sign out',
+  },
+
+  /**
+   * The Flagged Explanations queue, and the only place its copy is written.
+   *
+   * **Factual and third person**, like every other Admin string, and about the *prose*
+   * rather than about a family: not one sentence here names a child, an email address, a
+   * cost, a tier or a model name (AD-20, AD-26). An operator judging a paragraph needs the
+   * paragraph and the identifiers to name it by.
+   *
+   * **Nothing here is an action.** This story opens the queue; it does not suppress, edit
+   * or regenerate anything, so there is no control copy to write and none is written.
+   *
+   * Every figure is a parameter.
+   */
+  flaggedExplanations: {
+    title: 'Flagged Explanations',
+    intro:
+      'Every explanation a parent has reported, and every one a student reported that a parent agreed with. A student report a parent has not decided about, or decided was fine, is not listed. Each explanation appears once, however many times it was raised.',
+    /** An empty queue. The normal case, stated rather than left blank. */
+    empty: 'No explanations are flagged.',
+    loading: 'Loading flagged explanations…',
+    loadFailed: 'The flagged explanations could not be listed.',
+    retry: 'Try again',
+    /**
+     * One entry's own heading, which is what makes the outline navigable.
+     *
+     * A screen-reader user moving by heading needs each card to announce *which*
+     * explanation it is; without this every card would present the same three in-card
+     * labels and the queue would read as one label repeated N times. The Question is what
+     * an operator judges, so its id is what names the entry — no child's name and no
+     * account email (AD-20, AD-26).
+     */
+    entryHeading: (questionId: string) => `Question ${questionId}`,
+    /** The prose being judged. */
+    explanationHeading: 'The explanation',
+    /** Which routes raised it, from the list the API answered with. */
+    raisedByHeading: 'Raised by',
+    raisedBy: {
+      Parent: 'Parent',
+      Student: 'Student',
+    },
+    /** The earliest instant any qualifying report was raised. */
+    raisedAt: (instant: string) => `First raised ${instant}`,
+    /**
+     * The same fact with no date, for a stored instant that will not parse.
+     *
+     * It was still raised, which is why it is in this queue at all; the words "Invalid
+     * Date" would read as a fault in the report rather than in a string.
+     */
+    raisedAtUndated: 'First raised',
+    /** The identifiers an operator names an explanation by. No name and no email. */
+    identifiersHeading: 'Identifiers',
+    explanationIdLabel: 'Explanation',
+    attemptIdLabel: 'Attempt',
+    questionIdLabel: 'Question',
+    accountIdLabel: 'Parent account',
+    studentIdLabel: 'Student profile',
   },
   /**
    * Not one figure from `tiers.md` appears below. Every limit on the screen is

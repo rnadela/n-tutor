@@ -8,6 +8,7 @@ import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
 import { StudentModeGuard } from '../identity/student-mode.guard.js';
 import { PracticeTestModule } from '../practicetest/practice-test.module.js';
 import { ExplanationService } from './explanation.service.js';
+import { ParentExplanationFlagsController } from './parent-explanation-flags.controller.js';
 import { ParentExplanationController } from './parent-explanation.controller.js';
 import { StudentExplanationController } from './student-explanation.controller.js';
 
@@ -54,7 +55,14 @@ import { StudentExplanationController } from './student-explanation.controller.j
     AllowanceModule,
     AiModule,
   ],
-  controllers: [StudentExplanationController, ParentExplanationController],
+  controllers: [
+    StudentExplanationController,
+    ParentExplanationController,
+    // One child's reported Explanations across every run they have sat, which is a
+    // different thing to scope by than one Attempt — hence its own controller and not a
+    // third route on the Attempt-rooted one.
+    ParentExplanationFlagsController,
+  ],
   providers: [ExplanationService, StudentModeGuard, ParentElevationGuard],
   exports: [ExplanationService],
 })

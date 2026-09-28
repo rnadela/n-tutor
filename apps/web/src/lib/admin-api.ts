@@ -1,6 +1,38 @@
 'use client';
 
 import { adminCopy } from '@/copy/admin';
+import type { RichTextSegment } from '@/lib/parent-api';
+
+/**
+ * One Explanation an operator has to judge, exactly as the API states it.
+ *
+ * **The unit is the Explanation, not the flag.** A parent who originated a concern and a
+ * student concern the same parent later confirmed are two records of one paragraph, and
+ * the operator's job is to judge the paragraph once. So `raisedBy` lists every route that
+ * raised it and `raisedAt` is the earliest of their instants, which is the entry's place
+ * in the queue.
+ *
+ * **Only what judging a paragraph takes.** The prose and the identifiers, and no child's
+ * display name, no account email, no cost, no tier, no model name, no allowance figure
+ * and no grading rationale (AD-20, AD-26).
+ *
+ * The queue never carries a student concern nobody has decided about, or one a parent
+ * dismissed: the API filters those out in the query, so there is no state here for one to
+ * arrive in and nothing for this app to filter.
+ */
+export interface FlaggedExplanation {
+  explanationId: string;
+  parentAccountId: string;
+  studentProfileId: string;
+  attemptId: string;
+  questionId: string;
+  /** The stored segments, drawn by `components/RichText` and by nothing else (AD-32). */
+  body: RichTextSegment[];
+  /** Which routes raised it. Both, for one raised each way. */
+  raisedBy: ('Parent' | 'Student')[];
+  /** The earliest instant any qualifying concern was raised. The queue position. */
+  raisedAt: string;
+}
 
 export interface TaxonomyItem {
   id: string;
@@ -192,4 +224,15 @@ export const adminApi = {
       method: 'PATCH',
       body: JSON.stringify({ tier }),
     }),
+  /**
+   * Every Explanation an operator has to judge, oldest concern first.
+   *
+   * **A read that changes nothing.** Nothing here suppresses, regenerates or hides an
+   * Explanation, and nothing decides anything: the parent's decision is the parent's, and
+   * this app has no route to overturn one.
+   *
+   * An empty list is the ordinary answer and the normal case: nobody has raised a concern
+   * this operator has to judge.
+   */
+  flaggedExplanations: () => call<FlaggedExplanation[]>('/admin/flagged-explanations'),
 };

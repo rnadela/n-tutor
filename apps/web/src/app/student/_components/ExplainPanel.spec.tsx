@@ -25,20 +25,103 @@ const CODE = SOURCE.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
  * asks only when pressed, and says only what `studentCopy` says — is what this pins.
  */
 describe('what asks for an explanation', () => {
-  it('makes exactly one student-scoped call, and it is the explanation call', () => {
+  it('makes exactly two student-scoped calls: ask, and report', () => {
     expect(CODE).toContain('parentApi.explainQuestion(attemptId, questionId)');
-    expect(CODE.match(/parentApi\./gu)).toHaveLength(1);
+    expect(CODE).toContain('parentApi.flagExplanationAsStudent(attemptId, questionId)');
+    // Two, and no third. In particular nothing parent-scoped: no read of a parent's
+    // flag, no disposition and no list.
+    expect(CODE.match(/parentApi\.\w+/gu)).toEqual([
+      'parentApi.explainQuestion',
+      'parentApi.flagExplanationAsStudent',
+    ]);
     // No bearer and no parent-scoped member: the binding names the child.
     expect(CODE).not.toMatch(/Authorization|elevat/iu);
+    // And nothing here can learn what a grown-up decided (AD-20, AD-26).
+    expect(CODE).not.toMatch(/disposition|Confirmed|Dismissed|parentFlagged/iu);
   });
 
   it('never polls, never prefetches and never retries on its own', () => {
     // The first ask bills a provider call. A timer here would bill one per
     // Question per visit, with nobody having asked for any of them.
     expect(CODE).not.toMatch(/setInterval|setTimeout|requestAnimationFrame|poll|prefetch/iu);
-    // And nothing asks on mount: the only `useEffect` here is the announcement.
-    expect(CODE.match(/useEffect\(/gu)).toHaveLength(1);
+    // And nothing asks on mount: the only three `useEffect`s here are the two
+    // announcements and the focus move, and none of them touches the API.
+    expect(CODE.match(/useEffect\(/gu)).toHaveLength(3);
     expect(CODE).not.toMatch(/useEffect\([\s\S]{0,400}?explainQuestion/u);
+    expect(CODE).not.toMatch(/useEffect\([\s\S]{0,400}?flagExplanationAsStudent/u);
+  });
+
+  it('decides what a report press means through the pure function, not inline', () => {
+    // The rules that decide whether anything leaves the device — never send a second
+    // report for a concern already recorded, never start a second request while one is
+    // out, never send with no connection — live where they can be asserted with no DOM.
+    expect(CODE).toContain('flagDecision({ online: navigator.onLine, state, sending })');
+    expect(CODE).toContain(
+      "if (decision === 'noProse' || decision === 'already' || decision === 'busy') return;",
+    );
+  });
+
+  it('touches nothing about the explanation on any report outcome', () => {
+    // The prose stays rendered and the panel stays open whatever happens: the paragraph
+    // may well be right, and taking it off screen would be this panel deciding something
+    // only a grown-up can.
+    const report = CODE.slice(
+      CODE.indexOf('const report = useCallback('),
+      CODE.indexOf('const announced'),
+    );
+    // The only `setState` this handler makes writes the same `loaded` state back, with the
+    // report's instant on it. Every other outcome is a `ReportOutcome` beside the prose,
+    // which is why the panel's own union cannot be made to say "this failed" about a
+    // paragraph that is still perfectly readable.
+    expect(report.match(/setState\(\{\s*\n?\s*kind: '(\w+)'/gu)?.length).toBe(1);
+    expect(report).toMatch(/setState\(\{\s*\n?\s*kind: 'loaded'/u);
+    // And it never closes the panel or touches the prose it was handed.
+    expect(report).not.toContain('setOpen');
+    expect(report).not.toMatch(/state\.body/u);
+  });
+
+  it('moves focus to the sentence that replaced the control, and only on a press', () => {
+    // Reporting unmounts the control, and a browser drops focus to `document.body` when
+    // the focused element disappears — which puts a keyboard user out of the paper
+    // entirely, mid-list. Focus moves deliberately, to the outcome they need to read.
+    expect(CODE).toContain('tabIndex={-1}');
+    expect(CODE).toContain('ref={flagged}');
+    expect(CODE).toContain('flagged.current?.focus()');
+    // Guarded on this panel's own press, so re-opening a panel reported last week does
+    // not take the keyboard from a child who has not touched anything.
+    expect(CODE).toContain('pressed.current = true');
+    expect(CODE).toContain('if (flaggedAtOf(state) === null || !pressed.current) return;');
+    // And the focus effect talks to nothing: the only requests are inside the handlers.
+    const focusEffect = CODE.slice(
+      CODE.indexOf('if (flaggedAtOf(state) === null'),
+      CODE.indexOf('}, [state]);'),
+    );
+    expect(focusEffect).not.toContain('parentApi');
+  });
+
+  it('drops the report control once reported, rather than leaving an inert one', () => {
+    // There is no un-reporting: a record of a concern is not a toggle, so a control left
+    // on screen would offer an action that does nothing.
+    expect(CODE).toContain('state.studentFlaggedAt === null ? (');
+    expect(CODE).toContain('data-testid="explain-flag"');
+    expect(CODE).toContain('data-testid="explain-flagged"');
+  });
+
+  it('puts the report control inside the loaded branch and nowhere else', () => {
+    // A panel with nothing in it has nothing to be wrong about.
+    expect(CODE.indexOf('data-testid="explain-flag"')).toBeGreaterThan(
+      CODE.indexOf("state.kind === 'loaded' && ("),
+    );
+    expect(CODE.indexOf('data-testid="explain-flag"')).toBeGreaterThan(
+      CODE.indexOf('data-testid="explain-body"'),
+    );
+  });
+
+  it('shows the reported state without a date rather than the words “Invalid Date”', () => {
+    // A report whose instant will not parse is still a report; only the date is
+    // unstateable, and a screen reader says those two words out loud.
+    expect(CODE).toContain('studentCopy.results.explain.flaggedUndated');
+    expect(CODE).toContain('Number.isNaN(when.getTime())');
   });
 
   it('decides what a press means through the pure function, not inline', () => {
@@ -49,10 +132,11 @@ describe('what asks for an explanation', () => {
     expect(CODE).toContain("if (decision === 'stored' || decision === 'busy') return;");
   });
 
-  it('reads the connection at the press rather than latching it', () => {
+  it('reads the connection at each press rather than latching it', () => {
     // A held flag behind listeners is a second thing that can be wrong; what
-    // matters is whether there is a connection when something would be sent.
-    expect(CODE.match(/navigator\.onLine/gu)).toHaveLength(1);
+    // matters is whether there is a connection when something would be sent. Both
+    // presses read it, and neither holds it.
+    expect(CODE.match(/navigator\.onLine/gu)).toHaveLength(2);
     expect(CODE).not.toMatch(/addEventListener/u);
   });
 
@@ -72,19 +156,29 @@ describe('what asks for an explanation', () => {
       CODE.indexOf('data-testid="explain-note"'),
     );
     expect(noteAlert).not.toMatch(/role="status"/u);
-    expect(CODE.match(/announce\(/gu)).toHaveLength(1);
+    // The report's own failure sentence is in the live region too, so its alert carries
+    // no implicit region either.
+    const flagAlert = CODE.slice(
+      CODE.indexOf('data-testid="explain-flag-failed"') - 400,
+      CODE.indexOf('data-testid="explain-flag-failed"'),
+    );
+    expect(flagAlert).not.toMatch(/role="status"/u);
+    // Two call sites, one per effect, and neither speaks anything the panel does not show.
+    expect(CODE.match(/announce\(/gu)).toHaveLength(2);
   });
 
   it('is never a modal and never a route of its own', () => {
     // UX-DR16: the question, both answers and the reason belong on screen together.
     expect(CODE).not.toMatch(/Dialog|Modal|Drawer|Popover|href=/u);
-    // The one navigation is the binding refusal every read on this surface makes.
-    expect(CODE.match(/router\./gu)).toHaveLength(1);
-    expect(CODE).toContain("router.replace('/auth/sign-in')");
+    // The one navigation is the binding refusal every read on this surface makes, and
+    // both presses make exactly that one and no other.
+    expect(CODE.match(/router\.replace\('\/auth\/sign-in'\)/gu)).toHaveLength(2);
+    expect(CODE.match(/router\.\w+/gu)?.every((call) => call === 'router.replace')).toBe(true);
   });
 
-  it('keeps both tappable things at the surface’s tap-target floor', () => {
-    expect(CODE.match(/minHeight: comfortableDensity\.tapTarget/gu)).toHaveLength(2);
+  it('keeps every tappable thing at the surface’s tap-target floor', () => {
+    // The disclosure, the retry and the report control.
+    expect(CODE.match(/minHeight: comfortableDensity\.tapTarget/gu)).toHaveLength(3);
     // No literal pixel figure anywhere: the floor is a token (UX-DR10).
     expect(CODE).not.toMatch(/minHeight: ['"]?\d/u);
   });
@@ -113,12 +207,26 @@ describe('what asks for an explanation', () => {
     expect(CODE).toMatch(/studentCopy\.results\.explain\.offline/u);
     expect(CODE).toMatch(/studentCopy\.results\.explain\.atCap\(/u);
     expect(CODE).toContain('studentCopy.retry');
+    // The report's own six, for the same reason.
+    expect(CODE).toMatch(/studentCopy\.results\.explain\.flagControl/u);
+    expect(CODE).toMatch(/studentCopy\.results\.explain\.flagNote/u);
+    expect(CODE).toMatch(/studentCopy\.results\.explain\.flagged\(/u);
+    expect(CODE).toMatch(/studentCopy\.results\.explain\.flaggedUndated/u);
+    expect(CODE).toMatch(/studentCopy\.results\.explain\.flagFailed/u);
+    expect(CODE).toMatch(/studentCopy\.results\.explain\.flagOffline/u);
+    expect(CODE).toMatch(/studentCopy\.results\.explain\.flagAnnouncement\(ordinal\)/u);
   });
 
-  it('announces once, through the one region, with the sentence it displays', () => {
+  it('announces once per outcome, through the one region, with the sentence it displays', () => {
     expect(CODE).toContain('useAnnounce()');
-    expect(CODE.match(/announce\(/gu)).toHaveLength(1);
+    expect(CODE.match(/announce\(/gu)).toHaveLength(2);
     expect(CODE).toContain('const sentence = spokenOf(state, ordinal);');
+    // The report's outcome carries its own sentence, so what is spoken and what is shown
+    // are one string.
+    expect(CODE).toContain('announce(reported.sentence);');
+    // And a recorded report does not re-announce that the explanation arrived: the
+    // prose did not change.
+    expect(CODE).toContain('flaggedAtOf(previous) !== flaggedAtOf(state)');
     // The `loaded` sentence is rendered as well as spoken, from the one member both
     // come from.
     expect(CODE.match(/studentCopy\.results\.explain\.announcement\(ordinal\)/gu)).toHaveLength(2);
@@ -163,6 +271,14 @@ describe('what the explain copy is allowed to say', () => {
     copy.atCap('No Explanation Allowance is left this period.'),
     copy.announcement(1),
     copy.announcement(4),
+    copy.flagControl,
+    copy.flagNote,
+    copy.flagged('28 September 2026, 10:00'),
+    copy.flaggedUndated,
+    copy.flagFailed,
+    copy.flagOffline,
+    copy.flagAnnouncement(1),
+    copy.flagAnnouncement(4),
   ];
 
   it('never counts an allowance down in front of a child', () => {
@@ -204,5 +320,47 @@ describe('what the explain copy is allowed to say', () => {
     // `aria-expanded` says which way the press goes; a label that changed under the
     // finger would be a second, contradictory account of it.
     expect(typeof copy.control).toBe('string');
+  });
+
+  it('promises a grown-up will read it, and promises nothing beyond that', () => {
+    // A child told an outcome nobody has decided on would be waiting for something that
+    // may never come. What is promised is exactly what is true.
+    expect(copy.flagNote).toMatch(/grown-up/u);
+    expect(copy.flagAnnouncement(3)).toMatch(/grown-up/u);
+    for (const sentence of [copy.flagControl, copy.flagNote, copy.flagAnnouncement(3)]) {
+      expect(sentence).not.toMatch(
+        /operator|admin|queue|review team|\bwe\b|support|ticket|fixed|removed|deleted/iu,
+      );
+    }
+  });
+
+  it('says the explanation stays put, because it does', () => {
+    // The paragraph staying on screen is deliberate — it may well be right — and a child
+    // who pressed a button and watched nothing move would otherwise think it failed.
+    expect(copy.flagNote).toMatch(/Nothing here changes/u);
+    expect(copy.flagAnnouncement(3)).toMatch(/Nothing here changes/u);
+  });
+
+  it('never praises or blames the child for reporting', () => {
+    for (const sentence of [copy.flagControl, copy.flagNote, copy.flagAnnouncement(3)]) {
+      expect(sentence).not.toMatch(/well done|thank|good job|nice work|your fault|you broke/iu);
+    }
+  });
+
+  it('keeps the report’s two unhappy states two different sentences', () => {
+    // "There is no connection" is a thing a child can act on, and collapsing it into
+    // "it did not work" would send them pressing at a wall.
+    expect(copy.flagFailed).not.toBe(copy.flagOffline);
+    expect(copy.flagOffline).toMatch(/not connected/u);
+  });
+
+  it('names the Question in the report announcement, from a handed-in ordinal', () => {
+    expect(copy.flagAnnouncement(7)).toContain('question 7');
+    expect(copy.flagAnnouncement(7)).not.toBe(copy.flagAnnouncement(8));
+  });
+
+  it('states the reported instant as a parameter and never writes one', () => {
+    expect(copy.flagged('LATER')).toContain('LATER');
+    expect(copy.flaggedUndated).not.toMatch(/\d/u);
   });
 });

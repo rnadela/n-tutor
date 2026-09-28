@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -11,12 +12,13 @@ import {
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ParentElevationGuard, type ElevatedRequest } from '../identity/parent-elevation.guard.js';
+import { DisposeFlagDto } from './dto/dispose-flag.dto.js';
 import type { ParentExplanationView } from './explanation-flag.js';
 import { ExplanationService } from './explanation.service.js';
 
 /**
- * The parent's two Explanation routes: read what this Attempt's Explanations say,
- * and record that one of them is bad.
+ * The parent's Explanation routes: read what this Attempt's Explanations say, record
+ * that one of them is bad, and decide about a concern the child raised.
  *
  * **A `GET` that writes nothing.** The student route beside it is a `POST` because
  * its first call bills a provider; this one is a read and stays one. Opening a
@@ -91,6 +93,45 @@ export class ParentExplanationController {
       { parentAccountId: req.elevated!.parentAccountId },
       attemptId,
       questionId,
+    );
+  }
+
+  /**
+   * Records what the parent decided about the concern **their child** raised.
+   *
+   * 200 on the first decision and on a repeat of the same one, each time with the
+   * instant the decision was first recorded: a double-tap is one decision. A *different*
+   * decision answers 409 with the one `FLAG_ALREADY_DISPOSED` sentence and rewrites
+   * nothing — the first decision stands, because reversal is not in FR-38 and a
+   * reversible confirm would mean an Explanation entering and leaving an operator's
+   * queue underneath them.
+   *
+   * **There is no un-flag, no undo and no toggle here**, and no route that could become
+   * one: the only body field is a member of a closed two-value enum, which the validation
+   * pipe checks before anything is read.
+   *
+   * A Question with no Explanation, one whose Explanation the child never reported, a
+   * foreign Attempt, an unknown id and one still open all answer the one shared 404. A
+   * parent's *own* flag has no disposition and needs none, so an Explanation carrying
+   * only that answers the same 404 as well.
+   *
+   * **Confirming does not suppress.** The child is served exactly the same prose
+   * afterwards; what confirming does is put the Explanation in front of an operator, and
+   * the screen says so in words.
+   */
+  @Post('attempts/:attemptId/questions/:questionId/explanation-flag/disposition')
+  @HttpCode(HttpStatus.OK)
+  disposeFlag(
+    @Req() req: ElevatedRequest,
+    @Param('attemptId', ParseUUIDPipe) attemptId: string,
+    @Param('questionId', ParseUUIDPipe) questionId: string,
+    @Body() dto: DisposeFlagDto,
+  ): Promise<ParentExplanationView> {
+    return this.explanations.disposeStudentFlag(
+      { parentAccountId: req.elevated!.parentAccountId },
+      attemptId,
+      questionId,
+      dto.disposition,
     );
   }
 }

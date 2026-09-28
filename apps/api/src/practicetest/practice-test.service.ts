@@ -392,6 +392,38 @@ export interface AttemptProfile {
 }
 
 /**
+ * What one `(Attempt, Question)` pair **is**, for a surface that holds only the pair.
+ *
+ * The boundary read Story 6.3's per-child flag list is built on, and it exists for the
+ * reason `attemptProfileFor` and `explanationInputFor` do: `explanation` owns
+ * `explanation_flag` and holds no `attempt`, `practiceTest`, `question`, `sourceTest`
+ * or taxonomy delegate (AD-17), so a list of flags could otherwise name nothing but
+ * two opaque ids. A flag a parent cannot recognise is a flag that did not surface.
+ *
+ * `runOrdinal` is which run of that Practice Test the Attempt was, and
+ * `questionOrdinal` the number the child was shown while they worked. Both are the
+ * server's figures; nothing derives either from a position in a list.
+ *
+ * `subjectName` is null for a test whose Subject carries no classification or no
+ * longer resolves, exactly as `ParentAttemptSummary`'s is: the entry keeps its place
+ * and loses its label.
+ *
+ * Still **no grade, no score, no answer and no prose**, and no cost, tier or model
+ * name (AD-20, AD-26). This says what a flag points at, not what it is about.
+ */
+export interface FlaggedQuestionContext {
+  attemptId: string;
+  questionId: string;
+  practiceTestId: string;
+  /** Which run of that Practice Test the Attempt was. */
+  runOrdinal: number;
+  /** The number the child was shown while they worked. */
+  questionOrdinal: number;
+  subjectName: string | null;
+  submittedAt: string;
+}
+
+/**
  * What handing in answered.
  *
  * `expired` is the comparison **the server made, against its own clock and its
@@ -1409,6 +1441,98 @@ export class PracticeTestService {
       throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
     }
     return { attemptId: attempt.id, studentProfileId: attempt.studentProfileId };
+  }
+
+  /**
+   * What a set of `(Attempt, Question)` pairs point at, for this account only.
+   *
+   * **One boundary read for a whole list**, which is why it takes the refs in bulk:
+   * `explanation` composes a parent's flag list from rows that carry two ids and no
+   * context, and a call per entry across a module boundary would be an N+1 on a screen
+   * whose whole job is to be a list. Two statements and one batched label read,
+   * whatever the length.
+   *
+   * **It refuses nothing and returns less instead.** A ref outside this account, one
+   * naming an Attempt still open, one naming an id that never existed and one pairing a
+   * real Question with the wrong Attempt are all simply *absent* from the answer. The
+   * caller has already proved its own entitlement — these refs come off rows it owns,
+   * not off a request — so a throw here would turn one unresolvable label into a whole
+   * screen that will not load. A missing context costs the entry its label, never its
+   * place, exactly as an unresolved Subject does.
+   *
+   * The account is in the `where` regardless, because "the caller has proved it" is not
+   * a thing this method can see: a future caller that got its scoping wrong reads
+   * nothing here rather than reading another family's ordinals.
+   *
+   * The Subject label is batched through `SOURCE_TEST_READER` over every row's Source
+   * Test in one call, exactly as `parentSubmittedRunsFor` does it: this module holds no
+   * `sourceTest` and no `subject` delegate and must not acquire one (AD-17).
+   *
+   * No grade, no score, no answer, no prose and no allowance, tier, cost or model
+   * figure: none of those is a fact about what a flag points at (AD-20, AD-26).
+   */
+  async flaggedQuestionContextsFor(
+    parentAccountId: string,
+    refs: readonly { attemptId: string; questionId: string }[],
+  ): Promise<FlaggedQuestionContext[]> {
+    if (refs.length === 0) return [];
+
+    const attempts = await this.prisma.attempt.findMany({
+      where: {
+        id: { in: [...new Set(refs.map((ref) => ref.attemptId))] },
+        parentAccountId,
+        // A run still open has no results and nothing to review, so it names nothing.
+        submittedAt: { not: null },
+      },
+      select: {
+        id: true,
+        practiceTestId: true,
+        ordinal: true,
+        submittedAt: true,
+        practiceTest: { select: { sourceTestId: true } },
+      },
+    });
+    if (attempts.length === 0) return [];
+    const attemptById = new Map(attempts.map((attempt) => [attempt.id, attempt]));
+
+    // Scoped to the Practice Tests those Attempts were sat at, so a real Question of
+    // another test is as absent as one that never existed — the same scoping
+    // `explanationInputFor` puts on its own Question read, for the same reason.
+    const questions = await this.prisma.practiceTestQuestion.findMany({
+      where: {
+        id: { in: [...new Set(refs.map((ref) => ref.questionId))] },
+        practiceTestId: { in: [...new Set(attempts.map((attempt) => attempt.practiceTestId))] },
+      },
+      select: { id: true, practiceTestId: true, ordinal: true },
+    });
+    const questionById = new Map(questions.map((question) => [question.id, question]));
+
+    const labels = await this.sourceTests.readSubjectLabels(
+      attempts.map((attempt) => attempt.practiceTest.sourceTestId),
+    );
+
+    const contexts: FlaggedQuestionContext[] = [];
+    for (const ref of refs) {
+      const attempt = attemptById.get(ref.attemptId);
+      const question = questionById.get(ref.questionId);
+      if (attempt === undefined || question === undefined) continue;
+      // The pair has to agree: a Question of another test paired with this Attempt
+      // names no ordinal of this run, and answering one anyway would label an entry
+      // with a number the child never saw.
+      if (question.practiceTestId !== attempt.practiceTestId) continue;
+      contexts.push({
+        attemptId: attempt.id,
+        questionId: question.id,
+        practiceTestId: attempt.practiceTestId,
+        runOrdinal: attempt.ordinal,
+        questionOrdinal: question.ordinal,
+        subjectName: labels.get(attempt.practiceTest.sourceTestId) ?? null,
+        // Non-null by the `where` above, which is what makes the view's `string` honest
+        // rather than optimistic.
+        submittedAt: attempt.submittedAt!.toISOString(),
+      });
+    }
+    return contexts;
   }
 
   /**

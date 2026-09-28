@@ -1693,3 +1693,75 @@ source_spec: `spec-6-2-parent-review-of-explanations.md`
 severity: low
 reason: parentCopy.attempts.format re-declares the same three labels (MultipleChoice, FillInTheBlank, ShortAnswer) already in studentCopy.takeTest.format. commonCopy.gradeState was deliberately factored out specifically so a parent and a student surface cannot disagree on that one; this format table is the same category of duplication left unfactored, so a fourth question format added later requires remembering to update both copy tables.
 status: open
+
+### DW-213: The Admin Flagged Explanations queue read and the parent's per-child flag list are both unbounded.
+origin: spec-deferred e5b7665ce51f
+location: apps/api/src/explanation/explanation.service.ts
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: medium
+reason: `flaggedForAdmin` selects every qualifying flag row across every account with the full Explanation body and folds them in memory; `studentFlagsFor` reads every flag row for a child and feeds all of them into `flaggedQuestionContextsFor`, which builds `id: { in: [...] }` lists with no ceiling. Neither has take/skip/cursor, and the queue only grows because nothing marks an entry judged. At v0 volumes this is correct and cheap; it degrades monotonically.
+status: open
+
+### DW-214: No index supports the per-child flag list's actual predicate.
+origin: spec-deferred 5e8d0071edb8
+location: apps/api/prisma/schema.prisma
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: low
+reason: `studentFlagsFor` filters on parentAccountId + studentProfileId + origin and orders by createdAt desc, id desc. The table carries `[parentAccountId, createdAt]` and the new `[origin, disposition, createdAt]`; studentProfileId and origin are residual filters either way. An index on (parentAccountId, studentProfileId, origin, createdAt) is the one this read wants.
+status: open
+
+### DW-215: A disposition is permanent and records no actor beyond the account.
+origin: spec-deferred 6bb1970908c5
+location: apps/api/prisma/schema.prisma
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: low
+reason: `disposition`/`dispositionAt` carry no parent identity, and Parent View elevation is PIN-gated rather than identity-bound, so "who dismissed this" is unanswerable for a contested case. The intent does not ask for attribution and the epic scopes the account as the entitlement, so this is a note rather than a defect.
+status: open
+
+### DW-216: The story's e2e spec was written and typechecks but has never been executed.
+origin: spec-deferred 7510f85c5fd7
+location: e2e/tests/student-explanation-flagging.spec.ts
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: medium
+reason: Ports 3000 and 3001 were held for the whole run by an unrelated project's dev servers, and apps/web's `start` script pins port 3000, so Playwright could not bring the suite up. `pnpm e2e -- student-explanation-flagging` needs one run in a clean environment. Same condition Story 6.2 recorded.
+status: open
+
+### DW-217: The whole cross-surface flow is one e2e test with a 360s timeout covering eight independent claims.
+origin: spec-deferred 60c35419df7a
+location: e2e/tests/student-explanation-flagging.spec.ts
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: low
+reason: Sign-up through upload, generation, release, sitting, reporting, the parent's two decisions, the child's re-read and the operator queue all chain inside a single test(). Any failure reports as one red test with no isolation, and the expensive setup re-runs on retry.
+status: open
+
+### DW-218: Several API integration specs fail nondeterministically under parallel load, on baseline as well as here.
+origin: spec-deferred 315ba56fc32e
+location: apps/api/test/practice-test.int-spec.ts
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: medium
+reason: practice-test, source-test, uncommitted-state and admin-auth-dummy-hash each fail a different 1-3 cases per run when the suite runs in parallel and pass when run alone. Reproduced with this story's changes stashed and the Prisma client regenerated from the baseline schema, so it is contention over shared database state and PIN rate limits, not this change.
+status: open
+
+### DW-219: Date-formatting-with-"Invalid Date"-fallback logic is reimplemented independently three times instead of shared.
+origin: spec-deferred 4afad1f1ceea
+location: apps/web/src/app/admin/flagged-explanations/page.tsx
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: low
+reason: `raisedSentence` in the admin flagged-explanations page, `flaggedSentence` in `ExplainPanel.tsx`, and the `readableInstant`-based helpers in `ExplanationReview.tsx` / the parent explanation-flags page each guard the same "Invalid Date" case with their own local function. A future change to that guard has to be made three times and can drift.
+status: open
+
+### DW-220: `ExplanationFlag.disposition` and `dispositionAt` are only kept paired by application discipline, not a database constraint.
+origin: spec-deferred ea3102ce24e7
+location: apps/api/prisma/migrations/20260928200000_add_explanation_flag_disposition/migration.sql
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: low
+reason: Every write path in this story sets both columns together, but nothing in the migration enforces `(disposition IS NULL) = (dispositionAt IS NULL)`. A future write path that sets one without the other would produce a row the mapper has never seen and has undefined behavior for.
+status: open
+
+### DW-221: The 409-conflict reconcile branch in the parent's decide() flow is never exercised by an executing test, only by source-string assertions.
+origin: spec-deferred 0e026d11ef6d
+location: apps/web/src/app/parent/_components/ExplanationReview.spec.tsx
+source_spec: `spec-6-3-student-explanation-flagging.md`
+severity: low
+reason: `ExplanationReview.spec.tsx` reads the component's source with `readFileSync` and asserts on substrings (e.g. that `parentApi.attemptExplanations(token, attemptId)` appears, that the reconcile does not call `announce(`). No test renders the component, forces a 409 from a mocked `disposeExplanationFlag`, and asserts the region actually redraws as decided with the correct entry. This matches the codebase's existing source-assertion convention for stateful components, so closing it means adding real interactive rendering for this one component, not a one-line fix.
+status: open

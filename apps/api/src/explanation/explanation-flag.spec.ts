@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { PRACTICE_TEST_NOT_FOUND } from '../practicetest/practice-test-policy.js';
-import { NO_EXPLANATION_TO_FLAG } from './explanation-policy.js';
+import {
+  FLAG_ALREADY_DISPOSED,
+  NO_EXPLANATION_TO_FLAG,
+  NO_STUDENT_FLAG_TO_DISPOSE,
+} from './explanation-policy.js';
 import {
   PARENT_FLAG_ORIGIN,
+  STUDENT_FLAG_ORIGIN,
   parentExplanationViews,
   type StoredExplanationRow,
 } from './explanation-flag.js';
@@ -27,10 +32,50 @@ function row(overrides: Partial<StoredExplanationRow> = {}): StoredExplanationRo
   };
 }
 
+/** One parent-originated flag. A parent's own judgement, so never a disposition. */
+function parentFlag(at: string): StoredExplanationRow['flags'][number] {
+  return {
+    origin: PARENT_FLAG_ORIGIN,
+    createdAt: new Date(at),
+    disposition: null,
+    dispositionAt: null,
+  };
+}
+
+/**
+ * One student-originated flag, awaiting a decision unless one is given.
+ *
+ * `decidedAt` is a **different instant** from `at`, deliberately and by default: the two
+ * are separate columns written at separate moments, and a fixture where they agreed
+ * would let a mapper that read `createdAt` into `studentFlagDispositionAt` pass every
+ * case here. When a child raised a concern and when their parent decided about it are
+ * not the same fact.
+ */
+function studentFlag(
+  at: string,
+  disposition: 'Confirmed' | 'Dismissed' | null = null,
+  decidedAt = '2026-09-25T17:45:00.000Z',
+): StoredExplanationRow['flags'][number] {
+  return {
+    origin: STUDENT_FLAG_ORIGIN,
+    createdAt: new Date(at),
+    disposition,
+    // Null exactly where the disposition is: the API writes the two in one statement.
+    dispositionAt: disposition === null ? null : new Date(decidedAt),
+  };
+}
+
 describe('what a stored Explanation becomes on the way to a parent', () => {
   it('carries the Question, the stored segments and nothing else', () => {
     const [view] = parentExplanationViews([row()]);
-    expect(Object.keys(view!).sort()).toEqual(['body', 'parentFlaggedAt', 'questionId']);
+    expect(Object.keys(view!).sort()).toEqual([
+      'body',
+      'parentFlaggedAt',
+      'questionId',
+      'studentFlagDisposition',
+      'studentFlagDispositionAt',
+      'studentFlaggedAt',
+    ]);
     expect(view!.questionId).toBe('q1');
     expect(view!.body).toEqual([{ kind: 'text', value: 'Two halves make one whole.' }]);
   });
@@ -54,22 +99,82 @@ describe('what a stored Explanation becomes on the way to a parent', () => {
     // "the field is not there" for "there is no flag".
     const [view] = parentExplanationViews([row({ flags: [] })]);
     expect(view!.parentFlaggedAt).toBeNull();
+    expect(view!.studentFlaggedAt).toBeNull();
+    expect(view!.studentFlagDisposition).toBeNull();
+    expect(view!.studentFlagDispositionAt).toBeNull();
   });
 
   it('states when the concern was first raised, as an instant and not a boolean', () => {
     const first = new Date('2026-09-28T10:15:00.000Z');
-    const [view] = parentExplanationViews([row({ flags: [{ createdAt: first }] })]);
+    const [view] = parentExplanationViews([
+      row({ flags: [{ ...parentFlag('2026-09-28T10:15:00.000Z'), createdAt: first }] }),
+    ]);
     expect(view!.parentFlaggedAt).toBe('2026-09-28T10:15:00.000Z');
   });
 
-  it('takes the one flag the unique key allows, without searching for it', () => {
-    // The read that composes this filters `flags` to the parent origin, and
-    // `[explanationId, origin]` is unique — so there is at most one, and the mapping
-    // takes the first rather than implying a set to choose from.
+  it('folds both origins by origin, never by position in the list', () => {
+    // `flags[0]` was safe while the read filtered to one origin. With both origins in
+    // the list it would be whichever row the planner happened to return first — which
+    // is how a child's concern gets reported to a parent as their own. So the order is
+    // deliberately the *wrong* way round here, and both fields must still be right.
     const [view] = parentExplanationViews([
-      row({ flags: [{ createdAt: new Date('2026-09-28T09:00:00.000Z') }] }),
+      row({
+        flags: [studentFlag('2026-09-20T08:00:00.000Z'), parentFlag('2026-09-28T09:00:00.000Z')],
+      }),
     ]);
     expect(view!.parentFlaggedAt).toBe('2026-09-28T09:00:00.000Z');
+    expect(view!.studentFlaggedAt).toBe('2026-09-20T08:00:00.000Z');
+  });
+
+  it('reports a student flag nobody has decided about as awaiting, not as absent', () => {
+    // Awaiting is the *lack* of a decision, and it is told from "no student flag at
+    // all" by `studentFlaggedAt` — which is why the two are separate fields and not one
+    // three-state string. A screen that could not tell them apart would show a parent
+    // nothing to decide about a concern their child raised.
+    const [view] = parentExplanationViews([
+      row({ flags: [studentFlag('2026-09-20T08:00:00.000Z')] }),
+    ]);
+    expect(view!.studentFlaggedAt).toBe('2026-09-20T08:00:00.000Z');
+    expect(view!.studentFlagDisposition).toBeNull();
+    expect(view!.studentFlagDispositionAt).toBeNull();
+  });
+
+  it('keeps reporting a dismissed student flag, with its decision', () => {
+    // A dismissal is not a deletion. The concern was raised, the parent decided, and
+    // the entry says both — a view that dropped it would make the parent's own decision
+    // look like the concern never happened.
+    const [view] = parentExplanationViews([
+      row({ flags: [studentFlag('2026-09-20T08:00:00.000Z', 'Dismissed')] }),
+    ]);
+    expect(view!.studentFlaggedAt).toBe('2026-09-20T08:00:00.000Z');
+    expect(view!.studentFlagDisposition).toBe('Dismissed');
+    // The decision's **own** instant, which is not the instant the concern was raised: a
+    // mapper reading `createdAt` into this field would date every decision to the moment
+    // the child pressed, and a parent would read that they decided before they did.
+    expect(view!.studentFlagDispositionAt).toBe('2026-09-25T17:45:00.000Z');
+    expect(view!.studentFlagDispositionAt).not.toBe(view!.studentFlaggedAt);
+  });
+
+  it('never gives a parent-origin flag a disposition, whatever is on the row', () => {
+    // A parent-origin flag *is* the parent's own judgement, so there is nothing for
+    // them to decide about it. The disposition is read off the student's flag and only
+    // ever that one — here the parent's row carries a value it has no business carrying,
+    // and it still does not reach the view.
+    const [view] = parentExplanationViews([
+      row({
+        flags: [
+          {
+            ...parentFlag('2026-09-28T09:00:00.000Z'),
+            disposition: 'Confirmed',
+            dispositionAt: new Date('2026-09-28T09:30:00.000Z'),
+          },
+        ],
+      }),
+    ]);
+    expect(view!.parentFlaggedAt).toBe('2026-09-28T09:00:00.000Z');
+    expect(view!.studentFlaggedAt).toBeNull();
+    expect(view!.studentFlagDisposition).toBeNull();
+    expect(view!.studentFlagDispositionAt).toBeNull();
   });
 
   it('invents no entry for a Question nobody asked about', () => {
@@ -106,8 +211,8 @@ describe('what a stored Explanation becomes on the way to a parent', () => {
       'tier',
       'model',
       'suppressedAt',
-      'studentFlaggedAt',
-      'disposition',
+      'disputeFlag',
+      'mastery',
     ]) {
       expect(keys).not.toContain(forbidden);
     }
@@ -122,11 +227,42 @@ describe('what the origin and the unique key mean', () => {
     expect(PARENT_FLAG_ORIGIN).toBe('Parent');
   });
 
+  it('names the student origin once, beside the parent\u2019s, and not as an enum change', () => {
+    // Both members were declared by Story 6.2 precisely so the student route would be a
+    // code path. Two constants are what keep the write and three reads — the child's own
+    // response, the parent's, and the Admin queue — agreeing about one word.
+    expect(STUDENT_FLAG_ORIGIN).toBe('Student');
+    expect(STUDENT_FLAG_ORIGIN).not.toBe(PARENT_FLAG_ORIGIN);
+  });
+
   it('refuses a flag with the one sentence every ownership refusal reuses', () => {
     // A Question the child never asked about, a Question of another account's
     // Attempt, an unknown Attempt and one still open are four facts and one
     // sentence: spelling them apart is how the outside reads which of another
     // account's ids exist (AD-18).
     expect(NO_EXPLANATION_TO_FLAG).toBe(PRACTICE_TEST_NOT_FOUND);
+  });
+});
+
+describe('what a disposition is, and what refuses a second one', () => {
+  it('refuses a missing student flag with the same sentence every ownership refusal reuses', () => {
+    // A Question with no Explanation, one whose Explanation nobody reported, a foreign
+    // Attempt and one still open are four facts and one sentence: spelling them apart is
+    // how the outside reads which of another account's ids exist (AD-18). It is its own
+    // constant because the *reason* differs, not the wording.
+    expect(NO_STUDENT_FLAG_TO_DISPOSE).toBe(PRACTICE_TEST_NOT_FOUND);
+    expect(NO_STUDENT_FLAG_TO_DISPOSE).toBe(NO_EXPLANATION_TO_FLAG);
+  });
+
+  it('states that the first decision stands, and states nothing else', () => {
+    // The one 409 this surface has. A repeat of the *same* decision is 200 with the
+    // first instant, because a double-tap is one decision; a different one is this.
+    expect(FLAG_ALREADY_DISPOSED).not.toBe(PRACTICE_TEST_NOT_FOUND);
+    expect(FLAG_ALREADY_DISPOSED).toMatch(/first decision stands/u);
+    // No child, no Question, no instant, no tier, no number, no apology, and no
+    // instruction to try again — trying again is exactly what it refuses.
+    expect(FLAG_ALREADY_DISPOSED).not.toMatch(/\d/u);
+    expect(FLAG_ALREADY_DISPOSED).not.toMatch(/sorry|apolog|try again|tier|plan|cost/iu);
+    expect(FLAG_ALREADY_DISPOSED).not.toContain('!');
   });
 });

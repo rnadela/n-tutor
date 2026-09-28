@@ -1298,14 +1298,36 @@ enum ExplanationFlagOrigin {
   @@map("explanation_flag_origin")
 }
 
+/// What a parent decided about a concern their **child** raised.
+///
+/// Two members and no third. `Confirmed` is the parent agreeing that the
+/// Explanation is bad, which is what puts it in front of an operator; `Dismissed` is
+/// the parent reading the same prose and judging it fine. There is no `Pending`
+/// member, because "nobody has decided yet" is the absence of a disposition and not
+/// a decision — a third member would make an awaiting flag a row somebody has to
+/// remember to write, and an unwritten one would then be indistinguishable from a
+/// bug.
+///
+/// **A disposition is a decision, not a setting.** The first one recorded stands:
+/// there is no reversal route, because a reversible confirm would mean an
+/// Explanation entering and leaving an operator's queue underneath them.
+///
+/// It applies only to a `Student`-origin flag. A parent-origin flag *is* the parent's
+/// own judgement already, so there is nothing for them to dispose of.
+enum ExplanationFlagDisposition {
+  Confirmed
+  Dismissed
+
+  @@map("explanation_flag_disposition")
+}
+
 /// One recorded concern about one Explanation.
 ///
 /// A flag is a **record and nothing more**. It does not change the Explanation's
 /// body, what the child is served, the grade state, the Attempt's score, Mastery or
-/// any other row: suppression is Story 6.4's and it is the destructive act, and a
-/// disposition (confirm/dismiss) is Story 6.3's. There is deliberately no
-/// `dispositionedAt`, no `suppressedAt` and no `reason` column here — a column with
-/// no writer is a promise the next reader will believe.
+/// any other row: suppression is Story 6.4's and it is the destructive act. There is
+/// deliberately no `suppressedAt` and no `reason` column here — a column with no
+/// writer is a promise the next reader will believe.
 ///
 /// **There is no un-flagging.** No route deletes a row here, which is why the table
 /// carries no soft-delete column either. A concern that was raised was raised.
@@ -1317,7 +1339,7 @@ enum ExplanationFlagOrigin {
 /// The `explanationId` edge cascades, because a flag on a row that is gone is a
 /// flag on nothing.
 model ExplanationFlag {
-  id               String                @id @default(uuid())
+  id               String                      @id @default(uuid())
   explanationId    String
   /// Whose account the flagged Explanation belongs to. Denormalized so a queue read
   /// is one statement over one index.
@@ -1326,8 +1348,24 @@ model ExplanationFlag {
   /// and never taken from a request.
   studentProfileId String
   origin           ExplanationFlagOrigin
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  /// What the parent decided about a concern their child raised, or null.
+  ///
+  /// **Nullable, and null means two different things that are the same absence**: a
+  /// parent-origin flag has no disposition and needs none, and a student-origin flag
+  /// nobody has read yet has not got one yet. Which of the two a null row is, is read
+  /// off `origin` — it is not a third enum member, because "awaiting" is the lack of a
+  /// decision rather than one of them.
+  ///
+  /// Written by `updateMany({ where: { id, disposition: null } })` and never by a
+  /// read-then-write, so two simultaneous presses cannot both win and the first
+  /// decision is final by the statement rather than by a check.
+  disposition      ExplanationFlagDisposition?
+  /// When that decision was recorded, or null for a row that carries none. Always
+  /// written in the same statement as `disposition`: a set disposition with no instant
+  /// beside it would be a decision nobody can date.
+  dispositionAt    DateTime?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
 
   explanation Explanation @relation(fields: [explanationId], references: [id], onDelete: Cascade)
 
@@ -1339,5 +1377,9 @@ model ExplanationFlag {
   /// The one read index: this account's flags, newest first. Equality then range,
   /// exactly as `explanation`'s own count index is ordered.
   @@index([parentAccountId, createdAt])
+  /// The Admin queue's index, in the queue read's own shape: "parent-origin, or
+  /// student-origin confirmed, oldest qualifying first". Two equalities then the
+  /// ordering column, which is the same equality-then-range shape the index above has.
+  @@index([origin, disposition, createdAt])
   @@map("explanation_flag")
 }

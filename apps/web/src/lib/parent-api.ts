@@ -437,11 +437,18 @@ export interface AttemptResultsView {
 /**
  * One Question's Explanation, exactly as the API states it.
  *
- * Segments and two ids, and **nothing else**. There is no cost, no model name, no
- * tier, no allowance figure, no count of what is left and no grading rationale
- * (AD-20, AD-26): none of those is a student-scoped fact, and the view having no
- * field one could travel in is what makes that a property of the type rather than
- * a habit.
+ * Segments, two ids and **the child's own flag**, and nothing else. There is no cost,
+ * no model name, no tier, no allowance figure, no count of what is left and no
+ * grading rationale (AD-20, AD-26): none of those is a student-scoped fact, and the
+ * view having no field one could travel in is what makes that a property of the type
+ * rather than a habit.
+ *
+ * `studentFlaggedAt` is the one flag fact a student-scoped response carries: their
+ * own. **Never the parent's flag and never a decision about theirs** — whether a
+ * grown-up later agreed or disagreed is a parent-scoped fact and reaches no student
+ * surface, and there is nowhere here for one to travel. It rides on this response
+ * rather than having a read of its own, which is what makes the reported state
+ * survive a reload and a re-open of the panel with no second request.
  *
  * `AnswerKeyRowView` and `AttemptResultsView` are deliberately untouched by this.
  * An Explanation is asked for one Question at a time, by a deliberate press, and
@@ -453,6 +460,8 @@ export interface ExplanationView {
   questionId: string;
   /** The stored segments, drawn by `components/RichText` and by nothing else (AD-32). */
   body: RichTextSegment[];
+  /** When this child first reported it, or null. Never anybody else's flag. */
+  studentFlaggedAt: string | null;
 }
 
 /**
@@ -495,6 +504,72 @@ export interface ParentExplanationView {
   body: RichTextSegment[];
   /** When a parent first reported it, or null. */
   parentFlaggedAt: string | null;
+  /**
+   * When the **child** first reported it, or null.
+   *
+   * Its own field beside the parent's, because they are two people raising a concern
+   * and never one: a screen that read either one for the other would tell a parent
+   * their child said something they did not.
+   */
+  studentFlaggedAt: string | null;
+  /**
+   * What the parent decided about the child's report, or null.
+   *
+   * Null covers two cases that are the same absence — no report at all, and one
+   * awaiting a decision — and they are told apart by `studentFlaggedAt`. That is why
+   * these are two fields rather than one three-state string: a screen that could not
+   * tell them apart would offer a parent nothing to decide.
+   */
+  studentFlagDisposition: FlagDisposition | null;
+  /**
+   * When that decision was recorded, or null.
+   *
+   * Null exactly where `studentFlagDisposition` is null: the API writes the two in one
+   * statement, so a screen never has to handle a decision whose instant is missing.
+   */
+  studentFlagDispositionAt: string | null;
+}
+
+/**
+ * What a parent decided about the concern their child raised, exactly as the API
+ * states it.
+ *
+ * Two values and no third, and no `'Pending'`: awaiting a decision is the *absence* of
+ * one, which the null on the field above carries. **There is no reversal** — the first
+ * decision stands, and the API answers a different second one with a 409.
+ */
+export type FlagDisposition = 'Confirmed' | 'Dismissed';
+
+/**
+ * One concern a child raised, as the parent's per-child list of them reads it.
+ *
+ * **It outlives the decision**: an awaiting entry and a decided one are both listed,
+ * each marked with what it is. A list that dropped decided entries would make a
+ * parent's own dismissal look like the concern never happened.
+ *
+ * Every context field is nullable *together*, for a run or Question the API could no
+ * longer name: the entry keeps its place and loses its labels, because whether a
+ * concern was raised is not contingent on being able to say what it was about.
+ *
+ * No prose here — that is read next to the Question it is about, on the Attempt-detail
+ * screen — and no grade, score, cost, tier or model name (AD-20, AD-26).
+ */
+export interface StudentExplanationFlagView {
+  attemptId: string;
+  questionId: string;
+  /** When the child raised it. */
+  flaggedAt: string;
+  /** What the parent decided, or null while it awaits a decision. */
+  disposition: FlagDisposition | null;
+  /** When that decision was recorded, or null. */
+  dispositionAt: string | null;
+  practiceTestId: string | null;
+  /** Which run of that practice test it was, or null for a context that no longer resolves. */
+  runOrdinal: number | null;
+  /** The number the child was shown, or null for a context that no longer resolves. */
+  questionOrdinal: number | null;
+  subjectName: string | null;
+  submittedAt: string | null;
 }
 
 /**
@@ -1081,6 +1156,35 @@ export const parentApi = {
       studentCopy.results.explain.failed,
     ),
 
+  /**
+   * Records that the child thinks this explanation is wrong.
+   *
+   * **Idempotent, and there is no undo.** A second press is the same concern and
+   * answers the same `studentFlaggedAt` the first one did; nothing here un-reports,
+   * because a record of a concern is not a toggle.
+   *
+   * **The answer carries the same prose.** Reporting is not a retraction of what was
+   * said: the panel keeps the paragraph it already has, and the only thing that
+   * changes on screen is the report's own state.
+   *
+   * **The child's own report and nothing else.** No parent flag and no decision about
+   * theirs ever travels here — whether a grown-up agreed or disagreed is a
+   * parent-scoped fact, and `ExplanationView` has nowhere for one to sit (AD-20,
+   * AD-26).
+   *
+   * No bearer, exactly as `explainQuestion`: the binding cookie names the child
+   * server-side, and the two ids in the path name only *which* Question. A sibling's
+   * Attempt, another account's, one still open, one that never existed and a Question
+   * with no explanation all answer the same 404 sentence, so there is nothing this
+   * browser could learn by asking.
+   */
+  flagExplanationAsStudent: (attemptId: string, questionId: string) =>
+    call<ExplanationView>(
+      `/student/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation-flag`,
+      { method: 'POST' },
+      studentCopy.results.explain.flagFailed,
+    ),
+
   // --- Uncommitted parent state ------------------------------------------
   //
   // Server-side only, and behind the elevation bearer like every other
@@ -1508,6 +1612,53 @@ export const parentApi = {
       `/parent/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation-flag`,
       { method: 'POST', headers: elevated(token) },
       parentCopy.attempts.flagFailed,
+    ),
+
+  /**
+   * Records what the parent decided about the concern **their child** raised.
+   *
+   * **The first decision is final.** A repeat of the same decision answers 200 with the
+   * instant it was first recorded — a double-tap is one decision — and a *different*
+   * one answers 409 with the API's own sentence. There is no reversal and no undo:
+   * a confirm that could be taken back would mean an explanation entering and leaving
+   * an operator's queue underneath them.
+   *
+   * **Confirming does not suppress.** The child is served exactly the same explanation
+   * afterwards; what confirming does is send the report on for review, and the screen
+   * says so in words rather than leaving a parent to assume otherwise.
+   *
+   * A 404 covers a Question with no explanation, one the child never reported and an
+   * Attempt that is not this account's: there is nothing of the child's to decide about
+   * either way, and the API states one sentence for all of it.
+   */
+  disposeExplanationFlag: (
+    token: string,
+    attemptId: string,
+    questionId: string,
+    disposition: FlagDisposition,
+  ) =>
+    call<ParentExplanationView>(
+      `/parent/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation-flag/disposition`,
+      { method: 'POST', headers: elevated(token), body: JSON.stringify({ disposition }) },
+      parentCopy.attempts.disposeFailed,
+    ),
+
+  /**
+   * Every concern one child raised, newest first — awaiting and decided alike.
+   *
+   * **A read that generates nothing**, like every other Explanation read on a parent
+   * surface: no explanation is written and no Explanation Allowance is consumed.
+   *
+   * An empty list is the ordinary answer for a child who has reported nothing — and it
+   * is also the answer for a profile id belonging to another account, which is why this
+   * app does not try to tell the two apart. There is nothing here to enumerate and no
+   * refusal to read.
+   */
+  studentExplanationFlags: (token: string, studentProfileId: string) =>
+    call<StudentExplanationFlagView[]>(
+      `/parent/students/${encodeURIComponent(studentProfileId)}/explanation-flags`,
+      { headers: elevated(token) },
+      parentCopy.flags.listFailed,
     ),
 
   setPracticeTestTimer: (token: string, practiceTestId: string, minutes: number | null) =>

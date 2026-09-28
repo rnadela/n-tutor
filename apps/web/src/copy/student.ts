@@ -464,6 +464,73 @@ export const studentCopy = {
        * about would be unusable to anyone reading the page by ear.
        */
       announcement: (ordinal: number) => `The explanation for question ${ordinal} is ready.`,
+
+      // --- Telling a grown-up it is wrong --------------------------------
+      //
+      // The same four rules hold this half of the group as hold the half above, and
+      // two more besides.
+      //
+      // **Nothing here names what happens next beyond a grown-up reading it.** No
+      // operator, no queue, no review team, no "we", and nothing about what a parent
+      // might decide: a child promised an outcome nobody has decided on would be
+      // waiting for something that may never come. What is promised is exactly what is
+      // true -- a grown-up will read it.
+      //
+      // **Nothing here blames the explanation, the child, or the asking.** Reporting
+      // one is a good thing to do, said plainly and without praise: "well done" for
+      // pressing a button would teach a child to press it.
+
+      /**
+       * The control that says the explanation is wrong.
+       *
+       * The child's own framing -- something here is not right -- rather than the
+       * product's word for it, exactly as `control` is "Why is that the answer?" and
+       * not "Explanation". It says nothing about who reads it, because the note
+       * beneath it does, once.
+       */
+      flagControl: 'Something here looks wrong',
+      /**
+       * What reporting does, said **before** it is pressed and kept beside the
+       * reported state afterwards.
+       *
+       * Two facts and no third: a grown-up will read it, and nothing on this screen
+       * changes. The second half exists because a child who pressed a button and
+       * watched a paragraph stay put would otherwise think the press did not work --
+       * and the paragraph staying put is deliberate, because it may well be right.
+       */
+      flagNote:
+        'A grown-up will read this explanation. Nothing here changes, so you can keep reading it.',
+      /** Once reported. The state, named rather than the act that produced it. */
+      flagged: (instant: string) => `You told a grown-up about this on ${instant}.`,
+      /**
+       * The same state with no date, for a stored instant that will not parse.
+       *
+       * The report was still made, which is the fact the child needs; only the date is
+       * unstateable, and the words "Invalid Date" would read as a fault in the report.
+       */
+      flaggedUndated: 'You told a grown-up about this.',
+      /**
+       * It could not be reported. One sentence for every failure class, and it leaves
+       * the asking available: the control is still there to press.
+       */
+      flagFailed: 'That could not be sent just now.',
+      /**
+       * The press happened with no connection, so nothing was sent.
+       *
+       * Distinct from `flagFailed` for the reason `offline` is distinct from `failed`:
+       * "there is no connection" is a thing a child can act on.
+       */
+      flagOffline: 'You are not connected right now, so this could not be sent.',
+      /**
+       * Said to the live region when the report is recorded, and it is **the same
+       * sentence the screen displays** beside the explanation.
+       *
+       * The ordinal is handed in, because two panels open on one screen are two
+       * different facts and an announcement that did not say which question it was
+       * about would be unusable to anyone reading the page by ear.
+       */
+      flagAnnouncement: (ordinal: number) =>
+        `A grown-up will read the explanation for question ${ordinal}. Nothing here changes.`,
     },
   },
   /**
