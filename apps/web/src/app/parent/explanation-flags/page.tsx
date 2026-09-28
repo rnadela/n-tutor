@@ -295,7 +295,10 @@ export default function ParentExplanationFlagsPage() {
                 second opinion about it. */}
             {flags.map((entry) => (
               <Card
-                key={`${entry.attemptId}:${entry.questionId}`}
+                // Generation joins the pair now that a suppression and a regeneration let one
+                // Question carry a report against each of two rows -- the id pair alone stopped
+                // being unique the day this story widened the Explanation key.
+                key={`${entry.attemptId}:${entry.questionId}:${entry.generation}`}
                 component="li"
                 role="listitem"
                 sx={{ listStyle: 'none' }}

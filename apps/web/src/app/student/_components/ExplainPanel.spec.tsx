@@ -44,11 +44,15 @@ describe('what asks for an explanation', () => {
     // The first ask bills a provider call. A timer here would bill one per
     // Question per visit, with nobody having asked for any of them.
     expect(CODE).not.toMatch(/setInterval|setTimeout|requestAnimationFrame|poll|prefetch/iu);
-    // And nothing asks on mount: the only three `useEffect`s here are the two
-    // announcements and the focus move, and none of them touches the API.
-    expect(CODE.match(/useEffect\(/gu)).toHaveLength(3);
+    // And nothing asks on mount: the only six `useEffect`s here are the two announcements,
+    // the two focus moves, the one that adopts the removed prop when it arrives, and the one
+    // that mirrors it into a ref for the two requests below to read live — and none of them
+    // touches the API — the prop is handed down from the screen's own attempt-scoped read, so
+    // adopting it costs no request.
+    expect(CODE.match(/useEffect\(/gu)).toHaveLength(6);
     expect(CODE).not.toMatch(/useEffect\([\s\S]{0,400}?explainQuestion/u);
     expect(CODE).not.toMatch(/useEffect\([\s\S]{0,400}?flagExplanationAsStudent/u);
+    expect(CODE).not.toMatch(/useEffect\([\s\S]{0,400}?parentApi\./u);
   });
 
   it('decides what a report press means through the pure function, not inline', () => {
@@ -73,8 +77,14 @@ describe('what asks for an explanation', () => {
     // report's instant on it. Every other outcome is a `ReportOutcome` beside the prose,
     // which is why the panel's own union cannot be made to say "this failed" about a
     // paragraph that is still perfectly readable.
-    expect(report.match(/setState\(\{\s*\n?\s*kind: '(\w+)'/gu)?.length).toBe(1);
+    // Two, and the second is the one case where the explanation legitimately leaves the
+    // screen: a grown-up removed it between the prose arriving and this press. Nothing was
+    // recorded, so nothing is announced as recorded — the panel becomes the removed state,
+    // which is the true thing to show and the one thing this panel is allowed to learn.
+    expect(report.match(/setState\(\{\s*\n?\s*kind: '(\w+)'/gu)?.length).toBe(2);
     expect(report).toMatch(/setState\(\{\s*\n?\s*kind: 'loaded'/u);
+    expect(report).toMatch(/setState\(\{\s*kind: 'suppressed' \}\)/u);
+    expect(report).toContain('if (value.suppressed || suppressedRef.current)');
     // And it never closes the panel or touches the prose it was handed.
     expect(report).not.toContain('setOpen');
     expect(report).not.toMatch(/state\.body/u);
@@ -129,7 +139,103 @@ describe('what asks for an explanation', () => {
     // start a second request while one is out, never send with no connection —
     // live where they can be asserted without a DOM.
     expect(CODE).toContain('explainDecision({ online: navigator.onLine, state })');
-    expect(CODE).toContain("if (decision === 'stored' || decision === 'busy') return;");
+    // `removed` is here beside `stored` and `busy`, and the rule that produces it is in
+    // `explainDecision` ahead of every other arm: a press must never leave the device for a
+    // Question a grown-up has settled, whatever the connection is doing.
+    expect(CODE).toContain(
+      "if (decision === 'stored' || decision === 'removed' || decision === 'busy') return;",
+    );
+  });
+
+  it('withholds the control entirely where a grown-up removed the explanation', () => {
+    // **In place of the control, not beside it and not disabled.** A child cannot undo this,
+    // so an inert control or a retry that could never help would be an offer of something
+    // that does nothing — and there is no report control either.
+    expect(CODE).toContain("state.kind === 'suppressed' ? (");
+    expect(CODE).toContain('data-testid="explain-suppressed"');
+    expect(CODE).toContain('studentCopy.results.explain.suppressed');
+    expect(CODE).toContain('studentCopy.results.explain.suppressedAnnouncement(ordinal)');
+    // The control is the alternative to it, so it is not rendered in that state at all.
+    expect(CODE.indexOf('data-testid="explain-suppressed"')).toBeLessThan(
+      CODE.indexOf('data-testid="explain-control"'),
+    );
+    // And the disclosure draws nothing there: the two lines stand on their own.
+    expect(CODE).toContain("{open && state.kind !== 'suppressed' && (");
+  });
+
+  it('adopts the removed prop when it arrives, not only at mount', () => {
+    // The initializer alone is not enough, and the gap it leaves is the whole guarantee: the
+    // results screen makes two independent reads, rows mount as soon as the answer key lands,
+    // and a panel that mounted before the suppression read resolved would keep `idle` and
+    // draw `Explain this` for a Question the parent removed. Which control a child sees would
+    // be decided by which request won.
+    expect(CODE).toContain('}, [suppressed]);');
+    expect(CODE).toContain(
+      "setState((held) => (held.kind === 'suppressed' ? held : { kind: 'suppressed' }))",
+    );
+    // The prop is read outside the initializer, which is the claim: two sites, not one.
+    expect(CODE.match(/\bsuppressed\b(?!:)/gu)?.length).toBeGreaterThan(1);
+    // And it only ever moves one way. Suppression is not reversible, and the prop goes false
+    // on the retry path — where the screen resets the set before re-reading — so an arm that
+    // put the control back would be a child un-doing a parent's decision by pressing Retry.
+    const adopt = CODE.slice(
+      CODE.indexOf('if (!suppressed) return;'),
+      CODE.indexOf('}, [suppressed]);'),
+    );
+    expect(adopt).not.toMatch(/kind: 'idle'/u);
+  });
+
+  it('moves focus to the sentence that replaced the control it settled', () => {
+    // A press on either control can come back saying a grown-up removed this explanation, and
+    // both controls unmount when it does — dropping a keyboard user to `document.body`, out of
+    // the paper mid-list. The same failure this file already solves for the report control.
+    expect(CODE).toContain('ref={removedLine}');
+    expect(CODE).toContain('removedLine.current?.focus()');
+    // Guarded on this panel's own press, so a panel that mounted already removed — or one the
+    // late-arriving prop adopted — does not take the keyboard from a child who touched nothing.
+    expect(CODE).toContain('settled.current = true');
+    expect(CODE).toContain("if (state.kind !== 'suppressed' || !settled.current) return;");
+  });
+
+  it('gives the removed state no error severity, no glyph and no retry', () => {
+    // Nothing failed. A grown-up made a decision, and a screen that framed it as a fault
+    // would be arguing with them at a child.
+    const removed = CODE.slice(
+      CODE.indexOf('data-testid="explain-suppressed"'),
+      CODE.indexOf('data-testid="explain-control"'),
+    );
+    expect(removed).not.toContain('<Alert');
+    expect(removed).not.toContain('severity');
+    expect(removed).not.toContain('explain-retry');
+    expect(removed).not.toContain('explain-flag');
+    // Product voice in the dashboard face, never the generated-prose role.
+    expect(removed).toContain('typeRoles.caption');
+    expect(removed).not.toContain('typeRoles.explanationBody');
+  });
+
+  it('marks a replacement plainly, and only where there is one', () => {
+    // So a child re-reading a question they asked about twice is not left wondering why the
+    // words changed. It says nothing about who asked for it, why, or what it replaced.
+    expect(CODE).toContain('{state.replacement && (');
+    expect(CODE).toContain('studentCopy.results.explain.replacementNote');
+    expect(CODE).toContain('data-testid="explain-replacement"');
+  });
+
+  it('never learns or relays a grown-up’s words, a reason or an instant', () => {
+    // The whole of what the child is told is two sentences of `studentCopy`'s. Nothing
+    // parent-scoped has anywhere on this surface to arrive (AD-20, AD-26).
+    for (const forbidden of [
+      /suppressedAt/u,
+      /canSuppress/u,
+      /generation/u,
+      /parentFlag/iu,
+      /disposition/iu,
+      /allowance/iu,
+      /\btier\b/iu,
+      /rationale/iu,
+    ]) {
+      expect(CODE).not.toMatch(forbidden);
+    }
   });
 
   it('reads the connection at each press rather than latching it', () => {
@@ -247,7 +353,7 @@ describe('what asks for an explanation', () => {
 
   it('drops the collapsed panel from the tree rather than hiding it', () => {
     // Prose left in the DOM is prose a screen reader reaches and a child cannot see.
-    expect(CODE).toContain('{open && (');
+    expect(CODE).toContain('{open && ');
     expect(CODE).not.toMatch(/display: 'none'|hidden=\{/u);
   });
 

@@ -46,10 +46,17 @@ import { ExplanationService } from './explanation.service.js';
  * routes deliberately omit it, because a child's surface answers every refusal with
  * one sentence.
  *
- * Neither response carries a cost, a tier, a model name, an allowance figure or a
- * grading rationale (AD-20, AD-26). The rationale is Story 6.5's and
- * `ParentExplanationView` has nowhere for one to sit; suppression is Story 6.4's and
- * there is no column for it yet.
+ * **Since Story 6.4 there are two more writes: suppression and regeneration.** Neither
+ * takes a body — there is no reason field, no scope option and no "also confirm the flag"
+ * — and both answer **every** generation of that Question, so the screen can draw the
+ * removed explanation beside its replacement from the write it made. The status split says
+ * what each did: suppression is 200 because a repeat is the same decision, regeneration is
+ * 201 because it billed a provider call.
+ *
+ * No response here carries a cost, a tier, a model name, an allowance figure or a grading
+ * rationale (AD-20, AD-26). The rationale is Story 6.5's and `ParentExplanationView` has
+ * nowhere for one to sit — and that holds for the free regeneration too: the row is free,
+ * and the response says nothing about what anything cost.
  */
 @Controller('parent')
 @SkipThrottle({ login: true })
@@ -132,6 +139,80 @@ export class ParentExplanationController {
       attemptId,
       questionId,
       dto.disposition,
+    );
+  }
+
+  /**
+   * Stops this Explanation being served to the child it was written for, for good.
+   *
+   * **200 and never 201**, because a repeat is the same decision and not a second one: the
+   * write is `updateMany({ where: { id, suppressedAt: null } })`, so a double-tap answers
+   * 200 with the **first** instant exactly as a repeat flag press answers the first flag's.
+   * There is no sentence for a repeat and no 409 for one — a parent pressing twice made one
+   * decision, and telling them they already did it would be a refusal for nothing.
+   *
+   * **No body, and no field for one.** There is no reason to record, no scope to choose and
+   * no "also confirm the flag" to bundle in: each route does one thing, and a body field
+   * with no column behind it is a promise the next reader believes.
+   *
+   * **It is refused until a concern is recorded.** A 409 `SUPPRESSION_NEEDS_A_FLAG` for a
+   * Question with no flag, one whose only report is awaiting a decision, and one the parent
+   * dismissed — the same predicate `canSuppress` is computed from, so this refusal is what
+   * a stale tab gets and not a dead end the screen offers. A Question with no Explanation,
+   * a foreign Attempt, an unknown id and one still open all answer the one shared 404.
+   *
+   * **There is no un-suppress route here and there will not be one.** Suppression is not
+   * reversible, the confirmation says so in words before it fires, and the API has no
+   * column to clear.
+   *
+   * It answers **every** generation of that Question, oldest first, so the screen can draw
+   * the removed explanation beside its replacement from the write it made.
+   */
+  @Post('attempts/:attemptId/questions/:questionId/explanation-suppression')
+  @HttpCode(HttpStatus.OK)
+  suppress(
+    @Req() req: ElevatedRequest,
+    @Param('attemptId', ParseUUIDPipe) attemptId: string,
+    @Param('questionId', ParseUUIDPipe) questionId: string,
+  ): Promise<ParentExplanationView[]> {
+    return this.explanations.suppressExplanation(
+      { parentAccountId: req.elevated!.parentAccountId },
+      attemptId,
+      questionId,
+    );
+  }
+
+  /**
+   * Writes a replacement for an Explanation this parent removed, charging nothing.
+   *
+   * **201, because it billed a provider call** — even though it charged no Explanation
+   * Allowance. The status is about what happened, and what happened is that a new
+   * Explanation was written; the row's `chargedAt: null` is what makes it free, and the
+   * allowance counter excludes it by column. **No allowance is read on this path at all**,
+   * which is why a Free account already at its cap cannot be refused one.
+   *
+   * **No body here either**, for the same reason the route above has none: there is nothing
+   * to configure about a replacement, and a field with no column behind it is a promise.
+   *
+   * **Only over a suppressed one.** A live Explanation answers 409 `NOTHING_TO_REGENERATE`
+   * and nothing is written: the child is still being served that one, so there is nothing to
+   * replace — and an allowance-free write with no precondition would be a free provider call
+   * anybody could press in a loop. A provider fault is the module's one 503.
+   *
+   * The suppressed Explanation is retained, stays readable here and stays in front of an
+   * operator. The replacement is a further generation, so it can itself be reported,
+   * decided about and removed on the same terms with no ceiling.
+   */
+  @Post('attempts/:attemptId/questions/:questionId/explanation-regeneration')
+  regenerate(
+    @Req() req: ElevatedRequest,
+    @Param('attemptId', ParseUUIDPipe) attemptId: string,
+    @Param('questionId', ParseUUIDPipe) questionId: string,
+  ): Promise<ParentExplanationView[]> {
+    return this.explanations.regenerateExplanation(
+      { parentAccountId: req.elevated!.parentAccountId },
+      attemptId,
+      questionId,
     );
   }
 }

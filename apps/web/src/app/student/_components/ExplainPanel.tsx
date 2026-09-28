@@ -50,16 +50,40 @@ export function ExplainPanel({
   attemptId,
   questionId,
   ordinal,
+  suppressed,
 }: {
   attemptId: string;
   questionId: string;
   /** The number the child was shown while they worked. Announced, never derived. */
   ordinal: number;
+  /**
+   * Whether a grown-up has removed this Question's explanation.
+   *
+   * Handed down from the screen's one attempt-scoped read rather than learned here, because
+   * this component is mounted per row: a read of its own would be one request per Question
+   * on load, and learning it at press time would leave the control on screen for a child to
+   * press — one tap from undoing a parent's decision, and on a Free account one allowance
+   * unit spent doing it.
+   *
+   * `false` while that read is still in flight or after it failed, which is deliberate: the
+   * control is drawn, a press answers 200 suppressed, and nothing is generated and nothing
+   * is charged. That is exactly why the API's check is at serve time and not a cache key.
+   */
+  suppressed: boolean;
 }) {
   const router = useRouter();
   const { announce } = useAnnounce();
   const [open, setOpen] = useState(false);
-  const [state, setState] = useState<ExplainState>({ kind: 'idle' });
+  /**
+   * What the panel is showing.
+   *
+   * It starts at the removed state where the screen already knows one applies, so a child
+   * never sees an `Explain this` control for a Question a grown-up has settled — and the
+   * press that would have asked cannot happen, because there is nothing to press.
+   */
+  const [state, setState] = useState<ExplainState>(
+    suppressed ? { kind: 'suppressed' } : { kind: 'idle' },
+  );
   /** Whether a report this panel sent is still out. Guards a double-tap into one call. */
   const [sending, setSending] = useState(false);
   /**
@@ -79,6 +103,47 @@ export function ExplainPanel({
   const panelId = `explain-panel-${questionId}`;
 
   /**
+   * Adopts the prop **whenever it turns true**, and not only at mount.
+   *
+   * The initializer above is not enough, and the gap it leaves is the whole guarantee. The
+   * results screen makes two independent reads: rows mount as soon as the answer key lands,
+   * so a panel routinely mounts *before* the suppression read resolves — and with the prop
+   * read only once, that panel would keep `idle` and draw `Explain this` for a Question the
+   * parent removed. Which control a child sees would be decided by which request won.
+   *
+   * **It only ever moves one way.** There is no arm here that un-suppresses: suppression is
+   * not reversible, and a prop that went false — which it does on the retry path, where the
+   * screen resets the set to empty before re-reading — must never put the control back. The
+   * functional updater keeps the held object where it is already suppressed, so nothing
+   * re-renders and the announcement below is not fired twice for one fact.
+   *
+   * It replaces whatever is on screen, prose included: a parent deciding while the child had
+   * the paper open is exactly the case suppression exists for, and the API would answer the
+   * suppressed arm to any press from here anyway.
+   */
+  useEffect(() => {
+    if (!suppressed) return;
+    setState((held) => (held.kind === 'suppressed' ? held : { kind: 'suppressed' }));
+  }, [suppressed]);
+
+  /**
+   * The prop's current value, read by the two requests below at the moment their response
+   * arrives rather than at the moment they were sent.
+   *
+   * `ask` and `report` close over `suppressed` from whichever render fired them, which can
+   * be stale by the time a response lands: a parent can suppress the explanation *after* the
+   * request went out and *before* it comes back, and the effect above only fires on a change
+   * a still-in-flight closure never sees. A response that read `suppressed: false` before the
+   * fact was true would otherwise overwrite the state the effect above just set, and nothing
+   * afterwards would put it back — the prop is not read again until it next changes. This ref
+   * lets both `.then` handlers check the live fact instead of the one their own request saw.
+   */
+  const suppressedRef = useRef(suppressed);
+  useEffect(() => {
+    suppressedRef.current = suppressed;
+  }, [suppressed]);
+
+  /**
    * One press, and the only place this component talks to the API.
    *
    * The decision is a pure function in `lib/explain-panel.ts` so that the rules
@@ -93,7 +158,10 @@ export function ExplainPanel({
    */
   const ask = useCallback(() => {
     const decision = explainDecision({ online: navigator.onLine, state });
-    if (decision === 'stored' || decision === 'busy') return;
+    // `removed` is here beside `stored` and `busy`, and the rule that produces it is in
+    // `explainDecision` ahead of every other arm: a press must never leave the device for a
+    // Question a grown-up has settled.
+    if (decision === 'stored' || decision === 'removed' || decision === 'busy') return;
     if (decision === 'offline') {
       setState({ kind: 'offline' });
       return;
@@ -102,8 +170,30 @@ export function ExplainPanel({
     parentApi.explainQuestion(attemptId, questionId).then(
       // The report's own state arrives on this response, which is what makes it survive
       // a reload and a re-open of the panel with no second request.
-      (value) =>
-        setState({ kind: 'loaded', body: value.body, studentFlaggedAt: value.studentFlaggedAt }),
+      (value) => {
+        // A grown-up removed it between the screen's read and this press — a stale tab, or a
+        // parent deciding while the child had the paper open. The prose and the report
+        // control are replaced by the same two lines the withheld-control case draws, and
+        // nothing was generated and nothing charged to find that out.
+        //
+        // The flag is set before the state that unmounts the control this press came from, so
+        // the focus effect can tell this transition from a panel that mounted already removed.
+        //
+        // The live ref is read ahead of `value.suppressed`: a parent can settle it *after* this
+        // request went out but before it came back, and a response that asked its question
+        // before that must still lose to the fact that is true now.
+        if (value.suppressed || suppressedRef.current) settled.current = true;
+        setState(
+          value.suppressed || suppressedRef.current
+            ? { kind: 'suppressed' }
+            : {
+                kind: 'loaded',
+                body: value.body,
+                studentFlaggedAt: value.studentFlaggedAt,
+                replacement: value.replacement,
+              },
+        );
+      },
       (cause: unknown) => {
         // The one refusal that is about the binding rather than about this
         // Question.
@@ -152,6 +242,19 @@ export function ExplainPanel({
     parentApi.flagExplanationAsStudent(attemptId, questionId).then(
       (value) => {
         setSending(false);
+        // A grown-up removed it between the prose arriving and this press. Nothing was
+        // recorded, so nothing is announced as recorded: the panel simply becomes the removed
+        // state, which is the true thing to show.
+        //
+        // The live ref is read ahead of `value.suppressed` for the same reason `ask`'s handler
+        // reads it: suppression can land after this request went out and before it came back.
+        if (value.suppressed || suppressedRef.current) {
+          setReported(null);
+          // Set before the state that unmounts the report control this press came from.
+          settled.current = true;
+          setState({ kind: 'suppressed' });
+          return;
+        }
         // Set before the state that unmounts the control, so the effect below can tell
         // this transition from a panel that opened already reported.
         pressed.current = true;
@@ -165,6 +268,7 @@ export function ExplainPanel({
           kind: 'loaded',
           body: value.body,
           studentFlaggedAt: value.studentFlaggedAt,
+          replacement: value.replacement,
         });
       },
       (cause: unknown) => {
@@ -186,6 +290,13 @@ export function ExplainPanel({
    * two different facts, and a kind-keyed guard would swallow the second. A closed
    * panel announces nothing — there is nothing on screen to be the same sentence
    * as.
+   *
+   * **The removed state is announced when a press produced it, and not on arrival**, which
+   * is the same `open` gate every other state passes and the same behaviour `announcement`
+   * has: a press opens the panel, so a child who just asked is told. A paper opening with
+   * five removed explanations would otherwise fire five announcements at somebody who has
+   * touched nothing — and the sentence is displayed on every one of those rows regardless,
+   * which is what it is for.
    */
   const announced = useRef<ExplainState | null>(null);
   useEffect(() => {
@@ -244,6 +355,27 @@ export function ExplainPanel({
     flagged.current?.focus();
   }, [state]);
 
+  /**
+   * The same arrangement for a press that turns out to have been settled already.
+   *
+   * A press on `Explain this`, or on the report control, can come back saying a grown-up
+   * removed this explanation — and both of those controls unmount when it does. A browser
+   * puts focus on `document.body` when the focused element disappears, which drops a
+   * keyboard user out of the paper entirely, mid-list. So focus moves deliberately to the
+   * sentence that replaced the control, which is also the outcome they need to read.
+   *
+   * Guarded on *this panel's own press*, exactly as the report's focus move is and for the
+   * same reason: a panel that mounted already removed, or one the late-arriving read above
+   * adopted, must not take the keyboard from a child who has touched nothing.
+   */
+  const removedLine = useRef<HTMLParagraphElement | null>(null);
+  const settled = useRef(false);
+  useEffect(() => {
+    if (state.kind !== 'suppressed' || !settled.current) return;
+    settled.current = false;
+    removedLine.current?.focus();
+  }, [state]);
+
   const reportAnnounced = useRef<ReportOutcome | null>(null);
   useEffect(() => {
     if (!open || reported === null || reportAnnounced.current === reported) return;
@@ -264,24 +396,67 @@ export function ExplainPanel({
           `aria-controls` is set only while the panel is in the tree: a collapsed
           panel here is unmounted rather than hidden, and an `aria-controls`
           pointing at an id that does not exist yet is handled inconsistently. */}
-      <Button
-        variant="outlined"
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        onClick={() => {
-          setOpen((value) => !value);
-          if (!open) ask();
-        }}
-        sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
-        data-testid="explain-control"
-      >
-        {studentCopy.results.explain.control}
-      </Button>
+      {state.kind === 'suppressed' ? (
+        /* **In place of the control, not beside it and not disabled.** There is no expand,
+           no retry and no report control either: a child cannot undo this, and an inert
+           control or a retry that could never help would be an offer of something that does
+           nothing. The two lines are the whole of what is shown.
+
+           `severity="info"` at most, and never `error` or `warning`: nothing failed, and a
+           glyph that said otherwise would make a grown-up's decision read as a fault. The
+           statement itself is product voice in the dashboard face — `typeRoles.caption`,
+           never `typeRoles.explanationBody`, because it is the product speaking and not
+           generated prose.
+
+           Nothing else on the row or the screen changes: the question, both answers, the
+           grade state, the score, Retake and every other explanation are where they were. */
+        <Box
+          sx={{ display: 'grid', gap: `${comfortableDensity.gap / 2}px` }}
+          data-testid="explain-suppressed"
+          data-state={state.kind}
+        >
+          {/* Displayed as well as announced, from the one string both come from, exactly as
+              `announcement` is — so what is spoken and what is shown cannot come apart. */}
+          {/* Focusable only programmatically: this is where focus lands when the control
+              that was under the child's finger unmounts, and it is not a stop on the way
+              through the paper otherwise. */}
+          <Typography
+            component="p"
+            tabIndex={-1}
+            ref={removedLine}
+            sx={{ ...typeRoles.caption }}
+            data-testid="explain-suppressed-announcement"
+          >
+            {studentCopy.results.explain.suppressedAnnouncement(ordinal)}
+          </Typography>
+          <Typography
+            component="p"
+            sx={{ ...typeRoles.caption }}
+            data-testid="explain-suppressed-note"
+          >
+            {studentCopy.results.explain.suppressed}
+          </Typography>
+        </Box>
+      ) : (
+        <Button
+          variant="outlined"
+          aria-expanded={open}
+          aria-controls={open ? panelId : undefined}
+          onClick={() => {
+            setOpen((value) => !value);
+            if (!open) ask();
+          }}
+          sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
+          data-testid="explain-control"
+        >
+          {studentCopy.results.explain.control}
+        </Button>
+      )}
 
       {/* Rendered only while open, rather than hidden with CSS: a collapsed panel
           left in the tree is prose a screen reader can still reach and a child
           cannot see. */}
-      {open && (
+      {open && state.kind !== 'suppressed' && (
         <Box
           id={panelId}
           sx={{ display: 'grid', gap: `${comfortableDensity.gap / 2}px` }}
@@ -314,6 +489,18 @@ export function ExplainPanel({
               <Typography component="p" sx={{ ...typeRoles.caption }} data-testid="explain-ready">
                 {studentCopy.results.explain.announcement(ordinal)}
               </Typography>
+              {/* Only above a replacement, so a child re-reading a question they asked about
+                  twice is not left wondering why the words changed. It says nothing about who
+                  asked for it, why, or what it replaced: that history is a grown-up's. */}
+              {state.replacement && (
+                <Typography
+                  component="p"
+                  sx={{ ...typeRoles.caption }}
+                  data-testid="explain-replacement"
+                >
+                  {studentCopy.results.explain.replacementNote}
+                </Typography>
+              )}
               {/* The prose, drawn by the one renderer of stored segments (AD-32): a
                   fraction arrives as structure and keeps its spoken reading. */}
               <Typography
@@ -457,6 +644,11 @@ function noteOf(state: Extract<ExplainState, { kind: 'failed' | 'offline' | 'atC
  */
 function spokenOf(state: ExplainState, ordinal: number): string | null {
   if (state.kind === 'loaded') return studentCopy.results.explain.announcement(ordinal);
+  // Announced once, in the sentence the panel also displays. It is a fact and not a
+  // failure, which is why it is here beside `loaded` rather than with the three below.
+  if (state.kind === 'suppressed') {
+    return studentCopy.results.explain.suppressedAnnouncement(ordinal);
+  }
   if (state.kind === 'failed' || state.kind === 'offline' || state.kind === 'atCap') {
     return noteOf(state);
   }

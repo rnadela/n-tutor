@@ -125,3 +125,77 @@ export const NO_STUDENT_FLAG_TO_DISPOSE = PRACTICE_TEST_NOT_FOUND;
  */
 export const FLAG_ALREADY_DISPOSED =
   'This report has already been decided, and the first decision stands.';
+
+/**
+ * There is no Explanation here to remove.
+ *
+ * **`PRACTICE_TEST_NOT_FOUND` a third time, and by value for the reason
+ * `NO_EXPLANATION_TO_FLAG` and `NO_STUDENT_FLAG_TO_DISPOSE` are.** A parent suppressing a
+ * Question their child never asked about, one on a sibling's Attempt, one on another
+ * account's, one that never existed and one still open are five facts — and a surface
+ * that spelled them apart would let anything outside read which of another account's ids
+ * exist by reading which sentence came back (AD-18).
+ *
+ * Its own name rather than the same constant reused at the throw site, because the
+ * *reason* differs: there is nothing here to stop serving. Three names for one sentence
+ * is the honest shape — one spelling, three documented reasons — and the day the wording
+ * has to change, this file is where all three are.
+ */
+export const NO_EXPLANATION_TO_SUPPRESS = PRACTICE_TEST_NOT_FOUND;
+
+/**
+ * There is no Explanation here to replace.
+ *
+ * **`PRACTICE_TEST_NOT_FOUND` a fourth time, by value, for the reason the three above are.**
+ * A parent regenerating a Question their child never asked about, one on a sibling's Attempt,
+ * one on another account's, one that never existed and one still open are five facts — and
+ * spelling them apart would let anything outside read which of another account's ids exist by
+ * reading which sentence came back (AD-18).
+ *
+ * Its own name rather than `NO_EXPLANATION_TO_SUPPRESS` reused at the throw site, because the
+ * *reason* differs and this file's whole convention is that each reason gets its own name:
+ * there, there is nothing to stop serving; here, there is nothing to put in its place. Four
+ * names for one sentence is the honest shape — one spelling, four documented reasons — and the
+ * day the wording has to change, this file is where all four are.
+ *
+ * It is **not** the 409. A Question with no Explanation at all and a Question whose
+ * Explanation is still being served are different states: the first is this 404, and the
+ * second is `NOTHING_TO_REGENERATE`, which a parent can act on by removing it first.
+ */
+export const NO_EXPLANATION_TO_REGENERATE = PRACTICE_TEST_NOT_FOUND;
+
+/**
+ * Nothing has been recorded against this Explanation, so there is nothing to act on.
+ *
+ * **A 409 and not a 403.** The parent is entitled to the Attempt and to the Explanation —
+ * they are reading it — and what is missing is the recorded concern that suppression
+ * follows from. A concern has to be raised before an explanation is taken away from a
+ * child: either the parent's own, or their child's that the parent confirmed. Never
+ * automatic, and never on a report nobody has read.
+ *
+ * It names **no child, no Question, no tier and no number**, exactly as
+ * `FLAG_ALREADY_DISPOSED` names none: the state is the response's and the screen says it
+ * from there. This is the sentence a parent would see only by pressing a control the
+ * screen does not render — the view's `canSuppress` and this refusal read the one
+ * predicate — so it is written for a stale tab rather than for a dead end.
+ *
+ * No apology and no instruction beyond the one thing that would change the answer.
+ */
+export const SUPPRESSION_NEEDS_A_FLAG =
+  'This explanation has to be reported before it can be removed from the student.';
+
+/**
+ * The child is still being served this explanation, so there is nothing to replace.
+ *
+ * **A 409, and the one refusal the regeneration path has.** A replacement is what
+ * follows a removal: regenerating a live Explanation would be a second one written
+ * beside the first with no rule for which the child is shown, and an allowance-free
+ * write with no precondition is a free provider call anybody can press in a loop.
+ *
+ * It names no child, no Question, no tier, no number and no cost — and in particular it
+ * does not say what a regeneration *would* cost, because the screen states that beside
+ * the control before it fires and a refusal that restated it would be a second source
+ * for one figure.
+ */
+export const NOTHING_TO_REGENERATE =
+  'This explanation is still being shown to the student, so there is nothing to replace.';

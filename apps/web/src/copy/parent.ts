@@ -1034,6 +1034,89 @@ export const parentCopy = {
     dismissAnnouncement: (ordinal: number) =>
       `The explanation for question ${ordinal} is decided to be fine. The student is not told.`,
     disposeFailed: 'That decision could not be recorded. Try again.',
+
+    // --- Removing an explanation, and replacing it for nothing -----------
+    //
+    // Third person about the child throughout, every figure a parameter, and every
+    // sentence whole here rather than assembled at a call site.
+    //
+    // **The confirmation names every consequence before it fires, including the one that
+    // cannot be taken back.** A parent who assumed this deleted the record, or applied to
+    // every child, or changed the grade, would be finding out afterwards -- and afterwards
+    // is exactly when nothing can be done about it.
+    //
+    // **Nothing here names a tier, a price, a model or a counter.** The regeneration's cost
+    // is stated as what it is -- nothing, at every plan -- and not as a figure, a number of
+    // units left or an exception to a limit.
+
+    /** The control that stops an explanation being shown to the student. */
+    suppressControl: 'Remove this explanation from the student',
+    /** The confirmation's title. What is about to happen, named plainly. */
+    suppressTitle: 'Remove this explanation?',
+    /**
+     * Every consequence, before it fires -- and there is no "afterwards" to read it in.
+     *
+     * Seven facts in one breath, and each is one a parent would otherwise assume the other
+     * way: it stops being shown to **this student only**; **the student will be told it was
+     * removed**; it is not a deletion; it stays readable here; it is still visible to the
+     * people reviewing reports; the question, the attempt, its score and Mastery are
+     * unchanged; and it **cannot be undone**.
+     *
+     * **Mastery, not "progress".** Parent View names the figure the way the Analytics
+     * dashboard does; "progress" is the word reserved for the child's own screen (see
+     * `copy/student.ts`), and using it here would be the parent-facing surface borrowing
+     * the wrong register for the one figure this dialog has to name precisely.
+     *
+     * **The student-visible statement is named second, right after the removal itself.** It is
+     * the most visible consequence of all and the easiest to assume the other way: a parent
+     * expecting a silent removal would otherwise find out from their child. It says what the
+     * child is shown and no more — the child is never told who decided or why beyond the
+     * product's own sentence.
+     *
+     * The irreversibility is last, because it is the one that decides whether to press.
+     */
+    suppressBody:
+      'This explanation stops being shown to this student, and the student is told that a parent removed it. It is not deleted: it stays here for you to read, and it is still visible to the people reviewing reported explanations. The question, the attempt, its score and Mastery are all unchanged, and no other student is affected. This cannot be undone.',
+    /** The confirm control inside the dialog. The act, named again. */
+    suppressConfirm: 'Remove it',
+    /** Once removed. The state, named rather than the act that produced it. */
+    suppressed: (instant: string) => `Removed from the student on ${instant}.`,
+    /**
+     * The same state with no date, for a stored instant that will not parse.
+     *
+     * It was still removed, which is the fact a parent needs; only the date is unstateable,
+     * and "Removed Invalid Date" would put the fault on the removal.
+     */
+    suppressedUndated: 'Removed from the student.',
+    /** Announced, and shown, in the same words. */
+    suppressAnnouncement: (ordinal: number) =>
+      `The explanation for question ${ordinal} is no longer shown to the student. This cannot be undone.`,
+    suppressFailed: 'That explanation could not be removed. Try again.',
+
+    /** The control that asks for a replacement. Offered only once one has been removed. */
+    regenerateControl: 'Write a new explanation',
+    /**
+     * What it costs, said **before** it is pressed.
+     *
+     * Nothing, at every plan -- stated as the fact rather than as an exception, a figure or
+     * a number of units left. A parent who has just taken something away from their child
+     * should not have to weigh whether replacing it will cost them something.
+     */
+    regenerateNote:
+      'Writing a new explanation costs nothing. It is free on every plan, and it does not count against anything.',
+    /** The request is out. Stated, so the press is never silent. */
+    regenerating: 'Writing a new explanation…',
+    /** Announced, and shown, in the same words. */
+    regeneratedAnnouncement: (ordinal: number) =>
+      `A new explanation for question ${ordinal} is written, and the student can read it.`,
+    regenerateFailed: 'A new explanation could not be written just now. Try again.',
+    /**
+     * Which explanation of this question an entry is.
+     *
+     * A question can hold several: the one the student asked for, and each replacement
+     * after it. The label is what tells them apart on screen, and the ordinal is handed in.
+     */
+    generationLabel: (ordinal: number) => `Explanation ${ordinal}`,
   },
 
   /**

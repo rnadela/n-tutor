@@ -707,8 +707,15 @@ describe('Explanations: asked for once, generated once, charged once', () => {
       'attemptId',
       'body',
       'questionId',
+      'replacement',
       'studentFlaggedAt',
+      'suppressed',
     ]);
+    // The two facts Story 6.4 added, and the whole of what it added: that a parent removed
+    // this one, and that a served one is a replacement. A freshly generated first
+    // generation is neither.
+    expect(response.body.suppressed).toBe(false);
+    expect(response.body.replacement).toBe(false);
     // Null on a row nobody has reported, rather than an absent field: a panel reading
     // the state cannot take "the field is not there" for "there is no report".
     expect(response.body.studentFlaggedAt).toBeNull();

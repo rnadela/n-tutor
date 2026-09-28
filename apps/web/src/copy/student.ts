@@ -531,6 +531,54 @@ export const studentCopy = {
        */
       flagAnnouncement: (ordinal: number) =>
         `A grown-up will read the explanation for question ${ordinal}. Nothing here changes.`,
+
+      // --- When a grown-up has taken an explanation away ------------------
+      //
+      // Two facts and no third: a grown-up removed it, and why. Everything else is
+      // deliberately absent.
+      //
+      // **No blame, no reason of theirs and no relay of their words.** The child is not told
+      // who decided, when, or anything a grown-up typed -- there is nothing to type, and the
+      // API has nowhere for it to travel. "A parent" is as specific as this gets.
+      //
+      // **Nothing to do about it.** No retry, no "ask again", no "tell a grown-up" and no
+      // call to action of any kind: the child cannot undo this and must not be sent pressing
+      // at a wall. The `Why is that the answer?` control is not rendered at all, which is
+      // why nothing here refers to one.
+      //
+      // **Not an error and not a refusal.** No exclamation mark, no apology, no "sorry", and
+      // nothing that reads as something having gone wrong: nothing did. The question, both
+      // answers, the grade state and the score are all exactly where they were.
+
+      /**
+       * Said in place of the control, when a grown-up has removed this explanation.
+       *
+       * The UX's own words, verbatim and in the second person. It states the fact and the
+       * one reason there is -- that the explanation was not good enough -- and stops. It
+       * says nothing about what happens next, because nothing is promised: a replacement may
+       * come and may not, and a child told to wait for one would be waiting.
+       */
+      suppressed:
+        'A parent removed this explanation. It wasn’t a good enough explanation of this question.',
+      /**
+       * Said to the live region when the removal is what the panel is showing, and it is
+       * **the same sentence the screen displays** -- exactly as `announcement` is.
+       *
+       * The ordinal is handed in, because two rows on one screen are two different facts and
+       * an announcement that did not say which question it was about would be unusable to
+       * anyone reading the page by ear.
+       */
+      suppressedAnnouncement: (ordinal: number) =>
+        `A parent removed the explanation for question ${ordinal}.`,
+      /**
+       * Said above a replacement, so a child re-reading a question they asked about twice is
+       * not left wondering why the words changed.
+       *
+       * A plain line and nothing more. It does not say who asked for it, why, what it
+       * replaced or that anything was wrong -- the removed explanation is gone from this
+       * screen, and a sentence about it would be a history the child has no use for.
+       */
+      replacementNote: 'This is a new explanation of this question.',
     },
   },
   /**

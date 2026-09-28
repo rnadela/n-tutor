@@ -52,7 +52,11 @@ describe('a parent reading one handed-in run', () => {
     // row's content column — never a modal and never a route of its own.
     expect(PAGE_SOURCE).toContain('explain={');
     expect(PAGE_SOURCE).toContain('<ExplanationReview');
-    expect(PAGE_SOURCE).toContain('explanation={byQuestion.get(row.questionId)}');
+    expect(PAGE_SOURCE).toContain(
+      'explanations={byQuestion.get(row.questionId) ?? NOTHING_EXPLAINED}',
+    );
+    // The confirmation for the one irreversible act is the region's own, beneath the row it
+    // is about — this screen opens no dialog and holds no modal of its own.
     expect(PAGE_SOURCE).not.toMatch(/Dialog|Modal/u);
   });
 
@@ -131,7 +135,24 @@ describe('a parent reading one handed-in run', () => {
     // The write answers with the new state, so the screen holds what the server said
     // rather than a second read of rows it already has.
     expect(PAGE_SOURCE).toContain('onFlagged={onFlagged}');
-    expect(PAGE_SOURCE).toContain('held.questionId === view.questionId ? view : held');
+    // Matched on `(questionId, generation)` and no longer on the Question id alone, which
+    // now matches several rows: a replace by Question id would rewrite a removed explanation
+    // with the state of its replacement, and the parent would watch their own decision
+    // vanish off the screen.
+    expect(PAGE_SOURCE).toContain(
+      'held.questionId === view.questionId && held.generation === view.generation ? view : held',
+    );
+  });
+
+  it('appends a new generation rather than dropping it on the floor', () => {
+    // Its own handler beside `onFlagged`, because a removal and a replacement change the
+    // history rather than one row: a replacement *adds* a generation, and a
+    // replace-by-generation handler would have nothing on screen to match it against.
+    expect(PAGE_SOURCE).toContain('onGenerations={onGenerations}');
+    expect(PAGE_SOURCE).toContain('previous.filter((held) => held.questionId !== questionId)');
+    expect(PAGE_SOURCE).toContain('...views,');
+    // And still no second read: the writes answer with every generation of that Question.
+    expect(PAGE_SOURCE.match(/parentApi\./gu)).toHaveLength(2);
   });
 
   it('states a refusal as the one sentence, with the way back beside it', () => {

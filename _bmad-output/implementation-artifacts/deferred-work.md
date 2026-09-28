@@ -1765,3 +1765,27 @@ source_spec: `spec-6-3-student-explanation-flagging.md`
 severity: low
 reason: `ExplanationReview.spec.tsx` reads the component's source with `readFileSync` and asserts on substrings (e.g. that `parentApi.attemptExplanations(token, attemptId)` appears, that the reconcile does not call `announce(`). No test renders the component, forces a 409 from a mocked `disposeExplanationFlag`, and asserts the region actually redraws as decided with the correct entry. This matches the codebase's existing source-assertion convention for stateful components, so closing it means adding real interactive rendering for this one component, not a one-line fix.
 status: open
+
+### DW-222: Suppression is keyed to one Attempt, so a retake serves the child a fresh Explanation the parent's decision does not follow.
+origin: spec-deferred 70dbbd098c98
+location: apps/api/prisma/schema.prisma
+source_spec: `spec-6-4-explanation-suppression-free-regeneration.md`
+severity: low
+reason: `Explanation` is keyed `(attemptId, questionId, studentProfileId, generation)`, which Story 6.1 chose. A Story 5.7 retake opens a new Attempt, so the same Question yields a live generation 1 there and the suppression does not carry over. FR-39 says suppression is scoped to a Student Profile without naming the Attempt boundary, so both readings are defensible and neither the intent nor the epic decides it. No test covers suppress-then-retake either way.
+status: open
+
+### DW-223: The API integration suite is intermittently red when several files run together, and hangs outright on a large batch.
+origin: spec-deferred eacf1665da2b
+location: apps/api/test/harness.ts
+source_spec: `spec-6-4-explanation-suppression-free-regeneration.md`
+severity: medium
+reason: Running many int-specs in one vitest invocation fails a different, unrelated test roughly one run in several, each of which passes in isolation. Reproduced on the baseline commit 54527d9 with the whole change stashed, so it predates this story. A twelve-file batch that completed in 73s once later exceeded a ten-minute cap without finishing. `practice-test.int-spec.ts` (196 tests) cannot complete inside that cap at all, which is why the root `pnpm test` cannot be run as one command. `--no-file-parallelism` is not the workaround: it leaks `AI_FAKE_FAILURE` across files and fails eight provider-fault cases.
+status: open
+
+### DW-224: Suppressing a paid Explanation does not credit back the Explanation Allowance unit it was charged, so a parent who paid for a bad explanation and removed it gets no refund; the free replacement is
+origin: spec-deferred 6de3e49bc3c6
+location: apps/api/src/explanation/explanation.service.ts (suppressExplanation)
+source_spec: `spec-6-4-explanation-suppression-free-regeneration.md`
+severity: medium
+reason: `suppressExplanation` only sets `suppressedAt`; it never reads or writes `chargedAt`, so a suppressed row that was charged stays charged and the allowance counter (which reads `chargedAt: { gte, lt }`) never moves. The intent-contract is silent on whether a refund is owed, and both readings — no refund because suppression and regeneration change "one Explanation and nothing else," or a refund because the parent is being made whole for a bad paid explanation — are defensible. No test exercises a suppression of a charged row's counter effect either way.
+status: open

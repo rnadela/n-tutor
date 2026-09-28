@@ -35,6 +35,15 @@ const STUDENT_ROW_LABELS: AnswerKeyRowLabels = {
 };
 
 /**
+ * The empty suppression set, as one frozen value.
+ *
+ * Module-level rather than a fresh `new Set()` per render or per read: it is the initial
+ * state and the reset, and a new identity each time would be a new prop identity on every
+ * row of a long paper.
+ */
+const EMPTY_SUPPRESSION: ReadonlySet<string> = new Set<string>();
+
+/**
  * The answer key: what one handed-in Attempt came to, every Question of it.
  *
  * **Reading it is the retry.** FR-22 makes viewing the trigger, so the one `GET`
@@ -67,9 +76,23 @@ const STUDENT_ROW_LABELS: AnswerKeyRowLabels = {
  *
  * **Explaining is somebody else's state.** Since Story 6.1 each row carries an
  * `ExplainPanel` in its own slot, and this component neither knows nor can act on
- * what it does: the panel owns its press, its request and its four outcomes, which
- * is why the one read above is still the only `parentApi.` call this file makes and
- * why a failed explanation cannot take the answer key down with it.
+ * what it does: the panel owns its press, its request and its outcomes, which is why a
+ * failed explanation cannot take the answer key down with it.
+ *
+ * **Two reads and no third: the answer key from `grading`, and which Explanations a parent
+ * removed from `explanation`. Never one per Question, and never one per press.** Story 6.4
+ * added the second, and it is attempt-scoped for exactly that reason: the panel is mounted
+ * per row, so learning suppression at press time would leave a child one tap from undoing
+ * their parent's decision — and on a Free account, one allowance unit spent doing it — while
+ * asking per Question would be one request per row on load. `grading` is deliberately not
+ * the carrier: a suppression fact in `AnswerKeyRowView` would put an `explanation` column in
+ * the module that owns grades.
+ *
+ * **A failed or still-pending suppression read renders the control as usual**, and degrades
+ * to the API's serve-time check — which answers 200 suppressed, generating nothing and
+ * charging nothing. That is exactly why that check exists and why it is not a cache trick,
+ * and it is why this read has no error state and no retry of its own: there is nothing for a
+ * child to do about it and nothing at stake in it failing.
  *
  * **`footer` is a slot and nothing more.** Since Story 5.7 the page renders a control
  * beneath the rows, and it passes it in rather than this component growing a notion of
@@ -95,6 +118,16 @@ export function AttemptResults({
   const router = useRouter();
   const { announce } = useAnnounce();
   const [results, setResults] = useState<AttemptResultsView | null>(null);
+  /**
+   * The Question ids a parent has removed the explanation for, as a set for lookup.
+   *
+   * Empty until the read lands and empty if it fails, deliberately: an empty set draws the
+   * control, and a press then answers 200 suppressed with nothing generated and nothing
+   * charged. There is no error state and no retry for it, because there is nothing for a
+   * child to do about it — and a sentence about a read they never asked for would be the
+   * screen narrating its own housekeeping at them.
+   */
+  const [suppressed, setSuppressed] = useState<ReadonlySet<string>>(EMPTY_SUPPRESSION);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   // Guards the retry button so a second click cannot fire a second `GET` — and a
@@ -130,6 +163,33 @@ export function AttemptResults({
       live = false;
     };
   }, [attemptId, reload, router]);
+
+  /**
+   * Which Explanations a parent removed, read once per Attempt, beside the answer key.
+   *
+   * Its own effect rather than a chained `then`, so the two reads settle independently: the
+   * answer key is the screen and must not wait on, or fail with, a list of ids that only
+   * decides whether a control is drawn.
+   *
+   * **Every failure is swallowed on purpose**, and it is the only read on this surface that
+   * swallows one — including `deviceIsUnbound`, which the answer-key read beside it already
+   * acts on. Nothing here is a fact the child needs and nothing here is a fact this screen
+   * can act on: the set stays empty, the control is drawn, and the API refuses the press
+   * without generating or charging anything.
+   */
+  useEffect(() => {
+    let live = true;
+    setSuppressed(EMPTY_SUPPRESSION);
+    parentApi.suppressedExplanations(attemptId).then(
+      (ids) => {
+        if (live) setSuppressed(new Set(ids));
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [attemptId, reload]);
 
   /**
    * Announced once per read, and never twice for the same one.
@@ -292,6 +352,10 @@ export function AttemptResults({
                 attemptId={results.attemptId}
                 questionId={row.questionId}
                 ordinal={row.ordinal}
+                // Per row, off the one attempt-scoped read. `false` while that read is in
+                // flight or after it failed, which draws the control and leaves the refusal
+                // to the API's serve-time check.
+                suppressed={suppressed.has(row.questionId)}
               />
             }
           />

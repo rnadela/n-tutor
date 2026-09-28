@@ -37,6 +37,14 @@ import { ExplanationReview } from '../../_components/ExplanationReview';
  * surfaces. Module-level rather than per render — it is a constant, and a fresh object
  * per render would be a new prop identity on every row of a long paper.
  */
+/**
+ * The empty list a Question nobody asked about is handed.
+ *
+ * Module-level rather than a fresh `[]` per row: it is a constant, and a new identity on
+ * every render would be a new prop identity on every row of a long paper.
+ */
+const NOTHING_EXPLAINED: readonly ParentExplanationView[] = [];
+
 const PARENT_ROW_LABELS: AnswerKeyRowLabels = {
   question: parentCopy.attempts.question,
   format: parentCopy.attempts.format,
@@ -188,19 +196,62 @@ export default function ParentAttemptDetailPage() {
   }, [token, attemptId, attempt, leave, router]);
 
   /**
-   * This Attempt's Explanations, keyed by the Question each is about.
+   * This Attempt's Explanations, grouped by the Question each is about.
    *
-   * Rebuilt per render from the list in state, which is cheap and always true: a flag
-   * replaces one entry in that list, and a map cached across renders would be the one
+   * Rebuilt per render from the list in state, which is cheap and always true: a write
+   * replaces entries in that list, and a map cached across renders would be the one
    * thing holding the old state.
+   *
+   * A **list** per Question since Story 6.4: an explanation a parent removed and the
+   * replacement that followed it are two entries of one Question, and the region renders
+   * both.
    */
   const byQuestion = explanationsByQuestion(explanations);
 
-  /** Replaces one Explanation with the state the flag write answered with. */
+  /**
+   * Replaces one generation with the state a flag or a decision answered with.
+   *
+   * Matched on `(questionId, generation)` and no longer on the Question id alone, which now
+   * matches several rows: a replace by Question id would rewrite a removed explanation with
+   * the state of its replacement, and the parent would watch their own decision vanish off
+   * the screen.
+   */
   const onFlagged = useCallback((view: ParentExplanationView) => {
     setExplanations((previous) =>
-      previous.map((held) => (held.questionId === view.questionId ? view : held)),
+      previous.map((held) =>
+        held.questionId === view.questionId && held.generation === view.generation ? view : held,
+      ),
     );
+  }, []);
+
+  /**
+   * Replaces **every** entry for one Question with the array a removal or a replacement
+   * answered with.
+   *
+   * Its own handler beside `onFlagged`, and not a widening of it, because these two writes
+   * change the history rather than one row: a removal changes one generation but the screen
+   * must redraw the lot, and a replacement *adds* one — which a replace-by-generation
+   * handler would drop on the floor, because there is nothing on screen yet for it to match.
+   *
+   * The Question's old entries are dropped and the answer's are appended **at the end of the
+   * list**, in the API's own order, which states a Question's generations oldest first. So this
+   * *does* move that Question's entries relative to the other Questions' — and that is safe
+   * because nothing reads this list's order: the rows are rendered from the answer key, in the
+   * order the child met the Questions, and each row looks its own entries up by Question id
+   * through `explanationsByQuestion`. What has to hold is that a Question's generations stay in
+   * ordinal order relative to *each other*, which appending the API's array whole is exactly
+   * what preserves.
+   *
+   * Appending rather than splicing in place for that reason: a splice would be a second opinion
+   * about an order nothing consults, written to look tidy in a state dump.
+   */
+  const onGenerations = useCallback((views: readonly ParentExplanationView[]) => {
+    const questionId = views[0]?.questionId;
+    if (questionId === undefined) return;
+    setExplanations((previous) => [
+      ...previous.filter((held) => held.questionId !== questionId),
+      ...views,
+    ]);
   }, []);
 
   return (
@@ -318,10 +369,11 @@ export default function ParentAttemptDetailPage() {
                         attemptId={results.attemptId}
                         questionId={row.questionId}
                         ordinal={row.ordinal}
-                        explanation={byQuestion.get(row.questionId)}
+                        explanations={byQuestion.get(row.questionId) ?? NOTHING_EXPLAINED}
                         token={token}
                         announce={announce}
                         onFlagged={onFlagged}
+                        onGenerations={onGenerations}
                         onElevationLost={leave}
                       />
                     )

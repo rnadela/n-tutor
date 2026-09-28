@@ -13,10 +13,14 @@ const LOADED: ExplainState = {
   kind: 'loaded',
   body: [{ kind: 'text', value: 'Halving six gives three.' }],
   studentFlaggedAt: null,
+  replacement: false,
 };
 
 /** The same prose, already reported by this child. */
 const REPORTED: ExplainState = { ...LOADED, studentFlaggedAt: '2026-09-28T10:00:00.000Z' };
+
+/** A grown-up removed this one. The state carries nothing at all — that is the point. */
+const REMOVED: ExplainState = { kind: 'suppressed' };
 
 describe('what pressing the explain control decides', () => {
   it('asks, on a first press with a connection', () => {
@@ -66,6 +70,15 @@ describe('what pressing the explain control decides', () => {
     );
   });
 
+  it('sends nothing for a Question a grown-up has settled, whatever the connection', () => {
+    // The rule this story turns on, held where it is assertable with no DOM: a press must
+    // never leave the device for an explanation a parent removed. It is not a state a press
+    // could improve — there is no retry that would help and no connection that would change
+    // it — and the API's serve-time check is what catches the press this misses.
+    expect(explainDecision({ online: true, state: REMOVED })).toBe('removed');
+    expect(explainDecision({ online: false, state: REMOVED })).toBe('removed');
+  });
+
   it('re-asks after an offline press once the connection is back', () => {
     expect(explainDecision({ online: true, state: { kind: 'offline' } })).toBe('request');
   });
@@ -85,6 +98,7 @@ describe('what pressing the report control decides', () => {
       { kind: 'loading' } as const,
       { kind: 'failed' } as const,
       { kind: 'offline' } as const,
+      { kind: 'suppressed' } as const,
       { kind: 'atCap', limitSentence: null } as const,
     ]) {
       expect(flagDecision({ online: true, state, sending: false })).toBe('noProse');
@@ -119,6 +133,26 @@ describe('what pressing the report control decides', () => {
   });
 });
 
+describe('what the removed state carries', () => {
+  it('carries nothing beyond its own kind', () => {
+    // Not a body, not an instant, not a reason and not a sentence of the API's: the whole of
+    // what the child is told is `studentCopy`'s own two lines, and a field for anything else
+    // would be somewhere a grown-up's words could arrive (AD-20, AD-26).
+    expect(Object.keys(REMOVED)).toEqual(['kind']);
+  });
+});
+
+describe('whether a panel is holding a replacement', () => {
+  it('is a fact about prose that is on screen, and only there', () => {
+    // On the `loaded` state and nowhere else, because it is a fact about what is being read.
+    // A boolean and not the ordinal: "which of four" is a history the child has no use for.
+    const replacement: ExplainState = { ...LOADED, replacement: true };
+    expect(replacement.kind === 'loaded' && replacement.replacement).toBe(true);
+    expect(LOADED.kind === 'loaded' && LOADED.replacement).toBe(false);
+    expect(Object.keys(REMOVED)).not.toContain('replacement');
+  });
+});
+
 describe('the report a panel is holding', () => {
   it('is the instant on the loaded state, or null', () => {
     expect(flaggedAtOf(REPORTED)).toBe('2026-09-28T10:00:00.000Z');
@@ -131,6 +165,7 @@ describe('the report a panel is holding', () => {
       { kind: 'loading' } as const,
       { kind: 'failed' } as const,
       { kind: 'offline' } as const,
+      { kind: 'suppressed' } as const,
       { kind: 'atCap', limitSentence: 'No allowance.' } as const,
     ]) {
       expect(flaggedAtOf(state)).toBeNull();

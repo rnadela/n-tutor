@@ -30,8 +30,13 @@ import {
   FLAG_ALREADY_DISPOSED,
   NO_EXPLANATION_ALLOWANCE,
   NO_EXPLANATION_TO_FLAG,
+  NO_EXPLANATION_TO_REGENERATE,
+  NO_EXPLANATION_TO_SUPPRESS,
   NO_STUDENT_FLAG_TO_DISPOSE,
+  NOTHING_TO_REGENERATE,
+  SUPPRESSION_NEEDS_A_FLAG,
 } from './explanation-policy.js';
+import { suppressedQuestionIds, suppressionUnlocked } from './explanation-suppression.js';
 import { buildExplanationPrompt } from './explanation-prompt.js';
 import {
   EXPLANATION_SCHEMA_NAME,
@@ -71,7 +76,7 @@ export interface ParentScope {
 }
 
 /**
- * One Explanation as the child reading it gets it back.
+ * One Explanation the child is being served, as they get it back.
  *
  * `studentFlaggedAt` is **the child's own flag and nothing else** — it is the one flag
  * fact a student-scoped response carries, by the shape of the type rather than by a
@@ -84,13 +89,51 @@ export interface ParentScope {
  * collapse, so reopening it re-issues the same `POST`, which answers 200 from the
  * stored row — so the reported state survives a reload and a re-open with no second
  * request and no new endpoint.
+ *
+ * `replacement` is `generation > 1`, and it is the **second** of exactly two new facts a
+ * student surface learned in Story 6.4: that the one they are being served is a new
+ * explanation. A boolean and not the ordinal, because "which of four" is a fact about a
+ * history the child has no business reading — and it names no parent, no reason and no
+ * instant.
  */
-export interface ExplanationView extends StudentExplanationFlagView {
+export interface StudentExplanationServed extends StudentExplanationFlagView {
   attemptId: string;
   questionId: string;
+  /** The discriminant. Always `false` here, so a `switch` over the union is exhaustive. */
+  suppressed: false;
   /** The stored segments, exactly as stored (AD-32). */
   body: RichText;
+  /** Whether this is a replacement for one a parent removed. Never which, and never why. */
+  replacement: boolean;
 }
+
+/**
+ * The whole of what a child is told about an Explanation a parent removed: that one did.
+ *
+ * Two ids and the discriminant, and **nowhere for anything else to sit**. No body, no
+ * flag instant, no removal instant, no reason, no disposition and no hint of who decided
+ * beyond "a parent", which is the web's own word and not a field here: the student
+ * surface learns exactly one new fact, and a shape with no room for a second is what
+ * makes that a property of the code rather than a discipline at each call site (AD-20,
+ * AD-26).
+ */
+export interface StudentExplanationSuppressed {
+  attemptId: string;
+  questionId: string;
+  /** The discriminant. Always `true` here. */
+  suppressed: true;
+}
+
+/**
+ * What a student-scoped Explanation read answers: the prose, or that a parent removed it.
+ *
+ * **A discriminated union rather than a nullable body plus a boolean.** A
+ * `body: RichText | null` with a `suppressed` flag beside it would let one response say
+ * "suppressed" and still carry prose, a flag instant or a reason — and the whole
+ * discipline of this surface is that a student-scoped shape has nowhere for a
+ * parent-scoped fact to sit. The union makes that guarantee the compiler's.
+ */
+export type StudentExplanationResponse = StudentExplanationServed | StudentExplanationSuppressed;
 
 /**
  * One concern a child raised, as the parent's per-child list of them reads it.
@@ -113,6 +156,16 @@ export interface ExplanationView extends StudentExplanationFlagView {
 export interface StudentFlagListEntry {
   attemptId: string;
   questionId: string;
+  /**
+   * Which generation of that Question's Explanation this report is about.
+   *
+   * A suppression and a regeneration are what let one Question carry more than one
+   * report now: the child can flag the removed generation and, later, its replacement,
+   * and the two are different concerns about different rows. This is also what a list
+   * of these entries keys itself by, so two reports about one Question render as two
+   * entries rather than colliding on an id pair that stopped being unique.
+   */
+  generation: number;
   /** When the child raised it. */
   flaggedAt: string;
   /** What the parent decided, or null while it is awaiting a decision. */
@@ -128,13 +181,18 @@ export interface StudentFlagListEntry {
   submittedAt: string | null;
 }
 
-/** An Explanation, and whether this call is what produced it. */
+/** An Explanation or its absence, and whether this call is what produced it. */
 export interface ExplanationOutcome {
-  view: ExplanationView;
+  view: StudentExplanationResponse;
   /**
    * True only when this call generated and wrote the row. The controller turns
    * it into 201 against 200, which is the whole observable difference between a
    * call that billed a provider and one that read a row.
+   *
+   * **`false` on the suppressed arm**, so the split keeps meaning exactly what it means
+   * today: a suppressed Question makes no provider call at all, so there is nothing for
+   * a created-status to be honest about. A child is not shown a refusal for a decision a
+   * grown-up made either — the suppressed answer is a 200.
    */
   generated: boolean;
 }
@@ -182,6 +240,11 @@ export class ExplanationUnavailable extends ServiceUnavailableException {
  *   which brings the ownership proof and which child sat the Attempt. There is no
  *   `practiceTest`, `attempt`, `answer`, `sourceTest` or taxonomy delegate here,
  *   and no `ai_call` write (AD-17).
+ * - **Since Story 6.4 "the row" means the highest `generation`.** Every read path
+ *   resolves it with `findFirst({ orderBy: { generation: 'desc' } })` and checks
+ *   `suppressedAt` at serve time — never only by a cache key — so a suppressed Question
+ *   returns before the allowance read and before `ai`, and the one free write on this
+ *   surface reads no allowance at all.
  * - **Since Story 6.2 it also owns `explanation_flag`, and is its sole writer**
  *   (AD-17). The parent paths below are pure reads and one idempotent record:
  *   neither generates, neither consumes allowance, and a flag changes nothing —
@@ -227,30 +290,43 @@ export class ExplanationService {
 
     // The read-through cache, and the reason a re-read is provably free: nothing
     // below this line runs for a Question that already has one.
-    const stored = await this.prisma.explanation.findUnique({
-      where: {
-        attemptId_questionId_studentProfileId: {
-          attemptId,
-          questionId,
-          studentProfileId: scope.studentProfileId,
-        },
-      },
+    //
+    // `findFirst` on the highest generation rather than `findUnique`, because since
+    // Story 6.4 "the one that counts" is the newest generation and the key holds four
+    // columns. Ordering by the ordinal and not by `createdAt`: two rows written inside
+    // one millisecond have an unambiguous order by the column the writes maintain and
+    // none by their instants.
+    const stored = await this.prisma.explanation.findFirst({
+      where: { attemptId, questionId, studentProfileId: scope.studentProfileId },
+      orderBy: { generation: 'desc' },
       // The child's own flag, and only ever theirs: `STUDENT_FLAG_ORIGIN` in the `where`
       // is what makes a parent's flag and a disposition unreachable from this response
       // by the query rather than by a mapper's discipline (AD-20, AD-26). At most one
       // row by `@@unique([explanationId, origin])`.
       select: {
         body: true,
+        generation: true,
+        suppressedAt: true,
         flags: { where: { origin: STUDENT_FLAG_ORIGIN }, select: FLAG_INSTANT },
       },
     });
+    // A parent settled this Question, so it can neither generate nor charge. **Before**
+    // the allowance read and before `ai`, which is what makes "a suppressed Question is
+    // free" a property of the code rather than a promise — and a 200 rather than a
+    // refusal, because nothing failed and a child is not shown an error for a decision a
+    // grown-up made.
+    if (stored !== null && stored.suppressedAt !== null) {
+      return { view: { attemptId, questionId, suppressed: true }, generated: false };
+    }
     if (stored !== null) {
       return {
         view: {
           attemptId,
           questionId,
+          suppressed: false,
           body: stored.body as RichText,
           studentFlaggedAt: studentFlaggedAtOf(stored.flags),
+          replacement: stored.generation > 1,
         },
         generated: false,
       };
@@ -319,6 +395,12 @@ export class ExplanationService {
             attemptId,
             questionId,
             body,
+            // The child's own ask is always the first generation, and it is only ever
+            // written into an empty (Attempt, Question, child) — the arm above returned
+            // for every other case. That, plus the parent path only ever writing
+            // `max + 1` over a suppressed row, is why at most one generation is ever
+            // live and why no partial index states the rule a second time.
+            generation: 1,
             // The durable marker the Explanation Allowance is counted from (AD-14).
             // Written here, in the transaction that writes the row, so a paid call
             // is never uncounted and a refused one never charges.
@@ -334,28 +416,34 @@ export class ExplanationService {
       // rather than written as a second row. The re-read is outside the aborted
       // transaction, which cannot run another statement.
       if (!isUniqueViolation(cause)) throw cause;
-      const winner = await this.prisma.explanation.findUniqueOrThrow({
-        where: {
-          attemptId_questionId_studentProfileId: {
-            attemptId,
-            questionId,
-            studentProfileId: scope.studentProfileId,
-          },
-        },
+      const winner = await this.prisma.explanation.findFirstOrThrow({
+        where: { attemptId, questionId, studentProfileId: scope.studentProfileId },
+        orderBy: { generation: 'desc' },
         select: {
           body: true,
+          generation: true,
+          suppressedAt: true,
           flags: { where: { origin: STUDENT_FLAG_ORIGIN }, select: FLAG_INSTANT },
         },
       });
       this.logger.log(
         `An explanation for question ${questionId} of attempt ${attemptId} was already written by a concurrent request.`,
       );
+      // The winner's row can only be generation 1 here — the loser found nothing a
+      // statement ago, so no generation existed to suppress or replace — but the
+      // suppressed arm is stated rather than assumed away, because the one thing this
+      // response must never do is carry prose for a Question a parent has settled.
+      if (winner.suppressedAt !== null) {
+        return { view: { attemptId, questionId, suppressed: true }, generated: false };
+      }
       return {
         view: {
           attemptId,
           questionId,
+          suppressed: false,
           body: winner.body as RichText,
           studentFlaggedAt: studentFlaggedAtOf(winner.flags),
+          replacement: winner.generation > 1,
         },
         generated: false,
       };
@@ -366,10 +454,18 @@ export class ExplanationService {
       `An explanation was written for question ${questionId} of attempt ${attemptId}.`,
     );
     return {
-      // A row written one statement ago has no flag against it: `null` is stated rather
-      // than read back, because a second query for a fact that cannot be anything else
-      // would be a round trip bought for nothing.
-      view: { attemptId, questionId, body: row.body as RichText, studentFlaggedAt: null },
+      // A row written one statement ago has no flag against it and cannot be suppressed:
+      // `null` and `false` are stated rather than read back, because a second query for
+      // facts that cannot be anything else would be a round trip bought for nothing. It
+      // is generation 1 by the `create` above, so it is never a replacement.
+      view: {
+        attemptId,
+        questionId,
+        suppressed: false,
+        body: row.body as RichText,
+        studentFlaggedAt: null,
+        replacement: false,
+      },
       generated: true,
     };
   }
@@ -397,9 +493,12 @@ export class ExplanationService {
    * what says nothing was explained, and an invented entry would be
    * indistinguishable from prose that came back blank.
    *
-   * Only the parent-originated flag is read. Story 6.3's student-originated one has
-   * no reader here and Story 6.4's suppression has no column here, so neither can
-   * leak into this response ahead of the story that owns it.
+   * **Every generation, oldest first within a Question.** Since Story 6.4 a Question can
+   * hold several rows — the one a parent removed and the replacement that followed it —
+   * and both are here: the removed one because the parent who decided about it stays able
+   * to read it, and the replacement because it is what the child is now being served. A
+   * read that resolved only the highest one would hide exactly the prose an operator is
+   * judging from the only person who can ask for it to be replaced again.
    */
   async explanationsForAttempt(
     scope: ParentScope,
@@ -412,14 +511,29 @@ export class ExplanationService {
 
     const rows = await this.prisma.explanation.findMany({
       where: { attemptId, studentProfileId },
-      // The order the child asked in, which is a stable order and not a meaningful one:
-      // the screen keys these by Question id onto answer-key rows that are already in
-      // the order the child met them. It is stated so the response is deterministic
-      // rather than whatever the planner returns, and nothing downstream reads it.
-      orderBy: { createdAt: 'asc' },
+      // **Question id, then oldest generation first** — no longer "the order the child asked
+      // in", which is what `createdAt` gave before Story 6.4 and which cannot group a
+      // Question's generations together. Grouping is the point: the screen renders a
+      // Question's history as one block, the removed explanation above the replacement that
+      // followed it, and it looks entries up by Question id rather than reading this order.
+      //
+      // Neither key is meaningful on its own — the Question ids sort by uuid, not by the order
+      // the child met them, and the screen keys these onto answer-key rows that already carry
+      // that order. They are stated so the response is deterministic rather than whatever the
+      // planner returns, and so a Question's generations arrive adjacent and in ordinal order.
+      //
+      // The second key is the ordinal the writes maintain and not `createdAt`, because two
+      // rows written inside one millisecond have an unambiguous order by it and none by their
+      // instants.
+      orderBy: [{ questionId: 'asc' }, { generation: 'asc' }],
       select: {
         questionId: true,
         body: true,
+        // The two columns suppression is, and the only new ones this read selects. They
+        // are the whole of what makes a removed generation tellable from a live one, and
+        // `canSuppress` is computed off them and the flags by the pure mapper.
+        generation: true,
+        suppressedAt: true,
         // **Both origins, unfiltered.** The parent reads their own concern and their
         // child's, so the `where` that pinned this to one origin is gone and the fold
         // moved into the pure mapper — where a row with two flags becomes two named
@@ -485,14 +599,19 @@ export class ExplanationService {
       attemptId,
     );
 
-    const stored = await this.prisma.explanation.findUnique({
-      where: {
-        attemptId_questionId_studentProfileId: { attemptId, questionId, studentProfileId },
-      },
+    // The **highest** generation, which is the one the parent is reading and the one a
+    // concern is about. A flag against the generation a child was served last week would
+    // be a record nobody can act on: suppression and regeneration both work on the latest
+    // one, and the queue's entry is the Explanation the flag names.
+    const stored = await this.prisma.explanation.findFirst({
+      where: { attemptId, questionId, studentProfileId },
+      orderBy: { generation: 'desc' },
       select: {
         id: true,
         questionId: true,
         body: true,
+        generation: true,
+        suppressedAt: true,
         parentAccountId: true,
         studentProfileId: true,
         // The child's flag comes back with the row so the response this press answers
@@ -555,6 +674,8 @@ export class ExplanationService {
       {
         questionId: stored.questionId,
         body: stored.body,
+        generation: stored.generation,
+        suppressedAt: stored.suppressedAt,
         // The row's other flags as they were read, with this press's own put beside
         // them — composed rather than re-read, because a parent-origin flag's
         // disposition is null by definition and a second query would only confirm what
@@ -612,7 +733,7 @@ export class ExplanationService {
     scope: StudentScope,
     attemptId: string,
     questionId: string,
-  ): Promise<ExplanationView> {
+  ): Promise<StudentExplanationResponse> {
     await this.practiceTests.explanationInputFor(
       scope.parentAccountId,
       scope.studentProfileId,
@@ -620,20 +741,33 @@ export class ExplanationService {
       questionId,
     );
 
-    const stored = await this.prisma.explanation.findUnique({
-      where: {
-        attemptId_questionId_studentProfileId: {
-          attemptId,
-          questionId,
-          studentProfileId: scope.studentProfileId,
-        },
+    // The **highest** generation, exactly as the read path resolves it: a report is about
+    // the explanation on screen, and the one on screen is the newest.
+    const stored = await this.prisma.explanation.findFirst({
+      where: { attemptId, questionId, studentProfileId: scope.studentProfileId },
+      orderBy: { generation: 'desc' },
+      select: {
+        id: true,
+        body: true,
+        generation: true,
+        suppressedAt: true,
+        parentAccountId: true,
+        studentProfileId: true,
       },
-      select: { id: true, body: true, parentAccountId: true, studentProfileId: true },
     });
     // A Question this child never asked about. There is no Explanation for a report to
     // be about, and it is the same sentence a foreign Attempt gets: a second sentence
     // here would let the outside tell "nothing explained" from "not your Attempt".
     if (stored === null) throw new NotFoundException(NO_EXPLANATION_TO_FLAG);
+    // A stale tab pressing report on prose a parent has since removed. The same 200 the
+    // read path gives, nothing written, and — the point — **no body on the way out**: a
+    // response that carried the prose would put an Explanation a parent settled back on a
+    // child's screen, which is the one thing suppression exists to prevent. The panel
+    // replaces the paragraph and the control with the two lines it draws for the
+    // suppressed state.
+    if (stored.suppressedAt !== null) {
+      return { attemptId, questionId, suppressed: true };
+    }
 
     const key = { explanationId: stored.id, origin: STUDENT_FLAG_ORIGIN };
     let flag: { createdAt: Date };
@@ -680,9 +814,13 @@ export class ExplanationService {
     return {
       attemptId,
       questionId,
+      suppressed: false,
       // The prose, unchanged. Reporting an Explanation does not retract it.
       body: stored.body as RichText,
       studentFlaggedAt: flag.createdAt.toISOString(),
+      // The same fact the read path states, so a report does not make the panel forget
+      // that what it is holding is a replacement.
+      replacement: stored.generation > 1,
     };
   }
 
@@ -712,10 +850,17 @@ export class ExplanationService {
    * path here that could write one — the flag is found by `origin: Student` and a
    * Question whose only flag is the parent's own answers the shared 404.
    *
-   * **Confirming does not suppress.** Nothing here writes `Explanation.body`, a
-   * `chargedAt`, a grade, a score or Mastery, and the child is still served exactly the
-   * same prose afterwards: suppression is Story 6.4's and there is no column for it.
-   * What confirming does is put the Explanation in front of an operator.
+   * **Confirming still does not suppress.** Nothing here writes `Explanation.body`, a
+   * `chargedAt`, a `suppressedAt`, a grade, a score or Mastery, and the child is served
+   * exactly the same prose afterwards. What confirming does is put the Explanation in
+   * front of an operator and — since Story 6.4 — *unlock* suppression as something the
+   * parent may then choose: `suppressionUnlocked` reads this disposition. Unlocking an
+   * action is not performing it, and the screen says so in words before either.
+   *
+   * **It looks across every generation of the Question.** A child can report a suppressed
+   * explanation and its replacement, so the flag this decides is the oldest **undecided**
+   * student flag — the one nobody has read — falling back to the newest decided one for
+   * the 200 and 409 arms.
    *
    * The ownership proof runs first, through `attemptProfileFor`, and the profile is
    * resolved from the Attempt row rather than passed — so a child's id cannot be paired
@@ -732,14 +877,19 @@ export class ExplanationService {
       attemptId,
     );
 
-    const stored = await this.prisma.explanation.findUnique({
-      where: {
-        attemptId_questionId_studentProfileId: { attemptId, questionId, studentProfileId },
-      },
+    // **Every generation of this Question, oldest first.** A child can report a suppressed
+    // explanation and its replacement, so a Question can hold two student flags — and the
+    // decision that is owed is on the one nobody has read. Ordered here so the pick below
+    // is a scan and not a sort.
+    const generations = await this.prisma.explanation.findMany({
+      where: { attemptId, questionId, studentProfileId },
+      orderBy: { generation: 'asc' },
       select: {
         id: true,
         questionId: true,
         body: true,
+        generation: true,
+        suppressedAt: true,
         flags: {
           select: {
             id: true,
@@ -751,11 +901,23 @@ export class ExplanationService {
         },
       },
     });
+    // The oldest **undecided** student flag, and the newest decided one where there is
+    // none. The first is the decision that is owed; the second is what the 200/409 arms
+    // below read a repeat or a reversal against, so a parent pressing twice on a Question
+    // whose every report is decided is answered by the most recent decision rather than
+    // by the oldest one they made.
+    const withStudentFlag = generations.filter((row) =>
+      row.flags.some((flag) => flag.origin === STUDENT_FLAG_ORIGIN),
+    );
+    const stored =
+      withStudentFlag.find((row) =>
+        row.flags.some((flag) => flag.origin === STUDENT_FLAG_ORIGIN && flag.disposition === null),
+      ) ?? withStudentFlag.at(-1);
     const studentFlag = stored?.flags.find((flag) => flag.origin === STUDENT_FLAG_ORIGIN);
     // No Explanation at all, and an Explanation the child never reported, answer the
     // same sentence — as does a foreign or still-open Attempt, which threw above. There
     // is nothing of the child's here to decide about either way (AD-18).
-    if (stored === null || studentFlag === undefined) {
+    if (stored === undefined || studentFlag === undefined) {
       throw new NotFoundException(NO_STUDENT_FLAG_TO_DISPOSE);
     }
 
@@ -801,6 +963,8 @@ export class ExplanationService {
       {
         questionId: stored.questionId,
         body: stored.body,
+        generation: stored.generation,
+        suppressedAt: stored.suppressedAt,
         flags: currentFlags,
       },
     ]);
@@ -856,7 +1020,7 @@ export class ExplanationService {
         createdAt: true,
         disposition: true,
         dispositionAt: true,
-        explanation: { select: { attemptId: true, questionId: true } },
+        explanation: { select: { attemptId: true, questionId: true, generation: true } },
       },
     });
     if (rows.length === 0) return [];
@@ -877,6 +1041,7 @@ export class ExplanationService {
       return {
         attemptId: row.explanation.attemptId,
         questionId: row.explanation.questionId,
+        generation: row.explanation.generation,
         flaggedAt: row.createdAt.toISOString(),
         disposition: row.disposition,
         dispositionAt: row.dispositionAt?.toISOString() ?? null,
@@ -887,6 +1052,256 @@ export class ExplanationService {
         submittedAt: context?.submittedAt ?? null,
       };
     });
+  }
+
+  /**
+   * Which Questions of one Attempt this child may not be shown an explanation for.
+   *
+   * **Ids and nothing else.** Not a body, not an instant, not a reason and not who
+   * decided: the results screen needs to know whether to draw a control, and everything
+   * beyond the ids would be a parent-scoped fact on a student-scoped read (AD-20, AD-26).
+   *
+   * **It exists so a child is never offered a control that undoes their parent's
+   * decision.** The panel is mounted per row, so learning suppression at press time would
+   * mean either a control one tap from spending an allowance unit on a Question a parent
+   * has settled, or one request per Question on load. One attempt-scoped read answers it
+   * once, for the whole paper.
+   *
+   * **A foreign or unknown Attempt answers `[]`**, which is the same answer a child with
+   * nothing suppressed gets, and this method does not try to tell them apart: the rows
+   * carry both ids denormalized, so the `where` simply matches nothing. A 404 for an
+   * unknown id would be a confirmation for a known one (AD-18) — the same answer
+   * `studentFlagsFor` gives a foreign profile, and for the same reason.
+   *
+   * **It is not the guarantee, it is the courtesy.** The guarantee is the serve-time check
+   * in `explanationFor`, which returns the suppressed answer before the allowance read and
+   * before any provider call. If this read fails or is stale the screen draws the control,
+   * a press answers 200 suppressed, and nothing is generated and nothing is charged —
+   * which is exactly why the check is at serve time and not a cache key.
+   */
+  async suppressedQuestionsFor(scope: StudentScope, attemptId: string): Promise<string[]> {
+    const rows = await this.prisma.explanation.findMany({
+      where: {
+        parentAccountId: scope.parentAccountId,
+        studentProfileId: scope.studentProfileId,
+        attemptId,
+      },
+      // Three columns, and deliberately no `body`: the list of Questions a child may not
+      // read an explanation for is not a list of explanations.
+      select: { questionId: true, generation: true, suppressedAt: true },
+    });
+    // The latest generation is the one that counts, so a Question whose generation 1 is
+    // suppressed and whose generation 2 is live is **absent** from this list: the child is
+    // being served the replacement.
+    return suppressedQuestionIds(rows);
+  }
+
+  /**
+   * Stops one Explanation being served to the one child it was written for, for good.
+   *
+   * **Scoped to one Student Profile, and checked at serve time on every read path.** The
+   * row this writes belongs to one (Attempt, Question, child), so a sibling who sat their
+   * own Attempt of the same Practice Test is untouched by construction — their rows are
+   * keyed to a different Attempt. And the suppression is a *serving rule*: `explanationFor`
+   * reads `suppressedAt` on the row it resolves, which is what makes this more than a
+   * cache key that a new read path could forget to consult.
+   *
+   * **Only once a concern is recorded**, and the rule is `suppressionUnlocked` — the same
+   * predicate the Admin queue's two `where` arms state and the same one `canSuppress` is
+   * computed from. A parent-origin flag qualifies; a student-origin one only once the
+   * parent confirmed it. A Question with no flag, one whose only report is awaiting a
+   * decision and one the parent dismissed are each refused with `SUPPRESSION_NEEDS_A_FLAG`
+   * and nothing is written. Never automatic, and never available in Student Mode — there
+   * is no student route that reaches this method.
+   *
+   * **Idempotent, and there is no sentence for a repeat.** `updateMany({ where: { id,
+   * suppressedAt: null } })` is the whole of "the first instant stands": the row leaves
+   * the live state exactly once and the database decides which press did it, so a
+   * double-tap answers 200 with the **first** instant rather than a 409 about a decision
+   * the parent already made. A read-then-write could have both presses see `null` and
+   * both write, and the second would move the one fact this column holds.
+   *
+   * **Nothing is deleted and nothing is un-suppressed.** The row keeps its body, stays
+   * readable here, and stays in front of an operator. There is no route that clears
+   * `suppressedAt` and no column that could be flipped back.
+   *
+   * **It changes one Explanation and nothing else**: no grade state, no `GradeRow`, no
+   * Attempt score, no Mastery, no dispute flag, no other Question, no other generation
+   * and no other child. One `updateMany` against one id is the whole write, which is why
+   * this needs no transaction.
+   *
+   * The ownership proof runs first, through `attemptProfileFor`, and the profile is
+   * resolved from the Attempt row rather than passed — so a child's id cannot be paired
+   * with another child's Attempt because there is nowhere to put one.
+   *
+   * It answers **every** generation of that Question, oldest first, so a screen that must
+   * show the removed one beside its replacement gets both from the write it made.
+   */
+  async suppressExplanation(
+    scope: ParentScope,
+    attemptId: string,
+    questionId: string,
+  ): Promise<ParentExplanationView[]> {
+    const { studentProfileId } = await this.practiceTests.attemptProfileFor(
+      scope.parentAccountId,
+      attemptId,
+    );
+
+    const latest = await this.prisma.explanation.findFirst({
+      where: { attemptId, questionId, studentProfileId },
+      orderBy: { generation: 'desc' },
+      select: {
+        id: true,
+        suppressedAt: true,
+        flags: { select: { origin: true, disposition: true } },
+      },
+    });
+    // A Question nobody asked about, on an Attempt this parent may read. The same
+    // sentence a foreign Attempt gets: there is no Explanation here to stop serving, and
+    // spelling the two apart would let the outside read which ids exist (AD-18).
+    if (latest === null) throw new NotFoundException(NO_EXPLANATION_TO_SUPPRESS);
+
+    // The one predicate, and the reason the control a parent is offered and the refusal
+    // they would get cannot disagree. Checked before the write and never after it.
+    if (!suppressionUnlocked(latest.flags)) {
+      this.logger.log(
+        `A suppression of the explanation of question ${questionId} of attempt ${attemptId} was refused: no concern is recorded against it.`,
+      );
+      throw new ConflictException(SUPPRESSION_NEEDS_A_FLAG);
+    }
+
+    // `suppressedAt: null` in the `where` is the whole of the "first instant stands"
+    // rule. The count is deliberately ignored: what happened is read back below, so a
+    // repeat press is answered by the state rather than by an inference about it.
+    await this.prisma.explanation.updateMany({
+      where: { id: latest.id, suppressedAt: null },
+      data: { suppressedAt: new Date() },
+    });
+
+    // The Attempt and the Question. Never a fragment of the prose that was removed, and
+    // never a cost, a tier or a model name (AD-20, AD-26).
+    this.logger.log(
+      `The explanation of question ${questionId} of attempt ${attemptId} is no longer served to the student.`,
+    );
+
+    return this.generationsOf(attemptId, questionId, studentProfileId);
+  }
+
+  /**
+   * Writes a replacement for an Explanation a parent removed, as a further generation,
+   * charging nothing.
+   *
+   * **No allowance is read anywhere on this path**, which is what makes "free at every
+   * tier including Free" a property of the code rather than a promise: there is no
+   * `consumptionFor` call, no re-count, no `remainingFor` and therefore nothing that
+   * could refuse it. A Free account already at its cap gets its replacement, and the
+   * counter does not move — because the row is written with `chargedAt: null` and
+   * `allowance.service.ts` counts `chargedAt: { gte, lt }`. That is the whole of "free",
+   * and it needs no second counter and no `excludedFromCount` column.
+   *
+   * **Only over a suppressed generation.** A live Explanation answers 409
+   * `NOTHING_TO_REGENERATE` and nothing is written: a replacement is what follows a
+   * removal, and an allowance-free write with no precondition is a free provider call
+   * anybody could press in a loop.
+   *
+   * **A new generation, never an overwrite.** The suppressed row keeps its body, its
+   * flags and its removal instant; the replacement is `generation + 1` with
+   * `suppressedAt: null`, so both are readable and each can be flagged, decided about and
+   * suppressed on its own terms with no ceiling.
+   *
+   * The Question is re-asked through the **same** `explanationInputFor` the child's own
+   * ask goes through and written by the **same** `write` internal — so the prompt, the
+   * post-hoc validation, the bounded retry and every fault ending as
+   * `ExplanationUnavailable` are one code path and not two. A provider fault is a 503 and
+   * writes nothing.
+   *
+   * **It changes one Explanation and nothing else**: no grade state, no score, no
+   * Mastery, no other Question, no other generation and no other child.
+   */
+  async regenerateExplanation(
+    scope: ParentScope,
+    attemptId: string,
+    questionId: string,
+  ): Promise<ParentExplanationView[]> {
+    const { studentProfileId } = await this.practiceTests.attemptProfileFor(
+      scope.parentAccountId,
+      attemptId,
+    );
+
+    const latest = await this.prisma.explanation.findFirst({
+      where: { attemptId, questionId, studentProfileId },
+      orderBy: { generation: 'desc' },
+      select: { generation: true, suppressedAt: true },
+    });
+    // The same sentence a foreign Attempt gets, under its own name: there is nothing here to
+    // put a replacement in place of, which is a different reason from there being nothing to
+    // stop serving.
+    if (latest === null) throw new NotFoundException(NO_EXPLANATION_TO_REGENERATE);
+    if (latest.suppressedAt === null) {
+      this.logger.log(
+        `A regeneration of the explanation of question ${questionId} of attempt ${attemptId} was refused: the student is still being served it.`,
+      );
+      throw new ConflictException(NOTHING_TO_REGENERATE);
+    }
+
+    // The ownership proof again, and the Question, both answers and the Practice Test's
+    // Grade Level with it — the same read the child's own ask goes through, with the
+    // profile resolved off the Attempt rather than passed.
+    const input = await this.practiceTests.explanationInputFor(
+      scope.parentAccountId,
+      studentProfileId,
+      attemptId,
+      questionId,
+    );
+    // The same refusal the child's path makes for the same state: an explanation built
+    // around a prompt or a correct answer that could not be read would be invented, and
+    // a free one is no better for being free.
+    if (input.prompt.trim() === '' || input.correctAnswer.trim() === '') {
+      this.logger.warn(
+        `A replacement explanation for question ${questionId} of attempt ${attemptId} was refused: the stored question or correct answer could not be read.`,
+      );
+      throw new ExplanationUnavailable();
+    }
+
+    const body = await this.write(scope.parentAccountId, input, attemptId, questionId);
+
+    try {
+      await this.prisma.explanation.create({
+        data: {
+          parentAccountId: scope.parentAccountId,
+          studentProfileId,
+          attemptId,
+          questionId,
+          body,
+          // The next generation, and the reason this is a replacement rather than an
+          // overwrite. The widened unique key is what refuses a racing second one.
+          generation: latest.generation + 1,
+          // **The whole of "free".** No allowance was read on this path and none will be:
+          // the counter excludes a null `chargedAt` by column, so there is nothing to
+          // debit, nothing to reconcile and nothing that could refuse this row.
+          chargedAt: null,
+        },
+        select: { id: true },
+      });
+    } catch (cause) {
+      // Two regenerations for one Question at once: both computed the same `max + 1` and
+      // the unique key refused the loser. The loser's answer is the winner's generations
+      // — one row exists, and a parent is never shown a fault for having been quick. This
+      // call's own body is dropped rather than written as a third row.
+      if (!isUniqueViolation(cause)) throw cause;
+      this.logger.log(
+        `A replacement explanation for question ${questionId} of attempt ${attemptId} was already written by a concurrent request.`,
+      );
+      return this.generationsOf(attemptId, questionId, studentProfileId);
+    }
+
+    // The Attempt and the Question. Never a fragment of what was written, and never a
+    // cost, a tier or a model name (AD-20, AD-26).
+    this.logger.log(
+      `A replacement explanation was written for question ${questionId} of attempt ${attemptId}.`,
+    );
+
+    return this.generationsOf(attemptId, questionId, studentProfileId);
   }
 
   /**
@@ -908,6 +1323,14 @@ export class ExplanationService {
    * folds the rows and the reasoning lives there. Account-scoped it is not: the whole
    * point of the queue is that an operator sees every family's, which is why it is
    * behind `AdminAuthGuard` and behind nothing else.
+   *
+   * **Suppression is deliberately absent from this `where`, and must stay absent.** A
+   * suppressed Explanation is precisely the one an operator has to judge: the parent has
+   * already decided it was bad enough to take away from their child, and a queue that
+   * filtered those out would lose every case the strongest signal came from. So a
+   * suppressed row stays in front of an operator, with its body, for as long as the flag
+   * does — and a replacement that is later flagged is a **different Explanation**, so it
+   * arrives as an entry of its own with no fold, no grouping and no change here at all.
    *
    * Nothing here generates, writes or suppresses anything. Reading the queue is a read.
    */
@@ -947,6 +1370,52 @@ export class ExplanationService {
   }
 
   // --- Internals ---------------------------------------------------------
+
+  /**
+   * Every generation of one Question, oldest first, as the parent reads them.
+   *
+   * The answer both parent writes give, and one read rather than a composed response:
+   * suppression and regeneration each change one row, but the screen has to redraw the
+   * Question's whole history — the removed explanation beside its replacement — and a
+   * response composed from the row that was written would leave the other generation to
+   * be fetched or guessed at.
+   *
+   * Read **after** the write rather than composed from it, for the reason
+   * `disposeStudentFlag` re-reads its flags: the pre-write read predates the write, so a
+   * flag or a concurrent regeneration landing in the gap would otherwise vanish from this
+   * response even though the rows themselves are correct on the next read.
+   *
+   * It takes the profile resolved off the Attempt and never one from a request, exactly as
+   * the two callers resolved it.
+   */
+  private async generationsOf(
+    attemptId: string,
+    questionId: string,
+    studentProfileId: string,
+  ): Promise<ParentExplanationView[]> {
+    const rows = await this.prisma.explanation.findMany({
+      where: { attemptId, questionId, studentProfileId },
+      // Oldest generation first, which is the order the screen renders a Question's
+      // history in. The ordinal and not `createdAt`: two rows written inside one
+      // millisecond have an unambiguous order by it and none by their instants.
+      orderBy: { generation: 'asc' },
+      select: {
+        questionId: true,
+        body: true,
+        generation: true,
+        suppressedAt: true,
+        // Both origins, unfiltered, exactly as `explanationsForAttempt` reads them: the
+        // parent reads their own concern and their child's, and `canSuppress` is computed
+        // off them by the pure mapper. `chargedAt` is still deliberately not selected —
+        // what an Explanation cost is not a thing this response carries (AD-20, AD-26),
+        // and that holds for the free one too.
+        flags: {
+          select: { origin: true, createdAt: true, disposition: true, dispositionAt: true },
+        },
+      },
+    });
+    return parentExplanationViews(rows);
+  }
 
   /**
    * One `Explanation` call, re-issued while the post-hoc pass keeps rejecting what

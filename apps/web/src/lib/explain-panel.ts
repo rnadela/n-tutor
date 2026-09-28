@@ -3,7 +3,7 @@ import type { RichTextSegment } from './parent-api';
 /**
  * What one explain panel is showing, as a closed set.
  *
- * Six states and no seventh, and no pair of booleans that could be true at once:
+ * Seven states and no eighth, and no pair of booleans that could be true at once:
  * "loading and failed" and "at the cap with prose on screen" are both states a
  * `pending`/`error`/`body` triple admits and neither is a thing a child could make
  * sense of. A union makes the panel's render a `switch` the compiler checks.
@@ -12,13 +12,32 @@ import type { RichTextSegment } from './parent-api';
  * sentence is written once — in the API's policy file — and a second spelling in
  * the browser would be two answers to one refusal. `null` is a 409 that arrived
  * without one.
+ *
+ * `suppressed` is the seventh, added in Story 6.4: a grown-up removed this explanation.
+ * It carries **nothing** — no body, no instant, no reason and no sentence of the API's —
+ * because the whole of what the child is told is `studentCopy`'s own two lines, and a
+ * field for anything else would be somewhere for a parent's words to arrive. It is not an
+ * error state and it is not a refusal: nothing failed.
  */
 export type ExplainState =
   | { kind: 'idle' }
   | { kind: 'loading' }
-  | { kind: 'loaded'; body: RichTextSegment[]; studentFlaggedAt: string | null }
+  | {
+      kind: 'loaded';
+      body: RichTextSegment[];
+      studentFlaggedAt: string | null;
+      /**
+       * Whether this is a replacement for one a grown-up removed.
+       *
+       * On the `loaded` state because it is a fact about prose that is on screen. A boolean
+       * and not an ordinal: "which of four" is a fact about a history the child has no
+       * business reading.
+       */
+      replacement: boolean;
+    }
   | { kind: 'failed' }
   | { kind: 'offline' }
+  | { kind: 'suppressed' }
   | { kind: 'atCap'; limitSentence: string | null };
 
 /**
@@ -54,10 +73,14 @@ export function flaggedAtOf(state: ExplainState): string | null {
  *   loser is a refusal a child did nothing to earn.
  * - `offline` — no connection, so nothing is sent at all. Distinct from a failure,
  *   because "you are not connected" is a thing a child can act on.
+ * - `removed` — a grown-up settled this Question, so nothing is sent. Distinct from
+ *   every other arm because it is not a state a press could improve: there is no retry
+ *   that would help and no connection that would change it, and a request that left the
+ *   device would be the child asking again for something already decided about.
  * - `request` — ask. Which is the case for a first press, and for a person pressing
  *   again after a failure or a refusal.
  */
-export type ExplainDecision = 'stored' | 'busy' | 'offline' | 'request';
+export type ExplainDecision = 'stored' | 'removed' | 'busy' | 'offline' | 'request';
 
 /**
  * The whole of what a press decides, as a pure function.
@@ -69,12 +92,15 @@ export type ExplainDecision = 'stored' | 'busy' | 'offline' | 'request';
  *
  * The order of the arms is the rule. Stored prose wins over everything, including
  * being offline — an Explanation already on the page does not stop being readable
- * when the connection drops. `busy` comes next, so a double press is swallowed
- * before the connection is even consulted. Only then does a press become a request
- * that could leave the device.
+ * when the connection drops. **`removed` comes immediately after it and ahead of every
+ * other rule**: a press must never leave the device for a Question a grown-up has
+ * settled, whatever the connection is doing and whatever else is in flight. `busy` comes
+ * next, so a double press is swallowed before the connection is even consulted. Only then
+ * does a press become a request that could leave the device.
  */
 export function explainDecision(input: { online: boolean; state: ExplainState }): ExplainDecision {
   if (input.state.kind === 'loaded') return 'stored';
+  if (input.state.kind === 'suppressed') return 'removed';
   if (input.state.kind === 'loading') return 'busy';
   if (!input.online) return 'offline';
   return 'request';

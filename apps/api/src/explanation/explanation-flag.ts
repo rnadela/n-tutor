@@ -3,6 +3,7 @@ import type {
   ExplanationFlagOrigin,
 } from '../generated/prisma/enums.js';
 import type { RichText } from '../extraction/rich-text.js';
+import { suppressionUnlocked } from './explanation-suppression.js';
 
 /**
  * The origin a parent's flag is recorded under, named once.
@@ -49,9 +50,15 @@ export const QUEUED_FLAG_DISPOSITION: ExplanationFlagDisposition = 'Confirmed';
 /**
  * One stored Explanation as the **parent** reading it gets it back.
  *
- * `questionId` rather than the pair `ExplanationView` carries: a parent reads a
+ * `questionId` rather than the pair the student's own response carries: a parent reads a
  * whole Attempt at once, so the Attempt id is the request and restating it on every
  * entry would be the same string repeated per Question.
+ *
+ * **One entry per generation since Story 6.4, not one per Question.** A Question a parent
+ * suppressed and then regenerated holds two rows, and both are here — the removed one so
+ * it can be read beside its replacement, the replacement so it can be read at all. The
+ * `questionId` is therefore no longer unique across the list, and the screen groups by
+ * it. `generation` is what tells two entries of one Question apart.
  *
  * **Three independent flag facts, and each is its own field.** `parentFlaggedAt` is
  * the instant a parent first recorded a concern; `studentFlaggedAt` the instant the
@@ -64,13 +71,47 @@ export const QUEUED_FLAG_DISPOSITION: ExplanationFlagDisposition = 'Confirmed';
  * `studentFlaggedAt`, which is why that field exists separately rather than being
  * folded into a single three-state string here.
  *
- * There is **no suppression field**: that is Story 6.4's, and a view with a shape for
- * it would be this story answering a question it has not been asked. There is no
- * cost, no tier, no model name, no allowance figure and no grading rationale either
- * (AD-20, AD-26) — the rationale is Story 6.5's, and it has nowhere here to sit.
+ * There is no cost, no tier, no model name, no allowance figure and no grading rationale
+ * (AD-20, AD-26) — the rationale is Story 6.5's, and it has nowhere here to sit. And
+ * there is no suppression *reason* either: suppression follows a recorded flag and the
+ * flag is the record, so a second free-text field would be a second account of one
+ * concern.
  */
 export interface ParentExplanationView {
   questionId: string;
+  /**
+   * Which explanation of this Question this entry is: 1 for the one the child asked
+   * for, 2 for the first free replacement, and so on.
+   *
+   * The ordinal the screen labels an entry with, and the reason two entries of one
+   * Question are tellable apart. It is the stored column, never a position in this list:
+   * a list index would renumber itself the day the read's order changed.
+   */
+  generation: number;
+  /**
+   * When a parent stopped this one being served to their child, or null for one still
+   * live.
+   *
+   * An instant rather than a boolean, and the **first** one — the write keeps it — so a
+   * second press cannot move it. A suppressed entry is still here and still carries its
+   * `body`: suppression is a serving rule, and the parent who made the decision remains
+   * able to read what they decided about.
+   */
+  suppressedAt: string | null;
+  /**
+   * Whether this Explanation may be suppressed right now.
+   *
+   * **The server's answer, and never a rule the browser re-derives.** It is
+   * `suppressionUnlocked(flags) && suppressedAt === null` — the same predicate the API's
+   * refusal reads and the same one the Admin queue's two `where` arms state — so the
+   * control a parent is offered and the answer they would get cannot disagree. A second
+   * derivation in the browser would fail silently in the worst direction: a control
+   * offered for a concern nobody confirmed.
+   *
+   * False on a suppressed entry, because suppression is not reversible and pressing
+   * again is not a second decision.
+   */
+  canSuppress: boolean;
   /** The stored segments, exactly as stored (AD-32). */
   body: RichText;
   /** When a parent first flagged it, or null. */
@@ -122,6 +163,10 @@ export interface StudentExplanationFlagView {
 export interface StoredExplanationRow {
   questionId: string;
   body: unknown;
+  /** The stored ordinal, straight off the column. */
+  generation: number;
+  /** The stored instant, or null for a generation still being served. */
+  suppressedAt: Date | null;
   flags: readonly {
     origin: ExplanationFlagOrigin;
     createdAt: Date;
@@ -152,9 +197,13 @@ export interface StoredExplanationRow {
  * go if one were somehow written: a parent-origin flag is already the parent's own
  * judgement, so there is nothing for them to decide about it.
  *
- * The order is the read's order and nothing here sorts: the parent's screen keys
+ * The order is the read's order and nothing here sorts: the parent's screen groups
  * these by Question id onto answer-key rows that are already in the order the child
- * met them.
+ * met them, and the read states the generations oldest first within a Question.
+ *
+ * **`canSuppress` is computed here and nowhere else.** One predicate, read by the
+ * refusal the API would give and by the control the screen draws — which is what keeps
+ * one rule in one place.
  */
 export function parentExplanationViews(
   rows: readonly StoredExplanationRow[],
@@ -166,6 +215,12 @@ export function parentExplanationViews(
     const studentFlag = row.flags.find((flag) => flag.origin === STUDENT_FLAG_ORIGIN);
     return {
       questionId: row.questionId,
+      generation: row.generation,
+      suppressedAt: row.suppressedAt?.toISOString() ?? null,
+      // The one predicate, applied to the row's own flags. `&& suppressedAt === null`
+      // rather than a separate field, because suppression is not reversible: an entry
+      // already removed has no second decision to offer.
+      canSuppress: suppressionUnlocked(row.flags) && row.suppressedAt === null,
       // Stored segments travel out exactly as stored (AD-32). They were parsed on the
       // way in; re-parsing here would be a second chance for two readings of a row
       // neither of them wrote to disagree.

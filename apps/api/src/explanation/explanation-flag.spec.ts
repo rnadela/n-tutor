@@ -27,6 +27,10 @@ function row(overrides: Partial<StoredExplanationRow> = {}): StoredExplanationRo
   return {
     questionId: 'q1',
     body: [{ kind: 'text', value: 'Two halves make one whole.' }],
+    // The first and, for most rows, only generation. Stated rather than defaulted away,
+    // because `generation` is what tells two entries of one Question apart.
+    generation: 1,
+    suppressedAt: null,
     flags: [],
     ...overrides,
   };
@@ -70,11 +74,14 @@ describe('what a stored Explanation becomes on the way to a parent', () => {
     const [view] = parentExplanationViews([row()]);
     expect(Object.keys(view!).sort()).toEqual([
       'body',
+      'canSuppress',
+      'generation',
       'parentFlaggedAt',
       'questionId',
       'studentFlagDisposition',
       'studentFlagDispositionAt',
       'studentFlaggedAt',
+      'suppressedAt',
     ]);
     expect(view!.questionId).toBe('q1');
     expect(view!.body).toEqual([{ kind: 'text', value: 'Two halves make one whole.' }]);
@@ -200,8 +207,9 @@ describe('what a stored Explanation becomes on the way to a parent', () => {
 
   it('has no field a rationale, a cost, a tier or an allowance could travel in', () => {
     // Not a habit of the mapper but a property of the shape: the rationale is Story
-    // 6.5's and suppression is Story 6.4's, and neither has anywhere here to sit
-    // (AD-20, AD-26).
+    // 6.5's and has nowhere here to sit, and nothing about what a row cost does either —
+    // including the free one (AD-20, AD-26). `suppressedAt` *is* here now, deliberately:
+    // it is a serving rule the parent decided and the parent reads.
     const [view] = parentExplanationViews([row()]);
     const keys = Object.keys(view!);
     for (const forbidden of [
@@ -210,12 +218,112 @@ describe('what a stored Explanation becomes on the way to a parent', () => {
       'costMicros',
       'tier',
       'model',
-      'suppressedAt',
+      'suppressionReason',
       'disputeFlag',
       'mastery',
     ]) {
       expect(keys).not.toContain(forbidden);
     }
+  });
+});
+
+describe('when a parent may take an Explanation away from their child', () => {
+  it('offers it for a parent-origin flag', () => {
+    // A parent-origin flag *is* the parent's own judgement: there is nothing further to
+    // ask them, which is why it qualifies outright in the Admin queue's `where` too.
+    const [view] = parentExplanationViews([
+      row({ flags: [parentFlag('2026-09-28T09:00:00.000Z')] }),
+    ]);
+    expect(view!.canSuppress).toBe(true);
+  });
+
+  it('offers it for a student flag the parent confirmed', () => {
+    const [view] = parentExplanationViews([
+      row({ flags: [studentFlag('2026-09-20T08:00:00.000Z', 'Confirmed')] }),
+    ]);
+    expect(view!.canSuppress).toBe(true);
+  });
+
+  it('withholds it where nothing at all is recorded', () => {
+    // Never automatic. Suppression follows a recorded concern, and no concern is recorded
+    // here — so the control is not offered and the API's own 409 says the same thing.
+    const [view] = parentExplanationViews([row({ flags: [] })]);
+    expect(view!.canSuppress).toBe(false);
+  });
+
+  it('withholds it while the child\u2019s report is awaiting a decision', () => {
+    // A concern nobody has read is not a judgement. Its own case beside the two below,
+    // because "awaiting" is the *absence* of a disposition and a predicate that tested
+    // truthiness rather than the value would let it through.
+    const [view] = parentExplanationViews([
+      row({ flags: [studentFlag('2026-09-20T08:00:00.000Z')] }),
+    ]);
+    expect(view!.canSuppress).toBe(false);
+  });
+
+  it('withholds it where the parent dismissed the child\u2019s report', () => {
+    // A dismissal is the parent having read the same prose and judged it fine. Its own
+    // case, because a predicate that only asked whether a disposition exists would offer
+    // suppression for exactly the decision that says not to.
+    const [view] = parentExplanationViews([
+      row({ flags: [studentFlag('2026-09-20T08:00:00.000Z', 'Dismissed')] }),
+    ]);
+    expect(view!.canSuppress).toBe(false);
+  });
+
+  it('withholds it on one already removed, however it was unlocked', () => {
+    // Suppression is not reversible and pressing again is not a second decision. The
+    // control's availability is the server's answer, so this is where that is stated.
+    const [view] = parentExplanationViews([
+      row({
+        flags: [parentFlag('2026-09-28T09:00:00.000Z')],
+        suppressedAt: new Date('2026-09-29T11:00:00.000Z'),
+      }),
+    ]);
+    expect(view!.canSuppress).toBe(false);
+    expect(view!.suppressedAt).toBe('2026-09-29T11:00:00.000Z');
+  });
+
+  it('keeps reporting a removed generation\u2019s body and both flag facts', () => {
+    // A suppressed row is retained and stays parent-readable: the parent who decided
+    // about it remains able to read what they decided about, and so does the operator.
+    const [view] = parentExplanationViews([
+      row({
+        suppressedAt: new Date('2026-09-29T11:00:00.000Z'),
+        flags: [
+          parentFlag('2026-09-28T09:00:00.000Z'),
+          studentFlag('2026-09-20T08:00:00.000Z', 'Confirmed'),
+        ],
+      }),
+    ]);
+    expect(view!.body).toEqual([{ kind: 'text', value: 'Two halves make one whole.' }]);
+    expect(view!.parentFlaggedAt).toBe('2026-09-28T09:00:00.000Z');
+    expect(view!.studentFlaggedAt).toBe('2026-09-20T08:00:00.000Z');
+    expect(view!.studentFlagDisposition).toBe('Confirmed');
+  });
+
+  it('maps two generations of one Question to two entries, each with its own state', () => {
+    // The view carries one entry **per generation** since Story 6.4, not one per Question:
+    // the removed explanation and its replacement are two rows, and the screen groups them
+    // by `questionId`. Each keeps its own flags, its own removal instant and its own
+    // answer about whether it may be removed.
+    const views = parentExplanationViews([
+      row({
+        generation: 1,
+        suppressedAt: new Date('2026-09-29T11:00:00.000Z'),
+        flags: [parentFlag('2026-09-28T09:00:00.000Z')],
+      }),
+      row({ generation: 2, body: [{ kind: 'text', value: 'Try it with a picture.' }] }),
+    ]);
+    expect(views.map((view) => view.questionId)).toEqual(['q1', 'q1']);
+    expect(views.map((view) => view.generation)).toEqual([1, 2]);
+    expect(views[0]!.suppressedAt).toBe('2026-09-29T11:00:00.000Z');
+    expect(views[0]!.canSuppress).toBe(false);
+    expect(views[1]!.suppressedAt).toBeNull();
+    // Nothing is recorded against the replacement yet, so it cannot be removed either —
+    // a concern has to be raised first, on every generation, with no ceiling and no
+    // carry-over from the one it replaced.
+    expect(views[1]!.canSuppress).toBe(false);
   });
 });
 

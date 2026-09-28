@@ -1259,7 +1259,51 @@ model Explanation {
   body             Json
   /// When the Explanation Allowance was spent on this row, or null for a row that
   /// cost nothing. Written once, by the transaction that writes the row.
+  ///
+  /// **Story 6.4's free regeneration is the null case, and it adds no column for
+  /// itself.** A replacement written after a suppression takes `chargedAt: null`,
+  /// which `allowance.service.ts`'s explanation counter already excludes by reading
+  /// `chargedAt: { gte, lt }`. A second counter, an `excludedFromCount` boolean or an
+  /// allowance read on that path would each be a new place for the two to disagree.
   chargedAt        DateTime?
+  /// When a parent stopped this Explanation being served to their child, or null for
+  /// one still live.
+  ///
+  /// **Suppression is a serving rule on a retained row**, which is why this is a
+  /// nullable instant here and not a delete. The epic requires the suppressed record
+  /// kept, still readable by the parent and still in front of an operator, and an
+  /// overwrite of `body` would destroy exactly the prose the operator has to judge. So
+  /// nothing deletes a row here and nothing soft-deletes one either.
+  ///
+  /// **There is no un-suppress column and no route that clears this.** Suppression is
+  /// not reversible — the parent's confirmation says so in words before it fires — so a
+  /// nullable instant with one writer is the whole of the mechanism. There is
+  /// deliberately no `suppressedBy` (the account is already on the row) and no
+  /// `suppressionReason`: a column with no writer is a promise the next reader
+  /// believes.
+  ///
+  /// Written by `updateMany({ where: { id, suppressedAt: null } })` and never by a
+  /// read-then-write, so two simultaneous presses cannot both win and the **first**
+  /// instant is final by the statement rather than by a check.
+  suppressedAt     DateTime?
+  /// Which explanation of this Question for this child this row is: 1 for the one the
+  /// child asked for, 2 for the first free replacement, and so on.
+  ///
+  /// **This is what makes a replacement a distinct entry rather than an overwrite** —
+  /// the reason the epic's "a free regeneration is a distinct entry" is expressible at
+  /// all. It is part of the unique key below, so the suppressed generation and its
+  /// replacement are two rows, each with its own body, its own flags, its own
+  /// `chargedAt` and its own `suppressedAt`.
+  ///
+  /// **At most one generation is live at a time, and that follows from the two write
+  /// rules rather than from a partial index.** The student path only ever writes
+  /// `generation: 1`, and only into an empty (Attempt, Question, child); the parent's
+  /// regeneration only ever writes `max + 1`, and only when the highest generation is
+  /// suppressed. So a live row can only ever be the highest one, and the widened
+  /// unique key refuses every racing loser — which is why there is no
+  /// `WHERE suppressed_at IS NULL` partial unique index to keep in step with a rule
+  /// stated somewhere else.
+  generation       Int      @default(1)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -1269,10 +1313,17 @@ model Explanation {
   flags          ExplanationFlag[]
 
   /// The cache key, as a constraint rather than as an intention: two rows for one
-  /// (Attempt, Question, child) would be two explanations of one thing, and the
-  /// losing writer is refused by the index rather than by a check somebody has to
-  /// remember to make.
-  @@unique([attemptId, questionId, studentProfileId])
+  /// (Attempt, Question, child, generation) would be two copies of one explanation,
+  /// and the losing writer is refused by the index rather than by a check somebody has
+  /// to remember to make.
+  ///
+  /// **`generation` widened this key in Story 6.4.** Before it, one (Attempt, Question,
+  /// child) held exactly one row and the reads were `findUnique`; now "the one that
+  /// counts" is the highest generation and every read path resolves it with
+  /// `findFirst({ orderBy: { generation: 'desc' } })`. The key is still what makes two
+  /// concurrent regenerations leave one row: both compute the same `max + 1`, and the
+  /// loser answers with the winner's generations.
+  @@unique([attemptId, questionId, studentProfileId, generation])
   /// The one index the allowance count reads: this account's charged rows inside a
   /// period window. Equality then range, exactly as `practice_test`'s is.
   @@index([parentAccountId, chargedAt])

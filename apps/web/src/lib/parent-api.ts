@@ -455,14 +455,49 @@ export interface AttemptResultsView {
  * widening the results read with a field for one would turn opening a results
  * screen into a request for every Explanation on it.
  */
-export interface ExplanationView {
+export interface StudentExplanationServed {
   attemptId: string;
   questionId: string;
+  /** The discriminant. Always `false` here, so a `switch` over the union is exhaustive. */
+  suppressed: false;
   /** The stored segments, drawn by `components/RichText` and by nothing else (AD-32). */
   body: RichTextSegment[];
   /** When this child first reported it, or null. Never anybody else's flag. */
   studentFlaggedAt: string | null;
+  /**
+   * Whether this is a replacement for one a parent removed.
+   *
+   * A boolean and not the ordinal: "which of four" is a fact about a history the child has
+   * no business reading. It names no parent, no reason and no instant — the panel says
+   * only that this is a new explanation.
+   */
+  replacement: boolean;
 }
+
+/**
+ * The whole of what a child is told about an Explanation a parent removed: that one did.
+ *
+ * Two ids and the discriminant, and **nowhere for anything else to sit**. No body, no
+ * flag instant, no removal instant, no reason and no disposition: the sentence the panel
+ * shows is `studentCopy`'s own, and the API states only the fact (AD-20, AD-26).
+ */
+export interface StudentExplanationSuppressed {
+  attemptId: string;
+  questionId: string;
+  /** The discriminant. Always `true` here. */
+  suppressed: true;
+}
+
+/**
+ * What a student-scoped Explanation call answers: the prose, or that a parent removed it.
+ *
+ * **A discriminated union rather than a nullable body plus a boolean.** A
+ * `body: RichTextSegment[] | null` with a flag beside it would let one response say
+ * "suppressed" and still carry prose, an instant or a reason — and the whole discipline of
+ * this surface is that a student-scoped shape has nowhere for a parent-scoped fact to sit.
+ * The union makes that the compiler's guarantee, here as well as in the API.
+ */
+export type StudentExplanationResponse = StudentExplanationServed | StudentExplanationSuppressed;
 
 /**
  * One of a child's handed-in runs, exactly as the API states it.
@@ -494,12 +529,42 @@ export interface ParentAttemptSummary {
  * `parentFlaggedAt` is when a parent first recorded a concern about it, or null. An
  * instant rather than a boolean, and the *first* one: a second press cannot move it.
  *
- * There is no cost, no tier, no model name, no allowance figure, no grading rationale
- * and no suppression field (AD-20, AD-26): the rationale is Story 6.5's and
- * suppression is Story 6.4's, and neither has a shape here to travel in.
+ * **One entry per generation, not one per Question.** A Question a parent removed and then
+ * regenerated holds two entries, and the screen groups them by `questionId`: the removed
+ * one so it can be read beside its replacement, the replacement so it can be read at all.
+ *
+ * There is no cost, no tier, no model name, no allowance figure and no grading rationale
+ * (AD-20, AD-26): the rationale is Story 6.5's and has no shape here to travel in — and
+ * neither does what a row cost, free one or not.
  */
 export interface ParentExplanationView {
   questionId: string;
+  /**
+   * Which explanation of this Question this entry is: 1 for the one the child asked for,
+   * 2 for the first free replacement, and so on.
+   *
+   * The ordinal the screen labels an entry with, and the reason two entries of one Question
+   * are tellable apart. It is the API's stored column, never a position in the list.
+   */
+  generation: number;
+  /**
+   * When a parent stopped this one being served to their child, or null for one still live.
+   *
+   * An instant rather than a boolean, and the **first** one: a second press cannot move it.
+   * A removed entry still carries its `body` — suppression is a serving rule, and the parent
+   * who made the decision stays able to read what they decided about.
+   */
+  suppressedAt: string | null;
+  /**
+   * Whether this Explanation may be removed right now.
+   *
+   * **The API's answer, and never a rule this app re-derives.** It is "a concern is recorded
+   * and this one is not already removed", which the API computes from the same predicate its
+   * own refusal reads — so the control offered here and the answer a press would get cannot
+   * disagree. A second derivation in the browser would fail silently in the worst direction:
+   * a control offered for a concern nobody confirmed.
+   */
+  canSuppress: boolean;
   /** The stored segments, drawn by `components/RichText` and by nothing else (AD-32). */
   body: RichTextSegment[];
   /** When a parent first reported it, or null. */
@@ -557,6 +622,13 @@ export type FlagDisposition = 'Confirmed' | 'Dismissed';
 export interface StudentExplanationFlagView {
   attemptId: string;
   questionId: string;
+  /**
+   * Which generation of that Question's Explanation this report is about.
+   *
+   * A suppression and a regeneration are what let one Question carry more than one of
+   * these now: the child can flag the removed generation and, later, its replacement.
+   */
+  generation: number;
   /** When the child raised it. */
   flaggedAt: string;
   /** What the parent decided, or null while it awaits a decision. */
@@ -1150,9 +1222,39 @@ export const parentApi = {
    * nothing this browser could learn by asking.
    */
   explainQuestion: (attemptId: string, questionId: string) =>
-    call<ExplanationView>(
+    call<StudentExplanationResponse>(
       `/student/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation`,
       { method: 'POST' },
+      studentCopy.results.explain.failed,
+    ),
+
+  /**
+   * Which Questions of this Attempt the child may not be shown an explanation for.
+   *
+   * **One attempt-scoped read, and the reason the results screen knows before it draws a
+   * control.** The panel is mounted per row, so learning it at press time would leave a
+   * child one tap from undoing their parent's decision — and on a Free account, one tap
+   * from spending an allowance unit doing it. Asking per Question would be one request per
+   * row on load.
+   *
+   * Ids and nothing else: no body, no instant, no reason and no hint of who decided. The
+   * sentence the panel shows is `studentCopy`'s own.
+   *
+   * **It is the courtesy, not the guarantee.** A failed or still-pending read leaves the
+   * control drawn, and a press then answers 200 suppressed — nothing generated and nothing
+   * charged, which is exactly why the API's check is at serve time and not a cache key.
+   *
+   * An empty list is the ordinary answer for an Attempt with nothing removed, and it is
+   * also the answer for an Attempt that is not this child's: there is nothing here to
+   * enumerate and no refusal to read.
+   *
+   * No bearer, exactly as the other student calls: the binding cookie names the child
+   * server-side.
+   */
+  suppressedExplanations: (attemptId: string) =>
+    call<string[]>(
+      `/student/attempts/${encodeURIComponent(attemptId)}/suppressed-explanations`,
+      {},
       studentCopy.results.explain.failed,
     ),
 
@@ -1169,8 +1271,8 @@ export const parentApi = {
    *
    * **The child's own report and nothing else.** No parent flag and no decision about
    * theirs ever travels here — whether a grown-up agreed or disagreed is a
-   * parent-scoped fact, and `ExplanationView` has nowhere for one to sit (AD-20,
-   * AD-26).
+   * parent-scoped fact, and `StudentExplanationResponse` has nowhere for one to sit
+   * (AD-20, AD-26).
    *
    * No bearer, exactly as `explainQuestion`: the binding cookie names the child
    * server-side, and the two ids in the path name only *which* Question. A sibling's
@@ -1179,7 +1281,7 @@ export const parentApi = {
    * browser could learn by asking.
    */
   flagExplanationAsStudent: (attemptId: string, questionId: string) =>
-    call<ExplanationView>(
+    call<StudentExplanationResponse>(
       `/student/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation-flag`,
       { method: 'POST' },
       studentCopy.results.explain.flagFailed,
@@ -1641,6 +1743,55 @@ export const parentApi = {
       `/parent/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation-flag/disposition`,
       { method: 'POST', headers: elevated(token), body: JSON.stringify({ disposition }) },
       parentCopy.attempts.disposeFailed,
+    ),
+
+  /**
+   * Stops this Explanation being served to the child it was written for, for good.
+   *
+   * **Not reversible, and there is no call here that could undo it.** No un-suppress, no
+   * toggle and no soft-delete: the API has no column to clear, and the screen states every
+   * consequence in a confirmation before this is ever sent.
+   *
+   * **It removes nothing.** The explanation is retained, stays readable to the parent and
+   * stays in front of the operator; the question, the attempt, its score and mastery are
+   * untouched; and it stops being served to **this student only**.
+   *
+   * **Idempotent.** A repeat answers 200 with the instant it was *first* removed — a
+   * double-tap is one decision, and there is no 409 for one.
+   *
+   * It is refused with a 409 until a concern is recorded: the parent's own report, or their
+   * child's that they confirmed. The screen does not offer the control in that state, so
+   * only a stale tab sees that sentence.
+   *
+   * It answers **every** generation of that Question, oldest first, so the screen can draw
+   * the removed explanation beside its replacement from this response alone.
+   */
+  suppressExplanation: (token: string, attemptId: string, questionId: string) =>
+    call<ParentExplanationView[]>(
+      `/parent/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation-suppression`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.attempts.suppressFailed,
+    ),
+
+  /**
+   * Writes a replacement for an Explanation this parent removed, and it costs nothing.
+   *
+   * **Nothing, at every plan, including one already at its limit.** The API reads no
+   * allowance on this path at all, so there is nothing that could refuse it — and the screen
+   * states that cost beside the control before this is ever sent.
+   *
+   * **Only over a removed one**, refused with a 409 otherwise: the child is still being
+   * served that one, so there is nothing to replace. The removed explanation is retained,
+   * and the replacement is a new entry that can itself be reported and removed on the same
+   * terms.
+   *
+   * It answers every generation of that Question, oldest first, exactly as the removal does.
+   */
+  regenerateExplanation: (token: string, attemptId: string, questionId: string) =>
+    call<ParentExplanationView[]>(
+      `/parent/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/explanation-regeneration`,
+      { method: 'POST', headers: elevated(token) },
+      parentCopy.attempts.regenerateFailed,
     ),
 
   /**

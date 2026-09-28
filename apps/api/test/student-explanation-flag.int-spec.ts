@@ -490,7 +490,9 @@ describe('Student Explanation flagging: raised once, decided once, queued once',
         'attemptId',
         'body',
         'questionId',
+        'replacement',
         'studentFlaggedAt',
+        'suppressed',
       ]);
       const serialized = JSON.stringify(response.body);
       for (const forbidden of [
@@ -503,6 +505,12 @@ describe('Student Explanation flagging: raised once, decided once, queued once',
         'tier',
         'model',
         'allowance',
+        // Story 6.4's two parent-side columns. `suppressed` and `replacement` are on this
+        // response; the *instant* a parent removed something, which generation it was and
+        // whether they may remove it are not, and there is nowhere here for them to sit.
+        'suppressedAt',
+        'canSuppress',
+        'generation',
       ]) {
         expect(serialized).not.toContain(forbidden);
       }
@@ -903,6 +911,7 @@ describe('Student Explanation flagging: raised once, decided once, queued once',
         'disposition',
         'dispositionAt',
         'flaggedAt',
+        'generation',
         'practiceTestId',
         'questionId',
         'questionOrdinal',

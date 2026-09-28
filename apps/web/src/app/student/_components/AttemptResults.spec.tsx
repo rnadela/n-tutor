@@ -23,11 +23,37 @@ const CODE = SOURCE.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
  * `GradeStateMarker.spec.tsx`, which need neither.
  */
 describe('what reads the answer key', () => {
-  it('makes exactly one student-scoped call, and it is the results read', () => {
+  it('makes exactly two student-scoped calls, and no third', () => {
+    // **Two reads and no third: the answer key from `grading`, and which Explanations a
+    // parent removed from `explanation`. Never one per Question, and never one per press.**
+    // The second is attempt-scoped for exactly that reason — the panel is mounted per row,
+    // so learning suppression at press time would leave a child one tap from undoing their
+    // parent's decision, and asking per Question would be one request per row on load.
     expect(CODE).toContain('parentApi.attemptResults(attemptId)');
-    expect(CODE.match(/parentApi\./gu)).toHaveLength(1);
+    expect(CODE).toContain('parentApi.suppressedExplanations(attemptId)');
+    expect(CODE.match(/parentApi\./gu)).toHaveLength(2);
     // No bearer and no parent-scoped member: the binding names the child.
     expect(CODE).not.toMatch(/Authorization|elevat/iu);
+  });
+
+  it('reads suppression in its own effect, and lets it fail silently', () => {
+    // The two reads settle independently: the answer key is the screen and must not wait on,
+    // or fail with, a list of ids that only decides whether a control is drawn. And the
+    // failure is swallowed on purpose — the set stays empty, the control is drawn, and the
+    // API's serve-time check refuses the press without generating or charging anything, which
+    // is exactly why that check exists and is not a cache trick.
+    expect(CODE).toMatch(/\}, \[attemptId, reload\]\);/u);
+    const suppression = CODE.slice(CODE.indexOf('parentApi.suppressedExplanations(attemptId)'));
+    expect(suppression).toContain('() => {},');
+    expect(suppression.slice(0, 400)).not.toContain('setError');
+    expect(suppression.slice(0, 400)).not.toContain('deviceIsUnbound');
+  });
+
+  it('hands each row its own answer, off the one attempt-scoped read', () => {
+    expect(CODE).toContain('suppressed={suppressed.has(row.questionId)}');
+    // Empty until it lands and empty if it fails, from one frozen value rather than a fresh
+    // set per render: a new identity would be a new prop identity on every row of a paper.
+    expect(CODE).toContain('EMPTY_SUPPRESSION');
   });
 
   it('reads once per Attempt, keyed on the Attempt and a person’s retry', () => {
