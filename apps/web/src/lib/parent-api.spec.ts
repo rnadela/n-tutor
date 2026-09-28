@@ -783,3 +783,52 @@ describe('Source Test calls', () => {
     }
   });
 });
+
+describe('the analytics dashboard call', () => {
+  it('reads one route, carries the elevation bearer and writes nothing', async () => {
+    // One call and not four: three reads would let the table, the trend and the
+    // digest be taken at three instants and be read as one picture.
+    const fetchMock = respondWith(200, { studentProfileId: 'p-1', topics: [] });
+    await parentApi.profileAnalytics('tok', 'p-1');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/parent/students/p-1/analytics');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer tok');
+    expect(init.method).toBeUndefined();
+    expect(init.body).toBeUndefined();
+  });
+
+  it('escapes the profile id it is given rather than pasting it into the path', async () => {
+    const fetchMock = respondWith(200, { topics: [] });
+    await parentApi.profileAnalytics('tok', 'a/b?c');
+    const [url] = fetchMock.mock.calls[0]! as unknown as [string];
+    expect(url).toContain('/parent/students/a%2Fb%3Fc/analytics');
+  });
+
+  it('reports a failure with the dashboard’s own sentence', async () => {
+    respondWith(500, {});
+    await expect(parentApi.profileAnalytics('tok', 'p-1')).rejects.toMatchObject({
+      message: parentCopy.analytics.loadFailed,
+    });
+  });
+
+  it('states no threshold, ceiling or window of its own in the view types', () => {
+    // Every tunable arrives on the response: `weakArea` and `trend.windowSize`
+    // are fields, never figures this module knows.
+    expect(SOURCE).toContain('export interface WeakAreaPolicyView');
+    expect(SOURCE).toContain('windowSize: number');
+    // The forms that would actually indicate a hardcoded tunable: a value
+    // assigned to one of these names, or a default supplied for one. A
+    // `name: number` declaration and a property read are neither, which is why
+    // the shapes are spelled out rather than matched on the bare identifier.
+    expect(SOURCE).not.toMatch(
+      /\b(ceilingPercent|answeredFloor|windowSize)\b\s*(=\s*\{?\s*\d|\?\?\s*\d|:\s*\d)/u,
+    );
+  });
+
+  it('keeps the skipped count on the Mastery view, not optional', () => {
+    // A percentage without it is a percentage over an unstated denominator.
+    expect(SOURCE).toContain('unanswered: number;');
+    expect(SOURCE).not.toContain('unanswered?: number');
+  });
+});

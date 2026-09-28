@@ -560,6 +560,116 @@ export interface GradeDisputeView {
 }
 
 /**
+ * One Topic's Mastery on the dashboard, exactly as the API states it — ranked,
+ * named and carrying its own counts.
+ *
+ * **`unanswered` is not optional and never travels apart from `value`.** A Mastery
+ * percentage read without the count of what the child skipped is a percentage over
+ * an unstated denominator, so the field is here and every surface that prints the
+ * figure prints it too.
+ *
+ * **`isWeakArea` is the API's verdict and is never recomputed here.** The two
+ * thresholds it was resolved against live on the response's `weakArea` so the empty
+ * state can state the floor — this app states neither figure of its own.
+ *
+ * `topicName` and both Subject fields are null together, for a stored figure whose
+ * Topic no longer resolves: the row keeps its place and loses its label.
+ *
+ * No cost, tier, model name or grading rationale (AD-20, AD-26).
+ */
+export interface MasteryTopicView {
+  topicId: string;
+  topicName: string | null;
+  subjectId: string | null;
+  subjectName: string | null;
+  correct: number;
+  incorrect: number;
+  /** How many Questions of the window the student left blank. */
+  unanswered: number;
+  /** `correct + incorrect` — the fraction's denominator. */
+  answered: number;
+  attemptsCounted: number;
+  /** The fraction, or null for a window the student skipped entirely. */
+  value: number | null;
+  isWeakArea: boolean;
+}
+
+/** One handed-in run on the dashboard's trend. */
+export interface TrendPointView {
+  attemptId: string;
+  submittedAt: string;
+  correct: number;
+  /** FR-37's denominator. Zero is legitimate: a run nothing could mark. */
+  denominator: number;
+  excludedUngraded: number;
+}
+
+/**
+ * The dashboard's one trend, carrying the window it is over.
+ *
+ * `windowSize` is the API's resolved figure, so a chart that says "the last five"
+ * says five because five is what was counted — never because a component wrote it.
+ */
+export interface TrendView {
+  windowSize: number;
+  /** Oldest first. The order is the API's answer and nothing here re-sorts it. */
+  points: TrendPointView[];
+}
+
+/** What is waiting for the student, across every released practice test. */
+export interface ActivitySummaryView {
+  released: number;
+  unstarted: number;
+  inProgress: number;
+  completed: number;
+}
+
+/** What is waiting for the **parent** to decide. Counts only, never prose. */
+export interface DigestView {
+  disputesAwaiting: number;
+  explanationFlagsAwaiting: number;
+}
+
+/**
+ * The Explanation Allowance — an **account** figure, not this student's.
+ *
+ * `limit: null` is unlimited and is stated in words, never rendered as a number.
+ * There is no tier name here and no price (AD-26).
+ */
+export interface ExplanationAllowanceView {
+  used: number;
+  limit: number | null;
+  /** When the counter resets, stated in the account's own zone. */
+  resetAt: string;
+  timezone: string;
+}
+
+/**
+ * The two figures the Weak Area verdict was resolved against.
+ *
+ * They are on the response so the empty state can say "mastery appears once N
+ * questions are answered on a topic" with the N the API actually used. This app
+ * carries no copy of either: a restated tunable drifts the first time an operator
+ * changes it.
+ */
+export interface WeakAreaPolicyView {
+  ceilingPercent: number;
+  answeredFloor: number;
+}
+
+/** The whole dashboard for one student, as the API answers it in one read. */
+export interface ProfileAnalyticsView {
+  studentProfileId: string;
+  /** Ranked weakest-first by the API. Nothing here re-sorts it. */
+  topics: MasteryTopicView[];
+  trend: TrendView;
+  activity: ActivitySummaryView;
+  digest: DigestView;
+  explanationAllowance: ExplanationAllowanceView;
+  weakArea: WeakAreaPolicyView;
+}
+
+/**
  * One Question's Explanation, exactly as the API states it.
  *
  * Segments, two ids and **the child's own flag**, and nothing else. There is no cost,
@@ -2022,6 +2132,25 @@ export const parentApi = {
       `/parent/students/${encodeURIComponent(studentProfileId)}/grade-disputes`,
       { headers: elevated(token) },
       parentCopy.disputes.listFailed,
+    ),
+
+  /**
+   * One student's whole dashboard, in one read.
+   *
+   * **One call and not four**, because the dashboard is one answer: three reads
+   * would let the table, the trend and the digest be taken at three instants and
+   * read as one picture.
+   *
+   * An empty dashboard is the ordinary answer for a student with no finished work
+   * — and it is also the answer for a profile id belonging to another account,
+   * which is why this app does not try to tell the two apart. There is nothing
+   * here to enumerate and no refusal to read.
+   */
+  profileAnalytics: (token: string, studentProfileId: string) =>
+    call<ProfileAnalyticsView>(
+      `/parent/students/${encodeURIComponent(studentProfileId)}/analytics`,
+      { headers: elevated(token) },
+      parentCopy.analytics.loadFailed,
     ),
 
   setPracticeTestTimer: (token: string, practiceTestId: string, minutes: number | null) =>

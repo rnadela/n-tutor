@@ -161,6 +161,14 @@ export const parentCopy = {
      * surface.
      */
     gradeDisputes: 'Marks a student says are wrong',
+    /**
+     * The way in to the dashboard, and the only way in there is.
+     *
+     * It names what a parent gets rather than what the screen is called, because
+     * "Analytics" is a word about the product and this is a question about their
+     * child.
+     */
+    analytics: 'Where a student is strong and weak',
     loading: 'Loading Parent View…',
 
     /**
@@ -1419,6 +1427,181 @@ export const parentCopy = {
     resolvedUndated: 'You set this mark.',
     /** The way through to the question itself, where the reason is read and the mark set. */
     open: 'Read the question',
+  },
+  /**
+   * The dashboard. **Every sentence about a student's work is a function of the
+   * address** and never a literal naming the child (UX-DR31) — Parent View is third
+   * person, by name, so the name arrives as an argument rather than being written in.
+   *
+   * **Not one threshold, window size or percentage is stated here.** The answered
+   * floor, the ceiling and the trend's window all arrive on the response, resolved by
+   * the API at boot; a figure restated in this file would drift silently the first
+   * time an operator changed the environment.
+   *
+   * No account plan, no price and no prompt to buy anything: the empty state is a
+   * mechanism and a progress, not a sales surface.
+   */
+  analytics: {
+    title: 'Where a student is strong and weak',
+    intro: 'Everything below is about one student, from the work they have already finished.',
+    studentLabel: 'Student',
+    loading: 'Loading…',
+    noStudents: 'There is no student profile yet. Add one first.',
+    loadFailed: 'This could not be loaded. Try again.',
+    /**
+     * The **profiles** read failed, which is a different claim: saying the dashboard
+     * could not be loaded when it was the list of students that could not be read
+     * names the wrong thing, beside a selector that is empty for a reason the
+     * sentence does not give.
+     */
+    profilesFailed: 'The students could not be listed. Try again.',
+    retry: 'Try again',
+    backToParentView: 'Back to Parent View',
+
+    /** What is waiting, and what is done — the whole list, in one sentence. */
+    activityTitle: 'Practice tests',
+    activity: (name: string, counts: { released: number; completed: number }) =>
+      `${name} has ${counts.released} practice test${counts.released === 1 ? '' : 's'}, ${counts.completed} of them finished.`,
+    activityBreakdown: (counts: { unstarted: number; inProgress: number }) =>
+      `${counts.unstarted} not started, ${counts.inProgress} in progress.`,
+
+    /** The one trend on the page, with its own scope said beside it. */
+    trendTitle: 'Recent scores',
+    /**
+     * The chart's scope, stated on the chart: how many runs, whose, and which runs
+     * count. It says "first runs" because a retake is excluded, and it never claims
+     * to be a record of everything the student did.
+     */
+    trendScope: (name: string, windowSize: number) =>
+      `The last ${windowSize} practice tests ${name} finished for the first time, oldest first. Retakes are not plotted.`,
+    /**
+     * One plotted run, as the text equivalent of a point.
+     *
+     * **Labelled by the date it was handed in, not by its place in the list.** "Test
+     * 3" is a fact about this chart, not about the student's work — it renames
+     * itself the moment a run drops out of the window, and it collides with the
+     * ordinal a parent already knows a practice test by.
+     */
+    trendPoint: (when: string, correct: number, denominator: number) =>
+      `${when}: ${correct} of ${denominator} correct.`,
+    /**
+     * The same point where some questions could not be marked.
+     *
+     * Stated rather than dropped: a run scored over fewer questions than the
+     * student sat reads as a worse result than it was, unless the reason is beside
+     * it.
+     */
+    trendPointExcluded: (when: string, correct: number, denominator: number, excluded: number) =>
+      `${when}: ${correct} of ${denominator} correct. ${excluded} question${excluded === 1 ? '' : 's'} could not be marked.`,
+    /** The same fact about the most recent run, beside the printed figure. */
+    trendLatestExcluded: (excluded: number) =>
+      `${excluded} question${excluded === 1 ? '' : 's'} in this test could not be marked.`,
+    /** An instant that will not parse. The run happened; only its date is unstateable. */
+    trendPointUndated: 'This test',
+    /** The endpoint's own figure, printed beside the line. */
+    trendLatest: (correct: number, denominator: number) => `${correct} of ${denominator}`,
+    trendEmpty: (name: string) => `${name} has not finished a practice test yet.`,
+
+    /** The ranked table. */
+    masteryTitle: 'Topics',
+    /**
+     * **The table's own scope, stated on the table**, exactly as the chart states
+     * its own — and deliberately not the same scope. A topic's figure is over the
+     * last few practice tests that *asked about that topic*, where the chart is
+     * over the last few finished at all, so the two select different runs for most
+     * students. Both are stated; neither is reconciled with the other, because
+     * reconciling them would mean answering a question nobody asked.
+     *
+     * The window is the API's figure and the per-row count is the API's too, so no
+     * number here is one this app knows.
+     */
+    masteryScope: (name: string, windowSize: number) =>
+      `Each topic is over the last ${windowSize} practice tests ${name} finished for the first time that asked about it — not the same ${windowSize} tests as the scores above.`,
+    /** How many runs one row's own figure is actually over. */
+    masteryRowScope: (attemptsCounted: number) =>
+      `over ${attemptsCounted} practice test${attemptsCounted === 1 ? '' : 's'}`,
+    /** The column that states it, for the widths where the table has columns. */
+    runsColumn: 'Practice tests',
+    topicColumn: 'Topic',
+    masteryColumn: 'How much is right',
+    answeredColumn: 'Questions answered',
+    unansweredColumn: 'Left blank',
+    statusColumn: 'Status',
+    /** A stored figure whose topic no longer resolves. The row keeps its place. */
+    unknownTopic: 'A topic that is no longer listed',
+    /**
+     * The Mastery figure, **always with the skipped count beside it**: a percentage
+     * on its own is a percentage over a denominator nobody stated.
+     */
+    masteryFigure: (percent: number, answered: number) => `${percent}% of ${answered} answered`,
+    /** A topic the student was asked about and skipped entirely. There is no figure. */
+    masteryNone: 'Nothing answered yet',
+    unansweredNote: (unanswered: number) =>
+      `${unanswered} question${unanswered === 1 ? '' : 's'} left blank`,
+    /** No question was skipped. Said rather than left out, so nothing is implied. */
+    unansweredNone: 'Nothing left blank',
+    /** The label on the marker. The same words the marker announces. */
+    weakArea: 'Weak Area',
+
+    /** The Subject filter. The heading changes when the table is narrowed. */
+    subjectLabel: 'Subject',
+    allSubjects: 'Every subject',
+    subjectHeading: (subjectName: string) => `Topics in ${subjectName}`,
+    /** A topic whose subject no longer resolves, as an option. */
+    unknownSubject: 'No subject',
+
+    /** The digest: what is waiting for the parent, each with its way through. */
+    digestTitle: 'Waiting for you',
+    disputes: (count: number) =>
+      count === 1
+        ? '1 mark a student says is wrong is waiting for you.'
+        : `${count} marks a student says are wrong are waiting for you.`,
+    disputesNone: 'No marks are waiting for a decision.',
+    openDisputes: 'Read the marks',
+    flags: (count: number) =>
+      count === 1
+        ? '1 reported explanation is waiting for you.'
+        : `${count} reported explanations are waiting for you.`,
+    flagsNone: 'No reported explanations are waiting for a decision.',
+    openFlags: 'Read the reports',
+
+    /**
+     * The Explanation counter. **Stated as the account's**, because it is: it is
+     * shared by every student on the account and is not this one's budget.
+     */
+    allowanceTitle: 'Explanations on this account',
+    allowanceUsed: (used: number, limit: string) => `${used} of ${limit} used this period.`,
+    /** No ceiling. Said in words, never as a number and never as "0 left". */
+    allowanceUnlimited: (used: number) => `${used} used this period. There is no limit.`,
+    allowanceResets: (date: string) => `The count starts again on ${date}.`,
+
+    /**
+     * The empty state: **the mechanism, and how far along it is.**
+     *
+     * It names the one thing that makes a figure appear — answered questions on a
+     * topic — and the figure the API resolved for it, so a parent knows what to do
+     * rather than only that there is nothing here. Nothing about an account plan and
+     * nothing to buy: a parent with no data has a waiting problem, not a purchasing
+     * one.
+     */
+    emptyTitle: 'Nothing to show yet',
+    empty: (name: string, answeredFloor: number) =>
+      `A topic appears here once ${name} has answered ${answeredFloor} questions on it in a finished practice test.`,
+    /**
+     * There **is** finished or started work, and still no topic figure.
+     *
+     * The distinction matters: a parent whose child has finished two tests and is
+     * told "no practice test has been finished yet" is told something false, and
+     * concludes the product is broken rather than that it is waiting.
+     */
+    emptyProgress: (counts: { completed: number; inProgress: number }) => {
+      const finished = `${counts.completed} practice test${counts.completed === 1 ? '' : 's'} finished`;
+      return counts.inProgress === 0
+        ? `${finished} so far. No topic has enough answered questions yet.`
+        : `${finished} so far, and ${counts.inProgress} in progress. No topic has enough answered questions yet.`;
+    },
+    /** Nothing started and nothing finished, so there is no progress to state. */
+    emptyNoWork: 'No practice test has been started yet.',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

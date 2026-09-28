@@ -1949,3 +1949,11 @@ source_spec: `spec-7-3-weak-area-identification.md`
 severity: low
 reason: `_bmad-output/specs/spec-n-test-reviewer/SPEC.md:114` records this as open. Deriving the verdict at read time settles it by omission: a Topic that crossed the threshold because `resolveUngraded` finally wrote verdicts for a paper sat weeks ago appears with no marker of that. It is a product decision about Story 7.4's presentation, not a defect in the predicate.
 status: open
+
+### DW-245: The trend's Attempt source reads every handed-in Attempt of a child before the window narrows it to five.
+origin: spec-deferred b93769c2b3d4
+location: apps/api/src/grading/grading.service.ts (qualifyingScoresFor)
+source_spec: `spec-7-4-analytics-dashboard.md`
+severity: medium
+reason: `qualifyingScoresFor` calls `parentSubmittedRunsFor`, which loads every submitted Attempt for the profile and batch-resolves a Subject label for each across the module boundary, and only then filters retakes and slices to `MASTERY_ATTEMPT_WINDOW`. The work grows with how much a child has sat rather than with what the chart shows, and the label batch is discarded entirely. Fixing it needs a limited reader on `practicetest` — a new shape on another module's service, which this story has no basis to design alone. It is the same class of unbounded read Story 7.3 already deferred for `masteryFor`.
+status: open

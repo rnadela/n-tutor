@@ -161,7 +161,7 @@ describe('Weak Areas: classified on the way out of the stored row, never stored'
   /** `masteryFor`'s answer, keyed by Topic name. */
   async function viewByName(profileId = studentProfileId) {
     const names = await namesById();
-    const rows = await h.grading.masteryFor(profileId);
+    const rows = await h.grading.masteryFor({ parentAccountId }, profileId);
     return { rows, byName: new Map(rows.map((row) => [names.get(row.topicId)!, row])) };
   }
 
@@ -272,7 +272,7 @@ describe('Weak Areas: classified on the way out of the stored row, never stored'
       .sort();
     expect(expected).toHaveLength(12);
 
-    const rows = await h.grading.masteryFor(studentProfileId);
+    const rows = await h.grading.masteryFor({ parentAccountId }, studentProfileId);
     expect(rows.map((row) => row.topicId)).toEqual(expected);
   });
 
@@ -309,11 +309,25 @@ describe('Weak Areas: classified on the way out of the stored row, never stored'
 
   it('answers an empty list for a profile with no history — not an invented zero row', async () => {
     const sibling = await createStudentProfile(h, parentAccountId, { gradeLevelId });
-    expect(await h.grading.masteryFor(sibling.id)).toEqual([]);
+    expect(await h.grading.masteryFor({ parentAccountId }, sibling.id)).toEqual([]);
 
     // And still empty once a sibling has work of their own: the read is per profile.
     await handInOnePaper();
-    expect(await h.grading.masteryFor(sibling.id)).toEqual([]);
+    expect(await h.grading.masteryFor({ parentAccountId }, sibling.id)).toEqual([]);
+  });
+
+  it('answers an empty list to another account asking about this child, not their figures', async () => {
+    // The IDOR Story 7.3 left open and 7.4 closed. The scope is in the same
+    // statement the rows come out of, so a parent who guesses a profile id reads
+    // nothing — and reads it as an empty dashboard rather than as a refusal, which
+    // would confirm that the id exists (AD-18).
+    await handInOnePaper();
+    expect(await h.grading.masteryFor({ parentAccountId }, studentProfileId)).toHaveLength(3);
+
+    const stranger = await createParentAccount(h.identity);
+    expect(await h.grading.masteryFor({ parentAccountId: stranger.id }, studentProfileId)).toEqual(
+      [],
+    );
   });
 
   it('reclassifies the very same stored rows when the floor is lowered, with no recompute', async () => {

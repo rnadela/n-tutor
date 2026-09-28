@@ -13,7 +13,7 @@ import {
 import { TopicService } from '../topics/topic.service.js';
 import { buildGradingPrompt, type GradingPromptQuestion } from './grading-prompt.js';
 import { countsTowardMastery } from './mastery-eligibility.js';
-import { hasEvidence, masteryFrom, masteryWindowOf } from './mastery.js';
+import { MASTERY_ATTEMPT_WINDOW, hasEvidence, masteryFrom, masteryWindowOf } from './mastery.js';
 import { answeredOf, isWeakArea } from './weak-area-policy.js';
 import { runsOf, type PracticeTestRunsView } from './grading-history.js';
 import { answerKeyRows, type AttemptResultsView } from './grading-results.js';
@@ -65,6 +65,23 @@ export interface TopicMasteryView {
   value: number | null;
   /** Derived at read time by the one predicate, never stored. */
   isWeakArea: boolean;
+}
+
+/**
+ * One handed-in Attempt and what it came to — the unit the dashboard's trend is
+ * drawn from.
+ *
+ * The score is `AttemptScore` whole rather than a percentage: a fraction computed
+ * here would be a second denominator the moment a surface wanted to print the
+ * excluded count beside it, and `excludedUngraded` is not a footnote.
+ *
+ * `submittedAt` is carried so the point can be labelled, never so a caller can
+ * re-sort: the order is decided in `qualifyingScoresFor` and nowhere else.
+ */
+export interface AttemptScorePoint {
+  attemptId: string;
+  submittedAt: string;
+  score: AttemptScore;
 }
 
 /** Who is asking. A parent reaches an Attempt by account; a child by both ids. */
@@ -1228,23 +1245,19 @@ export class GradingService {
    * because `topic_mastery` is `grading`'s table (AD-6, AD-17) — not a repository in
    * `practicetest` and not a controller reaching for Prisma.
    *
-   * **This method is deliberately unauthorized, and that is not an oversight.**
-   * Every other read on this service — `resultsFor`, `runHistoryFor`,
-   * `parentResultsFor`, `gradeDisputesFor` — takes a scope and filters on
-   * `parentAccountId`. This one takes a bare `studentProfileId` and filters on
-   * nothing else, so **it will happily read any child in the system, including one
-   * belonging to another parent.** It is safe only because its caller has *already*
-   * established that the asker may see this profile. Story 7.4 owns that: the route,
-   * the parent scope check that the profile belongs to the requesting account, and
-   * the elevation guard in front of it. Until then this has no caller but the
-   * int-spec.
+   * **The scope is part of the read, not a check in front of it.** The account
+   * travels in the `where` through the `studentProfile` relation, in the same
+   * statement the rows come out of — the arrangement every other read on this
+   * service uses (`resultsFor`, `runHistoryFor`, `parentResultsFor`,
+   * `gradeDisputesFor`). Story 7.3 left this taking a bare profile id with the rule
+   * written in prose; Story 7.4 replaced the prose with the signature, because a
+   * rule a controller has to remember is one careless caller away from being an
+   * IDOR — one parent reading another child's Mastery by guessing an id.
    *
-   * **No controller may call this without that check.** A controller that passes a
-   * `studentProfileId` straight off the request into this method is an IDOR: one
-   * parent reading another child's Mastery by guessing an id. If a caller cannot
-   * point at the check it made first, it is not allowed to call this. The signature
-   * does not enforce it because the story fixes the signature; the rule is stated
-   * here instead, and it is a hard rule.
+   * **A foreign or unknown profile answers `[]`**, never a refusal and never a 404
+   * (AD-18): a 404 for an unknown id would be a confirmation for a known one, and
+   * an empty dashboard is exactly what a parent who is not this child's parent is
+   * entitled to know.
    *
    * **Classification happens here, once.** `isWeakArea` is called on the counts as
    * they are read, so no surface downstream of this compares a percentage of its own
@@ -1253,15 +1266,21 @@ export class GradingService {
    *
    * Ordered by `topicId` so the answer is stable across calls. It is **not** a
    * presentation order: ranking weak Topics first, filtering by Subject and naming
-   * the Topics are Story 7.4's, on top of this view.
+   * the Topics are `analytics`', on top of this view.
    *
    * A profile with no history answers `[]`. That is not an error and it is not a row
-   * of zeros: a child who has answered nothing has no Mastery, and Story 7.4's empty
-   * state needs that to stay distinguishable from a real zero.
+   * of zeros: a child who has answered nothing has no Mastery, and the dashboard's
+   * empty state needs that to stay distinguishable from a real zero.
+   *
+   * The profile id is a second argument rather than a field of the scope, exactly as
+   * `gradeDisputesFor` takes it: `ParentScope` deliberately carries no child's id,
+   * because a type that *could* would be a type inviting a student route to call it.
    */
-  async masteryFor(studentProfileId: string): Promise<TopicMasteryView[]> {
+  async masteryFor(scope: ParentScope, studentProfileId: string): Promise<TopicMasteryView[]> {
     const rows = await this.prisma.topicMastery.findMany({
-      where: { studentProfileId },
+      // Both halves in one `where`: which child, and that the child is this
+      // account's. Separated, the second half is a check somebody has to remember.
+      where: { studentProfileId, studentProfile: { parentAccountId: scope.parentAccountId } },
       orderBy: { topicId: 'asc' },
       select: {
         topicId: true,
@@ -1277,6 +1296,86 @@ export class GradingService {
       answered: answeredOf(row),
       isWeakArea: isWeakArea(row),
     }));
+  }
+
+  /**
+   * What this child's most recent qualifying Attempts came to, oldest first.
+   *
+   * **The dashboard's trend, computed here because a score is `grading`'s.**
+   * `scoreOf` is FR-37's one denominator and `QuestionGrade` is this module's table
+   * (AD-6, AD-17), so a surface that wanted five scores over five runs would either
+   * count them itself — a second denominator — or reach for a delegate it may not
+   * hold. It is the same two-round-trip recipe `runHistoryFor` uses, at a different
+   * scope: the runs, then their grades in one statement, resolved and counted.
+   *
+   * **The same window and the same eligibility rule as Mastery**, by the same two
+   * exports: `countsTowardMastery(ordinal)` drops every retake and
+   * `MASTERY_ATTEMPT_WINDOW` caps what is left. That is deliberately *not* a claim
+   * that the points are the Attempts any one Topic's Mastery is over — a Topic's
+   * window is the five most recent runs that **included that Topic**, and this is
+   * the five most recent qualifying runs at all. The two select different Attempts
+   * for most children, which is why each figure states its own scope on the surface
+   * and nothing reconciles them.
+   *
+   * **Nothing is stored.** A stored trend would be a second window definition to
+   * keep in step with `recomputeMastery`'s, and the two would disagree the first
+   * time either was tuned.
+   *
+   * **Oldest first**, because that is the order a line is read in — and the only
+   * place that order is decided, so no surface re-sorts by a timestamp it was given
+   * for labelling.
+   *
+   * A child with nothing handed in answers `[]`, and so does a foreign or unknown
+   * profile: `parentSubmittedRunsFor` carries the account in its own `where`
+   * (AD-18).
+   */
+  async qualifyingScoresFor(
+    scope: ParentScope,
+    studentProfileId: string,
+  ): Promise<AttemptScorePoint[]> {
+    const runs = await this.practiceTests.parentSubmittedRunsFor(
+      scope.parentAccountId,
+      studentProfileId,
+    );
+    // Newest-first already, so the window is the head of the list once the retakes
+    // are gone. The ordinal is judged by the one predicate — `1` never appears here.
+    const window = runs
+      .filter((run) => countsTowardMastery(run.ordinal))
+      .slice(0, MASTERY_ATTEMPT_WINDOW);
+    if (window.length === 0) return [];
+
+    const stored = await this.prisma.questionGrade.findMany({
+      where: {
+        attemptId: { in: window.map((run) => run.attemptId) },
+        // Defence in depth, and the reason it is here rather than assumed: the ids
+        // above are already this account's, because `parentSubmittedRunsFor` carries
+        // the account in its own `where`. Restating it through the relation means a
+        // later edit that changed how the window is built cannot silently widen this
+        // statement — every read in this story is scoped where it reads.
+        attempt: { parentAccountId: scope.parentAccountId },
+      },
+      // Three columns, exactly as `runHistoryFor` selects: no rationale, so there is
+      // nothing here to leak, and no `questionId`, because `scoreOf` tallies states
+      // and reads no Question. `overrideState` is what *counts*, never what is shown.
+      select: { attemptId: true, state: true, overrideState: true },
+    });
+    const statesByAttempt = new Map<string, GradeState[]>();
+    for (const row of stored) {
+      // Resolved before anything is counted, so a parent's adjustment is the child's
+      // mark on the trend as it is on every other surface that states one.
+      const state = effectiveStateOf(row);
+      const states = statesByAttempt.get(row.attemptId);
+      if (states === undefined) statesByAttempt.set(row.attemptId, [state]);
+      else states.push(state);
+    }
+
+    return window
+      .map((run) => ({
+        attemptId: run.attemptId,
+        submittedAt: run.submittedAt,
+        score: scoreOf(statesByAttempt.get(run.attemptId) ?? []),
+      }))
+      .reverse();
   }
 
   // --- Internals ---------------------------------------------------------

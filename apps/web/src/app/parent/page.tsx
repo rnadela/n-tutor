@@ -144,6 +144,13 @@ export default function ParentViewPage() {
             <Link component={NextLink} href="/parent/grade-disputes">
               {parentCopy.parentView.gradeDisputes}
             </Link>
+            {/* Where a student is strong and where they are weak — the one place
+                every stored mastery figure is actually read. A dashboard a parent
+                cannot reach is a dashboard that did not ship, and this list is the
+                only way in. Client-side for the same reason as its neighbours. */}
+            <Link component={NextLink} href="/parent/analytics">
+              {parentCopy.parentView.analytics}
+            </Link>
             <Link component={NextLink} href="/parent/pin/change">
               {parentCopy.parentView.changePin}
             </Link>

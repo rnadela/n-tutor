@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AdminModule } from './admin/admin.module.js';
 import { AiModule } from './ai/ai.module.js';
+import { AnalyticsModule } from './analytics/analytics.module.js';
 import { CorrelationIdMiddleware } from './common/correlation.js';
 import { requireIntEnv } from './common/env.js';
 import { ExplanationModule } from './explanation/explanation.module.js';
@@ -85,6 +86,13 @@ export const PARENT_THROTTLER = 'parent';
     // for; it is registered ahead of that caller so a missing provider or a bad
     // config fails the boot rather than the first label to arrive.
     TopicsModule,
+    // The Parent View dashboard: a composition over `grading`, `practicetest`,
+    // `explanation`, `allowance` and `topics` that owns no entity and writes
+    // nothing. Registered last because every arrow points out of it and nothing
+    // above imports it — and registered at all, rather than left until something
+    // does, because a module absent from this list is a module whose boot never
+    // fails.
+    AnalyticsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

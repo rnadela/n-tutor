@@ -43,16 +43,40 @@ export interface TopicNormalizeRequest {
 type LabelVector = { vector: number[]; model: string } | null;
 
 /**
+ * What one canonical Topic is called, and which Subject's set it belongs to.
+ *
+ * The name is the row's stored spelling and never a re-derivation of it: a Topic's
+ * name is the first label that arrived, and a dashboard that recomputed one would
+ * relabel itself the day the match key changed. No `matchKey`, no embedding and no
+ * counts — this is a name, not the Topic.
+ */
+export interface TopicDescription {
+  topicId: string;
+  name: string;
+  subjectId: string;
+  subjectName: string;
+  /** Whether the cascade minted it rather than a human confirming it (Story 7.6). */
+  provisional: boolean;
+}
+
+/**
  * The `topics` module: sole owner and sole writer of `Topic` (AD-17), and the one
  * implementation of the AD-11 canonicalization cascade.
  *
- * **There is exactly one public method.** `normalize` is the whole interface, and
- * the three stages, the threshold, the vectors and the prompt are all private
+ * **There is exactly one way in to the cascade.** `normalize` is the whole of it,
+ * and the three stages, the threshold, the vectors and the prompt are all private
  * behind it. That is the point of the design rather than a tidiness preference: a
  * second entry point — "just the exact match, please", "give me the candidates" —
  * is a second matching path, and the moment two callers canonicalize differently
  * the Mastery history fragments in a way no read can detect. The only thing a
  * caller may know is that a label maps to a Topic id.
+ *
+ * **`describe` is the one other public method, and it is not a second way in.**
+ * Story 7.4's dashboard has to print a Topic's name beside its Mastery figure, and
+ * `Topic` is this module's table (AD-17) — so the id-to-name read lives here rather
+ * than in a surface reaching for the delegate. It matches nothing, mints nothing
+ * and reaches no stage: it answers "what is this id called", which is a question
+ * canonicalization has already finished asking.
  *
  * **It reads `Subject` read-only** and writes nothing but `topic`. It never
  * touches `practice_test_question_topic`: generation keeps emitting whatever it
@@ -193,6 +217,57 @@ export class TopicService {
     // stage 2 can never match for as long as it exists.
     const forMint = embedded ?? (await this.embedLabel(name, parentAccountId));
     return this.mint(subjectId, name, matchKey, forMint);
+  }
+
+  /**
+   * What a set of Topic ids are called, keyed by id.
+   *
+   * **A reader and not a second way in to the cascade.** `normalize` remains the
+   * only way a label becomes a Topic; this answers the different question a
+   * surface downstream of it has — "what is this id's name?" — and it cannot
+   * match, mint, or reach any stage of the cascade. It is here rather than in
+   * `grading` or `analytics` because `topics` is the sole owner of `Topic`
+   * (AD-17), and a dashboard reaching for the delegate itself would be the
+   * ownership rule broken for the sake of one `select`.
+   *
+   * **One statement for the whole set**, with the Subject's name taken through
+   * the relation in the same call, exactly as `releasedFor` takes its labels: one
+   * read per row across a module boundary is an N+1 on a table whose whole point
+   * is that a child accumulates rows in it.
+   *
+   * **An unknown id is simply absent from the map**, and an empty input never
+   * reaches the database at all. Neither is an error: a stored Mastery row whose
+   * Topic has since gone is a figure that is still true, and the caller renders it
+   * with no name rather than dropping the row.
+   *
+   * No cost, tier, model name or embedding travels on this (AD-20, AD-26): a name
+   * is all a reader is being told.
+   */
+  async describe(topicIds: readonly string[]): Promise<Map<string, TopicDescription>> {
+    const ids = [...new Set(topicIds)];
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.topic.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        name: true,
+        subjectId: true,
+        provisional: true,
+        subject: { select: { name: true } },
+      },
+    });
+    return new Map(
+      rows.map((row) => [
+        row.id,
+        {
+          topicId: row.id,
+          name: row.name,
+          subjectId: row.subjectId,
+          subjectName: row.subject.name,
+          provisional: row.provisional,
+        },
+      ]),
+    );
   }
 
   // --- Internals ---------------------------------------------------------
