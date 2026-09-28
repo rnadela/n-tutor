@@ -5149,6 +5149,12 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
           'practiceTestId',
           'questionCount',
           'score',
+          // Story 6.5's second figure: what the Attempt came to *before* any parent
+          // adjustment, and null while there is none. It is `scoreOf` over the stored
+          // verdicts rather than a stored column, so it is not a second denominator —
+          // and it is on the student's view because a grade that silently changed
+          // between two visits would be a child doubting what they read the first time.
+          'originalScore',
           'subjectName',
           'questions',
         ].sort(),

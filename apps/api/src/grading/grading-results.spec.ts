@@ -141,4 +141,81 @@ describe('answerKeyRows', () => {
       excludedUngraded: 3,
     });
   });
+
+  // --- The two per-row facts Story 6.5 added ----------------------------
+
+  it('reads both per-row facts as false when neither list is given', () => {
+    // The default is "nothing happened", not "unknown": a row with no dispute and no
+    // adjustment is the ordinary row, and every existing caller passes neither list.
+    const rows = answerKeyRows(key(), states({ q1: 'Correct' }), []);
+
+    expect(rows.every((row) => !row.parentAdjusted)).toBe(true);
+    expect(rows.every((row) => !row.disputed)).toBe(true);
+  });
+
+  it('marks parentAdjusted and disputed on exactly the ids given, independently', () => {
+    // The two are independent by construction: an override needs no dispute, and a
+    // dispute a parent has not decided on carries no override. A row may be either,
+    // both or neither, and a mapper that folded them would make one imply the other.
+    const rows = answerKeyRows(
+      key(),
+      states({ q1: 'Correct', q2: 'Unanswered', q3: 'Incorrect' }),
+      [],
+      ['q1'],
+      ['q3'],
+    );
+
+    expect(rows.map((row) => row.parentAdjusted)).toEqual([true, false, false]);
+    expect(rows.map((row) => row.disputed)).toEqual([false, false, true]);
+  });
+
+  it('ignores an adjusted or disputed id that is not a presented Question', () => {
+    // The lists come from grade and dispute rows, the rows from the key. An id in one
+    // and not the other must not add a row or move one.
+    const rows = answerKeyRows(key(), states({ q1: 'Correct' }), [], ['gone'], ['also-gone']);
+
+    expect(rows).toHaveLength(3);
+    expect(rows.every((row) => !row.parentAdjusted && !row.disputed)).toBe(true);
+  });
+
+  it('takes the state it is given and resolves nothing of its own', () => {
+    // The caller applies `effectiveStateOf`; this mapper must not have a second
+    // opinion. Handed `Correct` for a row it also knows was adjusted, it states
+    // `Correct` — there is no `?? state` here to reach for the AI's verdict.
+    const rows = answerKeyRows(key(), states({ q1: 'Correct' }), [], ['q1']);
+
+    expect(rows[0]!.state).toBe('Correct');
+    expect(rows[0]!.parentAdjusted).toBe(true);
+  });
+
+  it('carries no field for the AI verdict, the override instant or a dispute decision', () => {
+    // The student row's shape is the guarantee. `parentAdjusted` and `disputed` are the
+    // whole of what a child is told; `aiState`, `overriddenAt`, `disputedAt` and any
+    // disposition live on the parent's superset and have nowhere here to sit.
+    const serialized = JSON.stringify(
+      answerKeyRows(key(), states({ q1: 'Correct' }), ['q1'], ['q1'], ['q1']),
+    );
+
+    for (const field of ['aiState', 'overrideState', 'overriddenAt', 'disputedAt', 'disposition']) {
+      expect(serialized).not.toMatch(new RegExp(`"${field}"\\s*:`, 'iu'));
+    }
+  });
+
+  it('scores the same rows twice — effective and stored — over one denominator', () => {
+    // The whole of "11 of 15 became 12 of 15": two calls to one `scoreOf`, never a
+    // stored prior score and never a subtraction. The excluded count is identical,
+    // because an override never moves a row into or out of the denominator.
+    const stored: Record<string, GradeState> = { q1: 'Incorrect', q2: 'Unanswered' };
+    const effective: Record<string, GradeState> = { q1: 'Correct', q2: 'Unanswered' };
+    const adjusted = answerKeyRows(key(), states(effective), [], ['q1']);
+
+    expect(scoreOf(adjusted.map((row) => row.state))).toEqual({
+      correct: 1,
+      denominator: 2,
+      excludedUngraded: 1,
+    });
+    expect(scoreOf(key().questions.map((question) => stored[question.questionId] ?? null))).toEqual(
+      { correct: 0, denominator: 2, excludedUngraded: 1 },
+    );
+  });
 });

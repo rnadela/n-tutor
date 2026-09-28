@@ -142,18 +142,47 @@ describe('what reads the answer key', () => {
   });
 
   it('holds nothing this story is not', () => {
-    // The dispute flags are Stories 6.2-6.5'; Retake and the attempt-count line are
-    // Story 5.7's; a rationale, a Topic and any money figure are parent-scoped and
-    // have no field to travel in.
+    // Retake and the attempt-count line are Story 5.7's, on the page rather than here; a
+    // rationale, a Topic and any money figure are parent-scoped and have no field to travel
+    // in. **Disputing left this list in Story 6.5** — the control is a slot's, exactly as
+    // explaining is, and the case below pins that it is a slot and not state held here.
     for (const forbidden of [
       /rationale/iu,
-      /dispute/iu,
       /retake/iu,
       /\btopic/iu,
       /allowance|tier|costMicros/iu,
+      // The workings of how a mark is reached, in any spelling: a child is shown the mark
+      // and one plain line, never a comparison between what anything decided.
+      /override|aiState|overriddenAt/iu,
     ]) {
       expect(CODE).not.toMatch(forbidden);
     }
+  });
+
+  it('hands disputing to a slot and keeps none of its state', () => {
+    // The dispute control is a sibling of the explanation panel in the row's `grade` slot,
+    // for the same reason: a failed objection must not be able to take the answer key down,
+    // and this file must keep its "two reads and no third" invariant literally true. So
+    // there is no dispute request here, no dispute state and no dispute copy — only the
+    // panel, handed a boolean off the row that already arrived.
+    expect(CODE).toContain('<DisputePanel');
+    expect(CODE).toContain('disputed={row.disputed}');
+    // The refreshed view is handed straight back into the screen's own state: the API
+    // answers the whole run, so the score and the rows always describe one read.
+    expect(CODE).toContain('onDisputed={setResults}');
+    // No request of its own, and no state of its own.
+    expect(CODE).not.toMatch(/parentApi\.disputeGrade/u);
+    expect(CODE).not.toMatch(/useState[^\n]*[Dd]ispute/u);
+  });
+
+  it('states the score as a change only when the server said there was one', () => {
+    // One denominator (FR-37): the change is stated from the server's two figures through
+    // the one function that decides whether there is a change at all, and this file
+    // subtracts nothing and compares nothing.
+    expect(CODE).toContain('scoreChangeOf(score, results.originalScore)');
+    expect(CODE).toContain('data-testid="attempt-results-score-change"');
+    expect(CODE).toContain('{scoreChange !== null &&');
+    expect(CODE).not.toMatch(/originalScore\.correct\s*[-<>]/u);
   });
 
   it('hands explaining to a slot and keeps none of its state', () => {

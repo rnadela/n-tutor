@@ -414,6 +414,24 @@ export interface AnswerKeyRowView {
   state: GradeState;
   /** True when **this read** is what judged it. About this response, nothing else. */
   newlyGraded: boolean;
+  /**
+   * Whether a parent adjusted this mark.
+   *
+   * **A boolean, and the whole of what a child is told about it.** Not which way, not from
+   * what, not when and not by whom: the row reads as the mark it now is, plus one plain
+   * line that a grown-up looked at it (AD-20, AD-26). The `state` above is the *effective*
+   * mark, so a screen never has to work out which of two values counts.
+   */
+  parentAdjusted: boolean;
+  /**
+   * Whether the student has said this mark is wrong.
+   *
+   * The child's own objection and nobody else's — a dispute is raised only by the child
+   * who sat the Attempt, which is why this is a boolean and not an origin. It rides on the
+   * results read rather than having one of its own, so the control's state survives a
+   * reload with no second request.
+   */
+  disputed: boolean;
 }
 
 /**
@@ -431,7 +449,114 @@ export interface AttemptResultsView {
   subjectName: string | null;
   questionCount: number;
   score: AttemptScore;
+  /**
+   * What the Attempt came to **before** any parent adjustment, or null when there is
+   * none.
+   *
+   * **Null is the whole of "nothing was adjusted"** — not an identical fraction beside the
+   * current one. Every screen would otherwise have to compare two figures and decide for
+   * itself whether that counts as a change, which is several surfaces deriving one fact.
+   * Both figures are the server's, computed by one function over the same rows; this
+   * browser subtracts nothing.
+   */
+  originalScore: AttemptScore | null;
   questions: AnswerKeyRowView[];
+}
+
+/**
+ * One row of an Attempt's answer key as the **parent** reads it, exactly as the API
+ * states it.
+ *
+ * The child's row plus the evidence an adjustment is decided on. **A separate type rather
+ * than nullable fields on the shared row**, because the shape is the guarantee: there is
+ * nowhere on `AnswerKeyRowView` for a rationale, the marking's own verdict or an instant
+ * to travel, so no change to a student-scoped read can carry one by accident (AD-20,
+ * AD-26).
+ *
+ * There is still no cost, no tier, no model name and no allowance figure.
+ */
+export interface ParentAnswerKeyRowView extends AnswerKeyRowView {
+  /**
+   * Why the marking judged the answer the way it did, or null.
+   *
+   * Null for a multiple-choice comparison, for an unanswered question and for one nothing
+   * has graded — none of those is a judgement anything explained, so a row with no reason
+   * is not a row whose reason failed to load.
+   */
+  rationale: string | null;
+  /**
+   * What the marking itself recorded, whatever a parent later decided.
+   *
+   * Retained and never overwritten, which is the requirement made visible: `state` is the
+   * effective mark and this is the recorded one. On a row nobody adjusted the two are
+   * equal, deliberately — a screen that inferred the recorded mark from the absence of an
+   * adjustment would be re-deriving a stored fact.
+   */
+  aiState: GradeState;
+  /** When a parent set the mark, or null for a question none has. */
+  overriddenAt: string | null;
+  /** When the student said it is wrong, or null. The first instant, which a repeat cannot move. */
+  disputedAt: string | null;
+}
+
+/**
+ * One handed-in Attempt's whole results as the parent reads them, exactly as the API
+ * states it.
+ *
+ * The child's view with the row type replaced. `originalScore` means here exactly what it
+ * means there, because it is the same function over the same rows: one denominator, two
+ * calls, every surface.
+ */
+export interface ParentAttemptResultsView extends Omit<AttemptResultsView, 'questions'> {
+  /**
+   * Which student sat this run.
+   *
+   * **On the parent's view and not the child's**, where it would be the response telling a
+   * child their own id back. It is here because the retained-work slot is keyed per Student
+   * Profile server-side: a parent's picked-but-unsaved mark has to be saved under the child
+   * whose run it is, and a screen that guessed would restore one child's decision onto
+   * another's paper.
+   */
+  studentProfileId: string;
+  questions: ParentAnswerKeyRowView[];
+}
+
+/**
+ * One mark a student says is wrong, as the parent's per-child list of them reads it.
+ *
+ * **It outlives the decision**: an entry awaiting a decision and a resolved one are both
+ * listed, each marked with what it is. A list that dropped resolved entries would make a
+ * parent's own adjustment look like the objection never happened.
+ *
+ * **Resolution is derived and is not a field of its own.** `overriddenAt` being set *is*
+ * the resolution, and `recordedState` beside `effectiveState` is what it came to. There is
+ * no disposition here and no "dismissed": a parent who reads one and agrees with the mark
+ * leaves it awaiting, and a value for that would be an outcome nobody recorded.
+ *
+ * Every context field is nullable *together*, for a run or question the API could no
+ * longer name: the entry keeps its place and loses its labels.
+ *
+ * No prose here — a reason is read next to the question it is about — and no score, cost,
+ * tier, model name or Mastery figure (AD-20, AD-26).
+ */
+export interface GradeDisputeView {
+  attemptId: string;
+  questionId: string;
+  /** When the student said it. */
+  disputedAt: string;
+  /** What the marking recorded, which is what the student objected to. */
+  recordedState: GradeState;
+  /** What the mark counts as now: the parent's decision where there is one. */
+  effectiveState: GradeState;
+  /** When a parent set the mark, or null while it awaits a decision. */
+  overriddenAt: string | null;
+  practiceTestId: string | null;
+  /** Which run of that practice test it was, or null for a context that no longer resolves. */
+  runOrdinal: number | null;
+  /** The number the student was shown, or null for a context that no longer resolves. */
+  questionOrdinal: number | null;
+  subjectName: string | null;
+  submittedAt: string | null;
 }
 
 /**
@@ -1287,6 +1412,39 @@ export const parentApi = {
       studentCopy.results.explain.flagFailed,
     ),
 
+  /**
+   * Records that the student thinks one question is marked wrong.
+   *
+   * **It changes no mark and no score.** Only a grown-up can do that, which is why this
+   * writes one record and nothing else — and it is why the answer is the whole results
+   * view with the objection on the row it is about, so the screen redraws from one
+   * response rather than from a merge.
+   *
+   * **Idempotent, and there is no undo.** A second press is the same objection and answers
+   * the same state the first one did; nothing here un-says it, because a record is not a
+   * toggle. So a repeat is a 200 and never a 409.
+   *
+   * **A `POST` that costs nothing.** No provider is asked anything, no allowance moves and
+   * nothing is generated: the method says this changes something, not that it is billed.
+   *
+   * The response **cannot carry** a reason for the mark, the marking's own verdict, an
+   * instant a grown-up decided at, or a cost, tier, allowance or model figure: none is a
+   * student-scoped fact (AD-20, AD-26) and `AttemptResultsView` has no field one could
+   * travel in.
+   *
+   * No bearer, exactly as the other student calls: the binding cookie names the child
+   * server-side, and the two ids in the path name only *which* question. A sibling's
+   * Attempt, another account's, one still open, one that never existed and a question that
+   * is not on that paper all answer the same 404 sentence, so there is nothing this browser
+   * could learn by asking.
+   */
+  disputeGrade: (attemptId: string, questionId: string) =>
+    call<AttemptResultsView>(
+      `/student/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/grade-dispute`,
+      { method: 'POST' },
+      studentCopy.results.dispute.failed,
+    ),
+
   // --- Uncommitted parent state ------------------------------------------
   //
   // Server-side only, and behind the elevation bearer like every other
@@ -1665,20 +1823,54 @@ export const parentApi = {
     ),
 
   /**
-   * One handed-in run's whole answer key and its score, read by account.
+   * One handed-in run's whole answer key and its score, read by account — plus the
+   * evidence a mark is adjusted on.
    *
-   * The same `AttemptResultsView` the child's own results read answers with, reused
-   * exactly as it stands: a parent-shaped copy of it would be a second place a
-   * rationale could one day be added to (AD-20, AD-26).
+   * **A superset shape rather than the child's own, and that is deliberate.** This call
+   * once reused `AttemptResultsView` exactly as it stood, on the grounds that a
+   * parent-shaped copy would be a second place a reason could be added to. The requirement
+   * that a parent read *why* a question was marked as it was made the reverse true: one
+   * type serving both audiences would put the reason one nullable field away from a child's
+   * screen, where two types make the student's response incapable of carrying it (AD-20,
+   * AD-26).
    *
-   * A 404 covers an id that never existed, one belonging to another account and one
-   * whose run is still open — the API states one sentence for all three.
+   * A 404 covers an id that never existed, one belonging to another account and one whose
+   * run is still open — the API states one sentence for all three.
    */
   parentAttemptResults: (token: string, attemptId: string) =>
-    call<AttemptResultsView>(
+    call<ParentAttemptResultsView>(
       `/parent/attempts/${encodeURIComponent(attemptId)}/results`,
       { headers: elevated(token) },
       parentCopy.attempts.detailFailed,
+    ),
+
+  /**
+   * Records what the parent says one question's mark is, and answers with the whole run
+   * recalculated.
+   *
+   * **The mark and the score arrive together**, because the API commits them together: a
+   * row that changed beside a header that did not is a screen contradicting itself. It
+   * answers the whole view rather than one row for that reason — a row-shaped answer would
+   * leave this browser to work out the new fraction, which is a second denominator.
+   *
+   * **The recorded mark and its reason are kept.** They are still on the response
+   * afterwards: an adjustment is recorded beside the marking's own verdict and never in
+   * place of it.
+   *
+   * **Two 409s, each with the API's own sentence**: the mark asked for is already the one
+   * that counts, or the question was never judged (unanswered, or not graded yet). Both are
+   * rules the parent is entitled to know about, and the screen renders the server's wording
+   * rather than restating it.
+   *
+   * **It needs no dispute.** A parent who spots a harsh mark themselves may set it, and
+   * where there *is* a dispute this is what resolves it. There is no second call that
+   * settles one the other way, because there is no such outcome.
+   */
+  overrideGrade: (token: string, attemptId: string, questionId: string, state: GradeState) =>
+    call<ParentAttemptResultsView>(
+      `/parent/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/grade-override`,
+      { method: 'POST', headers: elevated(token), body: JSON.stringify({ state }) },
+      parentCopy.attempts.override.failed,
     ),
 
   /**
@@ -1810,6 +2002,26 @@ export const parentApi = {
       `/parent/students/${encodeURIComponent(studentProfileId)}/explanation-flags`,
       { headers: elevated(token) },
       parentCopy.flags.listFailed,
+    ),
+
+  /**
+   * Every mark one student says is wrong, newest first — awaiting a decision and resolved
+   * alike.
+   *
+   * **A read that changes nothing**: no mark is set from here, because setting one without
+   * having read the reason is the thing this feature must not make easy. Every entry's way
+   * on is a link into the run it belongs to.
+   *
+   * An empty list is the ordinary answer for a student who has objected to nothing — and it
+   * is also the answer for a profile id belonging to another account, which is why this app
+   * does not try to tell the two apart. There is nothing here to enumerate and no refusal to
+   * read.
+   */
+  gradeDisputes: (token: string, studentProfileId: string) =>
+    call<GradeDisputeView[]>(
+      `/parent/students/${encodeURIComponent(studentProfileId)}/grade-disputes`,
+      { headers: elevated(token) },
+      parentCopy.disputes.listFailed,
     ),
 
   setPracticeTestTimer: (token: string, practiceTestId: string, minutes: number | null) =>

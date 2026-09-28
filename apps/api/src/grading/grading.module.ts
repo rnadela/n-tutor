@@ -8,6 +8,7 @@ import { StudentModeGuard } from '../identity/student-mode.guard.js';
 import { PracticeTestModule } from '../practicetest/practice-test.module.js';
 import { GradingService } from './grading.service.js';
 import { ParentAttemptController } from './parent-attempt.controller.js';
+import { ParentGradeDisputesController } from './parent-grade-disputes.controller.js';
 import { StudentAttemptController } from './student-attempt.controller.js';
 
 /**
@@ -45,7 +46,11 @@ import { StudentAttemptController } from './student-attempt.controller.js';
     PracticeTestModule,
     AiModule,
   ],
-  controllers: [StudentAttemptController, ParentAttemptController],
+  // `ParentGradeDisputesController` is its own controller because it is its own
+  // subject: it is rooted at a child and spans every run they have sat, where the other
+  // parent controller is rooted at one Attempt. Listing it here is the whole of its
+  // wiring — it needs no provider of its own.
+  controllers: [StudentAttemptController, ParentAttemptController, ParentGradeDisputesController],
   providers: [GradingService, StudentModeGuard, ParentElevationGuard],
   exports: [GradingService],
 })

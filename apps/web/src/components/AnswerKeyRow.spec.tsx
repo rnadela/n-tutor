@@ -28,6 +28,7 @@ const STUDENT_LABELS: AnswerKeyRowLabels = {
   answerUnavailable: studentCopy.results.answerUnavailable,
   rowUngraded: studentCopy.results.rowUngraded,
   rowNewlyGraded: studentCopy.results.rowNewlyGraded,
+  rowParentAdjusted: studentCopy.results.dispute.reviewed,
 };
 
 /** The parent's words for the same row, in the third person about the child. */
@@ -40,6 +41,7 @@ const PARENT_LABELS: AnswerKeyRowLabels = {
   answerUnavailable: parentCopy.attempts.answerUnavailable,
   rowUngraded: parentCopy.attempts.rowUngraded,
   rowNewlyGraded: parentCopy.attempts.rowNewlyGraded,
+  rowParentAdjusted: parentCopy.attempts.override.rowParentAdjusted,
 };
 
 const STATES: GradeState[] = ['Correct', 'Incorrect', 'Unanswered', 'Ungraded'];
@@ -54,16 +56,18 @@ function row(overrides: Partial<AnswerKeyRowView> = {}): AnswerKeyRowView {
     correctAnswer: [{ kind: 'text', value: 'Option A for 1.1' }],
     state: 'Correct',
     newlyGraded: false,
+    parentAdjusted: false,
+    disputed: false,
     ...overrides,
   };
 }
 
-function render(view: AnswerKeyRowView): string {
+function render(view: AnswerKeyRowView, labels: AnswerKeyRowLabels = STUDENT_LABELS): string {
   return renderToStaticMarkup(
     createElement(
       ThemeProvider,
       { theme: studentTheme },
-      createElement(AnswerKeyRow, { row: view, labels: STUDENT_LABELS }),
+      createElement(AnswerKeyRow, { row: view, labels }),
     ),
   );
 }
@@ -191,17 +195,91 @@ describe('what one answer-key row shows a child', () => {
       expect(code).not.toMatch(forbidden);
     }
     // A row a later edit widened would have to add the field to the API type first.
+    //
+    // **The two Story 6.5 fields are booleans and nothing more.** `parentAdjusted` and
+    // `disputed` say *that* a mark was set and *that* the child objected; the recorded mark,
+    // the reason, and the instants either happened at live on the parent's own superset row,
+    // which this component never receives. That is what keeps the workings off a child's
+    // screen as a property of the type rather than a habit of a mapper.
     const view: AnswerKeyRowView = row();
     expect(Object.keys(view).sort()).toEqual([
       'correctAnswer',
+      'disputed',
       'format',
       'newlyGraded',
       'ordinal',
+      'parentAdjusted',
       'prompt',
       'questionId',
       'state',
       'studentAnswer',
     ]);
+  });
+
+  it('states a parent-set mark in words on the row, and never as a sixth colour', () => {
+    // The state's five carriers describe the *mark*; who settled it is a different fact and
+    // it is a sentence. A marker token or a palette entry for "adjusted" would make it look
+    // like a fifth state and would be unreadable to anyone the row is read aloud to.
+    const adjusted = render(row({ parentAdjusted: true }), STUDENT_LABELS);
+    expect(adjusted).toContain('data-testid="answer-key-row-parent-adjusted"');
+    expect(adjusted).toContain(STUDENT_LABELS.rowParentAdjusted);
+    expect(render(row(), STUDENT_LABELS)).not.toContain(
+      'data-testid="answer-key-row-parent-adjusted"',
+    );
+
+    // Two persons, and neither inherits the other's: the child reads that a grown-up looked
+    // at it, the parent reads that they set it.
+    expect(render(row({ parentAdjusted: true }), PARENT_LABELS)).toContain(
+      PARENT_LABELS.rowParentAdjusted,
+    );
+    expect(STUDENT_LABELS.rowParentAdjusted).not.toBe(PARENT_LABELS.rowParentAdjusted);
+
+    // The state's own carriers are untouched by the adjustment: the row's `data-state` and
+    // `data-rule` are whatever the effective mark is, not a sixth value.
+    for (const state of STATES) {
+      const markup = render(row({ state, parentAdjusted: true }), STUDENT_LABELS);
+      expect(markup).toContain(`data-state="${state}"`);
+      expect(markup).toContain(`data-rule="${gradeStateMarker[state].rule}"`);
+    }
+  });
+
+  it('draws nothing of its own about disputing', () => {
+    // `disputed` is on the prop because the *screen* needs it for the slot it passes in;
+    // this component has no control, no sentence and no notion of an objection. A row that
+    // drew one would be a hookless component that had grown a press.
+    // `<button>` and not `/button/i`: the theme's own CSS variables are emitted into this
+    // markup and several are named after MUI's Button, so a case-insensitive word match would
+    // pass or fail on the palette rather than on the row.
+    const markup = render(row({ disputed: true }), STUDENT_LABELS);
+    expect(markup).not.toContain('<button');
+    const source = readFileSync(path.resolve(import.meta.dirname, 'AnswerKeyRow.tsx'), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
+    expect(code).not.toMatch(/dispute/iu);
+    expect(code).not.toMatch(/override/iu);
+  });
+
+  it('renders the grade slot inside the row and ahead of the explain slot', () => {
+    // A mark is what the row is about and an explanation is a thing asked for afterwards, so
+    // the order is fixed here rather than at each surface: two screens putting different
+    // things in each would otherwise interleave them differently.
+    const markup = renderToStaticMarkup(
+      createElement(
+        ThemeProvider,
+        { theme: studentTheme },
+        createElement(AnswerKeyRow, {
+          row: row(),
+          labels: STUDENT_LABELS,
+          grade: createElement('p', { 'data-testid': 'grade-probe' }, 'graded'),
+          explain: createElement('p', { 'data-testid': 'explain-probe' }, 'explained'),
+        }),
+      ),
+    );
+    expect(markup.indexOf('grade-probe')).toBeGreaterThan(
+      markup.indexOf('data-testid="answer-key-correct-label"'),
+    );
+    expect(markup.indexOf('grade-probe')).toBeLessThan(markup.indexOf('explain-probe'));
+    // Still inside the row: the `li` has not closed yet.
+    expect(markup.slice(markup.indexOf('grade-probe'))).toContain('</li>');
   });
 
   it('renders whatever the screen put in the explain slot, last in its own column', () => {

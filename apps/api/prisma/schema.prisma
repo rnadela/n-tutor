@@ -969,6 +969,9 @@ model PracticeTestQuestion {
   topics  PracticeTestQuestionTopic[]
   answers Answer[]
   grades  QuestionGrade[]
+  /// `grading`'s dispute rows, back-related for the reason `grades` is. It is a
+  /// relation and not a licence: nothing in `practicetest` reads or writes one.
+  gradeDisputes GradeDispute[]
   /// `explanation`'s rows, back-related here because Prisma requires both sides
   /// of a relation to be named. It is a relation and not a licence: nothing in
   /// `practicetest` reads or writes an Explanation (AD-17).
@@ -1081,6 +1084,9 @@ model Attempt {
   /// relation to be named. It is a relation and not a licence: nothing in
   /// `practicetest` reads or writes a grade (AD-6, AD-17).
   grades  QuestionGrade[]
+  /// `grading`'s dispute rows, back-related for the reason `grades` is. Nothing in
+  /// `practicetest` reads or writes one (AD-6, AD-17).
+  gradeDisputes GradeDispute[]
   /// `explanation`'s rows, back-related for the reason `grades` is. Cascade from
   /// here: an Explanation is a reading of this run and has no existence apart
   /// from it. The *charge* it carries is already spent and is never refunded.
@@ -1209,6 +1215,49 @@ model QuestionGrade {
   /// those is a judgement a provider explained. `@db.Text` for the reason
   /// `Answer.value` is: it is prose, not a label.
   rationale  String?    @db.Text
+  /// What a **parent** decided this Question is worth, or null for a Question no
+  /// parent has adjusted.
+  ///
+  /// **A column beside the verdict and never an edit of it** (FR-25, Story 6.5).
+  /// `state` and `rationale` above keep the provider's own verdict and the sentence
+  /// it gave for it, untouched and still readable by the parent, because the
+  /// original grade *and* its reason are exactly what an override is decided
+  /// against. Overwriting `state` would destroy the evidence, and a separate
+  /// `grade_override` table would put a second row in the way of every score read
+  /// for the sake of one nullable pair.
+  ///
+  /// **Effective state is `overrideState ?? state`, resolved in one place** —
+  /// `grading-override.ts`'s `effectiveStateOf` — so no surface computes its own
+  /// answer to "what counts". The Attempt's score is `scoreOf` over effective
+  /// states and the prior figure is `scoreOf` over stored ones: two calls to one
+  /// function, never a stored score column.
+  ///
+  /// It only ever holds `Correct` or `Incorrect`, and only over a stored `state`
+  /// that is one of those two: `Unanswered` and `Ungraded` are refused by
+  /// `overrideDecision` before any write, because neither is a judgement there is
+  /// anything to disagree with yet. That rule is the writer's and not a check
+  /// constraint here, for the reason the four states' own rules are the writer's.
+  ///
+  /// Written by `updateMany` guarded on the pair, inside the same transaction that
+  /// reads the score back (AD-10), and never by a read-then-write: two simultaneous
+  /// presses therefore both answer and the last statement wins, with the flip and
+  /// the figure committing together.
+  ///
+  /// There is deliberately no `overriddenBy` — the account is already reachable
+  /// through the Attempt — and no `overrideReason`: a column with no writer is a
+  /// promise the next reader believes.
+  overrideState GradeState?
+  /// When a parent adjusted it, or null for a Question none has.
+  ///
+  /// Always written in the same statement as `overrideState`: an override with no
+  /// instant beside it would be a decision nobody can date, exactly as
+  /// `ExplanationFlag.dispositionAt` is written with its disposition. Null exactly
+  /// where `overrideState` is null, so no reader has to handle half an override.
+  ///
+  /// Unlike `Explanation.suppressedAt` this one **moves**: an override is a
+  /// statement about a grade rather than an irreversible removal, so a parent who
+  /// flips a Question back records a new instant for the new decision.
+  overriddenAt  DateTime?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
@@ -1222,6 +1271,66 @@ model QuestionGrade {
   /// The read every later story makes: one Attempt's grades, whole.
   @@index([attemptId])
   @@map("question_grade")
+}
+
+/// One recorded objection by a **child** to the grade on one Question of their own
+/// handed-in Attempt.
+///
+/// A dispute is a **record and nothing more**, modelled on `ExplanationFlag` for
+/// exactly its reasons. It changes no grade, no score, no Mastery figure and nothing
+/// the child is served: the remedy FR-25 grants is the parent's override, which is
+/// `QuestionGrade.overrideState` and not a column here.
+///
+/// **There is no un-disputing.** No route deletes a row here, which is why the table
+/// carries no soft-delete column either. A hand that was raised was raised.
+///
+/// **There are deliberately no disposition columns** — no `resolvedAt`, no
+/// `resolution`, no `reason`. This is where it parts company with `ExplanationFlag`,
+/// and on purpose: that epic's text names *exactly two* dispositions, and FR-25 names
+/// none. A dispute is resolved exactly when its Question carries an override, so a
+/// `resolvedAt` here would be a second writer of a fact the override already states,
+/// and the two would drift the first time either was written alone. The consequence is
+/// deliberate and stated: a parent who reads a dispute and agrees with the AI leaves it
+/// listed as awaiting, which is what a record of an unanswered concern should look
+/// like.
+///
+/// `parentAccountId` and `studentProfileId` are denormalized onto the row for the
+/// reason `ExplanationFlag`'s are: the parent's per-child list reads by both without
+/// joining the Attempt, and `parentAccountId` in particular carries **no foreign key**
+/// so a dispute can never be what blocks an account deletion. Both edges that do exist
+/// cascade, because a dispute about a row that is gone is a dispute about nothing.
+model GradeDispute {
+  id               String   @id @default(uuid())
+  attemptId        String
+  questionId       String
+  /// The child who raised it, copied off the Attempt and never taken from a request.
+  studentProfileId String
+  /// Whose account the disputed Attempt belongs to. Denormalized so the parent's
+  /// per-child list is one statement over one index.
+  parentAccountId  String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  attempt  Attempt              @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question PracticeTestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  /// What makes a second press the **same** dispute rather than a second row: the
+  /// upsert that writes it targets this key, so idempotency is the index's promise and
+  /// not a check somebody has to remember to make. It also keeps the first
+  /// `createdAt`, because the instant a child first objected is the fact.
+  ///
+  /// The child is not part of the key, for the reason the origin *is* part of
+  /// `ExplanationFlag`'s: an Attempt belongs to exactly one Student Profile, so the
+  /// pair already names one child and adding the profile would be a third column that
+  /// can never vary.
+  @@unique([attemptId, questionId])
+  /// The parent's per-child list, in its own read's shape: this child's disputes,
+  /// newest first. Equality then range, exactly as `explanation_flag`'s is.
+  @@index([studentProfileId, createdAt])
+  /// The same shape by account, for a reader that has an account and no child in
+  /// hand — and so a dispute is never found by scanning the table.
+  @@index([parentAccountId, createdAt])
+  @@map("grade_dispute")
 }
 
 /// One Explanation of one Question, written for the child who sat that Attempt.

@@ -13,11 +13,13 @@ import { Screen } from '@/components/Screen';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import { explanationsByQuestion } from '@/lib/explanation-review';
+import { scoreChangeOf } from '@/lib/grade-dispute';
 import {
   parentApi,
   ParentApiError,
-  type AttemptResultsView,
+  type ParentAttemptResultsView,
   type ParentExplanationView,
+  type UncommittedStateView,
 } from '@/lib/parent-api';
 import {
   announcedText,
@@ -27,6 +29,7 @@ import {
   type Announcement,
 } from '@/lib/parent-view';
 import { ExplanationReview } from '../../_components/ExplanationReview';
+import { GradeReview } from '../../_components/GradeReview';
 
 /**
  * The words a parent reads on every answer-key row.
@@ -45,6 +48,15 @@ import { ExplanationReview } from '../../_components/ExplanationReview';
  */
 const NOTHING_EXPLAINED: readonly ParentExplanationView[] = [];
 
+/**
+ * The empty slot list every row is handed until the retained-work read answers.
+ *
+ * Module-level rather than a fresh `[]` per render: it is the initial state and the reset,
+ * and a new identity each time would be a new prop identity on every row of a long paper —
+ * and, worse, would re-run each row's restore effect on every render of this screen.
+ */
+const NOTHING_RETAINED: readonly UncommittedStateView[] = [];
+
 const PARENT_ROW_LABELS: AnswerKeyRowLabels = {
   question: parentCopy.attempts.question,
   format: parentCopy.attempts.format,
@@ -54,6 +66,9 @@ const PARENT_ROW_LABELS: AnswerKeyRowLabels = {
   answerUnavailable: parentCopy.attempts.answerUnavailable,
   rowUngraded: parentCopy.attempts.rowUngraded,
   rowNewlyGraded: parentCopy.attempts.rowNewlyGraded,
+  // The parent's own words for the same fact the child's screen states differently: they
+  // set the mark. A sentence on the row, never a sixth colour on the state's five carriers.
+  rowParentAdjusted: parentCopy.attempts.override.rowParentAdjusted,
 };
 
 /**
@@ -93,7 +108,7 @@ export default function ParentAttemptDetailPage() {
   const { elevation, clearElevation } = useElevation();
   const token = elevation?.token ?? null;
 
-  const [results, setResults] = useState<AttemptResultsView | null>(null);
+  const [results, setResults] = useState<ParentAttemptResultsView | null>(null);
   const [explanations, setExplanations] = useState<ParentExplanationView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +125,21 @@ export default function ParentAttemptDetailPage() {
    * simply has not arrived yet.
    */
   const [proseLoaded, setProseLoaded] = useState(false);
+  /**
+   * Every slot of retained parent work this account holds, read **once for the run**.
+   *
+   * It lives here and not in `GradeReview` because that region is mounted per Question: a
+   * fifteen-Question run would otherwise fire fifteen identical account-scoped reads on
+   * mount, all answering the same list, for one row's pick each. One read per Attempt, and
+   * every row filters the same array by its own per-Question scope.
+   *
+   * **It is a courtesy and never a gate.** Empty while it is in flight and empty if it
+   * fails: an empty list means "nothing picked", which is the ordinary case, so nothing on
+   * this screen waits on it, nothing reports it and no row is held back by it. Losing a
+   * pick is a smaller harm than a review screen that will not render.
+   */
+  const [retainedSlots, setRetainedSlots] =
+    useState<readonly UncommittedStateView[]>(NOTHING_RETAINED);
   const [announcement, setAnnouncement] = useState<Announcement>(NOTHING_ANNOUNCED);
   /** Every announcement is a change, repeats included. */
   const announce = useCallback(
@@ -148,11 +178,15 @@ export default function ParentAttemptDetailPage() {
     // here means the worst this screen can show is nothing yet.
     setResults(null);
     setExplanations([]);
+    // A previous run's retained picks are not this run's: the slots are scoped by Attempt
+    // *and* Question, so a stale list could match nothing — but it is dropped for the
+    // reason the two above are, which is that the worst this screen shows is nothing yet.
+    setRetainedSlots(NOTHING_RETAINED);
     // A prior run's flag outcome does not describe this run's Questions.
     setAnnouncement(NOTHING_ANNOUNCED);
 
     parentApi.parentAttemptResults(token, attemptId).then(
-      applyIfCurrent(current.current, issued, (view: AttemptResultsView) => {
+      applyIfCurrent(current.current, issued, (view: ParentAttemptResultsView) => {
         setResults(view);
         setLoading(false);
       }),
@@ -194,6 +228,36 @@ export default function ParentAttemptDetailPage() {
       }),
     );
   }, [token, attemptId, attempt, leave, router]);
+
+  /**
+   * Every retained pick this account holds, read once the run has named its child.
+   *
+   * **Its own effect, and it depends on the results read having landed**, because the slots
+   * are keyed per Student Profile server-side and the profile is resolved from the Attempt
+   * row rather than from the URL — a screen that guessed would read one child's retained
+   * work while showing another's paper.
+   *
+   * **Every failure is swallowed on purpose**, and it is the only read on this screen that
+   * swallows one — `endsParentView` included, which the two reads above both act on. A
+   * retained pick is a convenience under a decision the parent has not made yet: nothing
+   * here is a fact they need, nothing here is a fact this screen can act on, and an empty
+   * list is exactly what "nothing picked" looks like. The two reads that *are* the screen
+   * still end Parent View when the guard refuses them.
+   */
+  const studentProfileId = results?.studentProfileId ?? null;
+  useEffect(() => {
+    if (token === null || studentProfileId === null) return;
+    let live = true;
+    parentApi.uncommittedState(token, studentProfileId).then(
+      (held) => {
+        if (live) setRetainedSlots(held);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [token, studentProfileId, attempt]);
 
   /**
    * This Attempt's Explanations, grouped by the Question each is about.
@@ -254,6 +318,15 @@ export default function ParentAttemptDetailPage() {
     ]);
   }, []);
 
+  /**
+   * The two figures a changed score is stated as, or null when no mark has been set.
+   *
+   * Derived by the one pure function that decides it, so the rule — null when the server sent
+   * no prior figure — is asserted without a DOM rather than living inside this render. Null
+   * while `results` has not arrived, because there is nothing yet to state.
+   */
+  const scoreChange = results === null ? null : scoreChangeOf(results.score, results.originalScore);
+
   return (
     <Screen>
       <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
@@ -298,9 +371,22 @@ export default function ParentAttemptDetailPage() {
               {results.subjectName ?? parentCopy.attempts.unknownSubject}
             </Typography>
             {/* The server's two figures, over exactly the rows below. The browser
-                counts nothing (FR-37). */}
+                counts nothing (FR-37).
+
+                Stated as a **change** once a mark has been set — prior, then adjusted, with
+                "adjusted by parent" saying why — rather than one figure replacing another:
+                a score that silently moved between two visits is a parent doubting what they
+                read the first time. Both counts and the one denominator are the server's,
+                and `scoreChangeOf` is the single place that decides whether there is a change
+                to state at all. */}
             <Typography component="p" data-testid="parent-attempt-score">
-              {parentCopy.attempts.score(results.score.correct, results.score.denominator)}
+              {scoreChange === null
+                ? parentCopy.attempts.score(results.score.correct, results.score.denominator)
+                : parentCopy.attempts.override.scoreChanged(
+                    scoreChange.before,
+                    scoreChange.after,
+                    scoreChange.denominator,
+                  )}
             </Typography>
             {results.score.excludedUngraded > 0 && (
               <Typography component="p" data-testid="parent-attempt-excluded">
@@ -346,6 +432,33 @@ export default function ParentAttemptDetailPage() {
                   row={row}
                   // The parent's own words, about their child and never to them.
                   labels={PARENT_ROW_LABELS}
+                  // The mark, its evidence and the one remedy — in the row's own `grade`
+                  // slot, beneath the Question it is about and above anything that was
+                  // explained about it. The row stays hookless and gains no notion of
+                  // adjusting; every press, state and sentence lives in the region itself.
+                  //
+                  // **Unlike `explain`, this needs no read to have settled.** Everything it
+                  // draws arrived on the answer key: the recorded mark, the reason, the
+                  // dispute and the adjustment are all fields on this row. So there is no
+                  // window in which it could state something untrue about the child, and no
+                  // second failure for the screen to report.
+                  grade={
+                    token === null ? null : (
+                      <GradeReview
+                        attemptId={results.attemptId}
+                        row={row}
+                        studentProfileId={results.studentProfileId}
+                        // The screen's one read, filtered per row by its own scope. Handed
+                        // down rather than made per row: fifteen Questions would otherwise
+                        // be fifteen identical account-scoped reads on mount.
+                        retainedSlots={retainedSlots}
+                        token={token}
+                        announce={announce}
+                        onAdjusted={setResults}
+                        onElevationLost={leave}
+                      />
+                    )
+                  }
                   // Beneath the Question it is about (UX-DR16), in the row's own
                   // slot: the row stays hookless and gains no notion of explaining,
                   // and every press, state and sentence lives in the region itself.

@@ -1001,9 +1001,9 @@ describe('Explanation suppression and free regeneration: removed once, replaced 
 
     const response = await flagList(account.token, account.studentProfileId).expect(200);
     expect(response.body).toHaveLength(2);
-    expect(response.body.map((entry: { generation: number }) => entry.generation).sort()).toEqual(
-      [1, 2],
-    );
+    expect(response.body.map((entry: { generation: number }) => entry.generation).sort()).toEqual([
+      1, 2,
+    ]);
     for (const entry of response.body) {
       expect(entry.questionId).toBe(account.questionIds[0]);
     }

@@ -580,6 +580,104 @@ export const studentCopy = {
        */
       replacementNote: 'This is a new explanation of this question.',
     },
+
+    /**
+     * Everything the dispute control says, and the only place any of it is written.
+     *
+     * The same four rules hold this group as hold `explain`, and three more besides.
+     *
+     * **Nothing here is about a mechanism.** No "override", no "AI", no "the marking
+     * model", no "we", no rationale and no comparison between what a machine said and
+     * what a grown-up decided. A child is never shown the workings of how their paper was
+     * marked (AD-20, AD-26), and the word for what happens is "a grown-up will look at
+     * it".
+     *
+     * **Nothing here promises an outcome.** A grade may change and may not — a parent who
+     * reads the reason and agrees with it changes nothing, and that is a legitimate
+     * ending. A child told their grade would be fixed would be waiting for something that
+     * may never come, so what is promised is exactly what is true: somebody will look.
+     *
+     * **Nothing here blames the child, the marking, or the asking.** Saying a grade looks
+     * wrong is a good thing to do, said plainly and without praise: "well done" for
+     * pressing a button would teach a child to press it.
+     */
+    dispute: {
+      /**
+       * The control that says the grade is wrong.
+       *
+       * The child's own framing — this is not right — rather than the product's word for
+       * it, exactly as `explain.control` is "Why is that the answer?" and not
+       * "Explanation". It says nothing about who reads it, because the note beneath it
+       * does, once.
+       */
+      control: 'I think this is marked wrong',
+      /**
+       * What pressing it does, said **before** it is pressed and kept beside the reported
+       * state afterwards.
+       *
+       * Two facts and no third: a grown-up will look at it, and nothing on this screen
+       * changes yet. The second half exists because a child who pressed a button and
+       * watched the grade stay put would otherwise think the press did not work — and the
+       * grade staying put is deliberate, because only a grown-up can change it.
+       */
+      note: 'A grown-up will look at this question. Nothing changes here until they do.',
+      /**
+       * Once raised. The state, named rather than the act that produced it.
+       *
+       * **Undated, and there is no dated variant.** The instant is not on the child's
+       * results view at all — a date a grown-up decided nothing about yet is a date that
+       * reads as a deadline — so there is no figure here to state and no "Invalid Date" to
+       * guard against.
+       */
+      reported: 'You said this looks wrong.',
+      /**
+       * It could not be sent. One sentence for every failure class, and it leaves the
+       * asking available: the control is still there to press.
+       */
+      failed: 'That could not be sent just now.',
+      /**
+       * The press happened with no connection, so nothing was sent.
+       *
+       * Distinct from `failed` for the reason `explain.offline` is: "there is no
+       * connection" is a thing a child can act on.
+       */
+      offline: 'You are not connected right now, so this could not be sent.',
+      /**
+       * Said to the live region when the objection is recorded, and it is **the same
+       * sentence the screen displays** beside the row.
+       *
+       * The ordinal is handed in, because two rows on one screen are two different facts
+       * and an announcement that did not say which question it was about would be
+       * unusable to anyone reading the page by ear.
+       */
+      announcement: (ordinal: number) =>
+        `A grown-up will look at question ${ordinal}. Nothing changes here until they do.`,
+      /**
+       * Said on a row a grown-up has adjusted, and the whole of what the child is told
+       * about it.
+       *
+       * One plain line. It does not say which way the grade moved, what it was before,
+       * who decided, when, or that anything disagreed with anything — the grade on the row
+       * *is* the grade now, and the workings are not a child's to read. "Looked at" rather
+       * than "changed", because this line is true whichever way the adjustment went.
+       */
+      reviewed: 'A grown-up looked at this question and set the mark.',
+      /**
+       * The score stated as a change, once a grown-up has adjusted something.
+       *
+       * Every figure is the server's — the prior count, the current one and the one
+       * denominator both are over — and this module divides nothing, subtracts nothing
+       * and computes no percentage. It states the two and says a grown-up is why, which
+       * is the one fact that makes a changed figure legible instead of alarming.
+       *
+       * **One denominator, said once.** An adjustment moves a question between right and
+       * wrong and never into or out of the count, so the two fractions are over the same
+       * total — and repeating it would invite a reader to look for a difference that
+       * cannot be there.
+       */
+      scoreChanged: (before: number, after: number, denominator: number) =>
+        `${before} out of ${denominator} became ${after} out of ${denominator}, after a grown-up looked at it.`,
+    },
   },
   /**
    * What a row on Student Home says about a practice test the child has finished.

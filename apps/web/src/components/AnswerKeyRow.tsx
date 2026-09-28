@@ -52,6 +52,19 @@ export interface AnswerKeyRowLabels {
   rowUngraded: string;
   /** On a row this read is what judged. */
   rowNewlyGraded: string;
+  /**
+   * On a row a parent set the mark of.
+   *
+   * **A sentence, never a sixth colour.** `GradeStateMarker` and
+   * `theme/grade-state-palette.ts` already carry state five ways, and a parent's adjustment
+   * is not a sixth state: the row's state *is* the adjusted mark, and what this adds is who
+   * settled it. A new marker token would make "adjusted" look like a state of its own, and
+   * a colour alone would be unreadable to anyone the row is read aloud to.
+   *
+   * Two persons, as every other label here: the child reads that a grown-up looked at it,
+   * the parent reads that they set it.
+   */
+  rowParentAdjusted: string;
 }
 
 /**
@@ -119,11 +132,26 @@ function ruleBackground(rule: GradeStateMarkerToken['rule'], color: string): str
 export function AnswerKeyRow({
   row,
   labels,
+  grade,
   explain,
 }: {
   row: AnswerKeyRowView;
   /** Every word this row says. Required, so neither surface can inherit the other's. */
   labels: AnswerKeyRowLabels;
+  /**
+   * Whatever the screen puts about the *mark* — a dispute control on the child's screen,
+   * the reason and the adjustment on the parent's.
+   *
+   * A slot and not a prop with a meaning, exactly as `explain` is: this component keeps
+   * knowing nothing about disputing or adjusting, keeps having no hooks, and stays
+   * assertable as a markup string. It does not know what is in here and cannot act on it.
+   *
+   * Rendered **before** `explain`, because a mark is what the row is about and an
+   * explanation is a thing asked for afterwards — and because the two surfaces put
+   * different things in each, so a fixed order here is the one thing that keeps them from
+   * interleaving differently.
+   */
+  grade?: ReactNode;
   explain?: ReactNode;
 }) {
   const marker = gradeStateMarker[row.state];
@@ -268,6 +296,22 @@ export function AnswerKeyRow({
             {labels.rowNewlyGraded}
           </Typography>
         )}
+        {/* A parent set this mark. In words on the row it is about, so a row read on its
+            own still says it — and never as a colour, because the state's five carriers
+            are about the mark itself and this is about who settled it. */}
+        {row.parentAdjusted && (
+          <Typography
+            component="p"
+            sx={{ ...typeRoles.caption }}
+            data-testid="answer-key-row-parent-adjusted"
+          >
+            {labels.rowParentAdjusted}
+          </Typography>
+        )}
+        {/* Whatever the screen put about the mark: the dispute control on the child's
+            screen, the reason and the adjustment on the parent's. Before `explain`,
+            because a mark is what the row is about. */}
+        {grade}
         {/* Whatever the screen put here, last inside this row's own content column
             and never outside it — an explanation belongs directly beneath the
             Question it is about (UX-DR16).

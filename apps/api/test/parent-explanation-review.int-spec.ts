@@ -319,9 +319,20 @@ describe('Parent review of Explanations: read what the child was told, record a 
     expect(response.body.questions.map((row: { ordinal: number }) => row.ordinal)).toEqual([1, 2]);
     expect(response.body.score.correct).toBe(2);
     expect(response.body.score.denominator).toBe(2);
-    // No rationale anywhere on a parent response in this story: that is Story 6.5's,
-    // and the shape it would travel in does not exist.
-    expect(JSON.stringify(response.body)).not.toContain('rationale');
+    // **This route answers the parent's superset shape since Story 6.5**, which carries
+    // the rationale FR-25 makes a parent decide an override on. Story 6.2 asserted its
+    // absence here; that promise was "this route will not widen", and 6.5 replaced it
+    // with the stronger one — the widening lives on `ParentAttemptResultsView` and
+    // cannot reach the child's `AttemptResultsView`, which is asserted where that shape
+    // is composed and over the student routes themselves in `grade-dispute.int-spec.ts`.
+    // What this case still pins is that the rationale field exists on a parent response
+    // rather than being smuggled onto the shared row: the Questions here were graded
+    // deterministically, so every value is null and no prose is on the wire.
+    expect(
+      (response.body.questions as { rationale: string | null }[]).every(
+        (row) => row.rationale === null,
+      ),
+    ).toBe(true);
   });
 
   it('refuses a foreign, unknown or still-open Attempt with the one shared sentence', async () => {

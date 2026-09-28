@@ -627,6 +627,8 @@ function craftedResults(
     subjectName: 'Submit Subject',
     questionCount: rows.length,
     score,
+    // Nothing on a crafted run was adjusted, so there is no prior figure to state.
+    originalScore: null,
     questions: rows.map((row) => ({
       questionId: `00000000-0000-4000-8000-00000000000${row.ordinal}`,
       ordinal: row.ordinal,
@@ -637,6 +639,8 @@ function craftedResults(
       correctAnswer: [{ kind: 'text', value: `Answer ${row.ordinal}` }],
       state: row.state,
       newlyGraded: row.newlyGraded ?? false,
+      parentAdjusted: false,
+      disputed: false,
     })),
   };
 }

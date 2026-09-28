@@ -5,6 +5,27 @@
  * Not one figure or version appears here: the password minimum, the consent
  * versions and the notice text all come from `GET /api/auth/policy`.
  */
+/**
+ * The four words a mark is stated in, in the parent's own wording rather than the enum's.
+ *
+ * **One map, read by both screens that state a mark.** The run's own region and the
+ * dispute list each name a grade, and two separately maintained copies of one four-label
+ * table is two chances for the same mark to be called two things on two screens a parent
+ * moves between in one press. It is declared beside `parentCopy` rather than inside it so
+ * both groups can reference the same object, which is what makes them one source rather
+ * than two that happen to agree today.
+ *
+ * `Unanswered` and `Ungraded` are here even though neither can be *adjusted*: both are
+ * states a question can be in, and a list that could not name one would have a hole in it
+ * exactly where a child objected to a blank.
+ */
+const GRADE_LABELS = {
+  Correct: 'correct',
+  Incorrect: 'not correct',
+  Unanswered: 'unanswered',
+  Ungraded: 'not graded yet',
+} as const;
+
 export const parentCopy = {
   appName: 'n-test-reviewer',
   signUp: {
@@ -130,6 +151,16 @@ export const parentCopy = {
      * reach — and a report they cannot reach is a report that did not surface.
      */
     explanationFlags: 'Explanations a student has reported',
+    /**
+     * The way in to the grades a student says are wrong, and the only way in there is.
+     *
+     * Its own link beside the reported explanations, for the same reason that one exists:
+     * the Attempt-detail row shows an objection only to somebody who already opened that
+     * Attempt, so without this a child raising a hand about a mark would be a record
+     * nobody ever sees — and a dispute a parent cannot reach is a dispute that did not
+     * surface.
+     */
+    gradeDisputes: 'Marks a student says are wrong',
     loading: 'Loading Parent View…',
 
     /**
@@ -1117,6 +1148,124 @@ export const parentCopy = {
      * after it. The label is what tells them apart on screen, and the ordinal is handed in.
      */
     generationLabel: (ordinal: number) => `Explanation ${ordinal}`,
+
+    // --- Adjusting a mark, and the evidence it is adjusted on -------------
+    //
+    // Third person about the child throughout, every figure a parameter, and every
+    // sentence whole here rather than assembled at a call site.
+    //
+    // **The original mark and its reason are never described as gone.** They are retained
+    // and still readable here after an adjustment, which is the whole of FR-25: a parent
+    // who thought adjusting destroyed the reason would stop being able to check their own
+    // decision. So the recorded mark keeps its own label and its own place on screen.
+    //
+    // **Nothing here names a model, a provider, a cost or a tier.** "How this was marked"
+    // is as specific as the reason's heading gets: naming a provider would put a billing
+    // fact on a screen about a child's work, and "the AI" invites a parent to relay it to
+    // their child, which is the one thing the student surface exists to prevent.
+    //
+    // **Nothing here is a dismissal.** There is no control that settles a dispute the
+    // other way, because nothing in the requirement authorizes one — a parent who reads a
+    // dispute and agrees with the mark leaves it listed as awaiting, which is what a
+    // record of an unanswered concern should look like. The copy therefore never offers
+    // one and never implies it exists.
+
+    override: {
+      /** The region's own heading, above the recorded mark and the reason. */
+      heading: 'How this was marked',
+      /** What the marking recorded, which the adjustment does not erase. */
+      recorded: (grade: string) => `Recorded as ${grade}`,
+      /** The words a mark is stated in — the one map, shared with the dispute list. */
+      grade: GRADE_LABELS,
+      /**
+       * The control that shows and hides the reason.
+       *
+       * **Collapsed by default**, and one label for both directions because
+       * `aria-expanded` is what says which way the press goes. The reason is a paragraph
+       * per question, and twenty of them open at once is a screen a parent cannot scan —
+       * so it is there when they go looking and out of the way when they are not.
+       */
+      reasonControl: 'Why it was marked that way',
+      /** Above the reason itself. */
+      reasonHeading: 'The reason given',
+      /**
+       * A question whose mark came with no reason.
+       *
+       * Stated as the fact rather than as a failure: a multiple-choice question is marked
+       * by comparison and a blank is not a judgement, so there was never a reason to
+       * give. A parent reading "not available" would go looking for one.
+       */
+      noReason: 'This question was not marked by judgement, so there is no reason to read.',
+      /** The student said the mark is wrong. The state, not the act. */
+      disputed: (instant: string) => `The student said this is marked wrong on ${instant}.`,
+      /** The same state with no date, for a stored instant that will not parse. */
+      disputedUndated: 'The student said this is marked wrong.',
+      /**
+       * What there is to do about it, said once, above the control.
+       *
+       * It names the choice rather than urging it: a dispute nobody has decided about is
+       * not a problem the parent caused, and a sentence that pressed them would turn
+       * their child raising a hand into a chore. It also says the one thing a parent
+       * would otherwise assume — that leaving it alone is a legitimate answer.
+       */
+      disputeAwaiting:
+        'The student says this mark is wrong. You can change it, or leave it as it is.',
+      /** The control that picks the other mark. Nothing is sent until it is saved. */
+      control: (grade: string) => `Change the mark to ${grade}`,
+      /**
+       * What adjusting does, in words, beside the control.
+       *
+       * Four facts and each is one a parent would otherwise assume the other way: the
+       * recorded mark and its reason are **kept**; the score is recalculated; the student
+       * sees the new mark and one plain line that a grown-up looked at it; and the student
+       * is never shown the reason or told what it said.
+       */
+      note: 'Changing the mark recalculates the score for this practice test. The recorded mark and its reason are kept here for you. The student sees the new mark and one line saying a grown-up looked at it, and never the reason.',
+      /**
+       * A question the marking never judged, said where the control would otherwise be.
+       *
+       * **Stated rather than left blank.** An unanswered question and one nothing has
+       * graded are not judgements there is anything to disagree with, so there is no
+       * control — and a region that simply showed nothing would leave a parent looking
+       * for one, especially on a question their child objected to. It names the reason
+       * and stops: no instruction, because nothing the parent can do changes it.
+       */
+      notJudged: 'This question was not marked right or wrong, so there is no mark to change.',
+      /** The explicit save. A picked mark is not a saved one. */
+      save: 'Save this mark',
+      /**
+       * Puts a picked mark back, without saving anything.
+       *
+       * It exists because a pick is a step and not a decision: a mis-press would otherwise
+       * be escapable only by saving the wrong mark. It says what it undoes — the picking —
+       * rather than "cancel", which a parent could read as abandoning the whole question.
+       */
+      cancel: 'Keep the mark as it is',
+      /** The same control while the request is out. Stated, so the press is never silent. */
+      saving: 'Saving…',
+      /** The picked-but-unsaved mark, restored after Parent View was crossed again. */
+      restored:
+        'You had picked a different mark for this question and had not saved it. It is still picked.',
+      /** Once adjusted. The state, named rather than the act that produced it. */
+      adjusted: (instant: string) => `You set this mark on ${instant}.`,
+      /** The same state with no date, for a stored instant that will not parse. */
+      adjustedUndated: 'You set this mark.',
+      /** The row-level marker, said on the row itself so a row read alone still says it. */
+      rowParentAdjusted: 'A parent set this mark.',
+      /** Announced, and shown, in the same words. */
+      announcement: (ordinal: number, grade: string) =>
+        `Question ${ordinal} is now marked ${grade}, and the score is recalculated.`,
+      failed: 'That mark could not be saved. Try again.',
+      /**
+       * The score stated as a change rather than one figure replacing another.
+       *
+       * Every figure is the server's, over the one denominator both fractions share: an
+       * adjustment moves a question between right and wrong and never into or out of the
+       * count. This module divides nothing and computes no percentage.
+       */
+      scoreChanged: (before: number, after: number, denominator: number) =>
+        `${before} of ${denominator} marked correct, adjusted by parent to ${after} of ${denominator}.`,
+    },
   },
 
   /**
@@ -1181,6 +1330,95 @@ export const parentCopy = {
     dismissedUndated: 'Decided to be fine',
     /** The way through to the explanation itself, which is read beside its question. */
     open: 'Read the explanation',
+  },
+
+  /**
+   * The list of the marks one student says are wrong, and the only place its copy is
+   * written.
+   *
+   * **A list, not a dashboard band.** It states what the student objected to, what the
+   * mark was recorded as, what it is now and whether it has been decided — and nothing
+   * else: no Mastery figure, no score for the run, no analytics of any kind. Third person
+   * about the child throughout.
+   *
+   * **Awaiting is the absence of a decision.** There is no "dismissed" here and no
+   * "declined", because there is no control that settles a dispute the other way: a
+   * parent who reads one and agrees with the mark leaves it awaiting, and a word for that
+   * would be inventing an outcome nobody recorded.
+   *
+   * Every figure is a parameter. Not one instant, ordinal or grade is written into a
+   * sentence here.
+   */
+  disputes: {
+    title: 'Marks a student says are wrong',
+    /**
+     * Why a parent is here, stated as what the screen is for: their child said a mark was
+     * wrong, and this is where those are found.
+     */
+    intro:
+      'A student can say a question was marked wrong. Everything they have said is listed here, newest first, with what the mark is now.',
+    /** The child selector. One child at a time, because a dispute belongs to one. */
+    studentLabel: 'Student',
+    loading: 'Loading…',
+    /** No profile to choose from yet. The way on is the Students screen. */
+    noStudents: 'There is no student profile yet. Add one first.',
+    /** A child who has objected to nothing. A state, not a fault, and the common one. */
+    empty: 'This student has not said a mark is wrong.',
+    listFailed: 'The marks the student says are wrong could not be listed. Try again.',
+    /**
+     * The **profiles** read failed, which is a different claim from the one above.
+     *
+     * Two sentences because two reads can fail independently, and saying the disputes
+     * could not be listed when it was the list of students that could not be read names
+     * the wrong thing — beside a selector that is empty for a reason the sentence does not
+     * give.
+     */
+    profilesFailed: 'The students could not be listed. Try again.',
+    retry: 'Try again',
+    backToParentView: 'Back to Parent View',
+    /** Which run and which question a dispute points at. Both figures the server's. */
+    where: (runOrdinal: number, questionOrdinal: number) =>
+      `Run ${runOrdinal}, question ${questionOrdinal}`,
+    /**
+     * The same entry with no run or question to name, for a context that no longer
+     * resolves.
+     *
+     * The objection was still raised, which is why it is in this list at all: the entry
+     * keeps its place and loses only its label.
+     */
+    whereUnknown: 'The practice test this belongs to is no longer available.',
+    /** A test whose Subject carries no classification or no longer resolves. */
+    unknownSubject: 'No subject',
+    /** When the student said it. */
+    raised: (instant: string) => `Said this on ${instant}`,
+    /**
+     * The same fact with no date, for a stored instant that will not parse.
+     *
+     * A whole clause rather than the bare word the dated form opens with: "Said" alone is
+     * a fragment a reader finishes in their head, and the words "Invalid Date" beside it
+     * would read as a fault in the objection rather than in a string.
+     */
+    raisedUndated: 'Said this',
+    /** What the marking recorded, which an adjustment does not erase. */
+    recorded: (grade: string) => `Recorded as ${grade}`,
+    /** What the mark counts as now. Stated even when it is the same, so nothing is implied. */
+    effective: (grade: string) => `Marked ${grade} now`,
+    /** The words a mark is stated in — the one map, shared with the run's own region. */
+    grade: GRADE_LABELS,
+    /** Nobody has changed it. The absence of a decision, not one somebody recorded. */
+    awaiting: 'Waiting for you to decide',
+    /**
+     * Resolved: a parent set the mark, and when.
+     *
+     * Worded exactly as `attempts.override.adjusted` words the same fact on the run
+     * itself, down to the preposition and the stop: a parent reads this line here and
+     * again one click later, and two spellings of one sentence read as two different
+     * events.
+     */
+    resolved: (instant: string) => `You set this mark on ${instant}.`,
+    resolvedUndated: 'You set this mark.',
+    /** The way through to the question itself, where the reason is read and the mark set. */
+    open: 'Read the question',
   },
   errors: {
     generic: 'Something went wrong. Try again.',

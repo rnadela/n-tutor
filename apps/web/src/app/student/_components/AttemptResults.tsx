@@ -10,9 +10,11 @@ import { AnswerKeyRow, type AnswerKeyRowLabels } from '@/components/AnswerKeyRow
 import { useAnnounce } from '@/components/LiveRegion';
 import { studentCopy } from '@/copy/student';
 import { parentApi, type AttemptResultsView } from '@/lib/parent-api';
+import { scoreChangeOf } from '@/lib/grade-dispute';
 import { newlyGradedCount, summaryOf } from '@/lib/results-summary';
 import { comfortableDensity, typeRoles } from '@/theme/tokens';
 import { deviceIsUnbound } from '../page';
+import { DisputePanel } from './DisputePanel';
 import { ExplainPanel } from './ExplainPanel';
 
 /**
@@ -32,6 +34,10 @@ const STUDENT_ROW_LABELS: AnswerKeyRowLabels = {
   answerUnavailable: studentCopy.results.answerUnavailable,
   rowUngraded: studentCopy.results.rowUngraded,
   rowNewlyGraded: studentCopy.results.rowNewlyGraded,
+  // The one line the child is told about a mark a grown-up set. It is true of a row nobody
+  // disputed too — a parent may set a mark their child never objected to — which is why it
+  // is a row label and not part of the dispute control's own region.
+  rowParentAdjusted: studentCopy.results.dispute.reviewed,
 };
 
 /**
@@ -243,6 +249,14 @@ export function AttemptResults({
   }
 
   const { score } = results;
+  /**
+   * The two figures a changed score is stated as, or null when there is no change.
+   *
+   * Derived by the one pure function that decides it, so the rule — null when the server
+   * sent no prior figure, and null for a pair that cannot be stated over one denominator —
+   * is asserted without a DOM rather than living inside this render.
+   */
+  const scoreChange = scoreChangeOf(score, results.originalScore);
   const summary = summaryOf(results.questions);
   const resolved = newlyGradedCount(results.questions);
   // Suppressed rather than rendered as two zeroes: `0 not correct · 0 unanswered` is
@@ -290,6 +304,29 @@ export function AttemptResults({
             ? studentCopy.results.scorePartial(score.correct, score.denominator)
             : studentCopy.results.score(score.correct, score.denominator)}
       </Typography>
+
+      {/* The same two figures stated as a change, once a grown-up has set a mark — and
+          never instead of the fraction above, which is still what the paper came to. Both
+          counts and the one denominator are the server's; this screen divides nothing and
+          subtracts nothing (FR-37).
+
+          Null when the server sent no prior figure, which is the whole of "nothing was
+          adjusted": comparing two fractions here and deciding for ourselves whether that
+          counts as a change would be a second derivation of a fact the server already
+          stated. */}
+      {scoreChange !== null && (
+        <Typography
+          component="p"
+          sx={{ ...typeRoles.caption }}
+          data-testid="attempt-results-score-change"
+        >
+          {studentCopy.results.dispute.scoreChanged(
+            scoreChange.before,
+            scoreChange.after,
+            scoreChange.denominator,
+          )}
+        </Typography>
+      )}
 
       {meta !== null && (
         <Typography component="p" sx={{ ...typeRoles.caption }} data-testid="attempt-results-meta">
@@ -343,6 +380,28 @@ export function AttemptResults({
             // what lets the parent's Attempt detail render this same layout about
             // their child instead of to them.
             labels={STUDENT_ROW_LABELS}
+            // The row's own `grade` slot, before the explanation: a mark is what the
+            // row is about, and asking why is a thing done afterwards. Handed as a
+            // slot for the same reason `explain` is — neither this component nor the
+            // row gains a notion of disputing, and a failed objection cannot take the
+            // answer key down.
+            //
+            // **No third read.** The reported state is a field on the row that
+            // arrived with the answer key, and a press answers the whole refreshed
+            // view — so nothing here asks per Question and nothing asks per press
+            // beyond the press itself.
+            grade={
+              <DisputePanel
+                attemptId={results.attemptId}
+                questionId={row.questionId}
+                ordinal={row.ordinal}
+                disputed={row.disputed}
+                // The API answers the whole view, so the screen re-renders from one
+                // response rather than patching a row — which is what keeps the score
+                // and the rows describing the same read.
+                onDisputed={setResults}
+              />
+            }
             // Handed to the row as a slot, so neither this component nor the row
             // gains a notion of explaining: all the state, the press, the request
             // and the four outcomes live in `ExplainPanel`, which is what keeps the

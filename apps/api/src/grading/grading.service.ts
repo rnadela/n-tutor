@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { GradeState } from '../generated/prisma/enums.js';
 import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai/ai.service.js';
 import { plainTextOf } from '../extraction/rich-text.js';
@@ -13,6 +13,19 @@ import {
 import { buildGradingPrompt, type GradingPromptQuestion } from './grading-prompt.js';
 import { runsOf, type PracticeTestRunsView } from './grading-history.js';
 import { answerKeyRows, type AttemptResultsView } from './grading-results.js';
+import { effectiveStateOf, overrideDecision } from './grading-override.js';
+import {
+  GRADE_ALREADY_RECORDED,
+  GRADE_NOT_JUDGED,
+  NO_GRADE_TO_DISPUTE,
+  NO_GRADE_TO_OVERRIDE,
+} from './grading-policy.js';
+import {
+  originalScoreOf,
+  type GradeDisputeListEntry,
+  type ParentAnswerKeyRowView,
+  type ParentAttemptResultsView,
+} from './parent-results.js';
 import {
   GradingPayloadInvalid,
   validateGradingPayload,
@@ -44,6 +57,19 @@ export interface GradingScope {
 export interface StudentScope {
   parentAccountId: string;
   studentProfileId: string;
+}
+
+/**
+ * A parent asking about their own account's work, with **no** profile id.
+ *
+ * `GradingScope`'s optional profile admits either party, which is right for a read an
+ * Attempt's owner and its sitter may both make. A write is not that: an override is a
+ * decision only a parent takes, and a type that *could* carry a child's id would be a
+ * type inviting a student route to call it. Absent is not "any child" — it is "any child
+ * of this account", which is exactly what a parent may reach.
+ */
+export interface ParentScope {
+  parentAccountId: string;
 }
 
 /** What one retry pass came to, for the read that triggered it. */
@@ -354,17 +380,60 @@ export class GradingService {
     );
     const stored = await this.prisma.questionGrade.findMany({
       where: { attemptId },
-      // Two columns. A rationale this never selects is a rationale no mapper can
-      // put on a student response.
-      select: { questionId: true, state: true },
+      // Four columns, and **still no rationale**. A rationale this never selects is a
+      // rationale no mapper can put on a student response. `overrideState` is here
+      // because it is what *counts* — the effective grade is the child's own grade —
+      // and `overriddenAt` is deliberately **not**, because the instant a parent
+      // decided is not a fact the child is told (AD-20, AD-26): `parentAdjusted` is a
+      // boolean derived from the column being set, and a date would be somewhere for
+      // the mechanics to travel.
+      select: { questionId: true, state: true, overrideState: true },
     });
-    const states = new Map(stored.map((row) => [row.questionId, row.state]));
+    // The child's own objections, off the pair. One statement, one column: which
+    // Questions, and nothing about what anyone decided — there is no dispute
+    // disposition in this system, and the adjustment itself is `parentAdjusted`.
+    const disputes = await this.prisma.gradeDispute.findMany({
+      where: { attemptId },
+      select: { questionId: true },
+    });
+
+    // Indexed once, by Question. Every composition below reads this rather than
+    // scanning the list again: an Attempt is up to a few dozen Questions, and a `find`
+    // per Question inside a `map` over them is a quadratic pass for a lookup the
+    // response already needs keyed.
+    const byQuestion = new Map(stored.map((row) => [row.questionId, row]));
+
+    // **Effective states, resolved in the one place a grade is "what counts".** A
+    // parent's adjustment is the child's grade: a results screen that showed the
+    // provider's verdict after an override would be telling a child their parent's
+    // decision did not happen.
+    const states = new Map(stored.map((row) => [row.questionId, effectiveStateOf(row)]));
 
     // Not `resolveUngraded`'s score: that one was computed before this read, and a
     // header must describe exactly the rows in the same response. One `scoreOf`,
     // so no surface can reach a second denominator.
-    const rows = answerKeyRows(key, states, resolution.newlyGradedQuestionIds);
+    const rows = answerKeyRows(
+      key,
+      states,
+      resolution.newlyGradedQuestionIds,
+      stored.filter((row) => row.overrideState !== null).map((row) => row.questionId),
+      disputes.map((row) => row.questionId),
+    );
     const score = scoreOf(rows.map((row) => row.state));
+    // **The same function a second time, over the stored verdicts.** The prior figure
+    // is not stored and is not subtracted from anything: `scoreOf` decides both, so
+    // "11 of 15 became 12 of 15" is one denominator rule stated twice rather than two
+    // rules that agree today. Null where nothing was adjusted, which is what keeps a
+    // surface from comparing two identical fractions and guessing whether that counts.
+    const originalScore = originalScoreOf(
+      stored.some((row) => row.overrideState !== null),
+      // `null` for a Question with no grade row at all, and not `'Ungraded'`: `scoreOf`
+      // treats a missing row and a stored `Ungraded` as one fact and excludes both, so
+      // naming the absence honestly keeps the prior figure's denominator identical to
+      // the adjusted one's — which is the whole point of computing them with one
+      // function.
+      scoreOf(key.questions.map((question) => byQuestion.get(question.questionId)?.state ?? null)),
+    );
 
     return {
       attemptId: key.attemptId,
@@ -372,8 +441,433 @@ export class GradingService {
       subjectName: key.subjectName,
       questionCount: key.questionCount,
       score,
+      originalScore,
       questions: rows,
     };
+  }
+
+  /**
+   * Records that the **child** disagrees with the grade on one Question of their own
+   * handed-in Attempt, and answers with that row as they now read it.
+   *
+   * **It writes no grade.** No `state`, no `overrideState`, no score, no Mastery figure
+   * and no provider call: the only row this touches is the dispute's own. FR-25's remedy
+   * is the parent's override, and a child who could move their own grade by objecting to
+   * it would be a child marking their own paper.
+   *
+   * **It surfaces to the parent only**, through `gradeDisputesFor` and the parent's
+   * Attempt detail. The child learns that their own objection exists and nothing else:
+   * no rationale, no override mechanics, no AI-versus-parent wording and no cost, tier,
+   * model or allowance figure (AD-20, AD-26) — and `AnswerKeyRowView` has no field any
+   * of those could travel in.
+   *
+   * **The ownership proof runs first, through `resultsFor`.** A foreign Attempt, a
+   * sibling's, an unknown id and one still open all become the single
+   * `PRACTICE_TEST_NOT_FOUND` sentence before a dispute row is read (AD-18) — and, in
+   * passing, the response the child gets back is the whole results view with their
+   * objection on it, so the screen redraws from one answer rather than from a merge.
+   * Reading the grade row by its two ids before proving the binding would answer a
+   * stranger's id with a 404 for one reason and a row for another, which is the
+   * difference an enumeration attack reads.
+   *
+   * **A Question with no grade row, and one not on this Practice Test, answer the same
+   * 404.** There is no judgement there to object to, and spelling that apart from a
+   * foreign Attempt would let the outside tell "nothing graded" from "not yours".
+   *
+   * **Idempotent per pair, by the index and not by a check** — the same upsert-plus-P2002
+   * shape `flagExplanationAsStudent` makes, for the same reasons: a repeat press is the
+   * same objection and keeps the first `createdAt`, and two first presses landing
+   * together leave one row with the loser answering the winner's. There is **no
+   * un-disputing** and no route that deletes one.
+   */
+  async disputeGrade(
+    scope: StudentScope,
+    attemptId: string,
+    questionId: string,
+  ): Promise<AttemptResultsView> {
+    // **One read, and it is the proof, the re-ask and the response.** It refuses a
+    // foreign, sibling, unknown or still-open Attempt before a dispute row is touched,
+    // it runs FR-22's re-ask — which is what makes a dispute raised on a row that was
+    // `Ungraded` a moment ago legible — and it is what this method answers with.
+    //
+    // A second pass afterwards would be a second ownership proof, a second
+    // `resolveUngraded` and, on a paper with anything outstanding, a **second provider
+    // call** — on a route a child may press once per Question. The one field below is
+    // edited instead, for the reason stated there.
+    const read = await this.resultsFor(scope, attemptId);
+    // A Question of another Practice Test, and one that never existed, are both absent
+    // from the answer key — which is the same sentence a foreign Attempt got above.
+    const row = read.questions.find((question) => question.questionId === questionId);
+    if (row === undefined) throw new NotFoundException(NO_GRADE_TO_DISPUTE);
+
+    const key = { attemptId_questionId: { attemptId, questionId } };
+    try {
+      await this.prisma.gradeDispute.upsert({
+        where: key,
+        create: {
+          attemptId,
+          questionId,
+          // The scope's own ids, which are the Attempt's by construction: `resultsFor`
+          // refused above unless this child of this account owns it.
+          studentProfileId: scope.studentProfileId,
+          parentAccountId: scope.parentAccountId,
+        },
+        // Nothing. A child pressing again is the same objection, and an update arm that
+        // touched anything would move the one instant this row holds.
+        update: {},
+        select: { id: true },
+      });
+    } catch (cause) {
+      // Two first presses at once. An `upsert` reads and then writes, so both can find
+      // no row and both attempt the insert; the unique key refuses the loser with
+      // P2002, which is exactly the double-tap this absorbs. Nothing needs re-reading:
+      // the winner's row is the row, and the response below is composed afresh.
+      if (!isUniqueViolation(cause)) throw cause;
+    }
+
+    // The Attempt and the Question, and nothing else. Never the Question's content, the
+    // child's answer or a rationale (AD-20).
+    this.logger.log(
+      `A grade dispute is recorded for question ${questionId} of attempt ${attemptId}.`,
+    );
+
+    // **The one field this write changed, and nothing else.** `disputed` is not this
+    // method's opinion about what a later read would say — it is the outcome of the
+    // statement above, which either inserted the row or found the one a previous press
+    // left. Every other field is safe to carry over because a dispute writes **no
+    // grade**: not `state`, not `overrideState`, not a score and not another row, which
+    // is the invariant the integration cases pin from outside. So re-reading would cost
+    // a second proof and a second re-ask to learn nothing this does not already know.
+    return {
+      ...read,
+      questions: read.questions.map((question) =>
+        question.questionId === questionId ? { ...question, disputed: true } : question,
+      ),
+    };
+  }
+
+  /**
+   * One handed-in Attempt's results as the **parent** reads them: the effective grade,
+   * the provider's own verdict beside it, the rationale it gave, and what the child
+   * objected to.
+   *
+   * **Its own method rather than a widening of `resultsFor`, and that is the design.**
+   * That method's comment — "a rationale this never selects is a rationale no mapper can
+   * put on a student response" — is load-bearing. Widening it with a nullable rationale
+   * and a scope check would make one read serve two audiences and one field's presence
+   * depend on a runtime branch; a second method selecting more columns keeps the student
+   * response's *shape* incapable of carrying the fact (`parent-results.ts` says the rest).
+   *
+   * **It is still FR-22's retry**, exactly as the child's read is: `resolveUngraded` runs
+   * first, so a parent opening a run whose Questions nothing has judged re-asks for them.
+   * The same trigger on the same rows, not a second one — and it is also where every
+   * refusal comes from, so a foreign Attempt, an unknown id and one still open all throw
+   * the one shared 404 before this method reads a row.
+   *
+   * **One `scoreOf`, called twice.** The adjusted figure is over effective states and the
+   * prior one over stored verdicts, so the two fractions a parent reads as a change come
+   * from one denominator rule. `originalScore` is null when no row carries an override.
+   */
+  async parentResultsFor(scope: ParentScope, attemptId: string): Promise<ParentAttemptResultsView> {
+    const resolution = await this.resolveUngraded(scope, attemptId);
+
+    // Which child sat it, resolved from the Attempt row. It is on the response because the
+    // retained-override slot is keyed per Student Profile (FR-35), and it is read here
+    // rather than taken from a path because a profile id in a URL is a profile id that can
+    // be paired with another child's Attempt.
+    const { studentProfileId } = await this.practiceTests.attemptProfileFor(
+      scope.parentAccountId,
+      attemptId,
+    );
+    const key = await this.practiceTests.answerKeyFor(scope.parentAccountId, null, attemptId);
+    const stored = await this.prisma.questionGrade.findMany({
+      where: { attemptId },
+      // The parent's columns: the verdict, the sentence it gave, and the adjustment.
+      // This is the one read in this module that selects a rationale, and its return
+      // type is the one shape that can carry one.
+      select: {
+        questionId: true,
+        state: true,
+        rationale: true,
+        overrideState: true,
+        overriddenAt: true,
+      },
+    });
+    const disputes = await this.prisma.gradeDispute.findMany({
+      where: { attemptId },
+      select: { questionId: true, createdAt: true },
+    });
+    const disputedAt = new Map(disputes.map((row) => [row.questionId, row.createdAt]));
+    const byQuestion = new Map(stored.map((row) => [row.questionId, row]));
+
+    // The child's rows first, composed by the one mapper both surfaces share, so the
+    // effective state, the score and the two per-row facts cannot come to differ
+    // between the two screens. Then the parent-scoped columns on top.
+    const base = answerKeyRows(
+      key,
+      new Map(stored.map((row) => [row.questionId, effectiveStateOf(row)])),
+      resolution.newlyGradedQuestionIds,
+      stored.filter((row) => row.overrideState !== null).map((row) => row.questionId),
+      disputes.map((row) => row.questionId),
+    );
+    const questions: ParentAnswerKeyRowView[] = base.map((row) => {
+      const grade = byQuestion.get(row.questionId);
+      return {
+        ...row,
+        rationale: grade?.rationale ?? null,
+        // The stored verdict, and `Ungraded` for a Question with no row at all —
+        // exactly as `answerKeyRows` flattens the same absence, so the two fields
+        // agree about a row that does not exist.
+        aiState: grade?.state ?? 'Ungraded',
+        overriddenAt: grade?.overriddenAt?.toISOString() ?? null,
+        disputedAt: disputedAt.get(row.questionId)?.toISOString() ?? null,
+      };
+    });
+
+    const score = scoreOf(questions.map((row) => row.state));
+    const originalScore = originalScoreOf(
+      stored.some((row) => row.overrideState !== null),
+      scoreOf(questions.map((row) => (byQuestion.has(row.questionId) ? row.aiState : null))),
+    );
+
+    return {
+      attemptId: key.attemptId,
+      practiceTestId: key.practiceTestId,
+      studentProfileId,
+      subjectName: key.subjectName,
+      questionCount: key.questionCount,
+      score,
+      originalScore,
+      questions,
+    };
+  }
+
+  /**
+   * Records what a **parent** says one Question is worth, and the score that follows
+   * from it — in one transaction.
+   *
+   * **The flip and the figure commit together, or neither does** (AD-10,
+   * `withTransaction`). A reader must never be able to see one without the other: an
+   * Attempt whose row says `Correct` and whose header says the old fraction is a screen
+   * contradicting itself, and a parent watching it would not know which half to believe.
+   * The Mastery recompute seam is **inside** the same transaction, where every other
+   * grade-changing trigger's is — there is nothing to recompute until Epic 7, exactly as
+   * `mastery-eligibility.ts` records.
+   *
+   * **The original verdict and its rationale are never touched.** `state` and `rationale`
+   * keep the provider's own words, because FR-25 requires both readable afterwards; the
+   * override is its own column beside them and effective state is `overrideState ?? state`,
+   * resolved in `grading-override.ts` and nowhere else.
+   *
+   * **`updateMany` on the pair, never a read-then-write.** Two simultaneous presses both
+   * answer and the last statement wins — which is the honest outcome for a decision that
+   * may legitimately be made again in the other direction. The guard in the `where` is
+   * the *pair*, not the current value: guarding on `overrideState: null` would make a
+   * parent's second, different decision silently do nothing.
+   *
+   * **An override needs no dispute.** A parent who spots a harsh grade themselves may fix
+   * it, and requiring a child to object first would make the remedy depend on the child
+   * having noticed — which is the opposite of FR-25's mitigation. A dispute, where there
+   * is one, is resolved by this write.
+   *
+   * Two refusals, each a 409 with its own sentence and neither naming a child, a number
+   * or a tier: the requested grade is already what counts, or the stored verdict is not a
+   * judgement at all. A foreign, unknown or still-open Attempt is the shared 404 from the
+   * proof above, never a 403.
+   */
+  async overrideGrade(
+    scope: ParentScope,
+    attemptId: string,
+    questionId: string,
+    requested: GradeState,
+  ): Promise<ParentAttemptResultsView> {
+    // The proof, first and outside the write: a foreign Attempt, an unknown id and one
+    // still open all answer the one shared sentence before a grade row is read (AD-18).
+    await this.practiceTests.attemptProfileFor(scope.parentAccountId, attemptId);
+
+    await this.prisma.withTransaction(async (tx) => {
+      // Read inside the transaction, so the decision below is made against the row the
+      // write lands on rather than against a snapshot from before it opened.
+      const grade = await tx.questionGrade.findUnique({
+        where: { attemptId_questionId: { attemptId, questionId } },
+        select: { state: true, overrideState: true },
+      });
+      // No grade row at all: nothing has judged this, and there is nothing here to
+      // adjust. The same sentence the Attempt's own refusals give, for the reason a
+      // Question of another test gets it — the outside must not be able to tell
+      // "nothing graded" from "not your Attempt".
+      if (grade === null) throw new NotFoundException(NO_GRADE_TO_OVERRIDE);
+
+      // The whole of the rule, decided by a pure function so it is assertable without a
+      // database — and exhaustive, so a fourth outcome is a compile error rather than a
+      // fall-through that writes.
+      const decision = overrideDecision(grade, requested);
+      switch (decision) {
+        case 'already':
+          throw new ConflictException(GRADE_ALREADY_RECORDED);
+        case 'notJudged':
+          throw new ConflictException(GRADE_NOT_JUDGED);
+        case 'flip':
+          break;
+        default: {
+          const unhandled: never = decision;
+          throw new Error(`No override outcome is written for ${String(unhandled)}.`);
+        }
+      }
+
+      // `updateMany` on the pair and never a read-then-write: the statement is the
+      // guard, so two presses in flight both answer and the last one wins. `state` and
+      // `rationale` are absent from `data` deliberately — the provider's verdict and the
+      // sentence it gave are retained, and this is the statement that would overwrite
+      // them if anything ever did.
+      const adjusted = await tx.questionGrade.updateMany({
+        where: { attemptId, questionId },
+        // Both columns in one statement: an override with no instant beside it would be
+        // a decision nobody can date.
+        data: { overrideState: requested, overriddenAt: new Date() },
+      });
+      // **The count is read, not assumed.** The row was there a statement ago, but a
+      // cascading delete of the Attempt or the Question between the read and here would
+      // leave this matching nothing — and answering 200 for a write that landed on no
+      // row would tell a parent their decision was recorded when the thing it was about
+      // is gone. Thrown from **inside** the transaction, so the score read below never
+      // runs and nothing commits.
+      if (adjusted.count === 0) throw new NotFoundException(NO_GRADE_TO_OVERRIDE);
+
+      // The score, read back **inside this transaction**, which is the whole reason
+      // there is a transaction: the figure and the flip are one commit, so no reader
+      // can see one without the other. The value is deliberately not returned — the
+      // response is composed by `parentResultsFor` below, over the committed rows, so
+      // there is one composition of a parent's view rather than two. What matters here
+      // is that the read happened in the same unit of work as the write.
+      const committed = await tx.questionGrade.findMany({
+        where: { attemptId },
+        select: { questionId: true, state: true, overrideState: true },
+      });
+      scoreOf(committed.map((row) => effectiveStateOf(row)));
+
+      // **The Mastery recompute seam, and it is here on purpose.** AD-10 puts the
+      // recompute of whatever a grade changes inside the transaction that changed it,
+      // and an override changes a grade — so this is the second trigger, beside the
+      // hand-in. FR-26 and every Mastery figure are Epic 7's: there is no Mastery table
+      // and nothing yet to recompute, which is exactly what
+      // `mastery-eligibility.ts` records for the hand-in. When Epic 7 writes one, the
+      // call goes on this line, inside this transaction, and not on a queue.
+    });
+
+    // The Attempt, the Question and which way. Never the Question's content, the child's
+    // answer or the rationale (AD-20).
+    this.logger.log(
+      `The grade for question ${questionId} of attempt ${attemptId} is adjusted by a parent to ${requested}.`,
+    );
+
+    // Composed afresh over the committed rows, so the response a parent reads is the
+    // response the next read would give. It re-runs FR-22's re-ask, which has nothing
+    // left to do on an Attempt whose rows were just judged enough to be overridden.
+    return this.parentResultsFor(scope, attemptId);
+  }
+
+  /**
+   * Every grade one child has objected to, newest first — awaiting a decision and
+   * resolved alike.
+   *
+   * **It exists because a dispute the parent cannot find is a dispute that did not
+   * surface.** The Attempt-detail row shows an objection only to somebody who already
+   * opened that Attempt; this is what makes a child's raised hand reachable at all.
+   *
+   * **It outlives the decision.** A resolved dispute is still listed and marked with its
+   * outcome — `overriddenAt` — and one awaiting a decision is listed as awaiting, which
+   * is the *absence* of an override rather than a value somebody wrote. A list that
+   * dropped resolved entries would make a parent's own adjustment look like the
+   * objection never happened.
+   *
+   * **A foreign or unknown profile answers `[]`**, not a refusal — the same answer a
+   * child with no disputes gets, and the same answer `studentFlagsFor` and
+   * `GET parent/students/:id/attempts` already give: a 404 for an unknown id would be a
+   * confirmation for a known one (AD-18). This method does not try to tell the two apart,
+   * because the rows carry `parentAccountId` denormalized and the `where` simply matches
+   * nothing.
+   *
+   * The run and Question context arrives through one batched `PracticeTestService` read,
+   * the same one the explanation-flag list uses, so the arrow stays `grading ->
+   * practicetest`. A dispute whose context no longer resolves keeps its place and loses
+   * its labels: whether an objection was raised is not contingent on being able to name
+   * what it was about.
+   *
+   * No prose here — a rationale is read beside the Question it is about, on the
+   * Attempt-detail screen — and no score, cost, tier, model name or Mastery figure
+   * (AD-20, AD-26).
+   */
+  async gradeDisputesFor(
+    scope: ParentScope,
+    studentProfileId: string,
+  ): Promise<GradeDisputeListEntry[]> {
+    const rows = await this.prisma.gradeDispute.findMany({
+      // Both denormalized ids. The account is the parent's entitlement; the profile is
+      // which child. No origin arm, because a dispute has one origin and it is the child.
+      where: { parentAccountId: scope.parentAccountId, studentProfileId },
+      // Newest first, with the id behind it so two objections raised inside the same
+      // millisecond still come back in a stable order.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { attemptId: true, questionId: true, createdAt: true },
+    });
+    if (rows.length === 0) return [];
+
+    // The grades of exactly the disputed pairs. The recorded verdict is what the child
+    // objected to and the override is the resolution, so both columns come back — and no
+    // rationale, because a list is not where prose is read.
+    const grades = await this.prisma.questionGrade.findMany({
+      // **The disputed pairs themselves, not the cross-product of their two id sets.**
+      // Two `in` arms would match every (Attempt, Question) combination those ids form —
+      // so a child who disputed question 1 of run A and question 2 of run B would pull
+      // back four rows for two disputes, and a busy list would read a quadratic slice of
+      // the table to use a diagonal of it. `OR` over the pairs asks for exactly the rows
+      // this list states, which is also what the unique key on the pair indexes.
+      where: { OR: rows.map((row) => ({ attemptId: row.attemptId, questionId: row.questionId })) },
+      select: {
+        attemptId: true,
+        questionId: true,
+        state: true,
+        overrideState: true,
+        overriddenAt: true,
+      },
+    });
+    const gradeByRef = new Map(
+      grades.map((grade) => [refKey(grade.attemptId, grade.questionId), grade]),
+    );
+
+    const contexts = await this.practiceTests.flaggedQuestionContextsFor(
+      scope.parentAccountId,
+      rows.map((row) => ({ attemptId: row.attemptId, questionId: row.questionId })),
+    );
+    const contextByRef = new Map(
+      contexts.map((context) => [refKey(context.attemptId, context.questionId), context]),
+    );
+
+    return rows.map((row) => {
+      const ref = refKey(row.attemptId, row.questionId);
+      const grade = gradeByRef.get(ref);
+      const context = contextByRef.get(ref);
+      // A dispute whose grade row is gone states `Ungraded` both ways rather than
+      // dropping out of the list: the objection was raised, which is the fact, and
+      // `Ungraded` is already how this module reads the absence of a row everywhere else.
+      const recordedState = grade?.state ?? 'Ungraded';
+      return {
+        attemptId: row.attemptId,
+        questionId: row.questionId,
+        disputedAt: row.createdAt.toISOString(),
+        recordedState,
+        effectiveState: grade === undefined ? recordedState : effectiveStateOf(grade),
+        // The resolution, derived from the override and from nothing else. Null is
+        // awaiting.
+        overriddenAt: grade?.overriddenAt?.toISOString() ?? null,
+        practiceTestId: context?.practiceTestId ?? null,
+        runOrdinal: context?.runOrdinal ?? null,
+        questionOrdinal: context?.questionOrdinal ?? null,
+        subjectName: context?.subjectName ?? null,
+        submittedAt: context?.submittedAt ?? null,
+      };
+    });
   }
 
   /**
@@ -397,11 +891,18 @@ export class GradingService {
    * because those are the only two runs anything states. The runs in between are
    * counted and never scored.
    *
-   * **`attemptId`, `questionId` and `state` only.** A rationale never selected is a
+   * **`attemptId`, `state` and `overrideState` only.** A rationale never selected is a
    * rationale no mapper can leak onto a child's screen (AD-20, AD-26), and
-   * `AttemptRunView` has no field one could sit in. `questionId` is selected not to be
+   * `AttemptRunView` has no field one could sit in. The Attempt id is selected not to be
    * shown but so two runs of the same test cannot score each other: the states are
    * keyed by Attempt, and the count per Attempt is what `scoreOf` is given.
+   *
+   * **The states are the *effective* ones**, resolved by `effectiveStateOf` before
+   * `runsOf` hands anything to `scoreOf` (Story 6.5). Scoring the provider's own verdict
+   * here would make a child's home screen and their results screen state two different
+   * figures for one run the moment a parent adjusted a mark — which is exactly the
+   * second denominator FR-37 forbids, reached by a read that forgot the other column
+   * rather than by a second implementation of the count.
    *
    * A child with nothing handed in answers `[]`, and never a 404: having finished
    * nothing yet is a state a home screen renders as rows with no figure on them.
@@ -429,16 +930,21 @@ export class GradingService {
 
     const stored = await this.prisma.questionGrade.findMany({
       where: { attemptId: { in: [...scored] } },
-      // Two columns. No rationale, so there is nothing here to leak — and no
+      // Three columns. No rationale, so there is nothing here to leak — and no
       // `questionId` either: `scoreOf` tallies states and reads no Question, so the
       // run a verdict belongs to is the only thing that has to come back with it.
-      select: { attemptId: true, state: true },
+      // `overrideState` is selected because it is what *counts*, never to be shown.
+      select: { attemptId: true, state: true, overrideState: true },
     });
     const statesByAttempt = new Map<string, GradeState[]>();
     for (const row of stored) {
+      // Resolved here, through the one place a grade is "what counts", before anything
+      // is counted: a parent's adjustment is the child's mark on every surface that
+      // states one, the home screen included.
+      const state = effectiveStateOf(row);
       const states = statesByAttempt.get(row.attemptId);
-      if (states === undefined) statesByAttempt.set(row.attemptId, [row.state]);
-      else states.push(row.state);
+      if (states === undefined) statesByAttempt.set(row.attemptId, [state]);
+      else states.push(state);
     }
 
     return runsOf(runs, statesByAttempt);
@@ -637,6 +1143,25 @@ export class GradingService {
  */
 function correctAnswerOf(question: GradingQuestionInput): string {
   return question.answer === null ? '' : plainTextOf(question.answer);
+}
+
+/** One `(Attempt, Question)` pair as a single map key. Two ids, one lookup. */
+function refKey(attemptId: string, questionId: string): string {
+  return `${attemptId}:${questionId}`;
+}
+
+/**
+ * Whether a write lost a race on a unique index.
+ *
+ * The same two-line predicate `explanation.service.ts` and `practice-test.service.ts`
+ * each keep file-locally, and file-local here for their reason: it is a fact about a
+ * Prisma error code, and a shared helper would be a module boundary crossed for two
+ * lines.
+ */
+function isUniqueViolation(cause: unknown): boolean {
+  return (
+    typeof cause === 'object' && cause !== null && (cause as { code?: unknown }).code === 'P2002'
+  );
 }
 
 /** A fault's class, for a log line that may carry nothing else (AD-20). */

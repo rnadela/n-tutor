@@ -135,6 +135,15 @@ export default function ParentViewPage() {
             <Link component={NextLink} href="/parent/explanation-flags">
               {parentCopy.parentView.explanationFlags}
             </Link>
+            {/* The way in to the marks a child says are wrong, and the only way in there
+                is — beside the reported explanations for exactly that one's reason. The
+                Attempt-detail row shows an objection only to somebody who already opened
+                that Attempt, so without this link a child raising a hand about a mark would
+                be a record nobody ever sees. Client-side for the same reason as its
+                neighbours. */}
+            <Link component={NextLink} href="/parent/grade-disputes">
+              {parentCopy.parentView.gradeDisputes}
+            </Link>
             <Link component={NextLink} href="/parent/pin/change">
               {parentCopy.parentView.changePin}
             </Link>

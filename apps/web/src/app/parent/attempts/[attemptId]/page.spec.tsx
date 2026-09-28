@@ -151,8 +151,9 @@ describe('a parent reading one handed-in run', () => {
     expect(PAGE_SOURCE).toContain('onGenerations={onGenerations}');
     expect(PAGE_SOURCE).toContain('previous.filter((held) => held.questionId !== questionId)');
     expect(PAGE_SOURCE).toContain('...views,');
-    // And still no second read: the writes answer with every generation of that Question.
-    expect(PAGE_SOURCE.match(/parentApi\./gu)).toHaveLength(2);
+    // And still no second read *for the prose*: the writes answer with every generation of
+    // that Question. The screen's three reads are named exactly in the Story 6.5 case below.
+    expect(PAGE_SOURCE).not.toMatch(/attemptExplanations[\s\S]{0,400}attemptExplanations/u);
   });
 
   it('states a refusal as the one sentence, with the way back beside it', () => {
@@ -174,13 +175,104 @@ describe('a parent reading one handed-in run', () => {
     expect(PAGE_SOURCE).not.toContain('sessionStorage');
   });
 
-  it('carries no rationale, cost, tier, model or allowance anywhere', () => {
-    // The grading rationale is Story 6.5's, and `AttemptResultsView` has no field it
-    // could travel in (AD-20, AD-26).
+  it('carries no cost, tier, model or allowance anywhere', () => {
     // Over the code, not the prose: the doc above states that this screen consumes no
     // Explanation Allowance, which is the claim being made and not a violation of it.
-    for (const forbidden of [/rationale/iu, /allowance/iu, /\btier\b/iu, /costMicros/iu]) {
+    //
+    // **The rationale left this list in Story 6.5.** It is the evidence an adjustment is
+    // decided on, so a parent reads it — but this screen still never touches it: the field is
+    // on the row and the region that draws it is `GradeReview`, which is why `rationale` does
+    // not appear here either. The case below pins that as the positive claim.
+    for (const forbidden of [/allowance/iu, /\btier\b/iu, /costMicros/iu, /\bmodel\b/iu]) {
       expect(CODE).not.toMatch(forbidden);
     }
+  });
+
+  // --- Story 6.5: the mark, its evidence and the one remedy --------------
+
+  it('reads the parent’s own superset shape and not the child’s', () => {
+    // One type serving both audiences would put the reason one nullable field away from a
+    // child's screen; two types make the student's response incapable of carrying it.
+    expect(CODE).toContain('ParentAttemptResultsView');
+    expect(CODE).not.toMatch(/useState<AttemptResultsView/u);
+  });
+
+  it('hands the mark to the row’s grade slot and draws none of it itself', () => {
+    expect(CODE).toContain('<GradeReview');
+    expect(CODE).toContain('grade={');
+    // Every field the region needs arrived on the answer key, so unlike the prose region this
+    // one needs no read to have settled and has no window in which it could say something
+    // untrue about the child.
+    expect(CODE).not.toMatch(/proseLoaded[^\n]*GradeReview/u);
+    expect(CODE).not.toMatch(/rationale/iu);
+  });
+
+  it('adds no read for the mark, the reason or the dispute', () => {
+    // The answer key now carries the recorded mark, the reason, the dispute and the
+    // adjustment, so **nothing was added to learn any of them**: the two reads this screen
+    // always made are still its two.
+    expect(CODE).toContain('parentApi.parentAttemptResults(token, attemptId)');
+    expect(CODE).toContain('parentApi.attemptExplanations(token, attemptId)');
+  });
+
+  it('reads the retained picks once for the run, not once per Question', () => {
+    // `GradeReview` is mounted per row, so a read of its own would be one identical
+    // account-scoped request per Question on mount — fifteen on a fifteen-Question paper,
+    // every one of them answering the same list. So the screen makes it, and every row
+    // filters the same array by its own per-Question scope.
+    expect(CODE.match(/parentApi\.uncommittedState/gu)).toHaveLength(1);
+    expect(CODE).toContain('retainedSlots={retainedSlots}');
+    // Keyed on the profile the *run* named, never on one guessed from the URL: the slots
+    // are per Student Profile server-side.
+    expect(CODE).toContain('parentApi.uncommittedState(token, studentProfileId)');
+    expect(CODE).toContain('results?.studentProfileId ?? null');
+    // And the component that used to make it no longer does.
+    const review = readFileSync(
+      path.resolve(import.meta.dirname, '..', '..', '_components', 'GradeReview.tsx'),
+      'utf8',
+    );
+    expect(review).not.toMatch(/parentApi\s*\.\s*uncommittedState/u);
+  });
+
+  it('never lets the retained-pick read block, fail or end anything', () => {
+    // A retained pick is a convenience under a decision the parent has not made yet. It is
+    // the one read here that swallows every failure, `endsParentView` included — an empty
+    // list is exactly what "nothing picked" looks like, and the two reads that *are* the
+    // screen still end Parent View when the guard refuses them.
+    expect(CODE.match(/endsParentView\(cause\)/gu)).toHaveLength(2);
+    expect(CODE).toMatch(/uncommittedState\([\s\S]{0,260}\(\) => \{\},/u);
+    // Dropped as the run re-issues, like the other two held lists.
+    expect(CODE).toContain('setRetainedSlots(NOTHING_RETAINED)');
+  });
+
+  it('hands the whole recalculated run back into its own state', () => {
+    // The API commits the mark and the score together and answers the view, so the score and
+    // the rows always describe one read — and this screen patches no row of its own.
+    expect(CODE).toContain('onAdjusted={setResults}');
+  });
+
+  it('keys the retained slot to the child whose run this is', () => {
+    // The slot is keyed per Student Profile server-side. A screen that guessed would restore
+    // one child's decision onto another's paper.
+    expect(CODE).toContain('studentProfileId={results.studentProfileId}');
+  });
+
+  it('states the score as a change through the one function that decides there is one', () => {
+    // Prior, then adjusted, with "adjusted by parent" saying why — never one figure replacing
+    // another, and never a second denominator computed here (FR-37).
+    expect(CODE).toContain('scoreChangeOf(results.score, results.originalScore)');
+    expect(CODE).toContain('parentCopy.attempts.override.scoreChanged(');
+    expect(CODE).toContain('scoreChange === null');
+    expect(CODE).not.toMatch(/originalScore\.correct\s*[-<>]/u);
+  });
+
+  it('announces an override through the one region it already owns', () => {
+    // One surface, one region: `GradeReview` takes `announce` rather than reaching for one.
+    expect(CODE.match(/aria-live/gu)).toHaveLength(1);
+    expect(CODE.match(/announce=\{announce\}/gu)).toHaveLength(2);
+  });
+
+  it('gives the row the parent’s own word for a mark they set', () => {
+    expect(CODE).toContain('rowParentAdjusted: parentCopy.attempts.override.rowParentAdjusted');
   });
 });

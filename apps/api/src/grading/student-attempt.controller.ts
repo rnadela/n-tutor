@@ -160,4 +160,55 @@ export class StudentAttemptController {
       studentProfileId: req.student!.studentProfileId,
     });
   }
+
+  /**
+   * The child's own hand, raised on their own work: this grade is wrong.
+   *
+   * **It changes no grade and no score.** FR-25's remedy is the parent's override, and a
+   * child who could move their own grade by objecting to it would be marking their own
+   * paper. What this writes is one dispute row, and the response is the same results view
+   * the read gives, with the objection on the row it is about — so the screen redraws from
+   * one answer rather than from a merge.
+   *
+   * **A record, not a toggle.** There is no un-dispute route, no delete and no
+   * soft-delete column: a hand that was raised was raised. A second press is the *same*
+   * row by the unique key and answers the first instant, which is why this needs no 409 —
+   * a repeat is not a conflict, it is the same objection.
+   *
+   * **No parent-scoped fact on the way out.** No rationale, no override mechanics, no
+   * AI-versus-parent wording and no cost, tier, model or allowance figure (AD-20, AD-26).
+   * The response is `AttemptResultsView`, which has no field any of those could travel in.
+   *
+   * Both ids come off `req.student`, so a foreign Attempt, a sibling's, an unknown id, an
+   * Attempt still open and a Question that is not on that paper all answer the one shared
+   * `PRACTICE_TEST_NOT_FOUND` 404 — never a 403, and never five sentences (AD-18).
+   *
+   * **No `ParseUUIDPipe`**, for the reason the submit and results routes carry none: a 400
+   * on shape would be a second kind of refusal on a surface whose whole discipline is that
+   * every refusal is one sentence. A malformed id finds no row and gets the 404.
+   *
+   * **200, not Nest's `POST` default of 201**, exactly as the hand-in is: whether a row was
+   * inserted or found is a fact about idempotency, and a status that told the two apart
+   * would make a second press look like a different outcome to the child.
+   *
+   * **No body.** The two ids in the path say which Question, and there is nothing else to
+   * send: there is no reason field on either side of this feature — no column to write one
+   * to, and nothing that would relay a child's words to their parent.
+   */
+  @Post('attempts/:attemptId/questions/:questionId/grade-dispute')
+  @HttpCode(HttpStatus.OK)
+  disputeGrade(
+    @Req() req: StudentRequest,
+    @Param('attemptId') attemptId: string,
+    @Param('questionId') questionId: string,
+  ): Promise<AttemptResultsView> {
+    return this.grading.disputeGrade(
+      {
+        parentAccountId: req.student!.parentAccountId,
+        studentProfileId: req.student!.studentProfileId,
+      },
+      attemptId,
+      questionId,
+    );
+  }
 }

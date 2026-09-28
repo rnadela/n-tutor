@@ -1789,3 +1789,43 @@ source_spec: `spec-6-4-explanation-suppression-free-regeneration.md`
 severity: medium
 reason: `suppressExplanation` only sets `suppressedAt`; it never reads or writes `chargedAt`, so a suppressed row that was charged stays charged and the allowance counter (which reads `chargedAt: { gte, lt }`) never moves. The intent-contract is silent on whether a refund is owed, and both readings — no refund because suppression and regeneration change "one Explanation and nothing else," or a refund because the parent is being made whole for a bad paid explanation — are defensible. No test exercises a suppression of a charged row's counter effect either way.
 status: open
+
+### DW-225: Grade disputes surface on a standalone parent screen, not on the FR-28 Analytics dashboard band FR-25 names.
+origin: spec-deferred bac4525d30ec
+location: apps/web/src/app/parent/grade-disputes/page.tsx
+source_spec: `spec-6-5-grade-dispute-override.md`
+severity: medium
+reason: FR-25 says disputes surface "within or immediately beside the FR-28 activity summary" and that there is "no separate flagged-items destination in v0". That dashboard is Story 7.4's and does not exist yet, so this story shipped a plain parent screen, exactly as Story 6.3 did for explanation flags. The divergence is pinned by passing assertions (`page.spec.tsx` asserts no Mastery figure, the e2e asserts no analytics vocabulary) that Story 7.4 will have to move or invert when it mounts the band.
+status: open
+
+### DW-226: A dispute the parent reads and agrees with has no terminal state, so it stays listed as awaiting forever.
+origin: spec-deferred 97ac7099515b
+location: apps/web/src/lib/grade-dispute.ts
+source_spec: `spec-6-5-grade-dispute-override.md`
+severity: low
+reason: Resolution is derived from the override, because FR-25 grants exactly one remedy and authorizes no dismiss verb. A parent who judges the AI right therefore leaves the entry at "Waiting for you to decide" with nothing to press. Whether a dispute wants a second outcome is an intent decision nobody has taken.
+status: open
+
+### DW-227: A child may dispute an Unanswered or Ungraded row, which no override can ever resolve.
+origin: spec-deferred 7a9667a3c98d
+location: apps/api/src/grading/grading-override.ts
+source_spec: `spec-6-5-grade-dispute-override.md`
+severity: low
+reason: `OVERRIDABLE_STATES` is `{Correct, Incorrect}` and the DTO refuses the other two, while `disputeGrade` records a dispute on any row. The parent screen now says in words that a mark nothing judged cannot be adjusted, so the dead end is stated rather than silent — but the entry still cannot leave the awaiting list.
+status: open
+
+### DW-228: There is no way to object a second time, including to a mark the parent themselves set.
+origin: spec-deferred ae0f9e687568
+location: apps/api/prisma/schema.prisma
+source_spec: `spec-6-5-grade-dispute-override.md`
+severity: low
+reason: `disputed` stays true for the life of the row and the control unmounts permanently, and the schema carries no reopen, disposition or delete. A child whose Correct is flipped to Incorrect has no route to say so. FR-25 does not decide this either way.
+status: open
+
+### DW-229: Six E2E specs fail on this machine independently of this story, and `practice-test.int-spec.ts` is intermittently red under batching.
+origin: spec-deferred 4c823429865c
+location: e2e/tests
+source_spec: `spec-6-5-grade-dispute-override.md`
+severity: medium
+reason: The whole changeset was stashed and the suite re-run on the baseline commit 7fa00cc: admin-taxonomy (401 redirect), parent-auth (both reset cases), parent-explanation-review, parent-explanation-suppression and student-explanation-flagging fail identically with the work reverted. `practice-test.int-spec.ts` failed 6 of 196 on the same stashed baseline, in areas this diff never touches. Both predate the story; neither can currently tell a real break from noise.
+status: open
