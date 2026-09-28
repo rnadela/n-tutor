@@ -14,6 +14,7 @@ import { TopicService } from '../topics/topic.service.js';
 import { buildGradingPrompt, type GradingPromptQuestion } from './grading-prompt.js';
 import { countsTowardMastery } from './mastery-eligibility.js';
 import { hasEvidence, masteryFrom, masteryWindowOf } from './mastery.js';
+import { answeredOf, isWeakArea } from './weak-area-policy.js';
 import { runsOf, type PracticeTestRunsView } from './grading-history.js';
 import { answerKeyRows, type AttemptResultsView } from './grading-results.js';
 import { effectiveStateOf, overrideDecision } from './grading-override.js';
@@ -36,6 +37,35 @@ import {
 } from './grading-payload.js';
 import { GRADING_SCHEMA_NAME, GradingPayload, fakeGradingPayload } from './grading-schema.js';
 import { scoreOf, type AttemptScore } from './grading-score.js';
+
+/**
+ * One Topic's stored Mastery, as a caller reads it.
+ *
+ * The five stored figures, plus the two that are derived every time rather than
+ * kept: `answered` (the fraction's denominator, which is also what the Weak Area
+ * floor is measured against) and `isWeakArea` itself. Neither is a column, and both
+ * come from `weak-area-policy.ts` so a retune changes every answer at once.
+ *
+ * `value` is nullable for the reason the column is: a Topic whose whole window was
+ * skipped is not a Topic the child got nothing right on, and a surface showing `0%`
+ * for it would be reporting something that never happened.
+ *
+ * There is no Topic name here. Naming a Topic is `topics`' (AD-11) and the label a
+ * parent reads is Story 7.4's to join on.
+ */
+export interface TopicMasteryView {
+  topicId: string;
+  correct: number;
+  incorrect: number;
+  unanswered: number;
+  /** How many Questions of the window the child answered: `correct + incorrect`. */
+  answered: number;
+  /** How many Attempts the window held, one to five. */
+  attemptsCounted: number;
+  value: number | null;
+  /** Derived at read time by the one predicate, never stored. */
+  isWeakArea: boolean;
+}
 
 /** Who is asking. A parent reaches an Attempt by account; a child by both ids. */
 export interface GradingScope {
@@ -1187,6 +1217,66 @@ export class GradingService {
         });
       }
     }
+  }
+
+  /**
+   * Every Topic this child has a stored Mastery figure for, each with its counts
+   * and its Weak Area verdict.
+   *
+   * **The first reader of `topic_mastery`.** Story 7.2 writes the table and nothing
+   * read it; this is where a row becomes an answer. It lives on `GradingService`
+   * because `topic_mastery` is `grading`'s table (AD-6, AD-17) — not a repository in
+   * `practicetest` and not a controller reaching for Prisma.
+   *
+   * **This method is deliberately unauthorized, and that is not an oversight.**
+   * Every other read on this service — `resultsFor`, `runHistoryFor`,
+   * `parentResultsFor`, `gradeDisputesFor` — takes a scope and filters on
+   * `parentAccountId`. This one takes a bare `studentProfileId` and filters on
+   * nothing else, so **it will happily read any child in the system, including one
+   * belonging to another parent.** It is safe only because its caller has *already*
+   * established that the asker may see this profile. Story 7.4 owns that: the route,
+   * the parent scope check that the profile belongs to the requesting account, and
+   * the elevation guard in front of it. Until then this has no caller but the
+   * int-spec.
+   *
+   * **No controller may call this without that check.** A controller that passes a
+   * `studentProfileId` straight off the request into this method is an IDOR: one
+   * parent reading another child's Mastery by guessing an id. If a caller cannot
+   * point at the check it made first, it is not allowed to call this. The signature
+   * does not enforce it because the story fixes the signature; the rule is stated
+   * here instead, and it is a hard rule.
+   *
+   * **Classification happens here, once.** `isWeakArea` is called on the counts as
+   * they are read, so no surface downstream of this compares a percentage of its own
+   * and no two surfaces can disagree about what a Weak Area is. Retuning either
+   * figure changes every answer at once, because nothing stored says `weakArea`.
+   *
+   * Ordered by `topicId` so the answer is stable across calls. It is **not** a
+   * presentation order: ranking weak Topics first, filtering by Subject and naming
+   * the Topics are Story 7.4's, on top of this view.
+   *
+   * A profile with no history answers `[]`. That is not an error and it is not a row
+   * of zeros: a child who has answered nothing has no Mastery, and Story 7.4's empty
+   * state needs that to stay distinguishable from a real zero.
+   */
+  async masteryFor(studentProfileId: string): Promise<TopicMasteryView[]> {
+    const rows = await this.prisma.topicMastery.findMany({
+      where: { studentProfileId },
+      orderBy: { topicId: 'asc' },
+      select: {
+        topicId: true,
+        correct: true,
+        incorrect: true,
+        unanswered: true,
+        attemptsCounted: true,
+        value: true,
+      },
+    });
+    return rows.map((row) => ({
+      ...row,
+      answered: answeredOf(row),
+      isWeakArea: isWeakArea(row),
+    }));
   }
 
   // --- Internals ---------------------------------------------------------

@@ -1925,3 +1925,27 @@ source_spec: `spec-7-2-mastery-computation.md`
 severity: low
 reason: On `P2002` the code falls through to `tx.topicMastery.update(...)` on the same pair, which assumes the winner's row is still there. A third, concurrent recompute for the same (studentProfileId, topicId) that lands `hasEvidence(counts) === false` between this transaction's failed insert and its fallback update would delete that row first, so the fallback update hits nothing (Prisma `P2025`) and is not classified the way `P2002` is — the whole grade-change transaction would fail instead of falling through again. Narrow (needs three transactions racing the same pair with opposite evidence outcomes) and not covered by the story's I/O matrix.
 status: open
+
+### DW-242: An override set to an empty string is silently ignored and the built-in default is applied instead of the operator's intended value.
+origin: spec-deferred 1c6860fb57a7
+location: apps/api/src/common/env.ts (requireIntEnv)
+source_spec: `spec-7-3-weak-area-identification.md`
+severity: low
+reason: `requireIntEnv` treats `''` exactly as unset and returns its fallback, so `WEAK_AREA_ANSWERED_FLOOR=` in a deployment's environment reads as 5 with no warning. This is `env.ts`'s behaviour for every tunable in the system, not something this story introduced, and changing it would change PIN, rate-limit and uncommitted-state resolution at the same time.
+status: open
+
+### DW-243: `masteryFor` reads every stored Topic for a profile with no cap and no cursor.
+origin: spec-deferred e7ea3cce0bf8
+location: apps/api/src/grading/grading.service.ts (masteryFor)
+source_spec: `spec-7-3-weak-area-identification.md`
+severity: medium
+reason: `topic_mastery` holds one row per (profile, Topic) with evidence, and a child working across several Subjects over a school year accumulates them without bound. The read is small per row and outside any transaction, but nothing limits how many come back, and Story 7.4 renders the whole list. A cap needs a rule for which Topics a dashboard may omit, which this story has no basis to choose.
+status: open
+
+### DW-244: A Weak Area created retroactively by an ungraded batch resolving is indistinguishable from one created by new student work.
+origin: spec-deferred 3756ce9a2be2
+location: _bmad-output/specs/spec-n-test-reviewer/SPEC.md:114
+source_spec: `spec-7-3-weak-area-identification.md`
+severity: low
+reason: `_bmad-output/specs/spec-n-test-reviewer/SPEC.md:114` records this as open. Deriving the verdict at read time settles it by omission: a Topic that crossed the threshold because `resolveUngraded` finally wrote verdicts for a paper sat weeks ago appears with no marker of that. It is a product decision about Story 7.4's presentation, not a defect in the predicate.
+status: open

@@ -11,6 +11,7 @@ import { GradingService } from './grading.service.js';
 import { ParentAttemptController } from './parent-attempt.controller.js';
 import { ParentGradeDisputesController } from './parent-grade-disputes.controller.js';
 import { StudentAttemptController } from './student-attempt.controller.js';
+import { weakAreaRuntime } from './weak-area-policy.js';
 
 /**
  * The `grading` module: sole owner and sole writer of `QuestionGrade` (AD-6,
@@ -62,4 +63,12 @@ import { StudentAttemptController } from './student-attempt.controller.js';
   providers: [GradingService, StudentModeGuard, ParentElevationGuard],
   exports: [GradingService],
 })
-export class GradingModule {}
+export class GradingModule {
+  constructor() {
+    // Resolved and checked as the module is constructed, so a mistyped Weak Area
+    // threshold fails the process at boot rather than turning the first dashboard
+    // read into a 500 — and a ceiling above 100 is caught before any parent is
+    // told every Topic is a Weak Area.
+    weakAreaRuntime();
+  }
+}
