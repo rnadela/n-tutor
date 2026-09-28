@@ -36,6 +36,7 @@ import { PARENT_ELEVATION_AUDIENCE } from '../src/identity/pin-policy.js';
 import { STUDENT_MODE_AUDIENCE, STUDENT_MODE_COOKIE } from '../src/identity/student-mode-policy.js';
 import { MailDispatchError, MailService } from '../src/mail/mail.service.js';
 import { AiService } from '../src/ai/ai.service.js';
+import { TopicService } from '../src/topics/topic.service.js';
 import { ExtractionRunner } from '../src/extraction/extraction.runner.js';
 import { PracticeTestRunner } from '../src/practicetest/practice-test.runner.js';
 import type { AiFakeFailure } from '../src/ai/ai-config.js';
@@ -65,6 +66,12 @@ export interface Harness {
   mail: MailCapture;
   /** The captured `ai` seam: what was asked for, and the failure latch. */
   ai: AiCapture;
+  /**
+   * `topics`' sole writer of Topic, and the only entry point the AD-11 cascade
+   * has. Exposed as a service rather than driven through a route because there is
+   * no route: canonicalization is an internal seam in this story.
+   */
+  topics: TopicService;
   /**
    * The extraction worker, so a spec drives exactly one pass rather than
    * waiting on a poll timer. The timer itself is off in the test tier.
@@ -101,6 +108,7 @@ export async function createHarness(): Promise<Harness> {
     students: moduleRef.get(StudentProfileService),
     mail: captureMail(moduleRef.get(MailService)),
     ai: captureAi(moduleRef.get(AiService)),
+    topics: moduleRef.get(TopicService),
     extractionRunner: moduleRef.get(ExtractionRunner),
     practiceTestRunner: moduleRef.get(PracticeTestRunner),
     operatorId: '',
@@ -137,6 +145,11 @@ export async function createHarness(): Promise<Harness> {
  * one story's substrate and a reader looking for "are the pages wiped too?"
  * should find the answer in the list itself.
  *
+ * `topic` is named for the reason `student_profile` is: a canonical Topic holds its
+ * Subject with `onDelete: Restrict`, so the truncate has to name it or the statement
+ * fails. It is listed before `subject` for readability only — `TRUNCATE ... CASCADE`
+ * takes the whole list in one statement and does not care about the order.
+ *
  * `uncommitted_state` is deliberately *not* named: its FK to `student_profile`
  * is `onDelete: Cascade`, so `TRUNCATE ... CASCADE` reaches it through the
  * profile. Naming it would be harmless but would suggest the cascade does not
@@ -144,7 +157,7 @@ export async function createHarness(): Promise<Harness> {
  */
 export async function resetTaxonomy(prisma: PrismaService): Promise<void> {
   await prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE ${EXTRACTION_TABLES}, "page_image", "source_test", "student_profile", "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE`,
+    `TRUNCATE TABLE ${EXTRACTION_TABLES}, "page_image", "source_test", "student_profile", "topic", "subject_grade_level", "subject", "grade_level", "admin_audit" CASCADE`,
   );
 }
 
@@ -258,10 +271,50 @@ export interface CapturedAiCall {
   prompt: string;
 }
 
+/**
+ * One embedding call as the seam recorded it.
+ *
+ * The text is captured, unlike a `run`'s images: a label is the *whole* of what an
+ * embedding carries, and a spec asserting that stage 2 embedded the label it was
+ * given has nothing else to read. It is a generated Topic name and never child
+ * content.
+ */
+export interface CapturedAiEmbed {
+  text: string;
+}
+
+/**
+ * The failure kinds an `embed` can actually be driven into.
+ *
+ * Derived from `AiFakeFailure` rather than spelled as a literal, so that adding a
+ * kind the embed path honours is one edit here and not a second list to keep in
+ * step with the transport.
+ */
+export type AiEmbedFailure = Extract<AiFakeFailure, 'transport'>;
+
 export interface AiCapture {
   sent: CapturedAiCall[];
+  /**
+   * Every `embed` the seam was handed, oldest first — counted separately from
+   * `sent` because that separation *is* the assertion: which stage of the AD-11
+   * cascade answered is read off "one embed and no run" against "one of each"
+   * against "neither".
+   */
+  embedded: CapturedAiEmbed[];
   /** Drives the fake transport's failure mode for the next call alone. */
   failNext(kind: AiFakeFailure): void;
+  /**
+   * The same, for the next `embed` alone. A separate latch rather than one shared
+   * with `failNext`, because the interesting case is precisely an embedding that
+   * fails while the stage-3 call behind it succeeds.
+   *
+   * **Narrowed to the one kind the embed path honours.** `schema` has no meaning
+   * for a call whose answer is a vector rather than a parsed payload, and
+   * `unusable` belongs to the stage-3 call's own fake. Latching either here would
+   * set the variable, change nothing, and leave a spec passing for the wrong
+   * reason — so the type refuses them rather than the transport ignoring them.
+   */
+  failNextEmbed(kind: AiEmbedFailure): void;
   reset(): void;
   restore(): void;
 }
@@ -281,8 +334,11 @@ export interface AiCapture {
  */
 function captureAi(ai: AiService): AiCapture {
   const sent: CapturedAiCall[] = [];
+  const embedded: CapturedAiEmbed[] = [];
   const original = ai.run.bind(ai);
+  const originalEmbed = ai.embed.bind(ai);
   let failOnce: AiFakeFailure | null = null;
+  let failEmbedOnce: AiEmbedFailure | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ai.run = async (request: any): Promise<any> => {
     sent.push({
@@ -303,17 +359,45 @@ function captureAi(ai: AiService): AiCapture {
       else process.env.AI_FAKE_FAILURE = saved;
     }
   };
+  // Wrapped exactly as `run` is, and for the same reason: the real config, the
+  // real retry loop and the real cost row all still run underneath. The latch has
+  // to stay set across the retries one `embed` makes internally, because the fake
+  // reads it per attempt — which is what makes "the embedding exhausted its
+  // retries" reachable from a spec.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ai.embed = async (request: any): Promise<any> => {
+    embedded.push({ text: request.text });
+    if (failEmbedOnce === null) return originalEmbed(request);
+    const kind = failEmbedOnce;
+    failEmbedOnce = null;
+    const saved = process.env.AI_FAKE_FAILURE;
+    process.env.AI_FAKE_FAILURE = kind;
+    try {
+      return await originalEmbed(request);
+    } finally {
+      if (saved === undefined) delete process.env.AI_FAKE_FAILURE;
+      else process.env.AI_FAKE_FAILURE = saved;
+    }
+  };
+
   return {
     sent,
+    embedded,
     failNext: (kind) => {
       failOnce = kind;
     },
+    failNextEmbed: (kind) => {
+      failEmbedOnce = kind;
+    },
     reset: () => {
       sent.length = 0;
+      embedded.length = 0;
       failOnce = null;
+      failEmbedOnce = null;
     },
     restore: () => {
       ai.run = original;
+      ai.embed = originalEmbed;
     },
   };
 }

@@ -86,6 +86,34 @@ export const DEFAULT_MODEL_PINS: Readonly<Record<AiCallClassName, ModelPin>> = {
 };
 
 /**
+ * The embedding snapshot stage 2 of the AD-11 cascade compares against.
+ *
+ * **A pin of its own rather than a sixth call class.** An embedding is not a
+ * structured-output call and cannot be pinned by one: it is the *same* call
+ * class — `TopicNormalization` — served by a completely different model, and a
+ * cost row has to record which of the two it actually paid for. So the class
+ * keeps its `DEFAULT_MODEL_PINS` entry for the stage-3 call, and this is the
+ * snapshot `embed` sends and records.
+ *
+ * `outputMicrosPerMillion` is zero, and literally rather than by omission: an
+ * embedding returns a vector, not tokens, so there is no output side to price.
+ * Keeping the field means `costMicrosFor` stays the one arithmetic every row is
+ * computed by, and a zero times zero output is the honest figure rather than an
+ * invented one. It is deliberately not overridable from the environment for the
+ * same reason — there is no price to override.
+ *
+ * `text-embedding-3-small` is a resolved snapshot id and not an AD-8 alias, so
+ * unlike every entry above it this one needs no pre-deploy replacement. The
+ * model actually sent is still recorded per row, because a re-pin must not
+ * rewrite what previous calls were billed for.
+ */
+export const DEFAULT_EMBEDDING_PIN: ModelPin = {
+  model: 'text-embedding-3-small',
+  inputMicrosPerMillion: 20_000,
+  outputMicrosPerMillion: 0,
+};
+
+/**
  * The vision default (AD-7, AD-33). Three minutes, not thirty seconds: ten
  * photographed pages read as one document is a slow call by construction, and a
  * timeout shorter than the work converts a slow success into a retry that pays
@@ -107,6 +135,12 @@ export interface AiConfig {
   maxAttempts: number;
   retryBaseMs: number;
   pins: Record<AiCallClassName, ModelPin>;
+  /**
+   * The snapshot `embed` sends. One pin, not one per call class: there is
+   * exactly one caller of `embed` — stage 2 of the AD-11 cascade — and a
+   * per-class embedding pin would be five unused variables in `.env.example`.
+   */
+  embeddingPin: ModelPin;
 }
 
 /** The env name suffix one call class takes: `TopicNormalization` → `TOPIC_NORMALIZATION`. */
@@ -144,6 +178,27 @@ function pinFor(env: NodeJS.ProcessEnv, callClass: AiCallClassName): ModelPin {
 }
 
 /**
+ * The embedding pin, from `AI_MODEL_TOPIC_EMBEDDING` and
+ * `AI_PRICE_TOPIC_EMBEDDING_IN`.
+ *
+ * Named after what it is for rather than after the call class, because the class
+ * already has a pin under `AI_MODEL_TOPIC_NORMALIZATION` and two variables one
+ * letter apart would be swapped by somebody eventually. No `_OUT` variable: an
+ * embedding has no output tokens to price.
+ */
+function embeddingPinFor(env: NodeJS.ProcessEnv): ModelPin {
+  return {
+    model: (env.AI_MODEL_TOPIC_EMBEDDING ?? '').trim() || DEFAULT_EMBEDDING_PIN.model,
+    inputMicrosPerMillion: positiveInt(
+      env,
+      'AI_PRICE_TOPIC_EMBEDDING_IN',
+      DEFAULT_EMBEDDING_PIN.inputMicrosPerMillion,
+    ),
+    outputMicrosPerMillion: DEFAULT_EMBEDDING_PIN.outputMicrosPerMillion,
+  };
+}
+
+/**
  * Resolves and validates the AI configuration **once**, at boot.
  *
  * `fake` is the default for development and every test tier, and never
@@ -168,16 +223,17 @@ export function resolveAiConfig(env: NodeJS.ProcessEnv = process.env): AiConfig 
   const pins = Object.fromEntries(
     AI_CALL_CLASSES.map((callClass) => [callClass, pinFor(env, callClass)]),
   ) as Record<AiCallClassName, ModelPin>;
+  const embeddingPin = embeddingPinFor(env);
 
   if (transport === 'openai') {
     const apiKey = (env.OPENAI_API_KEY ?? '').trim();
     if (apiKey === '') {
       throw new Error('AI_TRANSPORT=openai requires OPENAI_API_KEY.');
     }
-    return { transport, apiKey, timeoutMs, maxAttempts, retryBaseMs, pins };
+    return { transport, apiKey, timeoutMs, maxAttempts, retryBaseMs, pins, embeddingPin };
   }
 
-  return { transport: 'fake', timeoutMs, maxAttempts, retryBaseMs, pins };
+  return { transport: 'fake', timeoutMs, maxAttempts, retryBaseMs, pins, embeddingPin };
 }
 
 /**

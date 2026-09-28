@@ -87,7 +87,7 @@ development_status:
   epic-6-retrospective: optional
 
   epic-7: backlog
-  7-1-topic-canonicalization: backlog
+  7-1-topic-canonicalization: done
   7-2-mastery-computation: backlog
   7-3-weak-area-identification: backlog
   7-4-analytics-dashboard: backlog

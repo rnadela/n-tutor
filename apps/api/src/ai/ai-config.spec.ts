@@ -3,6 +3,7 @@ import { AiCallClass } from '../generated/prisma/enums.js';
 import {
   AI_CALL_CLASSES,
   DEFAULT_AI_TIMEOUT_MS,
+  DEFAULT_EMBEDDING_PIN,
   DEFAULT_MODEL_PINS,
   costMicrosFor,
   envSuffixFor,
@@ -163,6 +164,64 @@ describe('the fake transport failure latch', () => {
   it('refuses an unknown mode rather than treating it as none', () => {
     expect(() => fakeFailureFrom({ AI_FAKE_FAILURE: 'explode' })).toThrow(
       /AI_FAKE_FAILURE must be one of/,
+    );
+  });
+});
+
+describe('the embedding pin', () => {
+  it('defaults to DEFAULT_EMBEDDING_PIN on both transports', () => {
+    expect(resolveAiConfig({}).embeddingPin).toEqual(DEFAULT_EMBEDDING_PIN);
+    expect(
+      resolveAiConfig({ AI_TRANSPORT: 'openai', OPENAI_API_KEY: 'sk-test' }).embeddingPin,
+    ).toEqual(DEFAULT_EMBEDDING_PIN);
+  });
+
+  it('prices no output side, because an embedding returns a vector', () => {
+    expect(resolveAiConfig({}).embeddingPin.outputMicrosPerMillion).toBe(0);
+  });
+
+  it('is a separate snapshot from the TopicNormalization call class pin', () => {
+    // One call class, two models. A cost row records which of the two it paid for,
+    // so these must not resolve to the same value by accident.
+    const config = resolveAiConfig({});
+    expect(config.embeddingPin.model).not.toBe(config.pins.TopicNormalization.model);
+  });
+
+  it('honours AI_MODEL_TOPIC_EMBEDDING and AI_PRICE_TOPIC_EMBEDDING_IN', () => {
+    const config = resolveAiConfig({
+      AI_MODEL_TOPIC_EMBEDDING: 'text-embedding-4-large-2027-01-01',
+      AI_PRICE_TOPIC_EMBEDDING_IN: '130000',
+    });
+    expect(config.embeddingPin).toEqual({
+      model: 'text-embedding-4-large-2027-01-01',
+      inputMicrosPerMillion: 130_000,
+      outputMicrosPerMillion: 0,
+    });
+    // The class pin is untouched by the embedding override, and the reverse.
+    expect(config.pins.TopicNormalization.model).toBe(DEFAULT_MODEL_PINS.TopicNormalization.model);
+  });
+
+  it('ignores a blank or whitespace model override rather than sending an empty model', () => {
+    expect(resolveAiConfig({ AI_MODEL_TOPIC_EMBEDDING: '   ' }).embeddingPin.model).toBe(
+      DEFAULT_EMBEDDING_PIN.model,
+    );
+  });
+
+  it('refuses a non-positive or non-numeric embedding price rather than billing zero', () => {
+    // A price of zero is a cost table that says every embedding was free, which is
+    // worse than a missing row because nothing about it looks wrong.
+    for (const raw of ['0', '-5', 'cheap', '1.5']) {
+      expect(() => resolveAiConfig({ AI_PRICE_TOPIC_EMBEDDING_IN: raw })).toThrow(
+        /AI_PRICE_TOPIC_EMBEDDING_IN must be a positive whole number/,
+      );
+    }
+  });
+
+  it('does not read an output price variable for the embedding pin', () => {
+    // There is deliberately no `_OUT` variable. Setting one must change nothing
+    // rather than quietly start pricing an output side that does not exist.
+    expect(resolveAiConfig({ AI_PRICE_TOPIC_EMBEDDING_OUT: '999999' }).embeddingPin).toEqual(
+      DEFAULT_EMBEDDING_PIN,
     );
   });
 });

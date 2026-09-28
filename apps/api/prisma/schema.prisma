@@ -37,6 +37,9 @@ model Subject {
   /// Back-relation only. `sourcetest` is the sole writer of SourceTest
   /// (AD-17); `admin` never writes through this field.
   sourceTests SourceTest[]
+  /// Back-relation only. `topics` is the sole writer of Topic (AD-17); `admin`
+  /// reads and writes a Subject and never reaches its canonical set.
+  topics      Topic[]
 
   @@index([name])
   @@map("subject")
@@ -1542,4 +1545,77 @@ model ExplanationFlag {
   /// ordering column, which is the same equality-then-range shape the index above has.
   @@index([origin, disposition, createdAt])
   @@map("explanation_flag")
+}
+
+// Topics module entity cluster (AD-11, AD-17).
+// `topics` is the sole owner and sole writer of Topic. It reads Subject
+// read-only and never through a Subject write of its own, and nothing else in
+// the system writes a canonical Topic: the one way a row gets here is
+// `TopicService.normalize`.
+
+/// One canonical Topic, scoped to a Subject.
+///
+/// This is the set AD-11 matches a generated `practice_test_question_topic.label`
+/// against. Generation keeps emitting free-form labels — nothing here constrains
+/// it — and `topics` maps each one onto exactly one row of this table so that a
+/// concept spelled four ways is one Mastery value rather than four.
+///
+/// **Scoped by Subject and never by Grade Level.** "Long Division" is the same
+/// concept in Grade 3 and in Grade 5; splitting the canonical set by grade would
+/// fragment the very history the dashboard exists to show, and a child who moves
+/// up a grade would start again from nothing.
+model Topic {
+  id             String   @id @default(uuid())
+  subjectId      String
+  /// The human-readable name. On a minted row it is the emitted label verbatim;
+  /// matching an existing row never rewrites it, because the first spelling that
+  /// arrived is no worse a name than the fourth and a name that moved would make
+  /// a parent's dashboard relabel itself overnight.
+  name           String
+  /// The stage-1 key: the name reduced by `topicMatchKey` — lowercased, stripped
+  /// of punctuation, stopwords dropped, tokens deduped and sorted. Stored rather
+  /// than derived at read time because it is what the unique index below is on,
+  /// and because a derivation applied at query time is a sequential scan.
+  matchKey       String
+  /// Whether this row was minted by the cascade rather than confirmed by a human.
+  ///
+  /// Defaults to true because minting is the only way a row arrives today: the
+  /// confirm / merge / rename surface is Story 7.6. Matching an existing Topic
+  /// never touches this flag — a provisional Topic that turns out to be the right
+  /// answer four more times is still unconfirmed.
+  provisional    Boolean  @default(true)
+  /// The cached stage-2 vector, as a plain JSON array of numbers.
+  ///
+  /// **An ordinary `Json` column, deliberately.** No database vector extension,
+  /// no `Unsupported` column type, no vector index: a Subject's canonical set is
+  /// tens of rows, cosine over tens of short arrays in TypeScript is free, and an
+  /// extension in the database is a deployment dependency bought for nothing.
+  ///
+  /// Nullable, because a row minted with no embed call behind it has none — the
+  /// first Topic in an empty canonical set is minted without a provider call at
+  /// all.
+  embedding      Json?
+  /// The embedding snapshot `embedding` was produced by, recorded per row for the
+  /// reason `ai_call.model` is: vectors from two different models are not
+  /// comparable, so a re-pin must leave the old rows visibly stale rather than
+  /// silently mixed into one cosine.
+  embeddingModel String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  /// `Restrict`: a Subject is disabled and never deleted (UJ-4), and a canonical
+  /// set that could vanish would take a child's whole Mastery history with it.
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+
+  /// What makes stage 1 a lookup and a concurrent mint a loser rather than a
+  /// duplicate. The cascade catches the unique violation and re-reads by this
+  /// exact pair, so "one row exists and both callers get its id" is the index's
+  /// promise and not a check somebody has to remember to make.
+  @@unique([subjectId, matchKey])
+  /// Stage 2's own read is `subjectId` equality only — every Topic of the
+  /// Subject, by design (see topic.service.ts) — so today this serves that
+  /// read by its `subjectId` prefix alone. The `provisional` column earns its
+  /// place once Story 7.6's queue reads `(subjectId, provisional)` together.
+  @@index([subjectId, provisional])
+  @@map("topic")
 }

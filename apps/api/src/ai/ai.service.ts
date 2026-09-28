@@ -13,6 +13,7 @@ import {
   fakeFailureFrom,
   resolveAiConfig,
 } from './ai-config.js';
+import { fakeEmbedding } from './fake-embedding.js';
 
 /**
  * The provider's fault (AD-31): a transport error, a timeout, a non-OK
@@ -73,6 +74,14 @@ export const AI_NO_IMAGES = 'An AI vision call needs at least one image.';
 export const AI_TEXT_CALL_HAS_IMAGES = 'An AI text call must carry no images.';
 export const AI_REQUEST_REJECTED = 'The AI provider refused the request.';
 export const AI_USAGE_MISSING = 'The AI provider answered without reporting what it spent.';
+/**
+ * An embedding call with nothing to embed. Refused rather than answered with a
+ * zero vector: a zero vector compares equal to nothing and would be cached as a
+ * real one, so the caller would pay for a row that can never match again.
+ */
+export const AI_NO_EMBEDDING_TEXT = 'An AI embedding call needs some text.';
+/** An embedding response that carried no vector, or one that is not numbers. */
+export const AI_EMBEDDING_MISSING = 'The AI provider answered without an embedding.';
 
 /**
  * The 4xx statuses that are still worth retrying: a rate limit and a request
@@ -151,11 +160,51 @@ export interface AiRunResult<T> {
   usage: AiUsage;
 }
 
+/**
+ * One embedding call. No schema, no fake-payload builder and no modality: an
+ * embedding has one input and one shape of answer, so there is nothing for a
+ * caller to state about it beyond the text and whose cost row it is.
+ */
+export interface AiEmbedRequest {
+  /**
+   * Which class of work this embedding serves, stated by the caller exactly as on
+   * a `run` and never defaulted here.
+   *
+   * An embedding is not a class of its own: it is a *means*, and the cost row has
+   * to say which piece of product work spent the money. Defaulting it to the one
+   * caller that exists today would make the second caller's cost silently land on
+   * the first caller's ledger line.
+   */
+  callClass: AiCallClassName;
+  /** The text to embed. Refused when blank. */
+  text: string;
+  /** Whose cost row this is, exactly as on a `run`. */
+  parentAccountId: string;
+}
+
+export interface AiEmbedResult {
+  /** The vector, as plain numbers. */
+  vector: number[];
+  /**
+   * What it cost, how long it took, and — in `usage.model` — the embedding
+   * snapshot actually sent. The caller caches that alongside the vector, because
+   * vectors from two models are not comparable and a re-pin has to leave the old
+   * ones visibly stale rather than silently mixed in.
+   */
+  usage: AiUsage;
+}
+
 /** What a transport hands back before the schema has had a say. */
 interface RawCompletion {
   raw: unknown;
   inputTokens: number;
   outputTokens: number;
+}
+
+/** What an embedding transport hands back. No output tokens: there are none. */
+interface RawEmbedding {
+  vector: number[];
+  inputTokens: number;
 }
 
 /** The fake's vision token figures: deterministic, derived from the image count. */
@@ -225,11 +274,60 @@ export class AiService {
       throw new AiInputError(AI_TEXT_CALL_HAS_IMAGES);
     }
     const pin = this.config.pins[request.callClass];
+    return this.withRetries(request.callClass, () => this.attempt(request, pin));
+  }
 
+  /**
+   * One embedding, retried on an upstream fault exactly as `run` is.
+   *
+   * It is here rather than in `topics` because this module is the only
+   * constructor of a provider client and the only writer of `ai_call` (AD-17,
+   * AD-20), and an embedding is a provider call that costs money like any other.
+   *
+   * It writes its cost row under the **caller's own call class** and under the
+   * embedding snapshot rather than that class's pin: one class, two models, and the
+   * row says which one it paid for. Output tokens are zero because an embedding
+   * returns a vector, not tokens.
+   *
+   * No schema and no fake-payload builder: there is one shape of answer, and it
+   * is numbers. The caller gets `number[]` and never an SDK type.
+   */
+  async embed(request: AiEmbedRequest): Promise<AiEmbedResult> {
+    // Refused before any attempt, and never retried: a second blank is blank.
+    if (request.text.trim() === '') throw new AiInputError(AI_NO_EMBEDDING_TEXT);
+    const pin = this.config.embeddingPin;
+    return this.withRetries(request.callClass, () => this.attemptEmbedding(request, pin));
+  }
+
+  /**
+   * The embedding snapshot `embed` would send right now.
+   *
+   * Exposed because of one thing a caller genuinely cannot decide without it: a
+   * cached vector is comparable with a fresh one only when both came from the same
+   * snapshot, so a caller holding stale vectors would otherwise have to *buy* an
+   * embedding to discover that it has nothing to compare it against. This is the
+   * whole of what leaks — an opaque token to compare for equality — and no pin,
+   * price, key or SDK type goes with it.
+   */
+  get embeddingModel(): string {
+    return this.config.embeddingPin.model;
+  }
+
+  // --- Internals ---------------------------------------------------------
+
+  /**
+   * The retry policy, shared by `run` and `embed` so there is one of it.
+   *
+   * An `AiInputError` and an `AiRejectedError` escape immediately: a request this
+   * service cannot make, and one the provider has already refused on its merits,
+   * are not made better by making them again. Every log line carries the call
+   * class and the attempt number and nothing else (AD-20).
+   */
+  private async withRetries<R>(callClass: AiCallClassName, attempt: () => Promise<R>): Promise<R> {
     let lastFault: AiUpstreamError = new AiUpstreamError(AI_TRANSPORT_FAILED);
-    for (let attempt = 1; attempt <= this.config.maxAttempts; attempt += 1) {
+    for (let tries = 1; tries <= this.config.maxAttempts; tries += 1) {
       try {
-        return await this.attempt(request, pin);
+        return await attempt();
       } catch (cause) {
         // Neither of these is made better by being asked again.
         if (cause instanceof AiInputError || cause instanceof AiRejectedError) throw cause;
@@ -238,17 +336,15 @@ export class AiService {
         // The call class and the attempt number, and nothing about the images
         // or the answer (AD-20).
         this.logger.warn(
-          `An ${request.callClass} call failed on attempt ${attempt} of ${this.config.maxAttempts}.`,
+          `An ${callClass} call failed on attempt ${tries} of ${this.config.maxAttempts}.`,
         );
-        if (attempt < this.config.maxAttempts) {
-          await sleep(this.config.retryBaseMs * 2 ** (attempt - 1));
+        if (tries < this.config.maxAttempts) {
+          await sleep(this.config.retryBaseMs * 2 ** (tries - 1));
         }
       }
     }
     throw lastFault;
   }
-
-  // --- Internals ---------------------------------------------------------
 
   /** Dispatch, parse, then — and only then — the cost row. */
   private async attempt<T>(request: AiRunRequest<T>, pin: ModelPin): Promise<AiRunResult<T>> {
@@ -284,8 +380,115 @@ export class AiService {
     return { payload: parsed.data, usage };
   }
 
+  /**
+   * One embedding: dispatch, check the shape, then — and only then — the cost row.
+   *
+   * The same order `attempt` uses and for the same reason: a row is written for a
+   * *completed* call, so a fault retried to exhaustion never appears in the cost
+   * table as a charge for work that was thrown away.
+   */
+  private async attemptEmbedding(request: AiEmbedRequest, pin: ModelPin): Promise<AiEmbedResult> {
+    const startedAt = Date.now();
+    const completion =
+      this.config.transport === 'openai'
+        ? await this.embedOpenAi(request, pin)
+        : this.embedFake(request);
+    const latencyMs = Date.now() - startedAt;
+
+    const usage: AiUsage = {
+      model: pin.model,
+      inputTokens: completion.inputTokens,
+      // Zero, and stated: an embedding returns a vector, not tokens.
+      outputTokens: 0,
+      costMicros: costMicrosFor(pin, completion.inputTokens, 0),
+      latencyMs,
+    };
+    // Already made and already billed. A cost row that could not be written is an
+    // accounting problem to shout about, not a reason to buy the vector again.
+    try {
+      await this.recordCall(request, usage);
+    } catch {
+      this.logger.error(
+        `The cost row for an ${request.callClass} embedding could not be written. The call completed and is not recorded.`,
+      );
+    }
+    return { vector: completion.vector, usage };
+  }
+
+  /** The embeddings endpoint. The text goes out; a vector comes back. */
+  private async embedOpenAi(request: AiEmbedRequest, pin: ModelPin): Promise<RawEmbedding> {
+    const client = this.openAiClient();
+    try {
+      // Trimmed, exactly as `embedFake` trims: the vector and the token count
+      // must agree on what was actually sent, and two labels that differ only
+      // in surrounding whitespace must embed and bill identically.
+      const text = request.text.trim();
+      const response = await client.embeddings.create(
+        { model: pin.model, input: text },
+        { signal: AbortSignal.timeout(this.config.timeoutMs) },
+      );
+      const vector = response.data?.[0]?.embedding;
+      // A response with no vector in it is the provider's fault and retryable:
+      // the alternative is caching `[]` as this label's embedding, which would
+      // compare equal to nothing forever after.
+      if (!Array.isArray(vector) || vector.length === 0) {
+        throw new AiUpstreamError(AI_EMBEDDING_MISSING);
+      }
+      if (
+        !vector.every((component) => typeof component === 'number' && Number.isFinite(component))
+      ) {
+        throw new AiUpstreamError(AI_EMBEDDING_MISSING);
+      }
+      // Defaulted to zero nowhere, for the reason `callOpenAi` states: a real
+      // call written into the cost table as free is worse than a missing row.
+      // A present-but-non-positive count is the same fault in a different
+      // shape — a vector was genuinely bought and must not be cached as a free
+      // or negative-cost row.
+      if (
+        !response.usage ||
+        typeof response.usage.prompt_tokens !== 'number' ||
+        response.usage.prompt_tokens <= 0
+      ) {
+        throw new AiUpstreamError(AI_USAGE_MISSING);
+      }
+      return { vector, inputTokens: response.usage.prompt_tokens };
+    } catch (cause) {
+      throw this.classifyOpenAiFault(cause, request.callClass);
+    }
+  }
+
+  /**
+   * The fake's embedding (AD-22).
+   *
+   * `fakeEmbedding` is the substance and lives in its own file, because making
+   * *similar* labels similar is the whole reason the fake exists and is worth a
+   * unit spec of its own. What is here is the part that belongs to the transport:
+   * the failure latch and the token figure.
+   *
+   * Only `transport` is honoured. `schema` has no meaning — there is no schema to
+   * reject a vector — and `unusable` belongs to the stage-3 call, where the
+   * caller's own fake payload spends it. Both are passed over rather than
+   * repurposed, so a spec that latches one for a `run` does not silently break an
+   * `embed` on the way there.
+   */
+  private embedFake(request: AiEmbedRequest): RawEmbedding {
+    if (fakeFailureFrom() === 'transport') throw new AiUpstreamError(AI_TRANSPORT_FAILED);
+    // The trimmed string, which is the one the refusal above tested and the one the
+    // vector is built from. Billing the untrimmed text would charge for whitespace
+    // that never reached the arithmetic, and would make two labels that embed
+    // identically cost differently.
+    const text = request.text.trim();
+    return {
+      vector: fakeEmbedding(text),
+      inputTokens: Math.max(1, Math.ceil(text.length / FAKE_CHARS_PER_TOKEN)),
+    };
+  }
+
   /** The only writer of `ai_call`. Identifiers, counts and money only (AD-20). */
-  private async recordCall<T>(request: AiRunRequest<T>, usage: AiUsage): Promise<void> {
+  private async recordCall(
+    request: { callClass: AiCallClassName; parentAccountId: string },
+    usage: AiUsage,
+  ): Promise<void> {
     await this.prisma.aiCall.create({
       data: {
         parentAccountId: request.parentAccountId,
@@ -309,14 +512,7 @@ export class AiService {
    * inline as a data URL in the order the caller gave.
    */
   private async callOpenAi<T>(request: AiRunRequest<T>, pin: ModelPin): Promise<RawCompletion> {
-    // `maxRetries: 0` because this module is the retry authority and the SDK's
-    // default of 2 would silently multiply: three of our attempts against three
-    // of its own is nine billed vision calls behind one cost row.
-    const client = (this.client ??= new OpenAI({
-      apiKey: this.config.apiKey!,
-      maxRetries: 0,
-      timeout: this.config.timeoutMs,
-    }));
+    const client = this.openAiClient();
     try {
       const response = await client.responses.parse(
         {
@@ -368,30 +564,54 @@ export class AiService {
         outputTokens: response.usage.output_tokens,
       };
     } catch (cause) {
-      // This module's own verdicts pass through: they have already been
-      // classified and their messages are already content-free.
-      if (cause instanceof AiUpstreamError || cause instanceof AiRejectedError) throw cause;
-
-      const status = statusOf(cause);
-      // A refused request — a bad key, a model this account cannot use, a body
-      // the API will not accept — is a standing fact, not an outage. The status
-      // is logged because it is the only thing that tells the two apart; not one
-      // word of the provider's own message goes with it (AD-20).
-      if (
-        status !== undefined &&
-        status >= 400 &&
-        status < 500 &&
-        !RETRYABLE_CLIENT_STATUSES.has(status)
-      ) {
-        this.logger.error(`An ${request.callClass} call was refused by the provider (${status}).`);
-        throw new AiRejectedError(AI_REQUEST_REJECTED, status);
-      }
-      if (status !== undefined) {
-        this.logger.warn(`An ${request.callClass} call failed upstream (${status}).`);
-      }
-      // Transport error, timeout, 429, 5xx: one retryable fault class.
-      throw new AiUpstreamError(AI_TRANSPORT_FAILED);
+      throw this.classifyOpenAiFault(cause, request.callClass);
     }
+  }
+
+  /**
+   * The one client, built once. `maxRetries: 0` because this module is the retry
+   * authority and the SDK's default of 2 would silently multiply: three of our
+   * attempts against three of its own is nine billed calls behind one cost row.
+   */
+  private openAiClient(): OpenAI {
+    return (this.client ??= new OpenAI({
+      apiKey: this.config.apiKey!,
+      maxRetries: 0,
+      timeout: this.config.timeoutMs,
+    }));
+  }
+
+  /**
+   * One SDK fault, classified. Shared by every `openai` path so that a refusal
+   * and an outage are told apart the same way whatever endpoint was called.
+   *
+   * Returns the verdict rather than throwing it, so each call site's `catch` reads
+   * as the `throw` it is.
+   */
+  private classifyOpenAiFault(cause: unknown, callClass: AiCallClassName): Error {
+    // This module's own verdicts pass through: they have already been
+    // classified and their messages are already content-free.
+    if (cause instanceof AiUpstreamError || cause instanceof AiRejectedError) return cause;
+
+    const status = statusOf(cause);
+    // A refused request — a bad key, a model this account cannot use, a body
+    // the API will not accept — is a standing fact, not an outage. The status
+    // is logged because it is the only thing that tells the two apart; not one
+    // word of the provider's own message goes with it (AD-20).
+    if (
+      status !== undefined &&
+      status >= 400 &&
+      status < 500 &&
+      !RETRYABLE_CLIENT_STATUSES.has(status)
+    ) {
+      this.logger.error(`An ${callClass} call was refused by the provider (${status}).`);
+      return new AiRejectedError(AI_REQUEST_REJECTED, status);
+    }
+    if (status !== undefined) {
+      this.logger.warn(`An ${callClass} call failed upstream (${status}).`);
+    }
+    // Transport error, timeout, 429, 5xx: one retryable fault class.
+    return new AiUpstreamError(AI_TRANSPORT_FAILED);
   }
 
   /**

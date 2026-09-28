@@ -15,6 +15,7 @@ import { PARENT_CREDENTIAL_ROUTE } from './identity/parent-credential-route.deco
 import { PracticeTestModule } from './practicetest/practice-test.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { SourceTestModule } from './sourcetest/source-test.module.js';
+import { TopicsModule } from './topics/topics.module.js';
 
 export const LOGIN_THROTTLER = 'login';
 export const PARENT_THROTTLER = 'parent';
@@ -76,6 +77,14 @@ export const PARENT_THROTTLER = 'parent';
     // counts its charged rows through its own PrismaService rather than through a
     // service here, which is what keeps the arrow one-way.
     ExplanationModule,
+    // Sole owner and sole writer of Topic, and the one implementation of the
+    // AD-11 canonicalization cascade (AD-17). Registered last because every arrow
+    // points out of it: it reads Subject read-only through the global Prisma
+    // module and asks `ai` for its two provider calls, and nothing in the list
+    // above imports it. Story 7.2's Mastery computation is the caller it exists
+    // for; it is registered ahead of that caller so a missing provider or a bad
+    // config fails the boot rather than the first label to arrive.
+    TopicsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -1829,3 +1829,43 @@ source_spec: `spec-6-5-grade-dispute-override.md`
 severity: medium
 reason: The whole changeset was stashed and the suite re-run on the baseline commit 7fa00cc: admin-taxonomy (401 redirect), parent-auth (both reset cases), parent-explanation-review, parent-explanation-suppression and student-explanation-flagging fail identically with the work reverted. `practice-test.int-spec.ts` failed 6 of 196 on the same stashed baseline, in areas this diff never touches. Both predate the story; neither can currently tell a real break from noise.
 status: open
+
+### DW-230: The api integration suite is flaky as a whole run: a shifting set of 2 to 6 parent-scoped requests answer 404 or 401 for a parent the fixture had just created.
+origin: spec-deferred 33a2cc1c63a2
+location: apps/api/test/harness.ts (resetParentAccounts / resetTaxonomy)
+source_spec: `spec-7-1-topic-canonicalization.md`
+severity: medium
+reason: Reproduced on master with this story's changes stashed: `pnpm --filter api run test` failed 6 tests across test/explanation-suppression.int-spec.ts, test/grade-dispute.int-spec.ts and test/student-explanation-flag.int-spec.ts. Patched runs fail a different set each time, usually inside test/practice-test.int-spec.ts, and every affected file passes when run alone. The failures always land on a parent-scoped route immediately after a fixture created the parent, which is the signature of a truncate-based reset racing an in-flight request rather than of any one story's code.
+status: open
+
+### DW-231: TopicService.cacheVectorFor's own database write failure (the vector-cache backfill onto a matched Topic) has no test forcing it, unlike AiService's parallel recordCall failure which does.
+origin: spec-deferred 6b21d8765317
+location: apps/api/src/topics/topic.service.ts (cacheVectorFor)
+source_spec: `spec-7-1-topic-canonicalization.md`
+severity: medium
+reason: Confirmed by a verification-gap review pass reading topic-normalization.int-spec.ts, ai.service.openai.spec.ts and the whole repo for `cacheVectorFor`/`topic.update`/ `prismaThrows` references: only the success path is exercised. An attempt to add integration coverage by spying on `h.prisma.topic.update` (mirroring the `prismaThrows` pattern from ai.service.openai.spec.ts) left the mock unrestored after `mockRestore()`, corrupting a later, unrelated test in the same file ('declines stage 2 when every cached vector came from another snapshot') even inside a try/finally. The shared PrismaService instance has no seam for this kind of failure injection at the integration tier the way AiService's mockable client does, so the test was reverted rather than shipped in a state that destabilizes the suite.
+status: open
+
+### DW-232: Two concurrent normalize() calls for the same concept under different labels that tokenize to different match keys (e.g. simultaneous first-time submissions of "Fraction Addition" and "Fractions
+origin: spec-deferred 234559965ce5
+location: apps/api/src/topics/topic.service.ts (normalize, mint)
+source_spec: `spec-7-1-topic-canonicalization.md`
+severity: medium
+reason: Confirmed by reading normalize()'s cascade in topic.service.ts: the unique index on (subjectId, matchKey) only prevents two mints from landing on the *same* key (the "Mint races another mint" row already covered by the I/O matrix and its own test). A race between two different, never-before-seen labels for the same concept has no such guard — each computes its own matchKey, each misses stage 1, each has no comparable vector yet, and each proceeds to mint independently. This is inherent to the AD-11 three-stage design (no cross-request lock across the cascade) rather than a coding defect, and resolving it would need a broader dedup mechanism than this story's scope allows.
+status: open
+
+### DW-233: No test exercises the Topic-to-Subject foreign key's ON DELETE RESTRICT behavior; a regression that weakened it to CASCADE (or removed it) would go unnoticed.
+origin: spec-deferred d6b223a7858b
+location: apps/api/prisma/migration.sql, apps/api/prisma/schema.prisma (Topic.subjectId FK)
+source_spec: `spec-7-1-topic-canonicalization.md`
+severity: low
+reason: apps/api/prisma/migration.sql and schema.prisma assert RESTRICT by comment, but topic-normalization.int-spec.ts never attempts to delete a Subject that owns canonical Topics to confirm the constraint actually blocks it.
+status: open
+
+### DW-234: TopicService.offer()'s "no comparable vector" fallback ordering (newest-first via the createdAt tiebreak, when embedded is null) is never exercised past TOPIC_CANDIDATE_LIMIT candidates by any test —
+origin: spec-deferred b9be720948a7
+location: apps/api/src/topics/topic.service.ts (offer)
+source_spec: `spec-7-1-topic-canonicalization.md`
+severity: medium
+reason: topic-normalization.int-spec.ts's only over-the-cap test ("caps the stage-3 candidate list and offers the strongest candidates first") gives every filler and the target Topic a real embedding, so embedded is never null in that test. The two tests that do produce embedded === null each use only 1-2 candidates, well under TOPIC_CANDIDATE_LIMIT, so the newest-first ordering never determines what gets dropped. A regression in that branch's tiebreak (e.g. reverting to oldest-first, the same class of bug the first review pass already fixed for the cosine-ranked branch) would ship undetected and could silently drop a Subject's newest Topics from the stage-3 offer, minting duplicates for concepts already present but excluded by the cap.
+status: open
