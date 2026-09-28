@@ -832,3 +832,50 @@ describe('the analytics dashboard call', () => {
     expect(SOURCE).not.toContain('unanswered?: number');
   });
 });
+
+describe('the topic drill-down call', () => {
+  it('reads one route, carries the elevation bearer and writes nothing', async () => {
+    // One call, because the drill-down is one answer: split across reads a screen
+    // could state a percentage taken at one instant beside rows taken at another.
+    const fetchMock = respondWith(200, { topicId: 't-1', mastery: null });
+    await parentApi.topicDrillDown('tok', 'p-1', 't-1');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/parent/students/p-1/analytics/topics/t-1');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer tok');
+    expect(init.method).toBeUndefined();
+    expect(init.body).toBeUndefined();
+  });
+
+  it('escapes both ids rather than pasting them into the path', async () => {
+    const fetchMock = respondWith(200, { mastery: null });
+    await parentApi.topicDrillDown('tok', 'a/b', 'c?d');
+    const [url] = fetchMock.mock.calls[0]! as unknown as [string];
+    expect(url).toContain('/parent/students/a%2Fb/analytics/topics/c%3Fd');
+  });
+
+  it('reports a failure with the drill-down’s own sentence', async () => {
+    respondWith(500, {});
+    await expect(parentApi.topicDrillDown('tok', 'p-1', 't-1')).rejects.toMatchObject({
+      message: parentCopy.topicDrillDown.loadFailed,
+    });
+  });
+
+  it('carries no allowance, cost, plan or price on the drill-down view', () => {
+    // The allowance the screen states is the account's own `generationAllowance`
+    // read; nothing about what a generation costs is a field on this response.
+    expect(SOURCE).toContain('export interface TopicDrillDownView');
+    const view = SOURCE.slice(
+      SOURCE.indexOf('export interface TopicDrillDownView'),
+      SOURCE.indexOf('}', SOURCE.indexOf('export interface TopicDrillDownView')),
+    );
+    expect(view).not.toMatch(/allowance|cost|price|tier|remaining/iu);
+  });
+
+  it('keeps the weighted label a field the server resolved, never one composed here', () => {
+    // `request()` refuses a label the upload does not carry, and what counts as
+    // carrying it is a comparison only the server makes.
+    expect(SOURCE).toContain('export interface WeightedTargetView');
+    expect(SOURCE).toContain('weightedTopic: string;');
+  });
+});

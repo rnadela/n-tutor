@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import type { Route } from 'next';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ThemeProvider } from '@mui/material/styles';
@@ -99,8 +100,17 @@ describe('what the mastery table states', () => {
     expect(CODE).toContain('aria-hidden="true"');
   });
 
-  it('offers no way on, because the drill-down is not this story', () => {
-    expect(CODE).not.toMatch(/NextLink|href=|onClick|router/u);
+  it('offers its one way on as a link, and no click handler standing in for one', () => {
+    // A row opens through an anchor, which is keyboard reachable and announced as a
+    // link. A row-level `onClick` would be neither, and a router push from a table cell
+    // would be navigation nothing can see the destination of.
+    //
+    // Asserted as "the topic cell is an anchor whose href is the caller's" rather than
+    // by counting `href=` occurrences: an unrelated anchor added elsewhere in this table
+    // is not a regression in this rule, and a count would call it one.
+    expect(CODE).not.toMatch(/onClick|router/u);
+    expect(CODE).toContain('component={TopicLink}');
+    expect(CODE).toContain('href={hrefFor(topic.topicId)}');
   });
 
   it('carries no cost, plan or model figure', () => {
@@ -133,12 +143,28 @@ function row(over: Partial<MasteryTopicView> & { topicId: string }): MasteryTopi
   };
 }
 
+/**
+ * The caller's own href composition, stood in for here.
+ *
+ * The table takes it as a required prop precisely because *where* a row goes is the
+ * dashboard's fact and not the table's, so the spec supplies one rather than the table
+ * having a default a caller could forget to replace.
+ */
+const TEST_HREF_FOR = (topicId: string): Route<`/parent/analytics/topics/${string}`> =>
+  `/parent/analytics/topics/${topicId}`;
+
 function render(topics: readonly MasteryTopicView[]): string {
   return renderToStaticMarkup(
     createElement(
       ThemeProvider,
       { theme: parentTheme },
-      createElement(MasteryTable, { topics, heading: 'Topics', windowSize: 5, name: 'Ada' }),
+      createElement(MasteryTable, {
+        topics,
+        heading: 'Topics',
+        windowSize: 5,
+        name: 'Ada',
+        hrefFor: TEST_HREF_FOR,
+      }),
     ),
   );
 }
@@ -261,5 +287,40 @@ describe('what the rendered mastery table shows a parent', () => {
     const markup = render([]);
     expect(count(markup, 'mastery-row')).toBe(0);
     expect(markup).toContain(parentCopy.analytics.masteryScope('Ada', 5));
+  });
+});
+
+describe('opening a row', () => {
+  it('renders the topic name as a real link carrying the topic id', () => {
+    // A row that cannot be opened is a dashboard that still dead-ends. An anchor rather
+    // than a row click handler, so it is keyboard reachable and announced as a link.
+    const markup = render(ROWS);
+    expect(count(markup, 'mastery-topic-link')).toBe(ROWS.length);
+    for (const topic of ROWS) {
+      expect(markup).toContain(`href="/parent/analytics/topics/${topic.topicId}"`);
+    }
+  });
+
+  it('makes the link’s accessible name the topic, and never a bare glyph', () => {
+    const markup = render([ROWS[0]!]);
+    expect(markup).toMatch(
+      new RegExp(`data-testid="mastery-topic-link"[^>]*>${ROWS[0]!.topicName}<`, 'u'),
+    );
+  });
+
+  it('opens a row whose topic no longer resolves, with the stand-in as its name', () => {
+    // The figure is still true whatever became of the row that named it.
+    const markup = render([row({ topicId: 'gone', topicName: null })]);
+    expect(markup).toContain('href="/parent/analytics/topics/gone"');
+    expect(markup).toContain(parentCopy.analytics.unknownTopic);
+  });
+
+  it('composes no URL of its own', () => {
+    // Which child is selected is the dashboard's fact; a route composed here would be a
+    // second place the drill-down's address lives. The route only appears as the type
+    // the prop is checked against, never as a value.
+    expect(CODE).toContain('hrefFor(topic.topicId)');
+    expect(CODE).not.toMatch(/href=\{`/u);
+    expect(CODE).not.toMatch(/student=/u);
   });
 });

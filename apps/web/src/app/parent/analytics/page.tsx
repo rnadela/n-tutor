@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
@@ -57,10 +58,11 @@ const NO_SUBJECT = '__none__';
  * response; restating either here would drift the first time an operator changed
  * the environment.
  *
- * **It decides nothing and generates nothing.** There is no way from a row into a
- * question list and no control that makes more work — those are Story 7.5 — and the
- * two digest lines are links into the screens that already own those decisions.
- * Nothing on this page writes.
+ * **It decides nothing and generates nothing.** Every row now opens its topic's
+ * drill-down — which is where the evidence and the one "generate more on this" control
+ * live (UX Q12c: no duplicate entry point at the dashboard) — and the two digest lines
+ * are links into the screens that already own those decisions. Nothing on this page
+ * writes, and no control here makes more work.
  *
  * A student the API returns nothing for renders the same empty state a student with
  * no finished work does, and this screen does not try to tell the two apart,
@@ -206,6 +208,24 @@ export default function ParentAnalyticsPage() {
               ? null
               : subjectChoice,
         );
+  /**
+   * Where one topic's drill-down is, for the student on screen.
+   *
+   * A `useCallback` so the table is not handed a new prop identity on every render of
+   * this page, and a function rather than a prefix string so the table composes no URL
+   * of its own: the route and the parameter name are known in one place.
+   */
+  const hrefForTopic = useCallback(
+    (topicId: string): Route<`/parent/analytics/topics/${string}`> => {
+      // Composed as one segment so the literal stays the shape the generated route
+      // table admits: the topic is the dynamic segment and the student rides in the
+      // query string, which is not part of the route.
+      const segment = `${encodeURIComponent(topicId)}?student=${encodeURIComponent(studentProfileId)}`;
+      return `/parent/analytics/topics/${segment}`;
+    },
+    [studentProfileId],
+  );
+
   const narrowedTo =
     subjectChoice === EVERY_SUBJECT
       ? null
@@ -386,6 +406,12 @@ export default function ParentAnalyticsPage() {
                           }
                           windowSize={analytics.trend.windowSize}
                           name={address.name}
+                          // The drill-down is about **one** child, so the selected
+                          // student travels in the query string rather than being
+                          // guessed from whatever the next screen happens to read
+                          // first. Composed here because this is the screen that
+                          // knows who is selected.
+                          hrefFor={hrefForTopic}
                         />
                       )}
                     </Addressed>

@@ -644,6 +644,57 @@ export interface AttemptAnswerKey {
 }
 
 /**
+ * One Question of one Attempt, as words — for a reader that already knows **which**
+ * `(Attempt, Question)` pairs it wants.
+ *
+ * `AnswerKeyQuestion`'s sibling and deliberately not that read widened.
+ * `answerKeyFor` is per-Attempt and returns every Question of the paper, which is
+ * right for a results screen and wrong for a drill-down: a Topic's five-Attempt
+ * window may touch four Questions across five papers of twenty, and reading five
+ * whole papers to render four rows would be four hundred rows fetched to throw away.
+ * So this one is keyed by refs, and the text resolution — the ordinal-to-body
+ * matching, the degrade-to-null and the log-ids-only rule — is the same three
+ * functions rather than a second recipe.
+ *
+ * No `questionId` field: the map is keyed by the ref, and a second copy of the id
+ * inside the value is a second thing that can disagree with the key.
+ */
+export interface QuestionEvidenceView {
+  /** The number the child was shown while they worked. */
+  ordinal: number;
+  format: QuestionFormat;
+  /** The stored segments, exactly as stored (AD-32). Null when unreadable. */
+  prompt: RichText | null;
+  /** What the child put down, as words. Null for a Question left blank. */
+  studentAnswer: RichText | null;
+  /** What the answer was, as words. Null when the stored key is unreadable. */
+  correctAnswer: RichText | null;
+}
+
+/**
+ * The one upload a weighted regeneration can actually be aimed at, resolved.
+ *
+ * `weightedTopic` is the **Extraction's own spelling** and is the only thing a
+ * request may be weighted on: `request()` resolves against `normalizeTopicLabel`,
+ * which is deliberately not canonicalization (AD-11), so a canonical Topic name is
+ * not guaranteed to be one of an Extraction's raw labels. A screen sending its own
+ * heading would 409 on a label it invented; this carries a label already proved to
+ * match.
+ *
+ * `subjectName` and `submittedAt` are what let a parent recognise the paper the
+ * practice would be generated from. Neither is a cost, a tier or a model name.
+ */
+export interface WeightedTargetView {
+  sourceTestId: string;
+  /** The label `request()` will accept, in the Extraction's own words. */
+  weightedTopic: string;
+  /** Null where the upload carries no classification or it no longer resolves. */
+  subjectName: string | null;
+  /** When the upload was committed, or null for a row that carries no instant. */
+  submittedAt: string | null;
+}
+
+/**
  * Everything an Explanation is written from, for one Question of one handed-in
  * Attempt.
  *
@@ -2104,6 +2155,218 @@ export class PracticeTestService {
   }
 
   /**
+   * The words behind a set of `(Attempt, Question)` refs, keyed
+   * `attemptId:questionId`.
+   *
+   * **It exists so `analytics` and `grading` hold no delegate of this module's.**
+   * `grading` can say which Questions of which Attempts a Topic's window holds; it
+   * cannot say what any of them asked, what the child put down or what the answer
+   * was, because `practice_test_question`, `practice_test_choice` and `answer` are
+   * this module's tables (AD-17). This is the read that crosses that boundary, and it
+   * is keyed by refs precisely so a drill-down over a five-Attempt window does not
+   * fetch five whole papers.
+   *
+   * **Not `answerKeyFor` widened.** That read is per-Attempt, returns every Question
+   * of the paper and refuses a foreign or still-open Attempt with the shared 404.
+   * This one is a lookup: a ref it cannot see is simply **absent from the map**, and
+   * the caller renders the row with null fields. A refusal here would let one
+   * unreadable row take a whole screen down, and the screen is about work already
+   * done.
+   *
+   * **The account travels in the `where`, on both axes.** The Question is reached
+   * through its Practice Test's `parentAccountId` and the child's answer through its
+   * Attempt's, so another account's row is unreachable by construction rather than by
+   * a comparison afterwards. A ref naming a real Question of another account's paper
+   * therefore comes back absent, which is the same answer an unknown id gets (AD-18).
+   *
+   * One transaction, for the reason `answerKeyFor` opens one: a Question, its options
+   * and this Attempt's answer assembled from three snapshots could answer with an
+   * option list that never belonged to the prompt above it.
+   *
+   * Unreadable stored segments **degrade to null** rather than throwing, and only ids
+   * are logged — never a prompt, an answer or an option body (AD-20).
+   */
+  async questionEvidenceFor(
+    parentAccountId: string,
+    refs: readonly { attemptId: string; questionId: string }[],
+  ): Promise<Map<string, QuestionEvidenceView>> {
+    if (refs.length === 0) return new Map();
+    const attemptIds = [...new Set(refs.map((ref) => ref.attemptId))];
+    const questionIds = [...new Set(refs.map((ref) => ref.questionId))];
+
+    return this.prisma.withTransaction(async (tx) => {
+      const questions = await tx.practiceTestQuestion.findMany({
+        where: {
+          id: { in: questionIds },
+          // Whose the Question is, in the statement that finds it.
+          practiceTest: { parentAccountId },
+        },
+        select: {
+          id: true,
+          ordinal: true,
+          format: true,
+          prompt: true,
+          answer: true,
+          // The flagged option's *body* is what a reader needs, and the ordinal the
+          // child chose has to be matched against the same list.
+          choices: {
+            select: { ordinal: true, body: true, isCorrect: true },
+            orderBy: { ordinal: 'asc' },
+          },
+          // Narrowed to the Attempts asked about, and scoped again through the
+          // Attempt's own account column: a Question of this account's paper sat by
+          // nobody of this account is not a row this read may answer with.
+          answers: {
+            where: { attemptId: { in: attemptIds }, attempt: { parentAccountId } },
+            select: { attemptId: true, value: true },
+          },
+        },
+      });
+      const byId = new Map(questions.map((question) => [question.id, question]));
+
+      const unreadable: string[] = [];
+      const evidence = new Map<string, QuestionEvidenceView>();
+      for (const ref of refs) {
+        const question = byId.get(ref.questionId);
+        // Absent rather than a row of nulls: "this ref names nothing I can see" is
+        // the caller's fact to state, and `drillDownRowsOf` states it.
+        if (question === undefined) continue;
+        // One row at most, by `answer_attemptId_questionId_key`. No row is a Question
+        // the child left blank, which is a null answer and never an empty one.
+        const value =
+          question.answers.find((answer) => answer.attemptId === ref.attemptId)?.value ?? null;
+        const correct = correctAnswerTextOf(question);
+        const prompt = isRichText(question.prompt) ? (question.prompt as RichText) : null;
+        const studentAnswer = studentAnswerTextOf(question, value);
+        // Any of the three can independently fail to read back; the log exists to say
+        // how many rows degraded, not which field did.
+        if (correct === null || prompt === null || (value !== null && studentAnswer === null)) {
+          unreadable.push(question.id);
+        }
+        evidence.set(refKeyOf(ref.attemptId, ref.questionId), {
+          ordinal: question.ordinal,
+          format: question.format,
+          prompt,
+          studentAnswer,
+          correctAnswer: correct,
+        });
+      }
+      if (unreadable.length > 0) {
+        // Ids and a count. Never a prompt, an answer or an option body (AD-20).
+        this.logger.warn(
+          `The stored answer key of ${unreadable.length} question(s) could not be read back: ${[...new Set(unreadable)].join(', ')}.`,
+        );
+      }
+      return evidence;
+    });
+  }
+
+  /**
+   * The one Source Test a weighted regeneration can be aimed at from this evidence,
+   * with the label `request()` will accept — or `null`.
+   *
+   * **The label is resolved here because this module owns the comparison.**
+   * `request()` refuses a label the Extraction does not carry and resolves against
+   * `normalizeTopicLabel`, which is deliberately *not* canonicalization (AD-11): a
+   * canonical Topic name is not guaranteed to be one of an Extraction's raw labels.
+   * A screen sending its own heading would 409 on a label it invented, which is
+   * exactly the offer a parent must never be shown. So the canonical name is tried
+   * first and then the raw `PracticeTestQuestionTopic` labels of the very Questions
+   * the parent is looking at, through the same `matchTopic` the request uses — and
+   * `null` is answered rather than a fire that would refuse.
+   *
+   * **Ordered by when the Practice Test behind each Question was generated, newest
+   * first** — `practiceTest.createdAt desc`, with `practiceTestId desc` breaking a tie
+   * two drafts of one job can land inside. Deliberately *not* the upload's own
+   * `submittedAt`: this read is over `practice_test_question`, and the Source Test's
+   * columns are `sourcetest`'s to give (AD-17) — reaching them here would mean
+   * acquiring the delegate this module must not hold, or a second round trip per
+   * candidate before any of them is known to match. The two orders agree for every
+   * paper generated from its own upload, which is every paper; where they could
+   * differ, "the most recently generated practice the child actually sat" is the
+   * better answer anyway, because that is the paper the evidence in front of the
+   * parent came off.
+   *
+   * The candidates are the Source Tests behind the Questions in hand and nothing else:
+   * a Topic the child met on one upload does not license generating from another.
+   *
+   * At most one Extraction read per distinct Source Test behind the window, and no
+   * provider call of any kind. `requireReadable` is what makes a foreign or unknown
+   * id a 404 inside this loop — and since the ids came out of an account-scoped
+   * statement above, it is a proof restated rather than one that can fail.
+   *
+   * A Source Test that is not `Submitted`, one with no completed Extraction and one
+   * whose Extraction carries no matching label are all simply **not** the answer:
+   * each is skipped and the next is tried, exactly as `request()` would have refused
+   * them. `null` when none is left.
+   */
+  async weightedTargetFor(
+    parentAccountId: string,
+    questionIds: readonly string[],
+    canonicalTopicName: string | null,
+  ): Promise<WeightedTargetView | null> {
+    if (questionIds.length === 0) return null;
+    const ids = [...new Set(questionIds)];
+
+    const questions = await this.prisma.practiceTestQuestion.findMany({
+      where: { id: { in: ids }, practiceTest: { parentAccountId } },
+      // Newest *generated paper* first — not newest upload; the docstring says why —
+      // with `practiceTestId` breaking a tie on `createdAt`, so two drafts of one job
+      // landing inside the same millisecond do not leave the order to whatever
+      // Postgres happened to return.
+      orderBy: [{ practiceTest: { createdAt: 'desc' } }, { practiceTestId: 'desc' }],
+      select: {
+        practiceTest: { select: { sourceTestId: true } },
+        // The raw generated spellings of the Questions in hand — the second thing
+        // tried, after the canonical name.
+        topics: { select: { label: true } },
+      },
+    });
+    if (questions.length === 0) return null;
+
+    // In first-appearance order, which is newest Source Test first by the `orderBy`
+    // above. The labels of *every* Question behind the same upload are pooled: a
+    // parent is looking at several rows of one paper, and the Extraction's spelling
+    // may sit on any of them.
+    const labelsBySourceTest = new Map<string, string[]>();
+    for (const question of questions) {
+      const sourceTestId = question.practiceTest.sourceTestId;
+      const labels = labelsBySourceTest.get(sourceTestId);
+      const own = question.topics.map((topic) => topic.label);
+      if (labels === undefined) labelsBySourceTest.set(sourceTestId, own);
+      else labels.push(...own);
+    }
+
+    const subjectLabels = await this.sourceTests.readSubjectLabels([...labelsBySourceTest.keys()]);
+
+    for (const [sourceTestId, rawLabels] of labelsBySourceTest) {
+      const sourceTest = await this.sourceTests.requireReadable(parentAccountId, sourceTestId);
+      // The same two gates `request()` applies, in the same order — an upload that
+      // has not finished being read is not a target, it is the next candidate.
+      if (sourceTest.status !== 'Submitted') continue;
+      const extraction = await this.extraction.readForGeneration(sourceTestId);
+      if (extraction === null || extraction.questions.length === 0) continue;
+
+      const offered = topicsOf(extraction);
+      // The canonical name first — it is what the parent is reading as a heading, so
+      // an Extraction that happens to spell it that way is the least surprising
+      // answer — then the raw labels of the Questions in hand.
+      const matched =
+        (canonicalTopicName === null ? undefined : matchTopic(offered, canonicalTopicName)) ??
+        rawLabels.map((label) => matchTopic(offered, label)).find((hit) => hit !== undefined);
+      if (matched === undefined) continue;
+
+      return {
+        sourceTestId,
+        weightedTopic: matched,
+        subjectName: subjectLabels.get(sourceTestId) ?? null,
+        submittedAt: sourceTest.submittedAt?.toISOString() ?? null,
+      };
+    }
+    return null;
+  }
+
+  /**
    * Everything an Explanation is written from, for one Question of one handed-in
    * Attempt — in one read across the module boundary.
    *
@@ -3529,6 +3792,19 @@ function resolveWeightedTopic(
   const matched = matchTopic(topicsOf(extraction), wanted);
   if (matched === undefined) throw new ConflictException(WEIGHTED_TOPIC_UNKNOWN);
   return matched;
+}
+
+/**
+ * One `(Attempt, Question)` pair as a single map key — the key
+ * `questionEvidenceFor` answers by.
+ *
+ * File-local and spelled exactly as `grading`'s own `refKey` is, deliberately: the
+ * two modules key the same pair the same way so a caller can look a ref up in either
+ * map without re-composing the string. A shared helper for two lines would be a
+ * module boundary crossed for a template literal.
+ */
+function refKeyOf(attemptId: string, questionId: string): string {
+  return `${attemptId}:${questionId}`;
 }
 
 /** One stored row, as much of it as the answer key's text resolution needs. */

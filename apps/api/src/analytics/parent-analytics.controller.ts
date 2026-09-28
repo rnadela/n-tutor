@@ -2,7 +2,7 @@ import { Controller, Get, Param, ParseUUIDPipe, Req, UseGuards } from '@nestjs/c
 import { SkipThrottle } from '@nestjs/throttler';
 import { ParentElevationGuard, type ElevatedRequest } from '../identity/parent-elevation.guard.js';
 import { AnalyticsService } from './analytics.service.js';
-import type { ProfileAnalyticsView } from './analytics-view.js';
+import type { ProfileAnalyticsView, TopicDrillDownView } from './analytics-view.js';
 
 /**
  * One child's dashboard, as one read.
@@ -26,9 +26,10 @@ import type { ProfileAnalyticsView } from './analytics-view.js';
  * `ParseUUIDPipe` on the profile id, as every other parent route carries, so a
  * malformed id is refused before it reaches a query.
  *
- * **It decides nothing and offers no way on.** The drill-down, the missed-Question
- * list and "generate more on this" are Story 7.5, and the Topic curation surface
- * is 7.6; nothing on this response has a shape for any of them to travel in.
+ * **The dashboard read still decides nothing and still carries no way on.** The
+ * drill-down is a *second* route below, reached with a Topic id the table already
+ * holds — nothing was added to the dashboard's own response for it to travel in, and
+ * the Topic curation surface is 7.6.
  *
  * Nothing here carries a cost, a tier, a model name or a grading rationale (AD-20,
  * AD-26).
@@ -46,5 +47,37 @@ export class ParentAnalyticsController {
     @Param('studentProfileId', ParseUUIDPipe) studentProfileId: string,
   ): Promise<ProfileAnalyticsView> {
     return this.analytics.profileAnalyticsFor(req.elevated!.parentAccountId, studentProfileId);
+  }
+
+  /**
+   * One Topic's evidence and the one thing a parent can do about it, in one answer.
+   *
+   * **One route, because the drill-down is one read.** The figure, the missed
+   * Questions, the blanks and the generation target are one picture: split across
+   * calls, a screen could state a percentage taken at one instant beside rows taken
+   * at another — and the empty drill-down would become four empty answers a surface
+   * has to agree about.
+   *
+   * **It still generates nothing.** The fire the screen offers is Story 4.2's
+   * `POST parent/source-tests/:id/practice-tests`, unchanged; this read only resolves
+   * *which* upload and *which* label that request may be made with. There is no
+   * generation route here and no second cost computation anywhere on this path.
+   *
+   * Both params through `ParseUUIDPipe`, as every other parent route carries, so a
+   * malformed id is refused before it reaches a query. A foreign or unknown profile —
+   * and a Topic this child has no figure for — answer an empty drill-down, never a
+   * refusal and never a 404 (AD-18).
+   */
+  @Get('students/:studentProfileId/analytics/topics/:topicId')
+  topicDrillDownFor(
+    @Req() req: ElevatedRequest,
+    @Param('studentProfileId', ParseUUIDPipe) studentProfileId: string,
+    @Param('topicId', ParseUUIDPipe) topicId: string,
+  ): Promise<TopicDrillDownView> {
+    return this.analytics.topicDrillDownFor(
+      req.elevated!.parentAccountId,
+      studentProfileId,
+      topicId,
+    );
   }
 }

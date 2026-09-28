@@ -47,6 +47,19 @@ export interface LiveSourceTest {
    * nothing to generate from, so a reader has to be able to tell.
    */
   status: SourceTestStatus;
+  /**
+   * When the pages were committed, or null while it is still a Draft.
+   *
+   * **Required, not optional.** `null` already carries the one legitimate absence —
+   * a Draft has no submission — so an *optional* field would mean a second kind of
+   * absence, "this reader did not select the column", which no caller can tell from
+   * the first. Story 7.5's weighted target labels the upload a parent would generate
+   * from by its date, and under an optional field a reader that quietly stopped
+   * selecting it would degrade every one of those labels to "a <subject> upload" with
+   * nothing failing. The shared field list selects it for every caller, so requiring
+   * it costs nothing and closes that.
+   */
+  submittedAt: Date | null;
   /** Not in the shared field list, so absent unless the caller selected it. */
   parentAccountId?: string;
 }

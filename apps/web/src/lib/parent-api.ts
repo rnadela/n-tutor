@@ -670,6 +670,71 @@ export interface ProfileAnalyticsView {
 }
 
 /**
+ * One row of a topic drill-down's evidence, exactly as the API states it.
+ *
+ * The shared answer-key row plus which run it came off and when that run was handed
+ * in — so `components/AnswerKeyRow` renders it unchanged and there is no second row
+ * layout for a parent's two rooms to drift between.
+ *
+ * `newlyGraded` is always `false` here: nothing on the drill-down grades anything.
+ *
+ * `ordinal` is `0` and every word is null for a row whose stored question could no
+ * longer be read: the row keeps its place and says so, rather than being dropped from
+ * evidence a figure is still over.
+ */
+export interface TopicDrillDownRowView extends AnswerKeyRowView {
+  attemptId: string;
+  submittedAt: string;
+}
+
+/**
+ * The one upload a weighted regeneration can be aimed at, resolved by the API.
+ *
+ * **`weightedTopic` is the extraction's own spelling, and this app never invents
+ * one.** The generation request refuses a label the upload does not carry, and what
+ * counts as carrying it is a comparison the server makes — so the label travels from
+ * this view straight into `startGeneration` and is never composed from a heading.
+ *
+ * `null` in place of the whole view means no upload of this student's carries the
+ * topic, and the screen says so instead of offering a control.
+ */
+export interface WeightedTargetView {
+  sourceTestId: string;
+  weightedTopic: string;
+  /** Null where the upload carries no subject or it no longer resolves. */
+  subjectName: string | null;
+  /** When the upload was committed, or null for a row carrying no instant. */
+  submittedAt: string | null;
+}
+
+/**
+ * One topic's drill-down for one student, as the API answers it in one read.
+ *
+ * **`mastery: null` is the whole of the empty drill-down**, and it is also the answer
+ * for a profile id belonging to another account and for a topic this student has no
+ * figure for — which is why this app does not try to tell them apart. There is
+ * nothing here to enumerate and no refusal to read.
+ *
+ * `missed` and `unanswered` never overlap, and a question nothing has marked reaches
+ * neither: that is the API's rule, stated once, server-side.
+ *
+ * No cost, tier, price or model name (AD-20, AD-26). The allowance the screen states
+ * is the account's own `generationAllowance` read — this response carries no figure
+ * of it.
+ */
+export interface TopicDrillDownView {
+  topicId: string;
+  /** Null for a stored figure whose topic no longer resolves. */
+  topicName: string | null;
+  subjectName: string | null;
+  mastery: MasteryTopicView | null;
+  missed: TopicDrillDownRowView[];
+  unanswered: TopicDrillDownRowView[];
+  target: WeightedTargetView | null;
+  weakArea: WeakAreaPolicyView;
+}
+
+/**
  * One Question's Explanation, exactly as the API states it.
  *
  * Segments, two ids and **the child's own flag**, and nothing else. There is no cost,
@@ -2151,6 +2216,24 @@ export const parentApi = {
       `/parent/students/${encodeURIComponent(studentProfileId)}/analytics`,
       { headers: elevated(token) },
       parentCopy.analytics.loadFailed,
+    ),
+
+  /**
+   * One topic's evidence and the one thing a parent can do about it.
+   *
+   * **One call, because the drill-down is one answer**: the figure, the missed
+   * questions, the blanks and the generation target are one picture, and split across
+   * reads a screen could state a percentage taken at one instant beside rows taken at
+   * another.
+   *
+   * The one place this app knows the route. It generates nothing — the fire the screen
+   * offers is `startGeneration`, unchanged.
+   */
+  topicDrillDown: (token: string, studentProfileId: string, topicId: string) =>
+    call<TopicDrillDownView>(
+      `/parent/students/${encodeURIComponent(studentProfileId)}/analytics/topics/${encodeURIComponent(topicId)}`,
+      { headers: elevated(token) },
+      parentCopy.topicDrillDown.loadFailed,
     ),
 
   setPracticeTestTimer: (token: string, practiceTestId: string, minutes: number | null) =>

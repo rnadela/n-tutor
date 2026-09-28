@@ -663,3 +663,230 @@ export async function questionGradesFor(
     await client.end();
   }
 }
+
+/**
+ * A finished, graded practice test on one Topic, with the stored Mastery figure it
+ * comes to — seeded straight into the E2E database.
+ *
+ * **Because the drill-down has nothing to say until a child has finished work**, and
+ * driving upload-extract-generate-release-sit-hand-in through the browser to reach one
+ * populated row would spend minutes of provider calls to assert a sentence. The rows
+ * written here are exactly the rows that flow would have written, in the shape
+ * `apps/api/test/analytics.int-spec.ts` writes them: one released paper of three
+ * questions on one Topic, one first run handed in with a wrong answer, a blank and a
+ * correct answer, and the `topic_mastery` row that follows.
+ *
+ * The Extraction behind the upload carries the raw label, because that is what makes
+ * the weighted-generation target resolvable — and the cost block a parent must read
+ * before anything fires only appears when there is something to aim a request at.
+ *
+ * Nothing here is a product rule: the figure is written to match what the recompute
+ * would have computed, and every rule about *what* it comes to is asserted against the
+ * real service in the API's own suites.
+ */
+export async function seedGradedTopicFixture(
+  parentEmail: string,
+  displayName: string,
+  subjectId: string,
+  /** The canonical Topic a parent reads in the table, and the raw label beside it. */
+  topic: { name: string; rawLabel: string },
+): Promise<{ topicId: string; sourceTestId: string }> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const account = await client.query<{ id: string }>(
+      'SELECT "id" FROM "parent_account" WHERE "email" = $1',
+      [parentEmail],
+    );
+    const parentAccountId = account.rows[0]!.id;
+    const profile = await client.query<{ id: string; gradeLevelId: string }>(
+      'SELECT "id", "gradeLevelId" FROM "student_profile" WHERE "parentAccountId" = $1 AND "displayName" = $2',
+      [parentAccountId, displayName],
+    );
+    const studentProfileId = profile.rows[0]!.id;
+    const gradeLevelId = profile.rows[0]!.gradeLevelId;
+
+    const topicId = randomUUID();
+    await client.query(
+      `INSERT INTO "topic" ("id", "subjectId", "name", "matchKey", "provisional", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, true, now(), now())`,
+      [topicId, subjectId, topic.name, topic.name.trim().toLowerCase()],
+    );
+
+    const sourceTestId = randomUUID();
+    await client.query(
+      `INSERT INTO "source_test"
+         ("id", "parentAccountId", "studentProfileId", "status", "expiresAt", "submittedAt",
+          "subjectId", "gradeLevelId", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, 'Submitted'::source_test_status, now() + interval '1 day', now(), $4, $5, now(), now())`,
+      [sourceTestId, parentAccountId, studentProfileId, subjectId, gradeLevelId],
+    );
+
+    // The Extraction, carrying the raw label the weighted request will be resolved
+    // against. Its own spelling, deliberately unlike the canonical Topic's.
+    const extractionId = randomUUID();
+    await client.query(
+      `INSERT INTO "extraction" ("id", "sourceTestId", "pageCount", "completedAt", "createdAt", "updatedAt")
+       VALUES ($1, $2, 1, now(), now(), now())`,
+      [extractionId, sourceTestId],
+    );
+    const extractedQuestionId = randomUUID();
+    await client.query(
+      `INSERT INTO "extracted_question"
+         ("id", "extractionId", "ordinal", "pageOrdinal", "format", "prompt", "confidence",
+          "dependsOnUninterpretable", "usable", "createdAt")
+       VALUES ($1, $2, 1, 1, 'ShortAnswer'::question_format, $3::jsonb, 'High'::extraction_confidence,
+               false, true, now())`,
+      [
+        extractedQuestionId,
+        extractionId,
+        JSON.stringify([{ kind: 'text', value: 'What is a third of nine?' }]),
+      ],
+    );
+    await client.query(
+      `INSERT INTO "extracted_topic_label" ("id", "questionId", "label", "confidence", "createdAt")
+       VALUES ($1, $2, $3, 'High'::extraction_confidence, now())`,
+      [randomUUID(), extractedQuestionId, topic.rawLabel],
+    );
+
+    const generationJobId = randomUUID();
+    await client.query(
+      `INSERT INTO "generation_job"
+         ("id", "parentAccountId", "sourceTestId", "studentProfileId", "requestedCount",
+          "producedCount", "status", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, 1, 1, 'Succeeded'::generation_job_status, now(), now())`,
+      [generationJobId, parentAccountId, sourceTestId, studentProfileId],
+    );
+
+    const practiceTestId = randomUUID();
+    await client.query(
+      `INSERT INTO "practice_test"
+         ("id", "parentAccountId", "sourceTestId", "studentProfileId", "generationJobId",
+          "status", "ordinal", "questionCount", "chargedAt", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, 'Released'::practice_test_status, 1, 3, now(), now(), now())`,
+      [practiceTestId, parentAccountId, sourceTestId, studentProfileId, generationJobId],
+    );
+
+    const attemptId = randomUUID();
+    await client.query(
+      `INSERT INTO "attempt"
+         ("id", "practiceTestId", "parentAccountId", "studentProfileId", "ordinal",
+          "startedAt", "submittedAt", "expired", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, 1, now() - interval '20 minutes', now() - interval '10 minutes',
+               false, now(), now())`,
+      [attemptId, practiceTestId, parentAccountId, studentProfileId],
+    );
+
+    // Question 1 answered wrong, Question 2 left blank — no `answer` row at all, which
+    // is what a blank on an unexpired hand-in is — and Question 3 answered correctly.
+    const states = ['Incorrect', 'Unanswered', 'Correct'] as const;
+    for (const [index, state] of states.entries()) {
+      const ordinal = index + 1;
+      const questionId = randomUUID();
+      await client.query(
+        `INSERT INTO "practice_test_question"
+           ("id", "practiceTestId", "ordinal", "format", "prompt", "answer", "createdAt")
+         VALUES ($1, $2, $3, 'ShortAnswer'::question_format, $4::jsonb, $5::jsonb, now())`,
+        [
+          questionId,
+          practiceTestId,
+          ordinal,
+          JSON.stringify([{ kind: 'text', value: `What is a third of ${ordinal * 9}?` }]),
+          JSON.stringify([{ kind: 'text', value: `${ordinal * 3}` }]),
+        ],
+      );
+      // The raw generated label, which is the second thing the weighted target is
+      // resolved against.
+      await client.query(
+        `INSERT INTO "practice_test_question_topic" ("id", "questionId", "label", "createdAt")
+         VALUES ($1, $2, $3, now())`,
+        [randomUUID(), questionId, topic.rawLabel],
+      );
+      // The canonical tag, which is what the window rule reads.
+      await client.query(
+        `INSERT INTO "question_topic" ("id", "questionId", "practiceTestId", "topicId", "createdAt")
+         VALUES ($1, $2, $3, $4, now())`,
+        [randomUUID(), questionId, practiceTestId, topicId],
+      );
+      if (state !== 'Unanswered') {
+        await client.query(
+          `INSERT INTO "answer" ("id", "attemptId", "questionId", "value", "createdAt")
+           VALUES ($1, $2, $3, $4, now())`,
+          [
+            randomUUID(),
+            attemptId,
+            questionId,
+            state === 'Correct' ? `${ordinal * 3}` : 'not the number asked for',
+          ],
+        );
+      }
+      await client.query(
+        `INSERT INTO "question_grade" ("id", "attemptId", "questionId", "state", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4::grade_state, now(), now())`,
+        [randomUUID(), attemptId, questionId, state],
+      );
+    }
+
+    // The figure the recompute would have written over exactly those three rows: one
+    // right, one wrong, one blank counted in neither term.
+    await client.query(
+      `INSERT INTO "topic_mastery"
+         ("id", "studentProfileId", "topicId", "correct", "incorrect", "unanswered",
+          "attemptsCounted", "value", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, 1, 1, 1, 1, 0.5, now(), now())`,
+      [randomUUID(), studentProfileId, topicId],
+    );
+
+    return { topicId, sourceTestId };
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * How many generation jobs this parent has, so "one more was enqueued" is a claim about
+ * a count rather than about whichever row a `LIMIT 1` happened to return.
+ */
+export async function countGenerationJobsFor(parentEmail: string): Promise<number> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+       FROM "generation_job" j
+       JOIN "parent_account" a ON a."id" = j."parentAccountId"
+       WHERE a."email" = $1`,
+      [parentEmail],
+    );
+    return Number(result.rows[0]!.count);
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * The clamped count the newest job was actually accepted with.
+ *
+ * `weightedTopicOfNewestJobFor`'s sibling, and here for one reason: together they pin
+ * the *argument order* of a four-argument request. A count and a topic transposed on the
+ * way in could not produce both a `requestedCount` of 1 and a stored label, so asserting
+ * the pair is a claim a substring grep of the call site cannot make.
+ */
+export async function requestedCountOfNewestJobFor(parentEmail: string): Promise<number> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const result = await client.query<{ requestedCount: number }>(
+      `SELECT j."requestedCount"
+       FROM "generation_job" j
+       JOIN "parent_account" a ON a."id" = j."parentAccountId"
+       WHERE a."email" = $1
+       ORDER BY j."createdAt" DESC, j."id" DESC
+       LIMIT 1`,
+      [parentEmail],
+    );
+    return result.rows[0]!.requestedCount;
+  } finally {
+    await client.end();
+  }
+}

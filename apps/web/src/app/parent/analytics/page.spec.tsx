@@ -148,8 +148,25 @@ describe('what the dashboard screen says', () => {
     expect(CODE).not.toMatch(/overrideGrade|disposeFlag|generate/u);
   });
 
-  it('offers no drill-down and no "more like this", which are not this story', () => {
-    expect(CODE).not.toMatch(/\/parent\/analytics\/\$\{|missedQuestions|generateMore/u);
+  it('builds the drill-down link, carrying the student it is about', () => {
+    // The one fact the drill-down refuses to guess: which child. The table knows the
+    // topic and nothing else, so the selected profile has to travel in the address the
+    // dashboard composes — and nothing else in the codebase asserts that it does.
+    expect(CODE).toContain('const hrefForTopic = useCallback(');
+    expect(CODE).toContain('hrefFor={hrefForTopic}');
+    expect(CODE).toContain('/parent/analytics/topics/');
+    expect(CODE).toContain('student=${encodeURIComponent(studentProfileId)}');
+    // Both ids escaped, never pasted into a path.
+    expect(CODE).toContain('encodeURIComponent(topicId)');
+    // And the href is recomputed when the chosen student changes, so a switch cannot
+    // leave rows pointing at the previous child.
+    expect(CODE).toMatch(/\[studentProfileId\],\s*\)/u);
+  });
+
+  it('still decides nothing and generates nothing itself', () => {
+    // The drill-down owns the evidence and the one control (UX Q12c: no duplicate entry
+    // point at the dashboard), so this screen gains a link and no cost, count or fire.
+    expect(CODE).not.toMatch(/startGeneration|costOf|remainingAfter|generationAllowance/u);
   });
 
   it('narrows by subject through the one pure module', () => {

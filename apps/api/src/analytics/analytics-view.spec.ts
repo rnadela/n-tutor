@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { PracticeTestReleasedSummary } from '../practicetest/practice-test.service.js';
+import type { TopicEvidenceRef } from '../grading/topic-evidence.js';
+import type {
+  PracticeTestReleasedSummary,
+  QuestionEvidenceView,
+} from '../practicetest/practice-test.service.js';
 import {
   activityOf,
   countAwaiting,
   describedTopics,
+  drillDownRowsOf,
   rankTopics,
   trendPointsOf,
   type MasteryTopicView,
@@ -271,5 +276,104 @@ describe('the activity summary is exhaustive', () => {
     expect(activityOf(released(['NotStarted']))).toMatchObject({ unstarted: 1, completed: 0 });
     expect(activityOf(released(['InProgress']))).toMatchObject({ inProgress: 1, completed: 0 });
     expect(activityOf(released(['Completed']))).toMatchObject({ completed: 1, unstarted: 0 });
+  });
+});
+
+describe('joining the drill-down’s refs to their words', () => {
+  /** One ref, with only what the join and the order read spelled out. */
+  function ref(over: Partial<TopicEvidenceRef> & { questionId: string }): TopicEvidenceRef {
+    return {
+      attemptId: 'attempt-1',
+      practiceTestId: 'test-1',
+      submittedAt: '2026-09-08T10:00:00.000Z',
+      state: 'Incorrect',
+      parentAdjusted: false,
+      disputed: false,
+      ...over,
+    };
+  }
+
+  /** One evidence entry, as `questionEvidenceFor` keys them. */
+  function words(
+    attemptId: string,
+    questionId: string,
+    over: Partial<QuestionEvidenceView> = {},
+  ): [string, QuestionEvidenceView] {
+    return [
+      `${attemptId}:${questionId}`,
+      {
+        ordinal: 1,
+        format: 'ShortAnswer',
+        prompt: [{ kind: 'text', value: 'What is a third of 9?' }],
+        studentAnswer: [{ kind: 'text', value: '4' }],
+        correctAnswer: [{ kind: 'text', value: '3' }],
+        ...over,
+      },
+    ];
+  }
+
+  it('joins a ref to its prompt, both answers and its state', () => {
+    const [row] = drillDownRowsOf(
+      [ref({ questionId: 'q1', parentAdjusted: true, disputed: true })],
+      new Map([words('attempt-1', 'q1', { ordinal: 7 })]),
+    );
+    expect(row).toMatchObject({
+      questionId: 'q1',
+      attemptId: 'attempt-1',
+      submittedAt: '2026-09-08T10:00:00.000Z',
+      ordinal: 7,
+      format: 'ShortAnswer',
+      state: 'Incorrect',
+      parentAdjusted: true,
+      disputed: true,
+    });
+    expect(row!.prompt).not.toBeNull();
+    expect(row!.correctAnswer).not.toBeNull();
+  });
+
+  it('never claims a row on this surface was newly graded', () => {
+    // Nothing on the drill-down grades, so no read of it can be what judged a Question.
+    const rows = drillDownRowsOf([ref({ questionId: 'q1' })], new Map([words('attempt-1', 'q1')]));
+    expect(rows.every((row) => row.newlyGraded === false)).toBe(true);
+  });
+
+  it('keeps a ref whose evidence is missing, with null words', () => {
+    // Dropping it would shorten the evidence behind a figure by exactly the rows that
+    // are hardest to explain — and the figure would then be over more Questions than
+    // the list under it.
+    const rows = drillDownRowsOf([ref({ questionId: 'gone' })], new Map());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      questionId: 'gone',
+      ordinal: 0,
+      prompt: null,
+      studentAnswer: null,
+      correctAnswer: null,
+      state: 'Incorrect',
+    });
+  });
+
+  it('orders by the attempt order it was given, then by the ordinal the child saw', () => {
+    // The attempt order is the partition's and is never re-derived from a timestamp
+    // here; the ordinal settles the rest, and it is only knowable once the words are in
+    // hand.
+    const refs = [
+      ref({ questionId: 'new-b', attemptId: 'attempt-2' }),
+      ref({ questionId: 'new-a', attemptId: 'attempt-2' }),
+      ref({ questionId: 'old-a', attemptId: 'attempt-1' }),
+    ];
+    const rows = drillDownRowsOf(
+      refs,
+      new Map([
+        words('attempt-2', 'new-b', { ordinal: 9 }),
+        words('attempt-2', 'new-a', { ordinal: 2 }),
+        words('attempt-1', 'old-a', { ordinal: 4 }),
+      ]),
+    );
+    expect(rows.map((row) => row.questionId)).toEqual(['new-a', 'new-b', 'old-a']);
+  });
+
+  it('answers nothing over no refs', () => {
+    expect(drillDownRowsOf([], new Map())).toEqual([]);
   });
 });

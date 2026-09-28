@@ -1957,3 +1957,43 @@ source_spec: `spec-7-4-analytics-dashboard.md`
 severity: medium
 reason: `qualifyingScoresFor` calls `parentSubmittedRunsFor`, which loads every submitted Attempt for the profile and batch-resolves a Subject label for each across the module boundary, and only then filters retakes and slices to `MASTERY_ATTEMPT_WINDOW`. The work grows with how much a child has sat rather than with what the chart shows, and the label batch is discarded entirely. Fixing it needs a limited reader on `practicetest` — a new shape on another module's service, which this story has no basis to design alone. It is the same class of unbounded read Story 7.3 already deferred for `masteryFor`.
 status: open
+
+### DW-246: One drill-down screen states two clocks: the hand-in and upload dates resolve in the browser's zone while the allowance reset resolves in the account's.
+origin: spec-deferred 04c6faeb893d
+location: apps/web/src/app/parent/analytics/topics/[topicId]/page.tsx
+source_spec: `spec-7-5-weak-area-drill-down-targeted-regeneration.md`
+severity: low
+reason: `readableInstant` (apps/web/src/lib/parent-view.ts) formats with the browser's locale and zone; `dateOnly(allowance.resetAt, allowance.timezone)` formats in the account's stored zone. Both appear on this one screen, so a parent travelling reads a hand-in date against their device and the reset against the account. Neither string is wrong on its own, and the split is the established convention across every existing parent surface (`parent/attempts`, `parent/generate`), so fixing it here alone would make this screen the odd one out. It needs a single decision about which zone parent-facing instants are stated in, applied everywhere at once.
+status: open
+
+### DW-247: The exhausted-allowance fire-control disable is proven only by a source-text regex match, not by an executing test, so a wiring regression that unbinds `disabled` from `cost.spendable` would ship
+origin: spec-deferred 4b3b399ab1c1
+location: apps/web/src/app/parent/analytics/topics/[topicId]/page.spec.tsx
+source_spec: `spec-7-5-weak-area-drill-down-targeted-regeneration.md`
+severity: low
+reason: `apps/web/src/app/parent/analytics/topics/[topicId]/page.spec.tsx` never renders the component (no testing-library import); it `readFileSync`s `page.tsx` and regex-matches the literal `disabled={cost === null || !cost.spendable || firing}` string. `e2e/tests/parent-analytics.spec.ts` only exercises the spendable path and asserts the button `toBeEnabled()`; it never drives the allowance to `remaining: 0`. Consequence is bounded because `PracticeTestService.request` still clamps the allowance server-side and surfaces a 409 sentence, but the UI-level guarantee UX Q12c calls out (never fire on a spent allowance) has no executable proof.
+status: open
+
+### DW-248: `questionEvidenceFor`'s unreadable-prompt/answer degrade path is proven at the service unit level but never driven end-to-end through the drill-down route, so a wiring break between the service and
+origin: spec-deferred 1ecfe9f793d7
+location: apps/api/test/analytics.int-spec.ts
+source_spec: `spec-7-5-weak-area-drill-down-targeted-regeneration.md`
+severity: low
+reason: The I/O matrix's "Unreadable stored prompt/key" row has no matching case in `apps/api/test/analytics.int-spec.ts`'s topic-drill-down describe block, only in unit specs.
+status: open
+
+### DW-249: `targetSentence`'s branch for a target with neither a Subject nor a readable date renders a materially vaguer sentence than the `noTarget` branch's specific guidance, so a parent reads two different
+origin: spec-deferred 39c6b48af70d
+location: apps/web/src/lib/topic-drill-down.ts
+source_spec: `spec-7-5-weak-area-drill-down-targeted-regeneration.md`
+severity: low
+reason: Compare the `targetSentence` fallback copy in `apps/web/src/lib/topic-drill-down.ts` (and the `topicDrillDown` copy namespace) against the `noTarget` string: one says "From an earlier upload of this student's," the other names the missing coverage specifically.
+status: open
+
+### DW-250: The cost-read failure (`allowanceFailed`) and the fire-request failure (409) branches this screen special-cases with their own retry/copy have no int-spec or e2e coverage -- only the happy path is
+origin: spec-deferred 7561e9fc9da6
+location: apps/web/src/app/parent/analytics/topics/[topicId]/page.tsx
+source_spec: `spec-7-5-weak-area-drill-down-targeted-regeneration.md`
+severity: low
+reason: `e2e/tests/parent-analytics.spec.ts` only exercises the spendable/success path; no test triggers a failing allowance read or a 409 from the fire request against the rendered screen.
+status: open

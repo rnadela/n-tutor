@@ -67,6 +67,87 @@ export function masteryWindowOf(
     .slice(0, MASTERY_ATTEMPT_WINDOW);
 }
 
+/**
+ * One canonical Topic tag, as the window rule reads it: which Topic, which
+ * Question, and which paper the Question is on.
+ *
+ * The three columns of `question_topic` and no more. Nothing about a grade, a
+ * state or an ordinal — which paper mentions a Topic is the only question the
+ * window asks.
+ */
+export interface TopicWindowTag {
+  topicId: string;
+  questionId: string;
+  practiceTestId: string;
+}
+
+/**
+ * One Topic's window, and the tagged Questions of each paper in it.
+ *
+ * Two groupings because the window rule and every rule downstream of it ask two
+ * different questions: "which papers mention this Topic" settles the window, and
+ * "which Questions of this paper are on it" is what the window is then read over.
+ */
+export interface TopicWindow {
+  /** Newest first, capped at `MASTERY_ATTEMPT_WINDOW`. */
+  window: MasteryWindowAttempt[];
+  /** This Topic's tagged Question ids, keyed by Practice Test id. */
+  questionIdsByTest: Map<string, string[]>;
+}
+
+/**
+ * Every named Topic's window, resolved once from one set of Attempts and one set
+ * of tags.
+ *
+ * **The one place a Topic's window is selected, and it has two callers.** The
+ * recompute writes a figure from it; the drill-down lists the *members* of the
+ * very same window so a parent reads the evidence the stored figure is over. A
+ * second copy of this grouping beside either would be a second answer to "which
+ * five", and the two would disagree the first time `MASTERY_ATTEMPT_WINDOW` or the
+ * caller's tie-break moved — with one of them a stored number nobody could then
+ * reconcile against the list under it.
+ *
+ * `attempts` arrives **already ordered newest-first and already qualifying**, on
+ * `masteryWindowOf`'s terms and for its reasons: nothing here sorts, filters by
+ * ordinal or reads a clock.
+ *
+ * A Topic no tag mentions answers an empty window and an empty grouping rather
+ * than being absent from the map: every named Topic gets an answer, because a
+ * caller that had to tell "no evidence" from "not asked about" would be a caller
+ * deciding this rule for itself.
+ */
+export function topicWindowsOf(
+  attempts: readonly MasteryWindowAttempt[],
+  tags: readonly TopicWindowTag[],
+  topicIds: readonly string[],
+): Map<string, TopicWindow> {
+  const testIdsByTopic = new Map<string, Set<string>>();
+  const questionIdsByTopic = new Map<string, Map<string, string[]>>();
+  for (const tag of tags) {
+    const testIds = testIdsByTopic.get(tag.topicId);
+    if (testIds === undefined) testIdsByTopic.set(tag.topicId, new Set([tag.practiceTestId]));
+    else testIds.add(tag.practiceTestId);
+
+    let byTest = questionIdsByTopic.get(tag.topicId);
+    if (byTest === undefined) {
+      byTest = new Map<string, string[]>();
+      questionIdsByTopic.set(tag.topicId, byTest);
+    }
+    const questionIds = byTest.get(tag.practiceTestId);
+    if (questionIds === undefined) byTest.set(tag.practiceTestId, [tag.questionId]);
+    else questionIds.push(tag.questionId);
+  }
+
+  const windows = new Map<string, TopicWindow>();
+  for (const topicId of topicIds) {
+    windows.set(topicId, {
+      window: masteryWindowOf(attempts, testIdsByTopic.get(topicId) ?? new Set()),
+      questionIdsByTest: questionIdsByTopic.get(topicId) ?? new Map(),
+    });
+  }
+  return windows;
+}
+
 /** What one Topic's window came to. The stored row is this plus `attemptsCounted`. */
 export interface MasteryCounts {
   /** How many Questions of the window counted as `Correct`. */

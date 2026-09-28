@@ -108,7 +108,7 @@ describe('Analytics dashboard: one parent-scoped composition behind the PIN', ()
     labels: readonly (readonly string[])[],
     /** Whose paper it is. Defaults to the first child; the sibling cases pass theirs. */
     studentProfileId: string = a.studentProfileId,
-  ): Promise<{ practiceTestId: string; questionIds: string[] }> {
+  ): Promise<{ practiceTestId: string; sourceTestId: string; questionIds: string[] }> {
     const sourceTest = await h.prisma.sourceTest.create({
       data: {
         parentAccountId: a.parentAccountId,
@@ -161,7 +161,43 @@ describe('Analytics dashboard: one parent-scoped composition behind the PIN', ()
       });
       questionIds.push(question.id);
     }
-    return { practiceTestId: practiceTest.id, questionIds };
+    return { practiceTestId: practiceTest.id, sourceTestId: sourceTest.id, questionIds };
+  }
+
+  /**
+   * A completed Extraction behind one upload, carrying the given raw labels.
+   *
+   * The drill-down's generation target is resolved by asking the **Extraction** whether
+   * it carries a matching label, so a case about the target has to have one. Written
+   * straight to the tables for the reason the papers are: driving
+   * upload-extract-generate per case would spend the setup's provider calls in the
+   * middle of asserting that this read makes none.
+   */
+  async function extractionFor(
+    sourceTestId: string,
+    labels: readonly (readonly string[])[],
+  ): Promise<void> {
+    const extraction = await h.prisma.extraction.create({
+      data: { sourceTestId, pageCount: 1 },
+      select: { id: true },
+    });
+    for (const [index, questionLabels] of labels.entries()) {
+      await h.prisma.extractedQuestion.create({
+        data: {
+          extractionId: extraction.id,
+          ordinal: index + 1,
+          pageOrdinal: 1,
+          format: 'ShortAnswer',
+          prompt: [{ kind: 'text', value: `Source question ${index + 1}` }],
+          confidence: 'High',
+          dependsOnUninterpretable: false,
+          usable: true,
+          topics: {
+            create: questionLabels.map((label) => ({ label, confidence: 'High' as const })),
+          },
+        },
+      });
+    }
   }
 
   async function openAttempt(
@@ -730,6 +766,358 @@ describe('Analytics dashboard: one parent-scoped composition behind the PIN', ()
         .get('/api/parent/students/not-a-uuid/analytics')
         .set('Authorization', bearer(a.token))
         .expect(400);
+    });
+  });
+
+  describe('the topic drill-down', () => {
+    /** The drill-down, read exactly as the web app reads it. */
+    async function drillDown(a: Account, topicId: string, profileId = a.studentProfileId) {
+      const response = await server()
+        .get(`/api/parent/students/${profileId}/analytics/topics/${topicId}`)
+        .set('Authorization', bearer(a.token))
+        .expect(200);
+      return response.body;
+    }
+
+    const topicNamed = (name: string) =>
+      h.prisma.topic.findFirstOrThrow({ where: { name }, select: { id: true } });
+
+    /**
+     * One graded hand-in on `fractions`: a wrong answer, a blank, and a correct answer —
+     * plus an untagged Question so the window is not the whole paper.
+     *
+     * The Extraction behind it carries the raw label, so the weighted target resolves.
+     */
+    async function fractionsPaper(a: Account) {
+      const { practiceTestId, sourceTestId, questionIds } = await paper(a, [
+        ['fractions'],
+        ['fractions'],
+        ['fractions'],
+        ['decimals'],
+      ]);
+      await extractionFor(sourceTestId, [['Fractions'], ['decimals']]);
+      const attemptId = await openAttempt(a, practiceTestId, 1);
+      // Question 1 wrong, Question 2 left blank (no answer row at all), Question 3
+      // right, Question 4 right and on another Topic.
+      await h.grading.submitAttempt(a.parentAccountId, a.studentProfileId, attemptId, [
+        { questionId: questionIds[0]!, value: wrong },
+        { questionId: questionIds[2]!, value: right(3) },
+        { questionId: questionIds[3]!, value: right(4) },
+      ]);
+      return { attemptId, practiceTestId, sourceTestId, questionIds };
+    }
+
+    it('states the figure with its unanswered count, and lists the evidence behind it', async () => {
+      const a = await account();
+      const { questionIds } = await fractionsPaper(a);
+      const topic = await topicNamed('fractions');
+
+      const body = await drillDown(a, topic.id);
+      expect(body).toMatchObject({
+        topicId: topic.id,
+        topicName: 'fractions',
+        subjectName: expect.any(String),
+      });
+      // The stored row, read through the parent-scoped `where`, with the blank counted
+      // in its own right and in neither term of the fraction.
+      expect(body.mastery).toMatchObject({
+        correct: 1,
+        incorrect: 1,
+        unanswered: 1,
+        answered: 2,
+        attemptsCounted: 1,
+        value: 0.5,
+      });
+
+      // The wrong answer, with what the student put down and what the answer was.
+      expect(body.missed).toHaveLength(1);
+      expect(body.missed[0]).toMatchObject({
+        questionId: questionIds[0]!,
+        state: 'Incorrect',
+        ordinal: 1,
+        newlyGraded: false,
+      });
+      expect(body.missed[0].studentAnswer).toEqual([{ kind: 'text', value: wrong }]);
+      expect(body.missed[0].correctAnswer).toEqual([{ kind: 'text', value: right(1) }]);
+      expect(body.missed[0].prompt).toEqual(expect.any(Array));
+      expect(body.missed[0].submittedAt).toEqual(expect.any(String));
+
+      // The blank, listed apart — and never mixed into the wrong answers.
+      expect(body.unanswered.map((row: { questionId: string }) => row.questionId)).toEqual([
+        questionIds[1]!,
+      ]);
+      expect(body.unanswered[0]).toMatchObject({ state: 'Unanswered', studentAnswer: null });
+
+      // The correct answer is in neither list: this is the evidence behind a weak
+      // figure, not a re-run of the answer key. And no id appears in both.
+      const missedIds = body.missed.map((row: { questionId: string }) => row.questionId);
+      const blankIds = body.unanswered.map((row: { questionId: string }) => row.questionId);
+      expect(missedIds).not.toContain(questionIds[2]!);
+      expect(missedIds.filter((id: string) => blankIds.includes(id))).toEqual([]);
+      // And nothing from another Topic's Question reaches either list.
+      expect([...missedIds, ...blankIds]).not.toContain(questionIds[3]!);
+    });
+
+    it('excludes a Question nothing has judged from both lists and from the figure', async () => {
+      const a = await account();
+      const { attemptId, questionIds } = await fractionsPaper(a);
+      const topic = await topicNamed('fractions');
+
+      // The one way a judged Question goes back to unjudged. Nothing in the product does
+      // it; the case it stands for is a verdict a provider never returned.
+      await h.prisma.questionGrade.updateMany({
+        where: { attemptId, questionId: questionIds[0]! },
+        data: { state: 'Ungraded', overrideState: null },
+      });
+      await h.prisma.withTransaction((tx) =>
+        h.grading.recomputeMastery(tx, a.studentProfileId, [topic.id]),
+      );
+
+      const body = await drillDown(a, topic.id);
+      expect(body.missed).toEqual([]);
+      // Still the blank, and a denominator that never counted the unjudged row.
+      expect(body.unanswered).toHaveLength(1);
+      expect(body.mastery).toMatchObject({ correct: 1, incorrect: 0, unanswered: 1, answered: 1 });
+    });
+
+    it('excludes a retake’s answers, because a retake is not the run that counts', async () => {
+      const a = await account();
+      const { practiceTestId, questionIds } = await fractionsPaper(a);
+      const topic = await topicNamed('fractions');
+      const before = await drillDown(a, topic.id);
+
+      // A second run at the same paper, with everything right this time.
+      const retake = await openAttempt(a, practiceTestId, 2);
+      await h.grading.submitAttempt(
+        a.parentAccountId,
+        a.studentProfileId,
+        retake,
+        questionIds.map((questionId, index) => ({ questionId, value: right(index + 1) })),
+      );
+
+      const after = await drillDown(a, topic.id);
+      // The figure and the evidence are both the first run's, unchanged.
+      expect(after.mastery).toEqual(before.mastery);
+      expect(after.missed.map((row: { attemptId: string }) => row.attemptId)).not.toContain(retake);
+      expect(after.unanswered.map((row: { attemptId: string }) => row.attemptId)).not.toContain(
+        retake,
+      );
+    });
+
+    it('takes an overridden row out of missed and marks the rows a parent settled', async () => {
+      const a = await account();
+      const { attemptId, questionIds } = await fractionsPaper(a);
+      const topic = await topicNamed('fractions');
+
+      // The parent disagrees with the wrong answer's mark.
+      await h.grading.overrideGrade(
+        { parentAccountId: a.parentAccountId },
+        attemptId,
+        questionIds[0]!,
+        'Correct',
+      );
+
+      const body = await drillDown(a, topic.id);
+      // It leaves `missed`, because the state that counts is the parent's.
+      expect(body.missed).toEqual([]);
+      expect(body.mastery).toMatchObject({ correct: 2, incorrect: 0, unanswered: 1, answered: 2 });
+
+      // And the parent's adjustment is visible on the row where there is one.
+      await h.grading.overrideGrade(
+        { parentAccountId: a.parentAccountId },
+        attemptId,
+        questionIds[0]!,
+        'Incorrect',
+      );
+      const back = await drillDown(a, topic.id);
+      expect(back.missed).toHaveLength(1);
+      expect(back.missed[0]).toMatchObject({ parentAdjusted: true, state: 'Incorrect' });
+      // The blank carries no adjustment: nothing has judged it, and nothing may.
+      expect(back.unanswered[0]).toMatchObject({ parentAdjusted: false });
+    });
+
+    it('marks the Topic a Weak Area when the window is at the floor and under the ceiling', async () => {
+      // The marker is why a parent reaches this screen at all, so the field is named
+      // against a window that actually earns it: enough answered Questions to be worth
+      // a judgement, and a fraction below the ceiling. Both figures are the runtime's,
+      // never literals here.
+      const { answeredFloor, ceilingPercent } = weakAreaRuntime();
+      const a = await account();
+      const labels = Array.from({ length: answeredFloor }, () => ['fractions']);
+      const { practiceTestId, sourceTestId, questionIds } = await paper(a, labels);
+      await extractionFor(sourceTestId, [['Fractions']]);
+      const attemptId = await openAttempt(a, practiceTestId, 1);
+      // One right out of the floor — comfortably under any permitted ceiling.
+      await h.grading.submitAttempt(
+        a.parentAccountId,
+        a.studentProfileId,
+        attemptId,
+        questionIds.map((questionId, index) => ({
+          questionId,
+          value: index === 0 ? right(1) : wrong,
+        })),
+      );
+      const topic = await topicNamed('fractions');
+
+      const body = await drillDown(a, topic.id);
+      expect(body.mastery).toMatchObject({ answered: answeredFloor, isWeakArea: true });
+      expect(body.mastery.correct * 100).toBeLessThan(ceilingPercent * body.mastery.answered);
+      // And the evidence under it is every Question they got wrong.
+      expect(body.missed).toHaveLength(answeredFloor - 1);
+    });
+
+    it('resolves a target for a Topic the child answered perfectly, with no failed row', async () => {
+      // The regression this guards: a window with nothing wrong and nothing blank has
+      // a figure and two empty lists, and resolving the target from those lists alone
+      // would tell the parent no upload of theirs covers a Topic the upload plainly
+      // does.
+      const a = await account();
+      const { practiceTestId, sourceTestId, questionIds } = await paper(a, [
+        ['fractions'],
+        ['fractions'],
+      ]);
+      await extractionFor(sourceTestId, [['Fractions']]);
+      const attemptId = await openAttempt(a, practiceTestId, 1);
+      await h.grading.submitAttempt(
+        a.parentAccountId,
+        a.studentProfileId,
+        attemptId,
+        questionIds.map((questionId, index) => ({ questionId, value: right(index + 1) })),
+      );
+      const topic = await topicNamed('fractions');
+
+      const body = await drillDown(a, topic.id);
+      expect(body.mastery).toMatchObject({ correct: 2, incorrect: 0, unanswered: 0, value: 1 });
+      expect(body.missed).toEqual([]);
+      expect(body.unanswered).toEqual([]);
+      // The target still resolves, because it is aimed by the window's tagged
+      // Questions rather than by the failed ones.
+      expect(body.target).toMatchObject({ sourceTestId, weightedTopic: 'Fractions' });
+    });
+
+    it('lists the newest qualifying Attempt’s rows first, across two papers', async () => {
+      const a = await account();
+      // Two papers on the Topic, each a first run, handed in a day apart. The window
+      // holds both, and the response's order is the one rule that decides which the
+      // parent reads first.
+      const older = await paper(a, [['fractions'], ['fractions']]);
+      const olderAttempt = await openAttempt(a, older.practiceTestId, 1);
+      await h.grading.submitAttempt(a.parentAccountId, a.studentProfileId, olderAttempt, [
+        { questionId: older.questionIds[0]!, value: wrong },
+        { questionId: older.questionIds[1]!, value: wrong },
+      ]);
+      const newer = await paper(a, [['fractions'], ['fractions']]);
+      const newerAttempt = await openAttempt(a, newer.practiceTestId, 1);
+      await h.grading.submitAttempt(a.parentAccountId, a.studentProfileId, newerAttempt, [
+        { questionId: newer.questionIds[0]!, value: wrong },
+        { questionId: newer.questionIds[1]!, value: wrong },
+      ]);
+      // The older run pushed a day back, so "newest first" is not left to two rows
+      // sharing a millisecond.
+      await h.prisma.attempt.update({
+        where: { id: olderAttempt },
+        data: { submittedAt: new Date(Date.now() - 86_400_000) },
+      });
+      const topic = await topicNamed('fractions');
+
+      const body = await drillDown(a, topic.id);
+      expect(body.mastery).toMatchObject({ incorrect: 4, attemptsCounted: 2 });
+      // The newer Attempt's two rows lead, and within each Attempt the ordinal the
+      // child was shown decides.
+      expect(body.missed.map((row: { attemptId: string }) => row.attemptId)).toEqual([
+        newerAttempt,
+        newerAttempt,
+        olderAttempt,
+        olderAttempt,
+      ]);
+      expect(body.missed.map((row: { ordinal: number }) => row.ordinal)).toEqual([1, 2, 1, 2]);
+    });
+
+    it('resolves a target naming the upload whose Extraction carries the label', async () => {
+      const a = await account();
+      await fractionsPaper(a);
+      const topic = await topicNamed('fractions');
+
+      const body = await drillDown(a, topic.id);
+      // The Extraction spells it `Fractions`; the canonical Topic is `fractions`. The
+      // label handed back is the **Extraction's** own, which is the only thing the
+      // generation request will accept.
+      expect(body.target).toMatchObject({
+        sourceTestId: expect.any(String),
+        weightedTopic: 'Fractions',
+        subjectName: expect.any(String),
+      });
+    });
+
+    it('answers no target when no Extraction behind the evidence carries the label', async () => {
+      const a = await account();
+      const { practiceTestId, sourceTestId, questionIds } = await paper(a, [
+        ['fractions'],
+        ['fractions'],
+      ]);
+      // An Extraction that exists and mentions something else entirely.
+      await extractionFor(sourceTestId, [['long division']]);
+      const attemptId = await openAttempt(a, practiceTestId, 1);
+      await h.grading.submitAttempt(a.parentAccountId, a.studentProfileId, attemptId, [
+        { questionId: questionIds[0]!, value: wrong },
+        { questionId: questionIds[1]!, value: wrong },
+      ]);
+      const topic = await topicNamed('fractions');
+
+      const body = await drillDown(a, topic.id);
+      expect(body.missed).toHaveLength(2);
+      // The evidence still renders; there is simply nothing to aim a request at.
+      expect(body.target).toBeNull();
+    });
+
+    it('answers an empty drill-down for another account’s child — 200, never 404 or 403', async () => {
+      const mine = await account();
+      const theirs = await account({ email: 'other-drill-down@example.test' });
+      await fractionsPaper(theirs);
+      const topic = await topicNamed('fractions');
+      expect((await drillDown(theirs, topic.id)).mastery).not.toBeNull();
+
+      const body = await drillDown(mine, topic.id, theirs.studentProfileId);
+      expect(body).toMatchObject({
+        topicId: topic.id,
+        topicName: null,
+        mastery: null,
+        missed: [],
+        unanswered: [],
+        target: null,
+      });
+      // The policy figures are still stated: the empty state has to be able to say what
+      // it takes for a figure to appear.
+      expect(body.weakArea).toEqual(weakAreaRuntime());
+    });
+
+    it('answers the same empty drill-down for a Topic this child has no row for', async () => {
+      const a = await account();
+      await fractionsPaper(a);
+      const body = await drillDown(a, UNKNOWN_UUID);
+      expect(body).toMatchObject({ topicId: UNKNOWN_UUID, mastery: null, target: null });
+    });
+
+    it('answers an empty drill-down for a profile id that exists nowhere', async () => {
+      const a = await account();
+      await fractionsPaper(a);
+      const topic = await topicNamed('fractions');
+      expect((await drillDown(a, topic.id, UNKNOWN_UUID)).mastery).toBeNull();
+    });
+
+    it('refuses a malformed topic id before it reaches a query', async () => {
+      const a = await account();
+      await server()
+        .get(`/api/parent/students/${a.studentProfileId}/analytics/topics/not-a-uuid`)
+        .set('Authorization', bearer(a.token))
+        .expect(400);
+    });
+
+    it('needs elevation, and a bearer-less call reaches nothing', async () => {
+      const a = await account();
+      await server()
+        .get(`/api/parent/students/${a.studentProfileId}/analytics/topics/${UNKNOWN_UUID}`)
+        .expect(401);
     });
   });
 

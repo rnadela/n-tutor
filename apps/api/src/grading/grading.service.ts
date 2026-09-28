@@ -13,7 +13,8 @@ import {
 import { TopicService } from '../topics/topic.service.js';
 import { buildGradingPrompt, type GradingPromptQuestion } from './grading-prompt.js';
 import { countsTowardMastery } from './mastery-eligibility.js';
-import { MASTERY_ATTEMPT_WINDOW, hasEvidence, masteryFrom, masteryWindowOf } from './mastery.js';
+import { MASTERY_ATTEMPT_WINDOW, hasEvidence, masteryFrom, topicWindowsOf } from './mastery.js';
+import { partitionTopicEvidence, type TopicEvidenceRef } from './topic-evidence.js';
 import { answeredOf, isWeakArea } from './weak-area-policy.js';
 import { runsOf, type PracticeTestRunsView } from './grading-history.js';
 import { answerKeyRows, type AttemptResultsView } from './grading-results.js';
@@ -65,6 +66,42 @@ export interface TopicMasteryView {
   value: number | null;
   /** Derived at read time by the one predicate, never stored. */
   isWeakArea: boolean;
+}
+
+/**
+ * One Topic's stored figure and the members of the window it is over.
+ *
+ * **`mastery: null` is the whole of "there is nothing to drill into"**, and it is
+ * the same answer a foreign profile id, an unknown profile id and a Topic this child
+ * has no row for all get (AD-18). A caller that had to tell those apart would be a
+ * caller enumerating what exists.
+ *
+ * The two lists never overlap and the two states that reach neither — `Ungraded` and
+ * a Question with no row — are exactly the two that reach neither term of the
+ * fraction above them. That is `topic-evidence.ts`'s rule.
+ *
+ * There is no Topic name here, and no prompt, ordinal or answer: naming a Topic is
+ * `topics`' (AD-11) and the words of a Question are `practicetest`'s (AD-17). This
+ * view is what `grading` can state on its own.
+ */
+export interface TopicEvidenceView {
+  topicId: string;
+  /** The stored row, read through the parent-scoped `where`, or null. */
+  mastery: TopicMasteryView | null;
+  missed: TopicEvidenceRef[];
+  unanswered: TopicEvidenceRef[];
+  /**
+   * Every tagged Question of the window, whatever state it came to.
+   *
+   * **The superset of the two lists, and deliberately not their union.** It is what a
+   * weighted regeneration is aimed by, and a Topic the child answered *perfectly* has
+   * a figure, no failed row, and an upload that plainly still carries the Topic —
+   * aiming from the lists alone would tell that parent no upload of theirs covers it.
+   *
+   * Empty only when the window itself is: no qualifying Attempt, or none that
+   * mentioned the Topic.
+   */
+  windowQuestionIds: string[];
 }
 
 /**
@@ -1125,38 +1162,24 @@ export class GradingService {
             select: { topicId: true, questionId: true, practiceTestId: true },
           });
 
-    // Tags grouped two ways, because the window rule and the counting rule ask two
-    // different questions: "which papers mention this Topic" and "which Questions of
-    // this paper are on it".
-    const testIdsByTopic = new Map<string, Set<string>>();
-    const questionIdsByTopicAndTest = new Map<string, string[]>();
-    for (const tag of tags) {
-      const testIds = testIdsByTopic.get(tag.topicId);
-      if (testIds === undefined) testIdsByTopic.set(tag.topicId, new Set([tag.practiceTestId]));
-      else testIds.add(tag.practiceTestId);
-
-      const key = topicTestKey(tag.topicId, tag.practiceTestId);
-      const questionIds = questionIdsByTopicAndTest.get(key);
-      if (questionIds === undefined) questionIdsByTopicAndTest.set(key, [tag.questionId]);
-      else questionIds.push(tag.questionId);
-    }
-
     // **The windows are settled before a single grade is read**, because they are what
     // narrows that read. A child who has sat forty papers has forty qualifying
     // Attempts and at most five per Topic in scope, so reading grades by the
     // qualifying set would grow without bound as they work — inside a transaction
     // they are waiting on — to fetch rows the arithmetic then throws away.
-    const windowByTopic = new Map<string, ReturnType<typeof masteryWindowOf>>();
+    //
+    // The grouping and the slice are `topicWindowsOf`'s, which is also what the
+    // drill-down resolves its evidence by: one selection rule behind the stored
+    // figure and behind the list a parent reads under it.
+    const windowByTopic = topicWindowsOf(qualifying, tags, topics);
     const windowAttemptIds = new Set<string>();
     const taggedQuestionIds = new Set<string>();
     for (const topicId of topics) {
-      const window = masteryWindowOf(qualifying, testIdsByTopic.get(topicId) ?? new Set());
-      windowByTopic.set(topicId, window);
-      for (const attempt of window) {
+      const resolved = windowByTopic.get(topicId);
+      if (resolved === undefined) continue;
+      for (const attempt of resolved.window) {
         windowAttemptIds.add(attempt.attemptId);
-        for (const questionId of questionIdsByTopicAndTest.get(
-          topicTestKey(topicId, attempt.practiceTestId),
-        ) ?? []) {
+        for (const questionId of resolved.questionIdsByTest.get(attempt.practiceTestId) ?? []) {
           taggedQuestionIds.add(questionId);
         }
       }
@@ -1187,11 +1210,11 @@ export class GradingService {
     );
 
     for (const topicId of topics) {
-      const window = windowByTopic.get(topicId) ?? [];
+      const resolved = windowByTopic.get(topicId);
+      const window = resolved?.window ?? [];
       const states: (GradeState | null)[] = [];
       for (const attempt of window) {
-        const questionIds =
-          questionIdsByTopicAndTest.get(topicTestKey(topicId, attempt.practiceTestId)) ?? [];
+        const questionIds = resolved?.questionIdsByTest.get(attempt.practiceTestId) ?? [];
         for (const questionId of questionIds) {
           // A Question with no row is pushed as null, which `masteryFrom` treats
           // exactly as `Ungraded`: the two are one fact, and a Mastery that told them
@@ -1296,6 +1319,194 @@ export class GradingService {
       answered: answeredOf(row),
       isWeakArea: isWeakArea(row),
     }));
+  }
+
+  /**
+   * One Topic's stored figure and the **members** of the very window it is over:
+   * the Questions this child got wrong, and the ones they left blank, listed apart.
+   *
+   * **The evidence is the same five Attempts the figure is over, because it is
+   * resolved by the same function.** `submittedAttemptsFor` →
+   * `countsTowardMastery` → `topicWindowsOf` is exactly the sequence
+   * `recomputeMastery` runs before it counts anything, so the list under the
+   * percentage cannot be a list of some other five runs. A `where` of this read's
+   * own — "the last five Attempts that mention this Topic", written again — would
+   * be a second selection rule beside a stored number, and the first time the
+   * window size or the tie-break moved a parent would read a figure that did not
+   * match the rows beneath it.
+   *
+   * **The stored figure is read first inside the transaction, and an absent row
+   * short-circuits.** First, because a Topic this child has no Mastery for has no
+   * evidence worth the reads below — a retake-only Topic, a Topic whose whole window
+   * is `Ungraded`, a Topic of another account's child and a Topic id that names
+   * nothing all come out the same empty view. **Inside**, because the percentage and
+   * the rows under it are one claim: read from two snapshots, a hand-in committing
+   * between them would put a figure over three Questions above a list of four, which
+   * is precisely the drift this transaction exists to prevent.
+   *
+   * **A foreign or unknown profile, and a Topic with no row, answer an empty view —
+   * never a refusal and never a 404** (AD-18): the account travels in the `where`
+   * through the `studentProfile` relation exactly as `masteryFor`'s does, so the
+   * empty answer is a property of the statement rather than a check in front of it.
+   * A 404 for an unknown id would be a confirmation for a known one.
+   *
+   * Four statements inside **one transaction**, for the reason `answerKeyFor` opens
+   * one: the figure, the window, its grades and its disputes assembled from four
+   * snapshots could answer with a row that had no place in the window it is being
+   * listed under. The grades and the disputes are narrowed on both axes — the
+   * Attempts that survived the window, and the Questions actually tagged — so
+   * nothing comes back that no list is over.
+   *
+   * **`windowQuestionIds` is every tagged Question of the window, not only the failed
+   * ones.** It is what a weighted regeneration is aimed by, and aiming it at the two
+   * lists alone would answer "no upload covers this topic" for a Topic the child
+   * answered *perfectly* — the one case where there is no failed row to resolve from
+   * and the upload plainly does carry it.
+   *
+   * What is in which list is `topic-evidence.ts`'s rule and is not restated here.
+   * Nothing on the returned refs is a prompt, an answer, an ordinal or a rationale:
+   * the words are `practicetest`'s to give (AD-17, AD-20).
+   */
+  async topicEvidenceFor(
+    scope: ParentScope,
+    studentProfileId: string,
+    topicId: string,
+  ): Promise<TopicEvidenceView> {
+    const empty: TopicEvidenceView = {
+      topicId,
+      mastery: null,
+      missed: [],
+      unanswered: [],
+      windowQuestionIds: [],
+    };
+
+    return this.prisma.withTransaction(async (tx) => {
+      const stored = await tx.topicMastery.findFirst({
+        // Both halves in one `where`, as `masteryFor`'s are: which child, which
+        // Topic, and that the child is this account's.
+        where: {
+          studentProfileId,
+          topicId,
+          studentProfile: { parentAccountId: scope.parentAccountId },
+        },
+        select: {
+          topicId: true,
+          correct: true,
+          incorrect: true,
+          unanswered: true,
+          attemptsCounted: true,
+          value: true,
+        },
+      });
+      // No stored figure is the whole of "there is nothing to drill into", and it is
+      // also what a foreign profile id and an unknown Topic answer. One empty view for
+      // all of them, before any further read.
+      if (stored === null) return empty;
+
+      const mastery: TopicMasteryView = {
+        ...stored,
+        answered: answeredOf(stored),
+        // Classified by the one predicate, as it is on every other surface. Nothing
+        // downstream of this compares a percentage of its own.
+        isWeakArea: isWeakArea(stored),
+      };
+
+      const qualifying = (
+        await this.practiceTests.submittedAttemptsFor(tx, studentProfileId)
+      ).filter((attempt) => countsTowardMastery(attempt.ordinal));
+      if (qualifying.length === 0) return { ...empty, mastery };
+
+      const tags = await tx.questionTopic.findMany({
+        where: {
+          topicId,
+          practiceTestId: { in: [...new Set(qualifying.map((a) => a.practiceTestId))] },
+        },
+        select: { topicId: true, questionId: true, practiceTestId: true },
+      });
+
+      // The one window resolution, shared with the recompute that wrote the figure
+      // above.
+      const resolved = topicWindowsOf(qualifying, tags, [topicId]).get(topicId);
+      const window = resolved?.window ?? [];
+      const submittedAtByAttempt = new Map(
+        qualifying.map((attempt) => [attempt.attemptId, attempt.submittedAt]),
+      );
+
+      const refs: {
+        attemptId: string;
+        questionId: string;
+        practiceTestId: string;
+        submittedAt: string;
+      }[] = [];
+      const windowAttemptIds = new Set<string>();
+      const taggedQuestionIds = new Set<string>();
+      for (const attempt of window) {
+        const submittedAt = submittedAtByAttempt.get(attempt.attemptId);
+        // Unreachable by construction — the window is a subset of `qualifying`, whose
+        // every row carries an instant — and skipped rather than asserted non-null:
+        // a ref with no instant is a ref the order is undefined over, and inventing
+        // one would put a row in a place no rule chose.
+        if (submittedAt === undefined) continue;
+        windowAttemptIds.add(attempt.attemptId);
+        for (const questionId of resolved?.questionIdsByTest.get(attempt.practiceTestId) ?? []) {
+          taggedQuestionIds.add(questionId);
+          refs.push({
+            attemptId: attempt.attemptId,
+            questionId,
+            practiceTestId: attempt.practiceTestId,
+            submittedAt: submittedAt.toISOString(),
+          });
+        }
+      }
+      // Every tagged Question of the window travels whatever the lists come to: it is
+      // what the generation target is resolved from, and a perfect window has no
+      // failed row to resolve from.
+      const windowQuestionIds = [...taggedQuestionIds];
+      if (refs.length === 0) return { ...empty, mastery, windowQuestionIds };
+
+      const grades = await tx.questionGrade.findMany({
+        where: {
+          attemptId: { in: [...windowAttemptIds] },
+          questionId: { in: windowQuestionIds },
+          // Defence in depth through the relation, exactly as `qualifyingScoresFor`
+          // restates it: the ids above are already this account's, and restating it
+          // means a later edit to how the window is built cannot silently widen
+          // this statement.
+          attempt: { parentAccountId: scope.parentAccountId },
+        },
+        // No `rationale`: it is a parent-scoped fact this view has no field for, and
+        // the way to keep it off a response is not to select it (AD-20).
+        select: { attemptId: true, questionId: true, state: true, overrideState: true },
+      });
+      const gradeByRef = new Map(grades.map((row) => [refKey(row.attemptId, row.questionId), row]));
+
+      const disputes = await tx.gradeDispute.findMany({
+        where: {
+          attemptId: { in: [...windowAttemptIds] },
+          questionId: { in: windowQuestionIds },
+          parentAccountId: scope.parentAccountId,
+        },
+        select: { attemptId: true, questionId: true },
+      });
+      const disputed = new Set(disputes.map((row) => refKey(row.attemptId, row.questionId)));
+
+      const { missed, unanswered } = partitionTopicEvidence(
+        refs.map((ref) => {
+          const key = refKey(ref.attemptId, ref.questionId);
+          const grade = gradeByRef.get(key) ?? null;
+          return {
+            ...ref,
+            // Resolved before anything is partitioned, so a parent's adjustment is
+            // what decides which list a row lands in — as it decides every other
+            // figure on every other surface.
+            state: grade === null ? null : effectiveStateOf(grade),
+            parentAdjusted: grade?.overrideState != null,
+            disputed: disputed.has(key),
+          };
+        }),
+      );
+      return { topicId, mastery, missed, unanswered, windowQuestionIds };
+    });
   }
 
   /**
@@ -1718,18 +1929,6 @@ function correctAnswerOf(question: GradingQuestionInput): string {
 /** One `(Attempt, Question)` pair as a single map key. Two ids, one lookup. */
 function refKey(attemptId: string, questionId: string): string {
   return `${attemptId}:${questionId}`;
-}
-
-/**
- * One `(Topic, Practice Test)` pair as a single map key.
- *
- * Its own function beside `refKey` rather than that one reused: the two compose
- * different pairs, and a single "two ids, one string" helper would let a key built
- * from one pair be looked up in a map keyed by the other without a word of
- * complaint from the compiler.
- */
-function topicTestKey(topicId: string, practiceTestId: string): string {
-  return `${topicId}:${practiceTestId}`;
 }
 
 /**

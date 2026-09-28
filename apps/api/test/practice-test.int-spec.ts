@@ -1030,6 +1030,219 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
   });
   // --- Story 4.2: topic weighting -------------------------------------
 
+  // --- The drill-down's weighted target ---------------------------------
+
+  describe('resolving a weighted target from evidence', () => {
+    const service = () => h.moduleRef.get(PracticeTestService);
+
+    /** Every generated Question of this account's drafts, newest paper first. */
+    async function generatedQuestionIds(): Promise<string[]> {
+      const rows = await h.prisma.practiceTestQuestion.findMany({
+        orderBy: [{ practiceTest: { createdAt: 'desc' } }, { ordinal: 'asc' }],
+        select: { id: true },
+      });
+      return rows.map((row) => row.id);
+    }
+
+    /** One raw label the generated Questions actually carry. */
+    async function aLandedLabel(): Promise<string> {
+      const row = await h.prisma.practiceTestQuestionTopic.findFirstOrThrow({
+        select: { label: true },
+      });
+      return row.label;
+    }
+
+    it('resolves the upload behind the evidence, in the Extraction’s own spelling', async () => {
+      const ready = await generatable();
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const target = await service().weightedTargetFor(
+        ready.parentAccountId,
+        await generatedQuestionIds(),
+        // The canonical name a drill-down would hold, drifted in case and spacing
+        // exactly as canonicalization may leave it.
+        `  ${(await aLandedLabel()).toUpperCase()} `,
+      );
+      expect(target).not.toBeNull();
+      expect(target!.sourceTestId).toBe(ready.sourceTestId);
+      // The label is one the Extraction carries, which is the only thing `request()`
+      // will accept — never the spelling it was asked with.
+      const carried = await server()
+        .get(`/api/parent/source-tests/${ready.sourceTestId}/practice-tests/topics`)
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      expect(carried.body.topics).toContain(target!.weightedTopic);
+      expect(target!.subjectName).toEqual(expect.any(String));
+      // The upload's own commit instant, and never absent for a Submitted one: it is
+      // how the screen names which paper the practice would come from, and a null here
+      // would silently drop the date from that sentence.
+      expect(target!.submittedAt).toEqual(expect.any(String));
+      expect(Number.isNaN(Date.parse(target!.submittedAt!))).toBe(false);
+    });
+
+    it('produces a weighted job when its label is posted back, and never WEIGHTED_TOPIC_UNKNOWN', async () => {
+      // The whole point of resolving server-side: the request cannot refuse the label
+      // the drill-down was handed.
+      const ready = await generatable();
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const target = await service().weightedTargetFor(
+        ready.parentAccountId,
+        await generatedQuestionIds(),
+        await aLandedLabel(),
+      );
+      const response = await server()
+        .post(`/api/parent/source-tests/${target!.sourceTestId}/practice-tests`)
+        .set('Authorization', bearer(ready.token))
+        .send({ count: 1, weightedTopic: target!.weightedTopic })
+        .expect(202);
+      expect(response.body.weightedTopic).toBe(target!.weightedTopic);
+
+      const stored = await h.prisma.generationJob.findUniqueOrThrow({
+        where: { id: response.body.id },
+        select: { weightedTopic: true, requestedCount: true },
+      });
+      expect(stored.weightedTopic).toBe(target!.weightedTopic);
+      expect(stored.requestedCount).toBe(1);
+    });
+
+    it('answers null when no Extraction behind the evidence carries the label', async () => {
+      const ready = await generatable();
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      // The Extraction is intact and mentions something else entirely, and the
+      // generated Questions' own raw labels no longer match it either.
+      await h.prisma.extractedTopicLabel.updateMany({ data: { label: 'astrophysics' } });
+      await h.prisma.practiceTestQuestionTopic.updateMany({ data: { label: 'palaeography' } });
+
+      await expect(
+        service().weightedTargetFor(
+          ready.parentAccountId,
+          await generatedQuestionIds(),
+          'long division',
+        ),
+      ).resolves.toBeNull();
+    });
+
+    it('answers null over no Questions at all, without reading an Extraction', async () => {
+      const ready = await generatable();
+      await expect(
+        service().weightedTargetFor(ready.parentAccountId, [], 'fractions'),
+      ).resolves.toBeNull();
+    });
+
+    it('answers null for another account’s Questions, never another account’s upload', async () => {
+      const mine = await generatable();
+      const theirs = await generatable();
+      await requestGeneration(theirs, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      await expect(
+        service().weightedTargetFor(
+          mine.parentAccountId,
+          await generatedQuestionIds(),
+          await aLandedLabel(),
+        ),
+      ).resolves.toBeNull();
+    });
+
+    it('picks the newest upload carrying the label when the evidence spans two', async () => {
+      const ready = await generatable();
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      const label = await aLandedLabel();
+      const older = await generatedQuestionIds();
+
+      // A second, later upload of the same account carrying the same label. Written
+      // straight to the tables: this case is about which Source Test is chosen, and
+      // driving a second upload-extract-generate would spend provider calls to stage
+      // an ordering.
+      const first = await h.prisma.sourceTest.findUniqueOrThrow({
+        where: { id: ready.sourceTestId },
+        select: { subjectId: true, gradeLevelId: true },
+      });
+      const newerSource = await h.prisma.sourceTest.create({
+        data: {
+          parentAccountId: ready.parentAccountId,
+          studentProfileId: ready.studentProfileId,
+          status: 'Submitted',
+          expiresAt: new Date(Date.now() + 86_400_000),
+          submittedAt: new Date(),
+          subjectId: first.subjectId,
+          gradeLevelId: first.gradeLevelId,
+        },
+        select: { id: true },
+      });
+      const extraction = await h.prisma.extraction.create({
+        data: { sourceTestId: newerSource.id, pageCount: 1 },
+        select: { id: true },
+      });
+      await h.prisma.extractedQuestion.create({
+        data: {
+          extractionId: extraction.id,
+          ordinal: 1,
+          pageOrdinal: 1,
+          format: 'ShortAnswer',
+          prompt: [{ kind: 'text', value: 'A later source question' }],
+          confidence: 'High',
+          dependsOnUninterpretable: false,
+          usable: true,
+          topics: { create: [{ label, confidence: 'High' as const }] },
+        },
+      });
+      const job = await h.prisma.generationJob.create({
+        data: {
+          parentAccountId: ready.parentAccountId,
+          sourceTestId: newerSource.id,
+          studentProfileId: ready.studentProfileId,
+          requestedCount: 1,
+          status: 'Succeeded',
+        },
+        select: { id: true },
+      });
+      const newerTest = await h.prisma.practiceTest.create({
+        data: {
+          parentAccountId: ready.parentAccountId,
+          sourceTestId: newerSource.id,
+          studentProfileId: ready.studentProfileId,
+          generationJobId: job.id,
+          status: 'Released',
+          ordinal: 1,
+          questionCount: 1,
+          chargedAt: new Date(),
+          // A whole day later, so "newest" is not left to two rows sharing a
+          // millisecond.
+          createdAt: new Date(Date.now() + 86_400_000),
+        },
+        select: { id: true },
+      });
+      const newerQuestion = await h.prisma.practiceTestQuestion.create({
+        data: {
+          practiceTestId: newerTest.id,
+          ordinal: 1,
+          format: 'ShortAnswer',
+          prompt: [{ kind: 'text', value: 'What is a third of 9?' }],
+          answer: [{ kind: 'text', value: '3' }],
+          topics: { create: [{ label }] },
+        },
+        select: { id: true },
+      });
+
+      // Evidence spanning both uploads, handed over oldest-first so the ordering
+      // cannot be the argument order.
+      const target = await service().weightedTargetFor(
+        ready.parentAccountId,
+        [...older, newerQuestion.id],
+        label,
+      );
+      expect(target!.sourceTestId).toBe(newerSource.id);
+      expect(target!.weightedTopic).toBe(label);
+    });
+  });
+
   describe('topic weighting', () => {
     /** The Topics the screen would offer, read from the route that offers them. */
     async function offeredTopics(ready: Ready): Promise<string[]> {

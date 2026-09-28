@@ -4,7 +4,9 @@ import {
   hasEvidence,
   masteryFrom,
   masteryWindowOf,
+  topicWindowsOf,
   type MasteryWindowAttempt,
+  type TopicWindowTag,
 } from './mastery.js';
 
 /**
@@ -129,5 +131,86 @@ describe('hasEvidence', () => {
 
   it('is true as soon as one Question was judged', () => {
     expect(hasEvidence(masteryFrom(['Incorrect', 'Ungraded']))).toBe(true);
+  });
+});
+
+describe('topicWindowsOf', () => {
+  /** Tags for one Topic, spelled `test:question`. */
+  function tagsFor(topicId: string, ...pairs: readonly `${string}:${string}`[]): TopicWindowTag[] {
+    return pairs.map((pair) => {
+      const [practiceTestId, questionId] = pair.split(':') as [string, string];
+      return { topicId, questionId, practiceTestId };
+    });
+  }
+
+  it('keeps a Topic’s own five when unrelated papers interleave with them', () => {
+    // Six papers carrying the Topic, with five papers about something else woven
+    // through. The window is the Topic's newest five and no other paper reaches it.
+    const attempts = attemptsAt('t1', 'other', 't2', 'other', 't3', 't4', 'other', 't5', 't6');
+    const windows = topicWindowsOf(
+      attempts,
+      tagsFor('topic-a', 't1:q1', 't2:q2', 't3:q3', 't4:q4', 't5:q5', 't6:q6'),
+      ['topic-a'],
+    );
+    expect(windows.get('topic-a')!.window.map((attempt) => attempt.practiceTestId)).toEqual([
+      't1',
+      't2',
+      't3',
+      't4',
+      't5',
+    ]);
+  });
+
+  it('groups the question ids per paper rather than into one pile', () => {
+    // "Which Questions of *this* paper are on the Topic" is the counting rule's
+    // question, and a single flat list would count another paper's Questions against
+    // an Attempt that never presented them.
+    const windows = topicWindowsOf(
+      attemptsAt('t1', 't2'),
+      tagsFor('topic-a', 't1:q1', 't1:q2', 't2:q3'),
+      ['topic-a'],
+    );
+    const byTest = windows.get('topic-a')!.questionIdsByTest;
+    expect(byTest.get('t1')).toEqual(['q1', 'q2']);
+    expect(byTest.get('t2')).toEqual(['q3']);
+  });
+
+  it('keeps two Topics’ windows apart, over one set of Attempts and one set of tags', () => {
+    const windows = topicWindowsOf(
+      attemptsAt('t1', 't2'),
+      [...tagsFor('topic-a', 't1:q1'), ...tagsFor('topic-b', 't2:q2')],
+      ['topic-a', 'topic-b'],
+    );
+    expect(windows.get('topic-a')!.window.map((a) => a.practiceTestId)).toEqual(['t1']);
+    expect(windows.get('topic-b')!.window.map((a) => a.practiceTestId)).toEqual(['t2']);
+    expect(windows.get('topic-a')!.questionIdsByTest.get('t2')).toBeUndefined();
+  });
+
+  it('answers an empty window for a Topic no tag mentions, rather than omitting it', () => {
+    // Every named Topic gets an answer: a caller that had to tell "no evidence" from
+    // "not asked about" would be a caller deciding this rule for itself.
+    const windows = topicWindowsOf(attemptsAt('t1'), tagsFor('topic-a', 't1:q1'), [
+      'topic-a',
+      'topic-z',
+    ]);
+    expect(windows.has('topic-z')).toBe(true);
+    expect(windows.get('topic-z')).toEqual({ window: [], questionIdsByTest: new Map() });
+  });
+
+  it('answers an empty window for every Topic when there is no qualifying Attempt', () => {
+    const windows = topicWindowsOf([], tagsFor('topic-a', 't1:q1'), ['topic-a']);
+    expect(windows.get('topic-a')!.window).toEqual([]);
+    // The tags are still grouped: the window is empty, not the grouping.
+    expect(windows.get('topic-a')!.questionIdsByTest.get('t1')).toEqual(['q1']);
+  });
+
+  it('agrees with masteryWindowOf, because it is what it calls', () => {
+    // The extraction is a move and not a re-write: the selection this answers with is
+    // the selection the one window function makes.
+    const attempts = attemptsAt('t1', 'other', 't2');
+    expect(
+      topicWindowsOf(attempts, tagsFor('topic-a', 't1:q1', 't2:q2'), ['topic-a']).get('topic-a')!
+        .window,
+    ).toEqual(masteryWindowOf(attempts, new Set(['t1', 't2'])));
   });
 });

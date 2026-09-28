@@ -1,6 +1,10 @@
 'use client';
 
+import type { Route } from 'next';
+import NextLink from 'next/link';
+import type { LinkProps } from 'next/link';
 import Box from '@mui/material/Box';
+import Link from '@mui/material/Link';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -50,12 +54,29 @@ import { density, typeRoles } from '@/theme/tokens';
  * viewport renders the phone layout first on every device and then swaps, which is
  * a visible reflow on the slowest device the product runs on.
  *
- * **A row's tap target leads nowhere yet.** The drill-down, the missed-question
- * list and "generate more like this" are Story 7.5; there is no link here and no
- * handler waiting for one.
+ * **Every row opens.** The topic name is a link filling its cell, and `hrefFor` is a
+ * required prop rather than an optional one: a row that cannot be opened is a
+ * dashboard that still dead-ends, and an optional href is an href somebody forgets.
+ * Where it goes is the caller's to compose — the drill-down is about one child and the
+ * table does not know which one is selected.
+ *
+ * The link's accessible name is the topic, and nothing else: it is a real anchor rather
+ * than a row click handler, so it is keyboard reachable and announced as a link without
+ * a word of `aria-` over the top of it.
  *
  * No cost, plan name, price or model name reaches this table (AD-20, AD-26).
  */
+
+/**
+ * `NextLink`, pinned to the drill-down route.
+ *
+ * MUI's `component` prop takes a concrete component, and handing it the generic
+ * `NextLink` collapses its route parameter to `unknown` — under which every *dynamic*
+ * route stops being a legal href, this one included.
+ */
+function TopicLink(props: LinkProps<`/parent/analytics/topics/${string}`>) {
+  return <NextLink {...props} />;
+}
 /**
  * Visually hidden up to the tablet breakpoint, an ordinary cell from there up.
  *
@@ -81,6 +102,7 @@ export function MasteryTable({
   heading,
   windowSize,
   name,
+  hrefFor,
 }: {
   topics: readonly MasteryTopicView[];
   /** The table's accessible name — the Subject's when the parent narrowed it. */
@@ -89,6 +111,13 @@ export function MasteryTable({
   windowSize: number;
   /** The student, named — Parent View is third person (UX-DR31). */
   name: string;
+  /**
+   * Where this topic's drill-down is, for the student the caller has selected.
+   *
+   * Required, so no render of this table can leave a row unopenable — and the caller's,
+   * because which child is selected is the dashboard's fact and not this table's.
+   */
+  hrefFor: (topicId: string) => Route<`/parent/analytics/topics/${string}`>;
 }) {
   return (
     <Box sx={{ display: 'grid', gap: `${density.gap}px` }}>
@@ -138,8 +167,21 @@ export function MasteryTable({
               >
                 <TableCell>
                   {/* The stored name, or a neutral stand-in for a topic that no
-                    longer resolves: the row keeps its place and loses its label. */}
-                  {topic.topicName ?? parentCopy.analytics.unknownTopic}
+                    longer resolves: the row keeps its place and loses its label — and
+                    it still opens, because the figure is still true whatever became of
+                    the row that named it.
+
+                    A real anchor filling the cell, so it is keyboard reachable and its
+                    accessible name is the topic. Client-side, so the provider holding
+                    the elevation bearer stays mounted across the navigation. */}
+                  <Link
+                    component={TopicLink}
+                    href={hrefFor(topic.topicId)}
+                    sx={{ display: 'block', minHeight: density.tapTarget }}
+                    data-testid="mastery-topic-link"
+                  >
+                    {topic.topicName ?? parentCopy.analytics.unknownTopic}
+                  </Link>
                 </TableCell>
                 <TableCell>
                   <Box sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>

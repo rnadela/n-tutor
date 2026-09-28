@@ -1,7 +1,13 @@
 import type { AttemptScorePoint } from '../grading/grading.service.js';
 import type { TopicMasteryView } from '../grading/grading.service.js';
+import type { AnswerKeyRowView } from '../grading/grading-results.js';
+import type { TopicEvidenceRef } from '../grading/topic-evidence.js';
 import type { TopicDescription } from '../topics/topic.service.js';
-import type { PracticeTestReleasedSummary } from '../practicetest/practice-test.service.js';
+import type {
+  PracticeTestReleasedSummary,
+  QuestionEvidenceView,
+  WeightedTargetView,
+} from '../practicetest/practice-test.service.js';
 
 /**
  * The dashboard's shape and its ranking, as interfaces and pure functions.
@@ -253,6 +259,134 @@ export function countAwaiting<T>(rows: readonly T[], awaiting: (row: T) => boole
   let count = 0;
   for (const row of rows) if (awaiting(row)) count += 1;
   return count;
+}
+
+/**
+ * One row of the drill-down's evidence: the shared answer-key row, plus which run
+ * it came off and when that run was handed in.
+ *
+ * **`AnswerKeyRowView` and not a shape of its own**, because the five redundant
+ * grade carriers, the paper-role prompt and the "no answer" treatment are already in
+ * `components/AnswerKeyRow` and Story 7.4 built `WeakAreaMarker` for this screen to
+ * reuse. A second row shape here would be the place the two rooms' grade semantics
+ * drift.
+ *
+ * `newlyGraded` is always `false` on this surface: nothing on the drill-down grades
+ * anything, so no read of it can be what judged a Question.
+ *
+ * The two extra fields are what one Attempt's row needs and the results screen does
+ * not: a drill-down lists Questions from up to five different runs, so each row has
+ * to say which run it was and when.
+ */
+export interface TopicDrillDownRowView extends AnswerKeyRowView {
+  attemptId: string;
+  submittedAt: string;
+}
+
+/**
+ * The weighted-generation target, re-exported rather than restated.
+ *
+ * It is `practicetest`'s shape because the label on it is `practicetest`'s to
+ * resolve: a second interface here would be a second place the contract between the
+ * resolver and `request()` could be written down, and the two would drift the first
+ * time either moved.
+ */
+export type { WeightedTargetView };
+
+/** The whole drill-down, as one read. */
+export interface TopicDrillDownView {
+  topicId: string;
+  /** The Topic's name, or null for a stored figure whose `Topic` no longer resolves. */
+  topicName: string | null;
+  subjectName: string | null;
+  /**
+   * The stored figure, with its unanswered count — or `null`.
+   *
+   * `null` is the whole of the empty drill-down, and it is the same answer a foreign
+   * profile id, an unknown profile id and a Topic this child has no row for all get
+   * (AD-18). The screen states one sentence for it and offers no fire.
+   */
+  mastery: MasteryTopicView | null;
+  /** The Questions the child got wrong, newest run first. */
+  missed: TopicDrillDownRowView[];
+  /** The Questions they left blank, listed **apart** from the ones they got wrong. */
+  unanswered: TopicDrillDownRowView[];
+  /** The one upload a weighted regeneration can be aimed at, or null for none. */
+  target: WeightedTargetView | null;
+  /** The figures the verdict was resolved against, so the web states neither. */
+  weakArea: WeakAreaPolicyView;
+}
+
+/**
+ * The format a row whose stored Question could not be found reports.
+ *
+ * Every word of such a row is null, so the format is the one field that cannot
+ * degrade to an absence without changing `AnswerKeyRowView`'s shape for every other
+ * surface. The plainest of the three is chosen deliberately: the row says the answer
+ * is unavailable in words, and "Short answer" is the reading least likely to be
+ * mistaken for a claim about the Question.
+ */
+const UNREADABLE_FORMAT: AnswerKeyRowView['format'] = 'ShortAnswer';
+
+/**
+ * The refs joined to their words — the drill-down's rows, in the order they are read.
+ *
+ * **Arithmetic over two maps, and assertable with no database.** `grading` says
+ * which `(Attempt, Question)` pairs a Topic's window holds and what each counts as;
+ * `practicetest` says what each one asked and what was put down. This is the join,
+ * and it is a lookup rather than a filter: **a ref whose evidence is missing keeps
+ * its place with null words**. Dropping it would silently shorten the evidence behind
+ * a figure by exactly the rows that are hardest to explain — and the figure above
+ * would then be over more Questions than the list under it.
+ *
+ * **The order is finished here**, and this is the only place it can be: the refs
+ * arrive newest-Attempt-first from `partitionTopicEvidence`, and the `ordinal` tie-break
+ * within one run needs the number the child was shown — which is `practicetest`'s
+ * column and reaches the composition only with the words. So the attempt order is
+ * taken from the refs as given, never re-derived from a timestamp, and `ordinal`
+ * settles the rest. A row with no evidence sorts as ordinal 0, which is no ordinal any
+ * Question carries: they are 1-based, so it leads its own run rather than landing in an
+ * arbitrary place among rows it cannot be compared with.
+ */
+export function drillDownRowsOf(
+  refs: readonly TopicEvidenceRef[],
+  evidence: ReadonlyMap<string, QuestionEvidenceView>,
+): TopicDrillDownRowView[] {
+  // First appearance of each Attempt in the refs as given — which is newest first,
+  // decided once in `partitionTopicEvidence` and not re-decided here.
+  const rank = new Map<string, number>();
+  for (const ref of refs) if (!rank.has(ref.attemptId)) rank.set(ref.attemptId, rank.size);
+
+  const ordinalOf = (ref: TopicEvidenceRef): number =>
+    evidence.get(`${ref.attemptId}:${ref.questionId}`)?.ordinal ?? 0;
+
+  return [...refs]
+    .sort((left, right) => {
+      const byAttempt = (rank.get(left.attemptId) ?? 0) - (rank.get(right.attemptId) ?? 0);
+      if (byAttempt !== 0) return byAttempt;
+      return ordinalOf(left) - ordinalOf(right);
+    })
+    .map((ref) => {
+      const words = evidence.get(`${ref.attemptId}:${ref.questionId}`) ?? null;
+      return {
+        questionId: ref.questionId,
+        attemptId: ref.attemptId,
+        submittedAt: ref.submittedAt,
+        ordinal: words?.ordinal ?? 0,
+        format: words?.format ?? UNREADABLE_FORMAT,
+        prompt: words?.prompt ?? null,
+        studentAnswer: words?.studentAnswer ?? null,
+        correctAnswer: words?.correctAnswer ?? null,
+        // Already one of the two states its list is named after: the partition
+        // narrowed it, so this is an assignment rather than an assertion. A default
+        // here would invent a verdict for a Question nothing judged.
+        state: ref.state,
+        // Nothing on this surface grades, so no read of it can be what judged a row.
+        newlyGraded: false,
+        parentAdjusted: ref.parentAdjusted,
+        disputed: ref.disputed,
+      };
+    });
 }
 
 /** The trend's points, with the score flattened onto each. */

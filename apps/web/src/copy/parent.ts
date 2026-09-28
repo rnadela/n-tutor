@@ -26,6 +26,24 @@ const GRADE_LABELS = {
   Ungraded: 'not graded yet',
 } as const;
 
+/**
+ * The mastery figure and the blank count, as four functions **two groups share**.
+ *
+ * Declared beside `parentCopy` for exactly `GRADE_LABELS`' reason: the dashboard row
+ * and the topic drill-down state the same figure about the same window, and two
+ * separately maintained copies of that wording is two chances for one number to be
+ * described two ways on two screens a parent moves between in one press. The figure is
+ * never stated without the count it is over, whichever group renders it.
+ */
+const MASTERY_FIGURE = (percent: number, answered: number): string =>
+  `${percent}% of ${answered} answered`;
+/** A topic the student was asked about and skipped entirely. There is no figure. */
+const MASTERY_NONE = 'Nothing answered yet';
+const BLANKS_NOTE = (unanswered: number): string =>
+  `${unanswered} question${unanswered === 1 ? '' : 's'} left blank`;
+/** No question was skipped. Said rather than left out, so nothing is implied. */
+const BLANKS_NONE = 'Nothing left blank';
+
 export const parentCopy = {
   appName: 'n-test-reviewer',
   signUp: {
@@ -1533,13 +1551,12 @@ export const parentCopy = {
      * The Mastery figure, **always with the skipped count beside it**: a percentage
      * on its own is a percentage over a denominator nobody stated.
      */
-    masteryFigure: (percent: number, answered: number) => `${percent}% of ${answered} answered`,
+    masteryFigure: MASTERY_FIGURE,
     /** A topic the student was asked about and skipped entirely. There is no figure. */
-    masteryNone: 'Nothing answered yet',
-    unansweredNote: (unanswered: number) =>
-      `${unanswered} question${unanswered === 1 ? '' : 's'} left blank`,
+    masteryNone: MASTERY_NONE,
+    unansweredNote: BLANKS_NOTE,
     /** No question was skipped. Said rather than left out, so nothing is implied. */
-    unansweredNone: 'Nothing left blank',
+    unansweredNone: BLANKS_NONE,
     /** The label on the marker. The same words the marker announces. */
     weakArea: 'Weak Area',
 
@@ -1603,6 +1620,169 @@ export const parentCopy = {
     /** Nothing started and nothing finished, so there is no progress to state. */
     emptyNoWork: 'No practice test has been started yet.',
   },
+  /**
+   * The topic drill-down: the evidence behind one figure, and the one thing a parent
+   * can do about it.
+   *
+   * **Every sentence about the student is a function of the subject** (UX-DR31): Parent
+   * View is third person and names the child, so no literal in the screen and no
+   * default here addresses anybody. The figure and blank wordings are the `analytics`
+   * group's own functions, reused rather than re-typed, so the dashboard row and the
+   * drill-down heading cannot come to state the same figure differently.
+   *
+   * **No account plan is named and there is nothing offered for sale.** A parent looking
+   * at a weak topic has a practice problem, not a purchasing one — and the cost block
+   * below is denominated in practice tests, which is the only unit this product spends.
+   */
+  topicDrillDown: {
+    /** The way back, naming the place rather than the action. */
+    back: 'Back to the topics',
+    loading: 'Loading\u2026',
+    /** The drill-down read failed. Its own sentence, never a platform string. */
+    loadFailed: 'This topic could not be opened. Try again.',
+    /** The **profiles** read failed, which is a different claim. */
+    profilesFailed: 'The students could not be listed. Try again.',
+    /** The allowance read failed. The evidence still renders; only the cost cannot. */
+    allowanceFailed: 'What is left of the Generation Allowance could not be read. Try again.',
+    retry: 'Try again',
+
+    /** The heading: which topic, about which student. */
+    title: (name: string, topicName: string) => `${topicName}, for ${name}`,
+    /** A stored figure whose topic no longer resolves. The screen keeps its place. */
+    unknownTopic: 'A topic that is no longer listed',
+    /**
+     * The `?student=` in the address names nobody this account has.
+     *
+     * A deleted profile, another account's child, or a link that was edited. One
+     * sentence for all of them — this screen does not try to tell them apart, because
+     * telling them apart would be confirming which ids exist — and the way back is the
+     * table that knows who is selected.
+     */
+    unknownStudent:
+      'This topic could not be shown, because the student in the address is not one on this account. Go back to the topics and open the row again.',
+    /**
+     * A row whose stored question could no longer be read back.
+     *
+     * It keeps its place, because the figure above is still over it — but it is headed
+     * by what is actually known rather than by "Question 0", which would be a claim
+     * about a number the system has just admitted it cannot recover.
+     */
+    unidentifiedQuestion: 'A question that can no longer be identified',
+    /** Which subject the topic sits under, when it still resolves. */
+    subject: (subjectName: string) => `Subject: ${subjectName}`,
+
+    /**
+     * The figure, with the count it is over — the `analytics` wording, so the two
+     * screens cannot drift.
+     */
+    figure: MASTERY_FIGURE,
+    /** A topic the student was asked about and skipped entirely. There is no figure. */
+    figureNone: MASTERY_NONE,
+    /** How many runs the figure is over — the API's count, never one derived here. */
+    scope: (name: string, attemptsCounted: number) =>
+      `This is over the last ${attemptsCounted} practice test${attemptsCounted === 1 ? '' : 's'} ${name} finished for the first time that asked about this topic.`,
+    /** The blank count, in the same words the dashboard uses. */
+    blanks: BLANKS_NOTE,
+    blanksNone: BLANKS_NONE,
+    /**
+     * What a blank *means*, said once on the screen it matters on.
+     *
+     * Two facts, and both are needed: a skipped question is counted in neither part of
+     * the figure, and it is only a blank at all because the practice test was handed in
+     * before its timer ran out. Had the timer expired, the same empty box would have
+     * been marked wrong — so a parent reading "3 left blank" beside a percentage that
+     * ignores them is owed the reason.
+     */
+    blanksExplained: (name: string) =>
+      `A question ${name} left blank counts in neither part of the figure above \u2014 it is not a right answer and not a wrong one. Had the practice test's timer run out, the same empty answers would have been marked wrong instead.`,
+
+    /** The two lists, each named after the student and never addressed to them. */
+    missedHeading: (name: string) => `What ${name} got wrong`,
+    unansweredHeading: (name: string) => `What ${name} left blank`,
+    /** Neither list has anything in it, and the figure still stands. */
+    missedNone: (name: string) => `${name} got none of these questions wrong.`,
+    unansweredNone: (name: string) => `${name} left none of these questions blank.`,
+    /** Which run a row came off, and when it went in. */
+    rowFrom: (when: string) => `From the practice test handed in on ${when}`,
+    /** The same fact for a stored instant that will not parse. */
+    rowFromUndated: 'From a finished practice test',
+
+    /**
+     * There is no stored figure for this topic and this student at all.
+     *
+     * The same sentence for a topic they have never been asked about, one met only on a
+     * retake, and one belonging to another account's child: this screen does not try to
+     * tell those apart, because the API does not either.
+     */
+    empty: (name: string) =>
+      `There is nothing to show for this topic yet. A figure appears once ${name} has answered questions on it in a finished practice test.`,
+
+    /** "Generate more on this" — the section, the cost, then the control. */
+    generateHeading: 'Generate more on this',
+    /** What the control will do, before the cost and before it can be pressed. */
+    generateIntro: (topicName: string) =>
+      `This makes one more practice test from an upload that already covers ${topicName}, with most of its questions on that topic.`,
+    /** Which upload it would come from, so a parent recognises the paper. */
+    generateFrom: (subjectName: string, when: string) =>
+      `From the ${subjectName} upload of ${when}.`,
+    generateFromUndated: (subjectName: string) => `From a ${subjectName} upload.`,
+    /** The same, for an upload whose subject no longer resolves. */
+    generateFromUnknownSubject: (when: string) => `From the upload of ${when}.`,
+    /**
+     * Neither a subject nor a readable date.
+     *
+     * Its own sentence rather than one of the three above with a stand-in dropped into
+     * it: passing "a finished practice test" where a date belongs reads "From the upload
+     * of From a finished practice test", which is the kind of sentence a parent reads as
+     * a fault in the product.
+     */
+    generateFromUnknown: 'From an earlier upload of this student’s.',
+
+    /**
+     * The cost, in **practice tests** and in three lines: what this spends, what is
+     * left, and what is left after. All three above the control, and every figure the
+     * API's.
+     */
+    costSpend: (count: number) =>
+      count === 1
+        ? 'This uses 1 practice test of the Generation Allowance.'
+        : `This uses ${count} practice tests of the Generation Allowance.`,
+    costRemaining: (remaining: number) =>
+      remaining === 1
+        ? '1 practice test is left in the Generation Allowance this period.'
+        : `${remaining} practice tests are left in the Generation Allowance this period.`,
+    /** No ceiling. Said in words, never as a number and never as "0 left". */
+    costRemainingUnlimited: 'The Generation Allowance on this account has no limit.',
+    costAfter: (after: number) =>
+      after === 1
+        ? '1 practice test would be left afterwards.'
+        : `${after} practice tests would be left afterwards.`,
+    /** An unlimited account has no remainder to state, so none is invented. */
+    costAfterUnlimited: 'There is no remainder to state afterwards.',
+    /** When the counters start again, in the account's own zone. */
+    resets: (date: string) => `The count starts again on ${date}.`,
+    /** Nothing is left, so the control is disabled and says why. */
+    spent: 'No Generation Allowance is left this period, so nothing can be made right now.',
+
+    /** The control. One tap, one practice test, this topic already chosen. */
+    fire: 'Generate one practice test on this topic',
+    /** While the request is in flight. */
+    firing: 'Starting\u2026',
+    /** The request was refused or never arrived. The screen stays usable. */
+    fireFailed: 'The practice test could not be started. Try again.',
+
+    /**
+     * No upload of this student's carries the topic, so there is nothing to aim a
+     * request at and no control is offered.
+     *
+     * The reason is stated rather than the control being quietly absent: a parent who
+     * read the evidence and found no way to act on it would conclude the product is
+     * broken rather than that this topic came off a paper they no longer have.
+     */
+    noTarget: (name: string) =>
+      `None of ${name}'s uploads covers this topic any more, so there is nothing to make more practice from. Upload a paper that covers it to practise it again.`,
+  },
+
   errors: {
     generic: 'Something went wrong. Try again.',
     network: 'The request could not be completed. Check the connection and try again.',
