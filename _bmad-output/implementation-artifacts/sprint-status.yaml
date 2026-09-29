@@ -103,7 +103,7 @@ development_status:
   epic-8-retrospective: optional
 
   epic-9: backlog
-  9-1-account-tier-assignment-data-model-effect: backlog
+  9-1-account-tier-assignment-data-model-effect: done
   9-2-student-profile-limit-enforcement: backlog
   9-3-upload-allowance-enforcement: backlog
   9-4-generation-allowance-enforcement: backlog

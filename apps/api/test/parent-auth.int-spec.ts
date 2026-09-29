@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { limitsFor } from '../src/allowance/tiers.js';
 import {
   CHILD_DATA_CONSENT_VERSION,
   DEFAULT_PARENT_SESSION_TTL_SECONDS,
@@ -163,6 +164,63 @@ describe('parent auth', () => {
       .expect(400);
     expect(String(response.body.message)).toContain('Unknown timezone: Mars/Olympus');
     expect(await h.prisma.parentAccount.count()).toBe(0);
+  });
+
+  // --- Account Tier at birth ---------------------------------------------
+
+  it('lands a real sign-up on Free, with the Free row behind its four figures', async () => {
+    await server().post('/api/auth/sign-up').send(signUpBody()).expect(201);
+
+    const stored = await h.prisma.parentAccount.findUniqueOrThrow({
+      where: { email: 'ada@example.test' },
+    });
+    expect(stored.tier).toBe('Free');
+
+    const token = await adminToken(h.jwt, h.operatorId);
+    const { body } = await server()
+      .get(`/api/admin/parent-accounts/${stored.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    // Figures are asserted against the one tiers table, never restated here.
+    const free = limitsFor('Free');
+    expect(body.account.tier).toBe('Free');
+    expect(body.consumption.studentProfileLimit).toBe(free.studentProfiles);
+    expect(body.consumption.allowances).toEqual({
+      upload: { used: 0, limit: free.upload },
+      generation: { used: 0, limit: free.generation },
+      explanation: { used: 0, limit: free.explanation },
+    });
+  });
+
+  it('refuses a sign-up body carrying a tier and writes nothing', async () => {
+    const response = await server()
+      .post('/api/auth/sign-up')
+      .send(signUpBody({ tier: 'Internal' }))
+      .expect(400);
+
+    // The refusal has to be about `tier` — a 400 from an unrelated rule
+    // (a changed password bound, a broken email check) must not pass here.
+    const messages: string[] = Array.isArray(response.body.message)
+      ? response.body.message
+      : [String(response.body.message)];
+    expect(messages.some((message) => message.includes('tier'))).toBe(true);
+
+    // And a refused self-serve tier attempt signs nobody in.
+    expect(sessionCookieFrom(response)).toBeUndefined();
+
+    // A 400 raised after the transaction opened would still pass on status alone.
+    expect(await h.prisma.parentAccount.count({ where: { email: 'ada@example.test' } })).toBe(0);
+    expect(
+      await h.prisma.accountTimezone.count({
+        where: { parentAccount: { email: 'ada@example.test' } },
+      }),
+    ).toBe(0);
+    expect(
+      await h.prisma.accountConsent.count({
+        where: { parentAccount: { email: 'ada@example.test' } },
+      }),
+    ).toBe(0);
   });
 
   // --- Sign-in -----------------------------------------------------------

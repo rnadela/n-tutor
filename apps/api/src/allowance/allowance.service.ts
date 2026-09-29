@@ -21,7 +21,10 @@ export interface AccountConsumption {
   /** The zone the window was actually computed in. */
   timezone: string;
   tier: AccountTier;
-  /** The tier's Student Profile limit. No profile count exists yet (Epic 1). */
+  /**
+   * The tier's Student Profile limit — the limit only, never a live count.
+   * Checking it against the account's actual profiles is Story 9.2.
+   */
   studentProfileLimit: number | null;
   allowances: {
     upload: AllowanceReading;

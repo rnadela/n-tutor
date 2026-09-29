@@ -2245,3 +2245,19 @@ source_spec: `spec-8-4-parent-account-deletion.md`
 severity: medium
 reason: `onDeleteConfirmed` in `apps/web/src/app/parent/settings/page.tsx` guards `if (confirming === null || token === null || deleting) return;` before setting `deleting` or any refusal text, so a token that has gone null since the dialog opened makes the confirm button a no-op with no feedback. `DestructiveConfirmDialog` itself has no notion of the token and cannot disable its confirm control for this case. The identical guard shape exists in `apps/web/src/app/parent/students/page.tsx` (`onDeleteConfirmed`, line 310), so this is an inherited pattern from Story 8.3, not something this story introduced.
 status: open
+
+### DW-282: Nothing pins the new claim that `studentProfileLimit` is the tier's limit only and never moves with the account's live Student Profile count.
+origin: spec-deferred 8e7ad04db2ae
+location: apps/api/src/allowance/allowance.service.ts:24
+source_spec: `spec-9-1-account-tier-assignment-data-model-effect.md`
+severity: low
+reason: `AccountConsumption.studentProfileLimit` is derived solely from `limitsFor(account.tier)`, so the property holds by construction today, but no test creates a Student Profile and asserts the reported limit is unchanged. A future change that folded a count into this field would ship green. Cheap to close, but it needs a Grade Level and Student Profile fixture in a spec file that has neither, and Story 9.2 will own the profile-count read anyway.
+status: open
+
+### DW-283: `studentProfileLimit`'s "limit only, never a live count" distinction lives only in a comment, not in the type system.
+origin: spec-deferred 9f2013f25ea1
+location: apps/api/src/allowance/allowance.service.ts:24
+source_spec: `spec-9-1-account-tier-assignment-data-model-effect.md`
+severity: low
+reason: `AccountConsumption.studentProfileLimit` is typed `number | null` -- identical to a shape a live count would have. A future caller reading the field's type alone has no signal it can't be decremented or compared as a running count; only the comment says so.
+status: open
