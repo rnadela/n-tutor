@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { IdentityModule } from '../identity/identity.module.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
-import { SourceTestModule } from '../sourcetest/source-test.module.js';
 import { AllowanceService } from './allowance.service.js';
 
 /**
@@ -10,11 +9,16 @@ import { AllowanceService } from './allowance.service.js';
  * Every surface that shows an allowance reads it from here.
  */
 @Module({
-  // `SourceTestModule` for the Upload count alone, which is read through its
-  // service and never through a delegate here (AD-17). The dependency runs one
-  // way — `sourcetest` knows nothing about allowances — so it needs no
-  // `forwardRef` and no token indirection.
-  imports: [IdentityModule, PrismaModule, SourceTestModule],
+  // No `SourceTestModule`. The Upload count now reads `source_test` through
+  // this module's own `PrismaService`, exactly as the Generation and
+  // Explanation counts read theirs, and for the same reason: `sourcetest`
+  // enforces the Upload cap against `AllowanceService`, so importing it back
+  // would make `allowance` — the module every surface reads — depend on a
+  // module that depends on it. What is read is a status and an instant, a
+  // column and not a behaviour, so the AD-17 carve-out that already covers
+  // `practicetest` and `explanation` covers this too, and no `forwardRef` and
+  // no reader token is bought for it.
+  imports: [IdentityModule, PrismaModule],
   providers: [AllowanceService],
   exports: [AllowanceService],
 })

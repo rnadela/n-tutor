@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { UsageClass } from '../generated/prisma/enums.js';
 import type { ParentAccountService } from '../identity/parent-account.service.js';
-import type { PrismaService } from '../prisma/prisma.service.js';
-import type { SourceTestService } from '../sourcetest/source-test.service.js';
+import type { PrismaService, TransactionClient } from '../prisma/prisma.service.js';
 import { AllowanceService } from './allowance.service.js';
 
 const ACCOUNT_ID = '99999999-8888-7777-6666-555555555555';
@@ -16,8 +15,9 @@ interface Tombstone {
 }
 
 /**
- * The service over stubbed owners: two live counts, one live count through the
- * owning module's service, and the tombstone table.
+ * The service over a stubbed Prisma: three live counts — Upload among them now
+ * that it reads `source_test` through this module's own delegate — and the
+ * tombstone table.
  *
  * The stubs answer fixed live counts on purpose. What is under test is the
  * *sum*, and a tombstone that moved a live count would be indistinguishable
@@ -26,9 +26,16 @@ interface Tombstone {
 function serviceWith(
   tombstones: readonly Tombstone[],
   live = { upload: 1, generation: 2, explanation: 3 },
-): { service: AllowanceService; aggregateArgs: unknown[] } {
+): {
+  service: AllowanceService;
+  aggregateArgs: unknown[];
+  /** This module's own Source Test count, so a test can read what it was asked. */
+  sourceTestCount: ReturnType<typeof vi.fn>;
+} {
   const aggregateArgs: unknown[] = [];
+  const sourceTestCount = vi.fn(async () => live.upload);
   const prisma = {
+    sourceTest: { count: sourceTestCount },
     practiceTest: { count: vi.fn(async () => live.generation) },
     explanation: { count: vi.fn(async () => live.explanation) },
     usageTombstone: {
@@ -62,11 +69,7 @@ function serviceWith(
     timezoneHistory: vi.fn(async () => []),
   } as unknown as ParentAccountService;
 
-  const sourceTests = {
-    countSubmittedIn: vi.fn(async () => live.upload),
-  } as unknown as SourceTestService;
-
-  return { service: new AllowanceService(accounts, prisma, sourceTests), aggregateArgs };
+  return { service: new AllowanceService(accounts, prisma), aggregateArgs, sourceTestCount };
 }
 
 function tombstone(periodStart: string, usageClass: UsageClass, count: number): Tombstone {
@@ -147,5 +150,76 @@ describe('usage tombstones keep a deleted artifact counted', () => {
       expect(where.periodStart.gte.toISOString()).toBe(consumption.periodStart);
       expect(where.periodStart.lt.toISOString()).toBe(consumption.periodEnd);
     }
+  });
+});
+
+describe('the Upload count the submit gate enforces against', () => {
+  /**
+   * The guard in `sourcetest` counts inside its own transaction, behind the
+   * account row lock. A count that quietly ran on this module's connection
+   * instead would read outside that snapshot and outside that lock — the exact
+   * race the lock exists to close — so which client the queries went to is the
+   * assertion.
+   */
+  it('issues both halves of the count on the client it is handed, and on no other', async () => {
+    const { service, sourceTestCount, aggregateArgs } = serviceWith([]);
+    const count = vi.fn(async () => 4);
+    const aggregate = vi.fn(async () => ({ _sum: { count: 3 } }));
+    const tx = {
+      sourceTest: { count },
+      usageTombstone: { aggregate },
+    } as unknown as TransactionClient;
+    const window = await service.windowFor(ACCOUNT_ID, NOW);
+
+    expect(await service.uploadUsedIn(ACCOUNT_ID, window, tx)).toBe(4 + 3);
+    expect(count).toHaveBeenCalledTimes(1);
+    expect(aggregate).toHaveBeenCalledTimes(1);
+    // The negative half, and the one that matters: a query that leaked onto
+    // this module's own connection would be a count taken outside the lock.
+    expect(sourceTestCount).not.toHaveBeenCalled();
+    expect(aggregateArgs).toHaveLength(0);
+  });
+
+  it('runs on this module’s own client when it is handed none', async () => {
+    const { service, aggregateArgs, sourceTestCount } = serviceWith([
+      tombstone('2026-09-01T00:00:00.000Z', 'Upload', 2),
+    ]);
+    const window = await service.windowFor(ACCOUNT_ID, NOW);
+
+    expect(await service.uploadUsedIn(ACCOUNT_ID, window)).toBe(1 + 2);
+    expect(sourceTestCount).toHaveBeenCalledTimes(1);
+    expect(aggregateArgs).toHaveLength(1);
+  });
+
+  /**
+   * The predicate this change moved across a module boundary. It was
+   * `sourcetest`'s and is now `allowance`'s, so it is asserted here rather than
+   * trusted: an account scope dropped, a status widened or a `lt` turned into
+   * an `lte` would each be a silent miscount that every other case still
+   * passes.
+   */
+  it('counts this account’s committed Source Tests over the half-open window', async () => {
+    const { service, sourceTestCount } = serviceWith([]);
+    const window = await service.windowFor(ACCOUNT_ID, NOW);
+
+    await service.uploadUsedIn(ACCOUNT_ID, window);
+
+    expect(sourceTestCount).toHaveBeenCalledWith({
+      where: {
+        parentAccountId: ACCOUNT_ID,
+        status: 'Submitted',
+        // `[start, end)`: a commit at the instant a period ends belongs to the
+        // next one and is counted exactly once.
+        submittedAt: { gte: window.start, lt: window.end },
+      },
+    });
+  });
+
+  it('is the same number the readout states, by construction', async () => {
+    const { service } = serviceWith([tombstone('2026-09-01T00:00:00.000Z', 'Upload', 6)]);
+    const window = await service.windowFor(ACCOUNT_ID, NOW);
+
+    const consumption = await service.consumptionFor(ACCOUNT_ID, NOW);
+    expect(await service.uploadUsedIn(ACCOUNT_ID, window)).toBe(consumption.allowances.upload.used);
   });
 });

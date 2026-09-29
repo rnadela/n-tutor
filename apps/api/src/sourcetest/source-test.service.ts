@@ -9,6 +9,10 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai/ai.service.js';
+import { AllowanceService } from '../allowance/allowance.service.js';
+import { uploadAllowanceExhausted } from '../allowance/allowance-policy.js';
+import { limitsFor } from '../allowance/tiers.js';
+import { ParentAccountService } from '../identity/parent-account.service.js';
 import { ExtractionService } from '../extraction/extraction.service.js';
 import { TaxonomyService, type TaxonomyItem } from '../admin/taxonomy.service.js';
 import type {
@@ -202,10 +206,15 @@ export interface SourceTestRow {
  * as labels — and this module never writes a taxonomy row.
  *
  * The legibility check is one batch over every `Ready` page, foreground and
- * in-request (AD-4, AD-29), run once and stored. Nothing here charges an Upload
- * Allowance: usage is derived (AD-14), and `countSubmittedIn` below is the
- * whole of the charge — counting Submitted rows in the window *is* the debit,
- * so there is no counter column, no charge write and no reset job to reconcile.
+ * in-request (AD-4, AD-29), run once and stored.
+ *
+ * The Upload Allowance is **enforced here**, in `submit` and nowhere else,
+ * because `submit` is the one statement that charges one. The charge is still
+ * the `Submitted` row and nothing else: usage stays derived (AD-14), counted by
+ * `allowance` from committed rows in the window, so there is no counter column,
+ * no charge write and no reset job to reconcile. Every other path on this
+ * service — opening a draft, adding, reordering, retaking or deleting a page,
+ * classifying, the legibility check — is uncapped and untouched by it.
  */
 @Injectable()
 export class SourceTestService implements SourceTestReader {
@@ -233,6 +242,14 @@ export class SourceTestService implements SourceTestReader {
     // unlink-then-mark sequence for the early deletion is precisely the defect
     // Epic 8 forbids.
     private readonly pageExpiry: PageExpiryService,
+    // The account row `submit` locks while it checks the cap. `identity` owns
+    // the lock idiom (`findByIdForUpdate`) and this module reuses it rather
+    // than writing a second `SELECT … FOR UPDATE` of its own.
+    private readonly accounts: ParentAccountService,
+    // The period window, the tier's limit and the Upload count — all three of
+    // them `allowance`'s, and none of them re-derived here. The dependency runs
+    // `sourcetest -> allowance` only, so it needs no `forwardRef`.
+    private readonly allowance: AllowanceService,
   ) {}
 
   // --- Reads -------------------------------------------------------------
@@ -807,9 +824,24 @@ export class SourceTestService implements SourceTestReader {
    * status change share one transaction, so nothing deleted or cleared
    * concurrently can slip between them and produce a Submitted Source Test with
    * no pages or no classification.
+   *
+   * The Upload Allowance is the fourth gate, and it is last on purpose: the
+   * three above are assertions about the draft and cost nothing to fail, while
+   * this one takes a row lock on the account. A draft that was never
+   * submittable must not queue behind another account's commit to be told so.
    */
   async submit(parentAccountId: string, sourceTestId: string): Promise<SourceTestView> {
     await this.requireDraft(parentAccountId, sourceTestId);
+
+    // One instant for the whole commit: the window is resolved from it and the
+    // row is stamped with it. Reading the clock twice would let a submit that
+    // straddles a period boundary be counted against the window it started in
+    // and stamped into the next one — an upload charged to nobody.
+    const now = new Date();
+    // Resolved before the transaction: it reads the account's zone history and
+    // holding the lock across that read buys nothing. A zone change landing in
+    // between moves the *next* boundary, never the running period (AD-27).
+    const window = await this.allowance.windowFor(parentAccountId, now);
 
     await this.prisma.withTransaction(async (tx) => {
       const count = await tx.pageImage.count({ where: { sourceTestId, state: 'Ready' } });
@@ -830,6 +862,43 @@ export class SourceTestService implements SourceTestReader {
       // check never covered. It asserts the check *ran* and nothing about what
       // it said — `Low` is a warning, never a refusal (AD-29).
       if (!isChecked(gates)) throw new BadRequestException(LEGIBILITY_CHECK_REQUIRED);
+      // The fourth gate, and the only one that is about the account rather than
+      // the draft. The lock is what closes the race the `explanation` charging
+      // seam documented and could not close: under READ COMMITTED two commits
+      // would otherwise read the same pre-charge usage and both write. One
+      // account's commits are exactly what should serialise, and
+      // `findByIdForUpdate` is `identity`'s existing idiom for it — no second
+      // lock, and no application-level clamp.
+      const account = await this.accounts.findByIdForUpdate(tx, parentAccountId);
+      const limit = limitsFor(account.tier).upload;
+      // `null` is unlimited: no count is issued and no figure is compared. The
+      // row lock above is still taken — reading the tier is what decides this,
+      // and the read is the lock — so an unlimited account pays for the lock
+      // and for no count.
+      if (limit !== null) {
+        // The same method every surface reads its Upload usage through, issued
+        // on this transaction's client so it runs behind the lock this
+        // transaction holds. The lock is the whole of the correctness: under
+        // READ COMMITTED every statement takes its own snapshot, so a count and
+        // a write in one transaction see nothing consistent by themselves —
+        // what serialises them is that no other commit for this account can be
+        // between them. Committed rows plus `Upload` tombstones; a deleted
+        // upload is not a refund (AD-14).
+        const used = await this.allowance.uploadUsedIn(parentAccountId, window, tx);
+        if (used >= limit) {
+          throw new ConflictException(
+            uploadAllowanceExhausted({
+              tier: account.tier,
+              used,
+              limit,
+              // The window's exclusive end *is* the reset instant, stated in
+              // the zone the window was actually cut in.
+              resetAt: window.end,
+              timezone: window.timezone,
+            }),
+          );
+        }
+      }
       const written = await tx.sourceTest.updateMany({
         // Account-scoped and state-guarded in the statement that writes: a
         // concurrent submit matches nothing here, so the first one stands.
@@ -851,7 +920,9 @@ export class SourceTestService implements SourceTestReader {
           // a Submitted row whose check was being cleared.
           legibilityCheckedAt: { not: null },
         },
-        data: { status: 'Submitted', submittedAt: new Date() },
+        // The instant the window was cut from, so the row always falls inside
+        // the period it was just counted against.
+        data: { status: 'Submitted', submittedAt: now },
       });
       if (written.count !== 1) throw new ConflictException(SOURCE_TEST_NOT_DRAFT);
       // Inside, not after (AD-5). The job row and the status change are one
@@ -864,35 +935,6 @@ export class SourceTestService implements SourceTestReader {
     return this.read(parentAccountId, sourceTestId);
   }
 
-  /**
-   * How many Source Tests this account committed inside the window — which is
-   * the Upload Allowance charge, entire (AD-14, FR-31).
-   *
-   * There is no debit to go with it. A Source Test reaches `Submitted` in
-   * exactly one transaction, so counting Submitted rows in the window *is* the
-   * charge: it cannot double-charge a retry, cannot charge a draft that was
-   * abandoned or that expired, and cannot leave "job succeeded, debit did not"
-   * reachable, because there is no debit. That is why no `charged` column and
-   * no allowance write exist anywhere.
-   *
-   * Half-open `[start, end)`, like every other count in `allowance`, so a
-   * commit at the instant a period ends belongs to the next one and is counted
-   * exactly once. `allowance` reads it through this method and never through a
-   * Prisma delegate of its own (AD-17).
-   */
-  async countSubmittedIn(
-    parentAccountId: string,
-    window: { start: Date; end: Date },
-  ): Promise<number> {
-    return this.prisma.sourceTest.count({
-      where: {
-        parentAccountId,
-        status: 'Submitted',
-        submittedAt: { gte: window.start, lt: window.end },
-      },
-    });
-  }
-
   // --- Story 8.3: what this module contributes to a profile deletion -------
 
   /**
@@ -901,11 +943,14 @@ export class SourceTestService implements SourceTestReader {
    * The Upload charge is *derived* from exactly these instants (AD-14), so a
    * deletion has to collect them before the rows go: each one resolves to the
    * period window it fell in, and the tombstone written for that window keeps
-   * the count honest once the row is gone. Nothing outside this module reads
-   * `source_test` for it (AD-17).
+   * the count honest once the row is gone. The *count* of them is `allowance`'s
+   * own read of `submittedAt` under the AD-17 carve-out; the per-child
+   * collection a deletion needs is this module's, and nothing else assembles
+   * it.
    *
-   * Drafts are excluded by the same condition `countSubmittedIn` uses: a draft
-   * was never committed, so it was never charged and leaves nothing behind.
+   * Drafts are excluded by the same condition `allowance`'s Upload count uses:
+   * a draft was never committed, so it was never charged and leaves nothing
+   * behind.
    *
    * `tx` is **not optional in practice**: the deletion reads this inside the same
    * transaction that deletes the rows, so a Source Test committed between the

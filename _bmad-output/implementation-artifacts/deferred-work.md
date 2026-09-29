@@ -2317,3 +2317,11 @@ source_spec: `spec-9-2-student-profile-limit-enforcement.md`
 severity: low
 reason: `account-deletion.service.ts` takes no explicit lock on the account row, so the orders differ rather than conflict by design. Postgres would detect the cycle and abort one transaction (40P01), which surfaces as a 500 on one of the two requests. It needs the same parent to be creating a child and deleting their account at the same instant, so it is remote, but nothing documents the ordering either way.
 status: open
+
+### DW-291: The capture screen's add-pages catch still drops the API's own 409 sentence, so a page refused at the 10-page ceiling shows the generic fallback.
+origin: spec-deferred 6610f0d7245a
+location: apps/web/src/app/parent/capture/page.tsx:553
+source_spec: `spec-9-3-upload-allowance-enforcement.md`
+severity: medium
+reason: `addPages`' per-file catch does `setError(cause instanceof Error ? cause.message : parentCopy.capture.addFailed)`. For a 409, `ParentApiError.message` is the call's generic fallback and the server's sentence lives on `reason`, so `PAGE_LIMIT_REACHED` ("An upload holds at most N pages.") never reaches the parent. The shared `write` catch was fixed by this story; this second refusal site on the same screen was not, and no test observes which sentence it sets. Pre-existing: the catch predates this change and no path this story added routes through it.
+status: open

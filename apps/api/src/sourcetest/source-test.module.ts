@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AiModule } from '../ai/ai.module.js';
+import { AllowanceModule } from '../allowance/allowance.module.js';
 import { requireParentJwtSecret } from '../common/env.js';
 import { SchedulerModule } from '../common/scheduler.js';
 import { TaxonomyModule } from '../admin/taxonomy.module.js';
@@ -46,6 +47,12 @@ import { SOURCE_TEST_READER } from './source-test-reader.js';
       useFactory: () => ({ secret: requireParentJwtSecret() }),
     }),
     IdentityModule,
+    // The period window, the tiers table and the Upload count the submit gate
+    // refuses against. The arrow runs `sourcetest -> allowance` and only that
+    // way now: `allowance` no longer imports this module, so there is no cycle
+    // to express, no `forwardRef` and no reader token — the plain import is the
+    // honest shape.
+    AllowanceModule,
     // The taxonomy read this module classifies through. Imported directly, the
     // way `IdentityModule` imports it — `identity` does not re-export it, and a
     // second reader of `subject` / `grade_level` / `subject_grade_level` is

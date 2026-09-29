@@ -5,13 +5,16 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it } from 'vitest';
 import { parentCopy } from '@/copy/parent';
-import type { PageImageView } from '@/lib/parent-api';
+import { ACCOUNT_TIERS } from '@/lib/admin-api';
+import { ParentApiError, type PageImageView } from '@/lib/parent-api';
+import { endsParentView } from '@/lib/parent-view';
 import { parentTheme } from '@/theme/theme';
 import { colorTokens, density } from '@/theme/tokens';
 import { CameraGuidance, type CameraStatus } from './AddPages';
 import { CameraViewfinder, type CameraViewfinderProps } from './CameraViewfinder';
 import { PageStrip, type PageStripProps } from './PageStrip';
 import { ThinExtractionWarning, type ThinExtractionWarningProps } from './ThinExtractionWarning';
+import { writeRefusal } from './page';
 
 const DIR = import.meta.dirname;
 
@@ -1420,5 +1423,57 @@ describe('the legibility result', () => {
     expect(parentCopy.capture.submitBlocked(['pages', 'classification', 'legibility'])).toBe(
       'Add at least one page before submitting. Choose a subject and a grade level before submitting. Check the pages before submitting.',
     );
+  });
+});
+
+describe('what a refused commit puts on the screen', () => {
+  /**
+   * The server's sentence, kept deliberately opaque.
+   *
+   * What is under test is that the API's own words win, not what those words
+   * say — and the words themselves name an Account Tier, an Upload Allowance
+   * figure and a reset date, none of which this app may restate. A fixture
+   * spelling them out would both break that rule and compare the expectation
+   * against itself.
+   */
+  const SERVER_SAID = 'A sentence only the API authored.';
+  const atCap = new ParentApiError('generic', 409, null, false, false, SERVER_SAID);
+
+  it('shows the API’s own sentence rather than the screen’s generic one', () => {
+    expect(writeRefusal(atCap)).toBe(SERVER_SAID);
+    expect(writeRefusal(atCap)).not.toBe(parentCopy.capture.failed);
+  });
+
+  it('falls back to the error’s own message when the API authored no sentence', () => {
+    expect(writeRefusal(new ParentApiError('boom', 503))).toBe('boom');
+  });
+
+  it('falls back to the screen’s sentence for a throw that is not an Error', () => {
+    expect(writeRefusal('boom')).toBe(parentCopy.capture.failed);
+  });
+
+  it('leaves the parent in Parent View: a refused commit is not an expired session', () => {
+    expect(endsParentView(atCap)).toBe(false);
+  });
+
+  it('is the rule the shared write path actually uses', () => {
+    // The catch that every control's mutation funnels through, the commit
+    // among them. An expression re-inlined there would pass every test above
+    // while the screen quietly went back to dropping the sentence.
+    const write = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('async function write('));
+    expect(write.slice(0, write.indexOf('finally'))).toContain('setError(writeRefusal(cause));');
+  });
+
+  it('states no tier, no upload figure and no reset date of its own', () => {
+    // All three originate in the API. This app must not carry a second copy of
+    // any of them.
+    const ours = JSON.stringify(parentCopy.capture);
+    // The enum itself rather than a second transcription of it, so a fifth
+    // tier is covered the day it is added.
+    for (const tier of ACCOUNT_TIERS) {
+      expect(ours).not.toContain(tier);
+    }
+    expect(ours).not.toContain('Account Tier');
+    expect(ours).not.toContain('resets');
   });
 });

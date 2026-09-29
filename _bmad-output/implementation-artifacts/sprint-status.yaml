@@ -105,7 +105,7 @@ development_status:
   epic-9: backlog
   9-1-account-tier-assignment-data-model-effect: done
   9-2-student-profile-limit-enforcement: done
-  9-3-upload-allowance-enforcement: backlog
+  9-3-upload-allowance-enforcement: done
   9-4-generation-allowance-enforcement: backlog
   9-5-explanation-allowance-enforcement: backlog
   9-6-allowances-surface-atomic-monthly-reset: backlog

@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { AccountTier, UsageClass } from '../generated/prisma/enums.js';
 import { ParentAccountService } from '../identity/parent-account.service.js';
-import { PrismaService } from '../prisma/prisma.service.js';
-import { SourceTestService } from '../sourcetest/source-test.service.js';
+import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
 import { resolveWindow, type PeriodWindow } from './period.js';
 import { limitsFor } from './tiers.js';
 
@@ -53,8 +52,10 @@ type ArtifactCounter = (accountId: string, window: PeriodWindow) => Promise<numb
  * effect immediately against the current period — the window is unchanged, only
  * the limits it is measured against move.
  *
- * This story implements no enforcement: nothing here blocks at cap. Epic 9 owns
- * that.
+ * This module still blocks nothing itself. It states what an allowance is and
+ * what has been used against it; the modules that own the artifacts enforce
+ * their own caps against `uploadUsedIn` and its siblings, inside the one
+ * transaction that produces the artifact.
  */
 @Injectable()
 export class AllowanceService {
@@ -66,11 +67,6 @@ export class AllowanceService {
     // `PracticeTestService` instead would make `allowance` — which every
     // surface reads — depend on a module that depends on it.
     private readonly prisma: PrismaService,
-    // Upload usage is read **through** the owning module's service, never
-    // through a Prisma delegate of this one's (AD-17). `sourcetest` does not
-    // import `allowance`, so unlike `practicetest` this is a plain dependency
-    // in one direction and needs no token indirection.
-    private readonly sourceTests: SourceTestService,
   ) {}
 
   /**
@@ -98,9 +94,9 @@ export class AllowanceService {
    * that matters and it is unchanged.
    */
   private readonly counters: Readonly<Record<keyof UsageCounts, ArtifactCounter>> = {
-    upload: async (accountId, window) =>
-      (await this.sourceTests.countSubmittedIn(accountId, window)) +
-      (await this.tombstonedIn(accountId, window, 'Upload')),
+    // Through `uploadUsedIn`, which is also what `sourcetest` enforces against:
+    // the readout and the cap are the same method, so they cannot drift.
+    upload: async (accountId, window) => this.uploadUsedIn(accountId, window),
     generation: async (accountId, window) =>
       // The half-open window the whole module is stated in: `[start, end)`, so
       // a Practice Test charged at the instant a period ends belongs to the
@@ -132,6 +128,53 @@ export class AllowanceService {
   };
 
   /**
+   * The account's Upload usage inside `[window.start, window.end)`: Source
+   * Tests committed in the window plus `Upload` tombstones of it.
+   *
+   * **One method, two readers.** `counters.upload` answers every surface with
+   * it, and `sourcetest`'s submit guard refuses against it — so the number a
+   * parent is shown and the number they are refused at are the same number by
+   * construction, rather than by two implementations agreeing today.
+   *
+   * `client` is the caller's transaction when there is one. The guard passes
+   * the `submit` transaction so the count runs behind the account row lock that
+   * transaction holds; a plain read passes nothing and runs on this module's
+   * own connection.
+   *
+   * **The lock is what makes the count trustworthy, not the transaction.**
+   * Under Postgres's READ COMMITTED every statement takes its own snapshot, so
+   * a count and a write inside one transaction are not a consistent pair by
+   * themselves. What makes the pair safe is that `FOR UPDATE` on the account
+   * keeps any other commit for it from landing between them. A caller that
+   * passed a transaction but took no lock would be back where `explanation`'s
+   * charging seam is.
+   *
+   * It reads `source_test` through this module's own Prisma delegate rather
+   * than through `SourceTestService`, the way `generation` and `explanation`
+   * already read theirs. `sourcetest` now enforces against `allowance`, and the
+   * module every surface reads may not depend on a module that depends on it.
+   * What is read is a status and an instant — a column, not a behaviour.
+   *
+   * Half-open `[start, end)`, like every other count here, so a commit at the
+   * instant a period ends belongs to the next one and is counted exactly once.
+   */
+  async uploadUsedIn(
+    accountId: string,
+    window: PeriodWindow,
+    client?: TransactionClient,
+  ): Promise<number> {
+    const db = client ?? this.prisma;
+    const committed = await db.sourceTest.count({
+      where: {
+        parentAccountId: accountId,
+        status: 'Submitted',
+        submittedAt: { gte: window.start, lt: window.end },
+      },
+    });
+    return committed + (await this.tombstonedIn(accountId, window, 'Upload', client));
+  }
+
+  /**
    * What this account's **deleted** artifacts of one class still count for in
    * this window.
    *
@@ -156,8 +199,9 @@ export class AllowanceService {
     accountId: string,
     window: PeriodWindow,
     usageClass: UsageClass,
+    client?: TransactionClient,
   ): Promise<number> {
-    const summed = await this.prisma.usageTombstone.aggregate({
+    const summed = await (client ?? this.prisma).usageTombstone.aggregate({
       where: {
         parentAccountId: accountId,
         usageClass,

@@ -32,7 +32,7 @@ import {
   type StudentProfileView,
   type TaxonomyItem,
 } from '@/lib/parent-api';
-import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
+import { applyIfCurrent, endsParentView, refusalText } from '@/lib/parent-view';
 import { density } from '@/theme/tokens';
 import { AddPages } from './AddPages';
 import { ORDER_HEADING_ID, PageStrip } from './PageStrip';
@@ -58,6 +58,24 @@ const LEGIBILITY_HEADING_ID = 'capture-legibility-heading';
  * could land out of order.
  */
 type Pending = 'add' | 'retake' | 'move' | 'delete' | 'submit' | 'classify' | 'check' | null;
+
+/**
+ * What a refused write puts on the screen.
+ *
+ * A rule rather than an expression inside the catch, for the reason the
+ * students screen's `createRefusal` is one: the decision is then testable as a
+ * decision, and this screen's spec renders no component tree.
+ *
+ * The API states a rule-refusal as a 409 whose body carries its own sentence —
+ * here, the Account Tier, the uploads used against the tier's Upload Allowance,
+ * and the date it comes back. That sentence is the only place a parent learns
+ * why a commit was refused, so it wins over this screen's generic fallback,
+ * which says nothing they can act on. **This app states no tier, no figure and
+ * no date of its own**; it only decides whose words to show.
+ */
+export function writeRefusal(cause: unknown): string {
+  return refusalText(cause, parentCopy.capture.failed);
+}
 
 /**
  * The page-management strip: the order a Source Test's pages are in, and the
@@ -402,7 +420,7 @@ export default function CapturePage() {
         leave();
         return;
       }
-      setError(cause instanceof Error ? cause.message : parentCopy.capture.failed);
+      setError(writeRefusal(cause));
     } finally {
       setPending(null);
     }

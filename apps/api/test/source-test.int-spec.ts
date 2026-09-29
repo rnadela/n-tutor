@@ -4,6 +4,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { AccountTier } from '../src/generated/prisma/enums.js';
 
 const {
   CLASSIFICATION_REQUIRED,
@@ -28,6 +29,8 @@ const {
   resetSourceTestRuntime,
 } = await import('../src/sourcetest/source-test-policy.js');
 const { AiService } = await import('../src/ai/ai.service.js');
+const { uploadAllowanceExhausted } = await import('../src/allowance/allowance-policy.js');
+const { limitsFor } = await import('../src/allowance/tiers.js');
 const { SourceTestService } = await import('../src/sourcetest/source-test.service.js');
 const { GRADE_LEVEL_NOT_SELECTABLE, PROFILE_NOT_FOUND } = await import(
   '../src/identity/student-profile.service.js'
@@ -38,6 +41,7 @@ const {
   createHarness,
   createSignedInParent,
   createStudentProfile,
+  createStudentProfileWithHeadroom,
   createSubject,
   elevate,
   resetParentAccounts,
@@ -94,15 +98,17 @@ describe('Source Tests: page management before submit', () => {
   });
 
   /** A parent standing inside Parent View, with the bearer its routes take. */
-  async function elevatedParent(): Promise<{ parentAccountId: string; token: string }> {
-    const parent = await createSignedInParent(h);
+  async function elevatedParent(
+    overrides: { tier?: AccountTier } = {},
+  ): Promise<{ parentAccountId: string; token: string }> {
+    const parent = await createSignedInParent(h, overrides);
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
     return { parentAccountId: parent.parentAccountId, token };
   }
 
   /** A parent, a child, and a draft Source Test open for that child. */
-  async function openDraft(): Promise<{
+  async function openDraft(overrides: { tier?: AccountTier } = {}): Promise<{
     parentAccountId: string;
     token: string;
     studentProfileId: string;
@@ -111,7 +117,7 @@ describe('Source Tests: page management before submit', () => {
     gradeLevelId: string;
     gradeLevelName: string;
   }> {
-    const parent = await elevatedParent();
+    const parent = await elevatedParent(overrides);
     const gradeLevel = await createGradeLevel(h);
     const profile = await createStudentProfile(h, parent.parentAccountId, {
       gradeLevelId: gradeLevel.id,
@@ -763,6 +769,215 @@ describe('Source Tests: page management before submit', () => {
       // And the submitted Source Test is still readable, pages intact.
       const read = await server().get(base).set('Authorization', bearer(draft.token)).expect(200);
       expect(read.body.pages).toHaveLength(1);
+    });
+  });
+
+  /**
+   * The Upload Allowance, enforced in `submit` and nowhere else.
+   *
+   * Every figure below is read through `limitsFor` and every sentence through
+   * `uploadAllowanceExhausted`: a reworded refusal or a recalibrated tier has
+   * to fail something here, and no number and no tier name is written twice.
+   */
+  describe('the Upload Allowance', () => {
+    /** The tier under test: the one with the smallest Upload Allowance. */
+    const CAPPED: AccountTier = 'Free';
+    const LIMIT = limitsFor(CAPPED).upload!;
+    /** The tier the product states as unlimited — `null`, never a big number. */
+    const UNLIMITED: AccountTier = 'Internal';
+
+    /** A parent, a child, and the Grade Level the child's drafts open under. */
+    async function cappedAccount(tier: AccountTier = CAPPED) {
+      const parent = await elevatedParent({ tier });
+      const gradeLevel = await createGradeLevel(h);
+      const profile = await createStudentProfile(h, parent.parentAccountId, {
+        gradeLevelId: gradeLevel.id,
+      });
+      return { ...parent, gradeLevelId: gradeLevel.id, studentProfileId: profile.id };
+    }
+
+    /**
+     * A fresh draft for the child, carried through all three existing gates so
+     * the only thing left that can refuse it is the allowance.
+     *
+     * One draft per child is open at a time, so this is called after the
+     * previous one committed — which is exactly how a parent reaches their
+     * second upload of a period.
+     */
+    async function readyDraft(account: {
+      token: string;
+      studentProfileId: string;
+      gradeLevelId: string;
+    }): Promise<string> {
+      const opened = await server()
+        .post('/api/parent/source-tests')
+        .set('Authorization', bearer(account.token))
+        .send({ studentProfileId: account.studentProfileId })
+        .expect(200);
+      const sourceTestId = opened.body.id as string;
+      await classifyDraft({ ...account, sourceTestId });
+      await addPage(account.token, sourceTestId, await photo()).expect(201);
+      await runCheck(account.token, sourceTestId);
+      return sourceTestId;
+    }
+
+    function submitting(token: string, sourceTestId: string) {
+      return server()
+        .post(`/api/parent/source-tests/${sourceTestId}/submit`)
+        .set('Authorization', bearer(token));
+    }
+
+    /** Commits `count` Source Tests for the child, each through the real route. */
+    async function commit(
+      account: { token: string; studentProfileId: string; gradeLevelId: string },
+      count: number,
+    ): Promise<void> {
+      for (let taken = 0; taken < count; taken += 1) {
+        await submitting(account.token, await readyDraft(account)).expect(200);
+      }
+    }
+
+    /** The sentence the API must have authored, built from the same sources it is. */
+    async function refusalFor(parentAccountId: string, used: number): Promise<string> {
+      const window = await h.allowance.windowFor(parentAccountId);
+      return uploadAllowanceExhausted({
+        tier: CAPPED,
+        used,
+        limit: LIMIT,
+        resetAt: window.end,
+        timezone: window.timezone,
+      });
+    }
+
+    it('commits while the account still has headroom', async () => {
+      const account = await cappedAccount();
+      await commit(account, LIMIT - 1);
+
+      const response = await submitting(account.token, await readyDraft(account)).expect(200);
+
+      expect(response.body.status).toBe('Submitted');
+      expect(
+        (await h.allowance.consumptionFor(account.parentAccountId)).allowances.upload.used,
+      ).toBe(LIMIT);
+    });
+
+    it('refuses the commit at the cap, naming the tier, the usage and the reset date', async () => {
+      const account = await cappedAccount();
+      await commit(account, LIMIT);
+      const sourceTestId = await readyDraft(account);
+      const jobsBefore = await h.prisma.extractionJob.count();
+
+      const response = await submitting(account.token, sourceTestId).expect(409);
+
+      expect(messagesOf(response)).toContain(await refusalFor(account.parentAccountId, LIMIT));
+      // Nothing was charged for the refusal: the row is still a Draft, no job
+      // was written, and the account's usage is where it was.
+      expect(
+        await h.prisma.sourceTest.findUniqueOrThrow({
+          where: { id: sourceTestId },
+          select: { status: true, submittedAt: true },
+        }),
+      ).toEqual({ status: 'Draft', submittedAt: null });
+      expect(await h.prisma.extractionJob.count()).toBe(jobsBefore);
+      expect(
+        (await h.allowance.consumptionFor(account.parentAccountId)).allowances.upload.used,
+      ).toBe(LIMIT);
+    });
+
+    it('never caps a tier whose Upload Allowance is unlimited', async () => {
+      expect(limitsFor(UNLIMITED).upload).toBeNull();
+      const account = await cappedAccount(UNLIMITED);
+
+      // One past what the capped tier would have refused at.
+      await commit(account, LIMIT + 1);
+
+      expect(
+        (await h.allowance.consumptionFor(account.parentAccountId)).allowances.upload.used,
+      ).toBe(LIMIT + 1);
+    });
+
+    it('counts an Upload tombstone against the cap: a deleted upload is not a refund', async () => {
+      const account = await cappedAccount();
+      await commit(account, LIMIT - 1);
+      const window = await h.allowance.windowFor(account.parentAccountId);
+      // What a deletion leaves behind for the period the charge fell in.
+      await h.prisma.usageTombstone.create({
+        data: {
+          parentAccountId: account.parentAccountId,
+          periodStart: window.start,
+          usageClass: 'Upload',
+          count: 1,
+        },
+      });
+
+      const response = await submitting(account.token, await readyDraft(account)).expect(409);
+
+      expect(messagesOf(response)).toContain(await refusalFor(account.parentAccountId, LIMIT));
+    });
+
+    it('does not count commits that fell in the previous period', async () => {
+      const account = await cappedAccount();
+      await commit(account, LIMIT);
+      const window = await h.allowance.windowFor(account.parentAccountId);
+      // Moved to just before the window opens: `[start, end)` is half-open, so
+      // these belong to the period before this one and this one is untouched.
+      const before = new Date(window.start.getTime() - 1);
+      await h.prisma.sourceTest.updateMany({
+        where: { parentAccountId: account.parentAccountId, status: 'Submitted' },
+        data: { submittedAt: before },
+      });
+      expect(
+        (await h.allowance.consumptionFor(account.parentAccountId)).allowances.upload.used,
+      ).toBe(0);
+
+      await submitting(account.token, await readyDraft(account)).expect(200);
+    });
+
+    it('lets exactly one of two racing commits take the last slot', async () => {
+      const account = await cappedAccount();
+      await commit(account, LIMIT - 1);
+      // Two drafts, both submittable, both against one remaining slot. A second
+      // child is needed because one draft is open per child at a time.
+      const first = await readyDraft(account);
+      const sibling = await createStudentProfileWithHeadroom(h, account.parentAccountId, {
+        gradeLevelId: account.gradeLevelId,
+      });
+      const second = await readyDraft({ ...account, studentProfileId: sibling.id });
+
+      // Both in flight at once: each `submitting(...)` builds its own request,
+      // and `Promise.all` dispatches them together rather than in turn.
+      const raced = await Promise.all([
+        submitting(account.token, first),
+        submitting(account.token, second),
+      ]);
+
+      // Numerically, not lexicographically: the default comparator sorts by
+      // string and would happily accept a pair this assertion means to reject.
+      expect(raced.map((response) => response.status).sort((a, b) => a - b)).toEqual([200, 409]);
+      const refused = raced.find((response) => response.status === 409)!;
+      expect(messagesOf(refused)).toContain(await refusalFor(account.parentAccountId, LIMIT));
+      expect(
+        (await h.allowance.consumptionFor(account.parentAccountId)).allowances.upload.used,
+      ).toBe(LIMIT);
+    });
+
+    it('charges nothing for a commit an earlier gate refuses, at the cap or under it', async () => {
+      const account = await cappedAccount();
+      await commit(account, LIMIT);
+      // A draft that fails the page gate *and* the cap. The existing 400 is
+      // reached first and wins; usage is unmoved either way.
+      const opened = await server()
+        .post('/api/parent/source-tests')
+        .set('Authorization', bearer(account.token))
+        .send({ studentProfileId: account.studentProfileId })
+        .expect(200);
+
+      const response = await submitting(account.token, opened.body.id as string).expect(400);
+
+      expect(messagesOf(response)).toContain(NO_PAGES_TO_SUBMIT);
+      expect(
+        (await h.allowance.consumptionFor(account.parentAccountId)).allowances.upload.used,
+      ).toBe(LIMIT);
     });
   });
 
