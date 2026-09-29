@@ -22,7 +22,6 @@ import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
   parentApi,
-  ParentApiError,
   type AuthPolicy,
   type StudentDeletionPreview,
   type StudentProfileView,
@@ -33,6 +32,7 @@ import {
   applyIfCurrent,
   endsParentView,
   NOTHING_ANNOUNCED,
+  refusalText,
   type Announcement,
 } from '@/lib/parent-view';
 import { density } from '@/theme/tokens';
@@ -50,16 +50,21 @@ export function canCreateStudent(displayName: string, gradeLevelId: string): boo
 }
 
 /**
- * Re-exported rather than defined here: a second parent-scoped screen now needs
- * the same three rules, so they live in `@/lib/parent-view` and both screens
- * read them from one place. The names stay reachable here because that is where
- * this screen's spec has always addressed them.
+ * Re-exported rather than defined here: other parent-scoped screens need the
+ * same rules, so they live in `@/lib/parent-view` and every screen reads them
+ * from one place. The names stay reachable here because that is where this
+ * screen's spec has always addressed them.
+ *
+ * `refusalText` is among them now: the Settings screen gates an account deletion
+ * behind the same 409, and one rule with two implementations is a rule that
+ * drifts while both suites stay green.
  */
 export {
   announcedText,
   applyIfCurrent,
   endsParentView,
   NOTHING_ANNOUNCED,
+  refusalText,
   type Announcement,
 } from '@/lib/parent-view';
 
@@ -69,20 +74,6 @@ interface Draft {
 }
 
 const EMPTY_DRAFT: Draft = { displayName: '', gradeLevelId: '' };
-
-/**
- * What to show a parent about a refusal: the API's own sentence when it authored
- * one, then the error's message, then the screen's fallback.
- *
- * The API states a rule-refusal as a 409 whose body carries the sentence, and
- * `ParentApiError` surfaces it as `reason`. Showing the generic fallback instead
- * would replace "that is not the account password" with "that change could not
- * be saved", which is a message a parent cannot act on.
- */
-export function refusalText(cause: unknown, fallback: string): string {
-  if (cause instanceof ParentApiError && cause.reason !== null) return cause.reason;
-  return cause instanceof Error ? cause.message : fallback;
-}
 
 /**
  * The ids the row's two notes carry, and the ids its two controls point their

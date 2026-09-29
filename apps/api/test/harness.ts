@@ -41,7 +41,7 @@ import { GradingService } from '../src/grading/grading.service.js';
 import { ExtractionRunner } from '../src/extraction/extraction.runner.js';
 import { PracticeTestRunner } from '../src/practicetest/practice-test.runner.js';
 import type { AiFakeFailure } from '../src/ai/ai-config.js';
-import type { AccountTier } from '../src/generated/prisma/enums.js';
+import type { AccountTier, AiCallClass } from '../src/generated/prisma/enums.js';
 
 export const OPERATOR_EMAIL = 'test-operator@example.test';
 export const OPERATOR_PASSWORD = 'correct-horse-battery-staple';
@@ -737,5 +737,38 @@ export function studentTokenWithClaims(
     audience: STUDENT_MODE_AUDIENCE,
     issuer: PARENT_SESSION_ISSUER,
     ...(options.expiresIn === undefined ? {} : { expiresIn: options.expiresIn }),
+  });
+}
+
+/**
+ * One completed `ai_call` cost row for an account.
+ *
+ * Seeded rather than earned, because the specs that need one — Story 8.4's
+ * account deletion above all — need a row that *exists*, not a provider call:
+ * the fake transport writes one only as a side effect of work that has nothing
+ * to do with the case being tested. Identifiers, counts and money only, exactly
+ * as the real writer records (AD-20).
+ *
+ * `AiCall` is the one `Restrict` child of `ParentAccount` that is not
+ * profile-scoped, so its presence is what makes an account deletion's order
+ * observable at all: without a row here, the purge that frees that edge could be
+ * missing and every test would still pass.
+ */
+export async function seedAiCall(
+  h: Pick<Harness, 'prisma'>,
+  parentAccountId: string,
+  overrides: { callClass?: AiCallClass; costMicros?: number } = {},
+): Promise<{ id: string }> {
+  return h.prisma.aiCall.create({
+    data: {
+      parentAccountId,
+      callClass: overrides.callClass ?? 'Extraction',
+      model: 'test-model-snapshot',
+      inputTokens: 100,
+      outputTokens: 20,
+      costMicros: overrides.costMicros ?? 1_234,
+      latencyMs: 250,
+    },
+    select: { id: true },
   });
 }

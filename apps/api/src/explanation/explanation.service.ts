@@ -1404,6 +1404,28 @@ export class ExplanationService {
     };
   }
 
+  /**
+   * The same count for the whole account (Story 8.4), and the only thing this
+   * module hands an account deletion.
+   *
+   * The rows still need no purge of their own: an Explanation cascades from its
+   * Student Profile and its flags cascade from it, so every one of them goes when
+   * the children go — and the Admin queue empties itself. And no charging instant
+   * is collected, because an account deletion writes no tombstone: `UsageTombstone`
+   * cascades from the account row, so a usage figure written here would be a
+   * statement about an account the same transaction is removing.
+   *
+   * Matched on the row's own `parentAccountId`, which needs none of the widening
+   * the profile scope needs: every Explanation of the account is in scope by
+   * definition. That column is a plain one with no foreign key, for the reason the
+   * schema states — it carries no edge and blocks nothing.
+   */
+  async countsForAccount(parentAccountId: string): Promise<{ explanations: number }> {
+    return {
+      explanations: await this.prisma.explanation.count({ where: { parentAccountId } }),
+    };
+  }
+
   // --- Internals ---------------------------------------------------------
 
   /**

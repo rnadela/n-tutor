@@ -2117,3 +2117,131 @@ source_spec: `spec-8-3-student-profile-deletion.md`
 severity: low
 reason: `pageIdsFor` deliberately includes `Uploading` rows so their bytes are unlinked, but nothing drives the actual race of an in-flight upload write landing concurrently with a profile deletion's unlink — structurally different from the already-tested mid-flight page-arrival case, and a plausible real-world overlap (a parent uploading a new page while the profile is deleted from another tab).
 status: open
+
+### DW-266: The bytes-first deletion protocol is now authored twice: roughly forty lines of `AccountDeletionService.delete` mirror `ProfileDeletionService.delete` statement for statement, including the whole
+origin: spec-deferred 926ae9dc1642
+location: apps/api/src/deletion/account-deletion.service.ts:121
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: `apps/api/src/deletion/account-deletion.service.ts:121-222` and `apps/api/src/deletion/profile-deletion.service.ts:147-267` share the password gate, the `pageIds*` -> `releaseBytes` -> `kept > 0` refusal, the in-transaction page-set re-read, the `catch { markReleasedPages; throw }` and the marking helper. Only the purge calls, the log wording and the tombstone step differ. The spec chose sibling services deliberately and argued for "one readable body", so this is a refactor decision (a shared preamble, a base class, or a `withReleasedBytes` helper) rather than a defect in either service.
+status: open
+
+### DW-267: The failure copy for a shortfall says "Nothing was removed" on the one path where photographs were in fact permanently unlinked.
+origin: spec-deferred cb23073fd1e0
+location: apps/web/src/copy/parent.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: A 503 `DELETION_INCOMPLETE` carries no client-readable `reason`, so the web app falls back to `parentCopy.settings.deleteAccountFailed` / `parentCopy.students.deleteFailed`. On that path `releaseBytes` already unlinked every page in `removedIds` and those rows were marked `Deleted` — the rows survive but the photographs do not. The wording predates this story (Story 8.3 authored it) and is identical on both paths, so fixing it is one copy decision across both deletion surfaces.
+status: open
+
+### DW-268: The in-transaction page-set re-read narrows but does not close the mid-flight window, while the comment beside it claims the set is "proved unchanged".
+origin: spec-deferred 2a406dd8f935
+location: apps/api/src/deletion/account-deletion.service.ts:148
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: Prisma interactive transactions run at the database default isolation (READ COMMITTED) with no row lock, no `Serializable` and no advisory lock on the account, so a page committed after the re-read and before `sourceTest.deleteMany` still cascades away with its bytes left on disk. The identical guard and the identical claim are in `profile-deletion.service.ts`, so this is a design-level question about how the two paths serialize, not a defect introduced here.
+status: open
+
+### DW-269: A page retaken mid-flight keeps its id, so the id-set guard cannot see that its bytes were rewritten after release.
+origin: spec-deferred d11c5b6bde26
+location: apps/api/src/deletion/account-deletion.service.ts:153
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: The guard compares page ids, and a retake writes new bytes at the path derived from the same page id. A retake landing between `releaseBytes` and the `sourceTest.deleteMany` therefore leaves a file whose row is gone. The same hole exists on Story 8.3's profile path with the same guard, and closing it needs a written-at marker rather than an id comparison.
+status: open
+
+### DW-270: The preview counts `Deleted` page images while the deletion excludes them, so the confirmation can name more photographs than are actually unlinked.
+origin: spec-deferred 8cffb8bdfe7d
+location: apps/api/src/sourcetest/source-test.service.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: `SourceTestService.countsForAccount` counts every `page_image` row of the account, whereas `pageIdsForAccount` filters `state: { not: 'Deleted' }` because a `Deleted` row's bytes are already gone. An account with expired pages therefore reads a higher photograph count than the deletion removes. This mirrors `countsFor` from Story 8.3 exactly, so it is a pre-existing inconsistency in what "photographs" means on both preview surfaces.
+status: open
+
+### DW-271: Nothing exercises a large account against the fixed 60-second deletion transaction ceiling, which was chosen by doubling the per-profile figure rather than by measurement.
+origin: spec-deferred 6117090af658
+location: apps/api/src/deletion/deletion-policy.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: `ACCOUNT_DELETION_TRANSACTION_TIMEOUT_MS = 60_000` bounds one all-or-nothing transaction over every child of the account, with no batching and no resumability; `pageIdsForAccount` also materializes every page id of the account in memory. The integration cases seed two children with a handful of rows each, so the timeout path is never approached in any tier.
+status: open
+
+### DW-272: No test mounts the assembled Settings screen, so the dialog's own gate and the post-deletion sign-out are asserted only by inheritance.
+origin: spec-deferred e259dd6a8f09
+location: apps/web/src/app/parent/settings/page.spec.tsx
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: `apps/web/vitest.config.ts:10` is `environment: 'node'`, so `settings/page.spec.tsx` tests exported helpers, statically rendered fragments and page source text. Untested at any tier: that the counted body reaches `DestructiveConfirmDialog`, that its confirm control stays disabled until a password is typed, and that a success clears elevation and replaces to `/auth/sign-in`. This is the tier-wide convention Story 8.2 and 8.3 already deferred, not something this story introduced.
+status: open
+
+### DW-273: The `apps/api` integration tier flakes nondeterministically across unrelated files, and this run saw it in more files than Story 8.3 recorded.
+origin: spec-deferred 9ab5f799af06
+location: apps/api/test
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: Four full-suite runs failed a different set of 1-6 tests each time, spread over `practice-test.int-spec.ts`, `parent-pin.int-spec.ts`, `uncommitted-state.int-spec.ts` and `extraction.int-spec.ts` — every one of them a file this story does not touch, and never one of the new specs. The signature is an elevation or setup read answering 404. It reproduces on a clean tree (`git stash` + a single-file run: 2 of 202 failed) and it still occurs with this story's new `rate-limit.int-spec.ts` cases reverted, so it is environmental rather than caused or aggravated here.
+status: open
+
+### DW-274: Two concurrent `DELETE /api/parent/account` requests for the same account are untested; the loser's row-count check is a plausible way to hit an unhandled 404 rather than a clean refusal.
+origin: spec-deferred 94ee139858fc
+location: apps/api/src/deletion/account-deletion.service.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: `AccountDeletionService.delete` and `ParentAccountService.removeAccount` reject on a row count other than 1, which is the expected shape of a losing racer once the winner's transaction has already committed. No unit or integration test drives two simultaneous deletes against one account, so the 404 this path produces, and whether the web client's `refusalText`/ `endsParentView` plumbing gives it a sane message, is unverified.
+status: open
+
+### DW-275: A Student Profile created between the preview read and the confirmed delete is silently destroyed without ever being named to the parent; only pages have an in-flight guard.
+origin: spec-deferred 532002e66482
+location: apps/api/src/deletion/account-deletion.service.ts:157
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: The mid-flight re-read inside the transaction (`account-deletion.service.ts:157`) only proves the page set is unchanged and 503s `DELETION_INCOMPLETE` if it grew. A Student Profile added on another device between the preview response and the confirmed delete has no equivalent check: it is destroyed along with everything else, but the confirmation the parent read never named it. This is a narrower version of the same in-flight-arrival problem the page guard already treats as worth refusing for.
+status: open
+
+### DW-276: Nothing asserts that the counts a purge actually removes match the counts the preview showed for the same account.
+origin: spec-deferred cebd3c6f7562
+location: apps/api/src/deletion/account-deletion.service.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: low
+reason: `AccountDeletionService.previewFor` and `.delete` call the same per-kind services (`sourceTests`, `practiceTests`, `explanations`, `students`) but no test computes a preview, runs the delete, and checks the removed-row totals against it. A future field added to one query and not its sibling would ship undetected.
+status: open
+
+### DW-277: `DeleteAccountDto`'s password field has no validation-pipe test for a non-string body (e.g. a number), only behavioral tests for correct/incorrect/empty string passwords.
+origin: spec-deferred b500bc625a48
+location: apps/api/src/deletion/dto/delete-account.dto.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: low
+reason: `DeleteAccountDto` documents the absence of an `@IsNotEmpty()` guard as deliberate, but nothing confirms a non-string `password` is rejected by the validation pipe before reaching argon2.
+status: open
+
+### DW-278: No end-to-end test proves Student Profile deletion (Story 8.3) leaves the account's other `AiCall` rows untouched; the guarantee rests on a doc comment, not an assertion.
+origin: spec-deferred a1b80f246868
+location: apps/api/src/deletion/profile-deletion.service.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: low
+reason: The account-deletion int-spec proves account deletion erases `AiCall` rows; nothing exercises the negative case that profile deletion must NOT touch them, only unit-level comments assert the ownership split.
+status: open
+
+### DW-279: An elevation bearer token is a stateless JWT with no revocation on account deletion; replaying it against another parent-scoped route right after a successful delete is untested and may surface a raw
+origin: spec-deferred 0383e44d0044
+location: apps/api/src/identity/parent-elevation.guard.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: Only the cookie-based checks (`/api/auth/me`, `/api/student/session`) are verified after deletion. The elevation bearer itself remains cryptographically valid until its own expiry, and no test drives it against e.g. `deletion-preview` or another parent route post-deletion to see what the now-nonexistent account resolves to.
+status: open
+
+### DW-280: Two independent deletion transactions (a Student Profile delete and an Account delete) can run concurrently against overlapping rows with no lock coordinating them.
+origin: spec-deferred 095661007a12
+location: apps/api/src/deletion/account-deletion.service.ts
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: `ProfileDeletionService.delete` and `AccountDeletionService.delete` each open their own transaction with no per-account advisory lock or row lock acquired first. A profile delete and an account delete racing on the same account could interleave in ways neither transaction's own re-read guards against, since each only re-checks its own view of the page set.
+status: open
+
+### DW-281: If the elevation token expires while the destructive confirmation dialog is already open, clicking confirm silently does nothing instead of showing a refusal.
+origin: spec-deferred a156f891d89e
+location: apps/web/src/app/parent/settings/page.tsx:175
+source_spec: `spec-8-4-parent-account-deletion.md`
+severity: medium
+reason: `onDeleteConfirmed` in `apps/web/src/app/parent/settings/page.tsx` guards `if (confirming === null || token === null || deleting) return;` before setting `deleting` or any refusal text, so a token that has gone null since the dialog opened makes the confirm button a no-op with no feedback. `DestructiveConfirmDialog` itself has no notion of the token and cannot disable its confirm control for this case. The identical guard shape exists in `apps/web/src/app/parent/students/page.tsx` (`onDeleteConfirmed`, line 310), so this is an inherited pattern from Story 8.3, not something this story introduced.
+status: open

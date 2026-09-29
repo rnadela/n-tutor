@@ -971,6 +971,60 @@ export class SourceTestService implements SourceTestReader {
     await tx.sourceTest.deleteMany({ where: { studentProfileId } });
   }
 
+  // --- Story 8.4: the same three, one level out (the whole account) --------
+
+  /**
+   * Every page of this **account** that may still have bytes on disk.
+   *
+   * `pageIdsFor` one level out, and matched on the Source Test's own
+   * `parentAccountId` rather than on its child: an account deletion removes every
+   * Source Test on the account, including any whose `studentProfileId` names a
+   * child of somebody else's — which cannot happen, and would be a file left on
+   * disk with no row if it did.
+   *
+   * Read **twice** by the account deletion, for the reason the profile one is:
+   * once outside the transaction to know what to unlink, and once inside it with
+   * `tx` to prove nothing was photographed onto a draft while the deletion was in
+   * flight. Ids alone, never paths (AD-15).
+   */
+  async pageIdsForAccount(parentAccountId: string, tx?: TransactionClient): Promise<string[]> {
+    const rows = await (tx ?? this.prisma).pageImage.findMany({
+      where: { sourceTest: { parentAccountId }, state: { not: 'Deleted' } },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
+  /** What this module would destroy with the whole account, for the confirmation. */
+  async countsForAccount(
+    parentAccountId: string,
+  ): Promise<{ sourceTests: number; pageImages: number }> {
+    const [sourceTests, pageImages] = await Promise.all([
+      this.prisma.sourceTest.count({ where: { parentAccountId } }),
+      this.prisma.pageImage.count({ where: { sourceTest: { parentAccountId } } }),
+    ]);
+    return { sourceTests, pageImages };
+  }
+
+  /**
+   * Deletes every Source Test on this account, inside the caller's transaction.
+   *
+   * One statement for the same reason `purgeForStudentProfile` is one: everything
+   * under a Source Test cascades from it, and what does not cascade is what
+   * `Restrict` holds — Practice Tests and Generation Jobs — so this raises rather
+   * than removing them as a side effect, which is why the caller purges those
+   * first. The `Restrict` edge to `ParentAccount` is not weakened either: this is
+   * the statement that frees it.
+   *
+   * No collection of charging instants beside it, unlike the profile path: an
+   * account deletion writes no tombstone, because the tombstones cascade away
+   * with the account row and there is no surviving account for a usage figure to
+   * be about.
+   */
+  async purgeForAccountAllProfiles(tx: TransactionClient, parentAccountId: string): Promise<void> {
+    await tx.sourceTest.deleteMany({ where: { parentAccountId } });
+  }
+
   /**
    * The Subject label of each given Source Test, keyed by Source Test id.
    *

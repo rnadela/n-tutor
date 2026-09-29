@@ -10,7 +10,33 @@ import { PAGE_EXPIRY_SWEEP_BATCH_SIZE, pageImageExpiryCutoff } from './source-te
  * are distinguishable after the fact, and "whatever the caller passed" is not a
  * distinction an operator can rely on.
  */
-type ExpiryTrigger = 'Retention sweep' | 'Parent-requested deletion' | 'Student Profile deletion';
+type ExpiryTrigger =
+  | 'Retention sweep'
+  | 'Parent-requested deletion'
+  | 'Student Profile deletion'
+  | 'Parent Account deletion';
+
+/**
+ * Which deletion asked for a release, for the log line and nothing else.
+ *
+ * The two deletion paths share one unlink site and one marking site, because
+ * "bytes before rows, and any shortfall refuses everything" is one contract and
+ * must not be authored twice. What they do *not* share is which of them an
+ * operator is reading about: a line saying "Student Profile deletion" about an
+ * account deletion is a log that misleads the one person who reads it.
+ *
+ * **Extracted from `ExpiryTrigger` rather than written out again**, so the two
+ * unions cannot drift: a trigger renamed above is renamed here, and a string that
+ * is not one of the three the log knows about is not spellable.
+ *
+ * The parameter is **required** at both call sites. A default would be today's
+ * wording, so a third caller that forgot the label would silently log somebody
+ * else's deletion — which is the one failure this widening exists to prevent.
+ */
+export type ByteReleaseTrigger = Extract<
+  ExpiryTrigger,
+  'Student Profile deletion' | 'Parent Account deletion'
+>;
 
 /**
  * The FR-32 retention sweep: 90 days after a Source Test was submitted, the
@@ -36,8 +62,9 @@ type ExpiryTrigger = 'Retention sweep' | 'Parent-requested deletion' | 'Student 
  *   (AD-15, AD-20).
  *
  * Three triggers reach the unlink and only three: the 90-day schedule
- * (`sweepExpired`), the parent's own early deletion (`expireNow`, FR-33), and
- * Story 8.3's Student Profile deletion (`releaseBytes`). The first two delegate
+ * (`sweepExpired`), the parent's own early deletion (`expireNow`, FR-33), and a
+ * deletion of rows (`releaseBytes`) — a Student Profile's or the whole account's,
+ * which differ only in the label they log under. The first two delegate
  * to `removeAndMark`, so the rules above are stated once and the outcome of an
  * early deletion is indistinguishable from an expiry; the third unlinks and
  * marks nothing up front, because the rows it belongs to are about to be deleted
@@ -119,7 +146,9 @@ export class PageExpiryService {
 
   /**
    * Unlinks the bytes of the given pages and marks **nothing** — the third
-   * trigger, for Story 8.3's Student Profile deletion.
+   * trigger, for Story 8.3's Student Profile deletion and Story 8.4's account
+   * deletion, which is the same contract one level out and so is the same
+   * routine with a different label.
    *
    * The rows these pages belong to are about to be deleted outright, so in the
    * ordinary case there is no row left to mark and no next pass to converge: a
@@ -138,16 +167,19 @@ export class PageExpiryService {
    * refused is already in the log line below and in `remove()`'s own warning,
    * both by page id and never by path (AD-15, AD-20).
    */
-  async releaseBytes(pageIds: readonly string[]): Promise<{ removedIds: string[]; kept: number }> {
-    const gone = await this.unlink(pageIds, 'Student Profile deletion');
+  async releaseBytes(
+    pageIds: readonly string[],
+    trigger: ByteReleaseTrigger,
+  ): Promise<{ removedIds: string[]; kept: number }> {
+    const gone = await this.unlink(pageIds, trigger);
     return { removedIds: gone, kept: pageIds.length - gone.length };
   }
 
   /**
    * Says on the rows what `releaseBytes` already did to the files.
    *
-   * The one caller is a Student Profile deletion whose transaction failed *after*
-   * the bytes came away. The rows are still there, because the transaction rolled
+   * The callers are the two deletions whose transaction failed *after* the bytes
+   * came away. The rows are still there, because the transaction rolled
    * back — but their photographs are not, and a `Ready` row with a `storagePath`
    * pointing at a file that no longer exists is a row lying about what it holds.
    * `readPageBytes` would select it and `ingest.read()` would raise
@@ -162,7 +194,11 @@ export class PageExpiryService {
    * the row must not be promoted to `Ready` over nothing. A row another pass
    * already marked is excluded, so its original `bytesDeletedAt` stands.
    */
-  async markReleased(pageIds: readonly string[], now: Date): Promise<number> {
+  async markReleased(
+    pageIds: readonly string[],
+    now: Date,
+    trigger: ByteReleaseTrigger,
+  ): Promise<number> {
     if (pageIds.length === 0) return 0;
     const marked = await this.prisma.pageImage.updateMany({
       where: { id: { in: [...pageIds] }, state: { not: 'Deleted' } },
@@ -170,7 +206,7 @@ export class PageExpiryService {
     });
     if (marked.count > 0) {
       this.logger.warn(
-        `A Student Profile deletion did not complete after its bytes were removed; ${marked.count} page images were marked to match what is actually on disk.`,
+        `A ${trigger} did not complete after its bytes were removed; ${marked.count} page images were marked to match what is actually on disk.`,
       );
     }
     return marked.count;

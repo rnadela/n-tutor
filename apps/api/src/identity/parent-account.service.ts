@@ -339,6 +339,38 @@ export class ParentAccountService {
   }
 
   /**
+   * Erases the Parent Account row (FR-33, Story 8.4), inside the caller's
+   * transaction.
+   *
+   * **Deletion erases.** There is no husk row, no `deletedAt` column and no
+   * disabled-account state: an account that no longer exists is an account whose
+   * session cookie stops resolving, which is what the session guard already does
+   * with an id it cannot find.
+   *
+   * `identity` stays the sole writer of `parent_account` (AD-17), and this one
+   * statement is the whole of the account's own removal. What goes with it is
+   * what the schema says goes with it: `AccountConsent`, `PasswordReset`,
+   * `AccountTimezone`, `UncommittedState` and `UsageTombstone` all cascade from
+   * here — which is how the retained uncommitted Parent View state and the usage
+   * tombstones 8.3 left behind go. Everything held by a `Restrict` edge —
+   * Student Profiles, Source Tests, Practice Tests, Generation Jobs and the
+   * `AiCall` cost rows — must already be gone, or this raises rather than
+   * removing it as a side effect. That is the point of those edges, and the
+   * reason the caller walks them inward-out first.
+   *
+   * A `deleteMany` that **raises when it removed nothing**, rather than an
+   * `update`-shaped delete: the caller has already verified this account's
+   * password against this id, so a row that is not there is a concurrent
+   * deletion of the same account, and committing a transaction that quietly
+   * removed every child of an account that was already gone would report a
+   * success nobody performed.
+   */
+  async removeAccount(tx: TransactionClient, id: string): Promise<void> {
+    const removed = await tx.parentAccount.deleteMany({ where: { id } });
+    if (removed.count !== 1) throw new NotFoundException('Parent Account not found.');
+  }
+
+  /**
    * Writes the PIN and clears the failure state with it, inside the caller's
    * transaction: a PIN that has just been set or changed must not land behind a
    * lock left over from the entries that preceded it.

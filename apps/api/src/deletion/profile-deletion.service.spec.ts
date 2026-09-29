@@ -75,6 +75,8 @@ function build(scenario: Scenario = {}) {
   const tombstones: WrittenTombstone[] = [];
   /** What `markReleased` was handed, or `null` if it was never called. */
   let marked: { pageIds: readonly string[]; at: Date } | null = null;
+  /** Which deletion the marking named itself as, for the log line. */
+  let markedTrigger: unknown = null;
 
   const tx = {
     usageTombstone: {
@@ -139,13 +141,14 @@ function build(scenario: Scenario = {}) {
   } as unknown as SourceTestService;
 
   const pageExpiry = {
-    releaseBytes: vi.fn(async (ids: readonly string[]) => {
-      steps.push('bytes');
+    releaseBytes: vi.fn(async (ids: readonly string[], trigger?: unknown) => {
+      steps.push(`bytes(${String(trigger)})`);
       const removedIds = ids.slice(0, ids.length - unlinkFailures);
       return { removedIds, kept: unlinkFailures };
     }),
-    markReleased: vi.fn(async (ids: readonly string[], at: Date) => {
+    markReleased: vi.fn(async (ids: readonly string[], at: Date, trigger?: unknown) => {
       steps.push('markReleased');
+      markedTrigger = trigger;
       if (markingFails) throw new Error('the rows could not be marked');
       marked = { pageIds: [...ids], at };
       return ids.length;
@@ -203,6 +206,7 @@ function build(scenario: Scenario = {}) {
     tombstones,
     transactionOptions,
     markedPages: () => marked,
+    markedTrigger: () => markedTrigger,
     accounts,
     students,
     sourceTests,
@@ -230,13 +234,18 @@ describe('deleting a Student Profile with everything under it', () => {
     // and Mastery cascade).
     expect(purgeSteps(h.steps)).toEqual([
       'password',
-      'bytes',
+      'bytes(Student Profile deletion)',
       'tombstones',
       'practiceTests',
       'sourceTests',
       'profile',
     ]);
-    expect(h.pageExpiry.releaseBytes).toHaveBeenCalledWith(['page-1', 'page-2']);
+    // Named explicitly, never defaulted: two deletions share this one unlink
+    // site, and a caller that said nothing would log the other one's name.
+    expect(h.pageExpiry.releaseBytes).toHaveBeenCalledWith(
+      ['page-1', 'page-2'],
+      'Student Profile deletion',
+    );
   });
 
   it('runs the tombstones and every delete in one transaction', async () => {
@@ -308,7 +317,7 @@ describe('deleting a Student Profile with everything under it', () => {
     expect(h.tombstones).toEqual([]);
     expect(purgeSteps(h.steps)).toEqual([
       'password',
-      'bytes',
+      'bytes(Student Profile deletion)',
       'practiceTests',
       'sourceTests',
       'profile',
@@ -376,6 +385,8 @@ describe('when the transaction fails after the bytes are already gone', () => {
     expect(marked).not.toBeNull();
     expect(marked!.pageIds).toEqual(['page-1', 'page-2']);
     expect(marked!.at).toBeInstanceOf(Date);
+    // Marked under this path's own label, so the log names the right caller.
+    expect(h.markedTrigger()).toBe('Student Profile deletion');
   });
 
   it('rethrows the original failure rather than reporting a successful delete', async () => {

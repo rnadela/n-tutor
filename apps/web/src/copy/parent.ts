@@ -6,7 +6,7 @@
  * the API's own: one shape, named once, and no second vocabulary for the same
  * six numbers.
  */
-import type { StudentDeletionPreview } from '@/lib/parent-api';
+import type { AccountDeletionPreview, StudentDeletionPreview } from '@/lib/parent-api';
 
 /**
  * The single copy module for the parent-facing auth screens. No user-facing
@@ -55,6 +55,7 @@ const BLANKS_NOTE = (unanswered: number): string =>
 const BLANKS_NONE = 'Nothing left blank';
 
 export type StudentDeletionCounts = StudentDeletionPreview;
+export type AccountDeletionCounts = AccountDeletionPreview;
 
 /**
  * `"3 photographs"`, or `null` when there are none.
@@ -217,6 +218,14 @@ export const parentCopy = {
      * child.
      */
     analytics: 'Where a student is strong and weak',
+    /**
+     * The way in to the account's own settings, and the only way in there is.
+     *
+     * It names what is behind it rather than the word "Settings" alone, because
+     * the one thing it holds today is where a parent ends the account — and a
+     * destination a parent cannot reach is a destination that did not ship.
+     */
+    settings: 'Settings and account deletion',
     loading: 'Loading Parent View…',
 
     /**
@@ -344,6 +353,75 @@ export const parentCopy = {
     deleteFailed: 'The profile could not be deleted. Nothing was removed. Try again.',
 
     failed: 'That change could not be saved. Try again.',
+    back: 'Back to Parent View',
+  },
+  /**
+   * The Settings screen, and the account-level data actions that had no home
+   * before it.
+   *
+   * The account is addressed in the second person — this is the parent reading
+   * about their own account — while a child is still only ever named in the
+   * third. No figure is stated beyond the counts the API sends.
+   */
+  settings: {
+    title: 'Settings',
+    intro: 'Settings for this account, and what can be removed from it.',
+    loading: 'Loading the settings…',
+    /**
+     * Said while the confirmation's counts are being read.
+     *
+     * Its own sentence rather than a second use of `loading`: the screen is
+     * already up by then, and "loading the settings" about a control the parent
+     * has just pressed describes the wrong thing.
+     */
+    preparing: 'Checking what would be removed…',
+    /** The section heading, which is the entry point the UX names. */
+    dataAndDeletion: 'Data & deletion',
+    deleteAccount: 'Delete this account',
+    /**
+     * What the control costs, said before it is touched rather than only in the
+     * confirmation: a parent deciding whether to open the dialog at all is
+     * entitled to know that this is not the per-child delete one screen over, and
+     * that there is nothing to recover afterwards.
+     */
+    deleteAccountNote:
+      'Deleting the account removes every profile on it, everything uploaded for them and every practice test, run and explanation made from it. The photographs are removed from storage. Nothing can be recovered afterwards, and you will be signed out.',
+    /** What the confirmation's title names, in place of a child's name. */
+    deleteAccountSubject: 'your account',
+    /**
+     * The confirmation's body: the number of children first, then every count
+     * and kind that has something in it, then the irreversibility.
+     *
+     * The children lead, because that is the figure a parent recognises before
+     * any count of uploads or runs. Only the kinds that have something in them
+     * are listed, for the reason the per-child body lists only those: "0 practice
+     * tests" is noise in a sentence a parent is meant to read carefully.
+     *
+     * It says nothing about the month's allowance, unlike the per-child body.
+     * There is no account left for an allowance to be about, and mentioning it
+     * would invite the reading that something survives.
+     */
+    deleteAccountBody: (counts: AccountDeletionCounts) => {
+      const parts = [
+        countPhrase(counts.students, 'student profile', 'student profiles'),
+        countPhrase(counts.sourceTests, 'uploaded test', 'uploaded tests'),
+        countPhrase(counts.pageImages, 'photograph', 'photographs'),
+        countPhrase(counts.practiceTests, 'practice test', 'practice tests'),
+        countPhrase(counts.attempts, 'finished run', 'finished runs'),
+        countPhrase(counts.explanations, 'explanation', 'explanations'),
+        countPhrase(
+          counts.masteryTopics,
+          'topic with progress saved',
+          'topics with progress saved',
+        ),
+      ].filter((part): part is string => part !== null);
+      const destroyed =
+        parts.length === 0
+          ? 'Your account will be removed. There is nothing saved under it.'
+          : `Your account will be removed, along with ${listOf(parts)}.`;
+      return `${destroyed} This cannot be undone, and nothing can be recovered afterwards.`;
+    },
+    deleteAccountFailed: 'The account could not be deleted. Nothing was removed. Try again.',
     back: 'Back to Parent View',
   },
   /**

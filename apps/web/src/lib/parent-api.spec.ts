@@ -979,3 +979,72 @@ describe('deleting a Student Profile', () => {
     });
   });
 });
+
+describe('deleting the whole Parent Account', () => {
+  it('reads the preview at the account deletion-preview path, with the bearer', async () => {
+    const fetchMock = respondWith(200, {
+      students: 2,
+      sourceTests: 1,
+      pageImages: 2,
+      practiceTests: 0,
+      attempts: 0,
+      explanations: 0,
+      masteryTopics: 0,
+    });
+
+    const preview = await parentApi.accountDeletionPreview('elev-token');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/parent/account/deletion-preview');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer elev-token');
+    expect(init.method).toBeUndefined();
+    expect(preview.students).toBe(2);
+  });
+
+  it('deletes with DELETE, the elevation bearer, and the password in the body', async () => {
+    const fetchMock = respondWith(204);
+
+    await parentApi.deleteAccount('elev-token', 'correct-horse-battery-staple');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    // No id in the path and none in the body: the account is the elevated one.
+    expect(url).toContain('/parent/account');
+    expect(url).not.toContain('password');
+    expect(init.method).toBe('DELETE');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer elev-token');
+    // In the body, never the query string: a query string is logged by every
+    // proxy between here and the API.
+    expect(JSON.parse(String(init.body))).toEqual({ password: 'correct-horse-battery-staple' });
+  });
+
+  it('sends the session cookie, which is what the API clears on success', async () => {
+    const fetchMock = respondWith(204);
+
+    await parentApi.deleteAccount('elev-token', 'hunter2');
+
+    const [, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    // The session cookie is httpOnly, so only the response can clear it — and it
+    // only reaches the API because every call here is `credentials: 'include'`.
+    expect(init.credentials).toBe('include');
+  });
+
+  it('surfaces a 409’s sentence as the refusal’s reason, and does not end Parent View', async () => {
+    respondWith(409, { message: 'That is not the account password.' });
+
+    await expect(parentApi.deleteAccount('elev-token', 'wrong')).rejects.toMatchObject({
+      status: 409,
+      reason: 'That is not the account password.',
+      notElevated: false,
+    });
+  });
+
+  it('shows the screen’s own sentence for a 503, which carries no reason', async () => {
+    respondWith(503, {});
+
+    await expect(parentApi.deleteAccount('elev-token', 'hunter2')).rejects.toMatchObject({
+      status: 503,
+      message: parentCopy.settings.deleteAccountFailed,
+      reason: null,
+    });
+  });
+});

@@ -54,6 +54,18 @@ export interface StudentDeletionPreview {
   masteryTopics: number;
 }
 
+/**
+ * What deleting the whole Parent Account would destroy, by count and by kind.
+ *
+ * `StudentDeletionPreview` plus the one count only an account confirmation can
+ * name: how many children go. Counts only, and no breakdown per child — the API
+ * sends none, because a preview is a warning and not a last reading of each
+ * child's work.
+ */
+export interface AccountDeletionPreview extends StudentDeletionPreview {
+  students: number;
+}
+
 export interface PinStatus {
   pinSet: boolean;
   /** An ISO instant while the gate is shut, `null` while it is open. */
@@ -1398,6 +1410,39 @@ export const parentApi = {
       `/parent/students/${encodeURIComponent(id)}`,
       { method: 'DELETE', headers: elevated(token), body: JSON.stringify({ password }) },
       parentCopy.students.deleteFailed,
+    ),
+
+  /**
+   * What deleting the whole account would destroy, read before the confirmation
+   * opens so the sentence the parent confirms against names real numbers.
+   */
+  accountDeletionPreview: (token: string) =>
+    call<AccountDeletionPreview>(
+      '/parent/account/deletion-preview',
+      { headers: elevated(token) },
+      parentCopy.settings.deleteAccountFailed,
+    ),
+
+  /**
+   * Erases the whole account, re-authenticated by the **account password** —
+   * never the Parent PIN, and never a confirmation phrase typed beside it.
+   *
+   * No id in the path and none in the body: the account is the elevated one and
+   * can be no other. The password travels in the body of the DELETE for the
+   * reason `deleteStudent` states, and a 409 is surfaced as `reason` by the same
+   * machinery — deliberately not a 401, which `endsParentView` would read as the
+   * elevation expiring and which would take the parent off the screen holding
+   * the refusal.
+   *
+   * On success the API clears both cookies itself: the session cookie is
+   * `httpOnly`, so this client could not clear it, and the device must stop being
+   * attached to an account that no longer exists.
+   */
+  deleteAccount: (token: string, password: string) =>
+    call<void>(
+      '/parent/account',
+      { method: 'DELETE', headers: elevated(token), body: JSON.stringify({ password }) },
+      parentCopy.settings.deleteAccountFailed,
     ),
 
   // --- Student Mode ------------------------------------------------------

@@ -1660,6 +1660,39 @@ export class PracticeTestService {
     await tx.generationJob.deleteMany({ where: scope });
   }
 
+  // --- Story 8.4: the same two, one level out (the whole account) -----------
+
+  /** What this module would destroy with the whole account, for the confirmation. */
+  async countsForAccount(
+    parentAccountId: string,
+  ): Promise<{ practiceTests: number; attempts: number }> {
+    const [practiceTests, attempts] = await Promise.all([
+      this.prisma.practiceTest.count({ where: { parentAccountId } }),
+      this.prisma.attempt.count({ where: { parentAccountId } }),
+    ]);
+    return { practiceTests, attempts };
+  }
+
+  /**
+   * Deletes this account's Practice Tests and then the Generation Jobs that
+   * produced them, inside the caller's transaction.
+   *
+   * **The same order, for the same reason** `purgeForStudentProfile` documents:
+   * `PracticeTest.generationJob` is `Cascade`, so the jobs first would take the
+   * tests with them, and `PracticeTest.sourceTest` is `Restrict`, so a test left
+   * standing would block the Source Test delete that follows.
+   *
+   * Matched on `parentAccountId` alone, which needs none of the widening the
+   * profile scope needs: every row of the account is in scope by definition, so
+   * there is no row whose own child is one of these and whose Source Test is
+   * another's. Both delegates hold the account with `Restrict`, and these two
+   * statements are what free it.
+   */
+  async purgeForAccountAllProfiles(tx: TransactionClient, parentAccountId: string): Promise<void> {
+    await tx.practiceTest.deleteMany({ where: { parentAccountId } });
+    await tx.generationJob.deleteMany({ where: { parentAccountId } });
+  }
+
   /**
    * What a set of `(Attempt, Question)` pairs point at, for this account only.
    *

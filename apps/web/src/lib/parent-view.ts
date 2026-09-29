@@ -6,10 +6,11 @@ import { ParentApiError } from '@/lib/parent-api';
  * The three rules every screen inside Parent View shares.
  *
  * They were the Students screen's, and stayed inside it while it was the only
- * one. A second parent-scoped screen makes them shared, and a shared rule with
- * two copies is a rule that has already started to drift — so they live here
- * and the screens import them. `students/page.tsx` re-exports them, because its
- * spec has always addressed them there.
+ * one. `refusalText` joined them when the Settings screen needed the same
+ * rule: a second parent-scoped screen makes them shared, and a shared rule
+ * with two copies is a rule that has already started to drift — so they live
+ * here and the screens import them. `students/page.tsx` re-exports them,
+ * because its spec has always addressed them there.
  */
 
 /**
@@ -39,6 +40,25 @@ export function applyIfCurrent<T>(
     if (current.value !== issued) return;
     apply(value);
   };
+}
+
+/**
+ * What to show a parent about a refusal: the API's own sentence when it authored
+ * one, then the error's message, then the screen's fallback.
+ *
+ * The API states a rule-refusal as a 409 whose body carries the sentence, and
+ * `ParentApiError` surfaces it as `reason`. Showing the generic fallback instead
+ * would replace "that is not the account password" with "that change could not
+ * be saved", which is a message a parent cannot act on.
+ *
+ * It lives here for the reason the three rules above do: two parent screens now
+ * gate a destructive action behind the same 409, and two copies of the rule is a
+ * rule that has already started to drift — both suites would stay green while
+ * one screen quietly stopped showing the sentence.
+ */
+export function refusalText(cause: unknown, fallback: string): string {
+  if (cause instanceof ParentApiError && cause.reason !== null) return cause.reason;
+  return cause instanceof Error ? cause.message : fallback;
 }
 
 /**

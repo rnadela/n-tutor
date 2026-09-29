@@ -256,6 +256,40 @@ export class StudentProfileService {
     if (removed.count !== 1) throw new NotFoundException(PROFILE_NOT_FOUND);
   }
 
+  /**
+   * Erases **every** child of this account (Story 8.4), inside the caller's
+   * transaction, and answers how many went.
+   *
+   * `removeOwned` one level out, and one statement rather than a loop over
+   * `removeOwned`: the account row cannot come away until its last child has, so
+   * there is no partial success to report and nothing for a per-child 404 to mean.
+   * An account with no children removes nothing and returns `0`, which is not a
+   * refusal — an account with nothing under it is deletable like any other.
+   *
+   * What goes with them is what the schema says goes with them: each child's
+   * `UncommittedState`, `Attempt`, `Explanation` and `TopicMastery` rows cascade
+   * from here. Everything held by a `Restrict` edge to a profile — Source Tests,
+   * Practice Tests, Generation Jobs — must already be gone, or this raises rather
+   * than removing it as a side effect. `identity` stays the sole writer of
+   * `student_profile` (AD-17); the `deletion` module decides the order.
+   */
+  async removeAllOwned(tx: TransactionClient, parentAccountId: string): Promise<number> {
+    const removed = await tx.studentProfile.deleteMany({ where: { parentAccountId } });
+    return removed.count;
+  }
+
+  /**
+   * How many children this account has, archived ones included.
+   *
+   * The first figure an account-deletion confirmation names, because it is the one
+   * a parent recognises before any count of uploads or runs. Archived children are
+   * counted because they are deleted too: archiving hides a child, it does not
+   * exempt them.
+   */
+  countOwned(parentAccountId: string): Promise<number> {
+    return this.prisma.studentProfile.count({ where: { parentAccountId } });
+  }
+
   // --- Internals ---------------------------------------------------------
 
   private requireName(raw: string): string {

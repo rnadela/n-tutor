@@ -67,6 +67,26 @@ export const DELETION_TRANSACTION_TIMEOUT_MS = 30_000;
 export const DELETION_TRANSACTION_MAX_WAIT_MS = 10_000;
 
 /**
+ * How long the one **account** deletion transaction may run, in milliseconds.
+ *
+ * Twice the per-profile ceiling, because an account is several children's worth
+ * of the same statement tree plus the rows only an account holds: its cost rows,
+ * its consents, its reset tokens, its timezone history, its uncommitted Parent
+ * View state and its usage tombstones. The per-profile number was chosen for one
+ * child with a year of practice behind them; a family of four is the same work
+ * four times over in one transaction that cannot be split, because the account
+ * row cannot come away until every `Restrict` child of it has.
+ *
+ * Its own constant rather than a reuse of the profile ceiling, so raising one
+ * does not silently raise the other — and its own *number* rather than a second
+ * wording of `DELETION_INCOMPLETE`: the refusal a parent reads on a timeout is
+ * the same refusal, whichever deletion timed out. `DELETION_TRANSACTION_MAX_WAIT_MS`
+ * is shared unchanged, because how long it takes to *acquire* a connection is a
+ * fact about the pool and not about how much work is about to be done with it.
+ */
+export const ACCOUNT_DELETION_TRANSACTION_TIMEOUT_MS = 60_000;
+
+/**
  * What is about to be destroyed, by count and by kind.
  *
  * This is the confirmation's whole content: FR-33 requires the sentence the
@@ -83,5 +103,36 @@ export interface ProfileDeletionSummary {
   attempts: number;
   explanations: number;
   /** Topics this child has a stored Mastery figure on. */
+  masteryTopics: number;
+}
+
+/**
+ * What deleting the whole Parent Account would destroy, by count and by kind.
+ *
+ * `ProfileDeletionSummary` one level out, with the one count only an account
+ * confirmation can name: how many children go. It is stated first in the
+ * sentence a parent reads, because it is the thing they will recognise before
+ * any figure about uploads or runs.
+ *
+ * Counts and kinds only, and not one of them is a per-child figure: a preview is
+ * a warning, and a breakdown by child would be a last reading of each child's
+ * work reachable from the route that destroys it (AD-20).
+ *
+ * It deliberately does **not** report the account's `AiCall` rows. Those are
+ * cost and latency figures about this deployment's spend, not about anything a
+ * parent uploaded — naming them in a confirmation would state a number the
+ * parent has never been shown and cannot interpret (AD-26).
+ */
+export interface AccountDeletionSummary {
+  /** Children on the account, archived ones included: all of them go. */
+  students: number;
+  /** Uploads across every child, drafts included. */
+  sourceTests: number;
+  /** The photographs themselves, which is the count a parent recognises. */
+  pageImages: number;
+  practiceTests: number;
+  attempts: number;
+  explanations: number;
+  /** Topics some child on the account has a stored Mastery figure on. */
   masteryTopics: number;
 }

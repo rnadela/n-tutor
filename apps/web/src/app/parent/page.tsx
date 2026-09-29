@@ -154,6 +154,12 @@ export default function ParentViewPage() {
             <Link component={NextLink} href="/parent/pin/change">
               {parentCopy.parentView.changePin}
             </Link>
+            {/* The account's own settings — the only way in, and where a parent
+                ends the account entirely (FR-33). Client-side for the same
+                reason as its neighbours. */}
+            <Link component={NextLink} href="/parent/settings">
+              {parentCopy.parentView.settings}
+            </Link>
           </Box>
         )}
       </CardContent>

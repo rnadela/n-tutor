@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import type { ZodType } from 'zod';
 import { currentCorrelationId } from '../common/correlation.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
 import {
   type AiCallClassName,
   type AiConfig,
@@ -311,6 +311,34 @@ export class AiService {
    */
   get embeddingModel(): string {
     return this.config.embeddingPin.model;
+  }
+
+  /**
+   * Removes this account's cost rows (Story 8.4), inside the caller's
+   * transaction, and answers how many went.
+   *
+   * **The one thing account deletion erases that profile deletion does not.**
+   * `AiCall` is the only `Restrict` child of `ParentAccount` that is not
+   * profile-scoped, so it would block the account delete outright — and it is a
+   * longitudinal per-account activity trace, which is exactly what FR-33 says
+   * does not survive. On a *profile* deletion there is nothing to do here: the
+   * row carries no child id, so it is already anonymous with respect to the
+   * child that went.
+   *
+   * It lives here because `ai` is the sole owner and sole writer of `ai_call`
+   * (AD-17, AD-20): the `deletion` module decides the order and this service
+   * performs the one write it owns. Nothing outside it holds this delegate.
+   *
+   * **A future spend ceiling must not read this table.** AD-23's global ceiling
+   * does not exist yet; when it is built it has to read an account-anonymous
+   * aggregate, because a figure derived from rows that are erased with their
+   * account would fall when an account is deleted — and a ceiling that can be
+   * lowered by deleting an account is not a ceiling. That is Epic 9's problem and
+   * deliberately not a column this story adds.
+   */
+  async purgeForAccount(tx: TransactionClient, parentAccountId: string): Promise<number> {
+    const removed = await tx.aiCall.deleteMany({ where: { parentAccountId } });
+    return removed.count;
   }
 
   // --- Internals ---------------------------------------------------------

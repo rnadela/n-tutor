@@ -22,6 +22,15 @@ import {
   type ProfileDeletionSummary,
 } from './deletion-policy.js';
 
+/**
+ * The label both log-writing routines carry on this path (AD-20).
+ *
+ * Passed explicitly rather than defaulted inside `PageExpiryService`: two
+ * deletions share that one unlink site, and a caller that said nothing would log
+ * the other one's name.
+ */
+const TRIGGER = 'Student Profile deletion' as const;
+
 /** One tombstone to write: a period, a class and how many charges fell in it. */
 interface TombstoneEntry {
   periodStart: Date;
@@ -162,7 +171,7 @@ export class ProfileDeletionService {
     // a page id (AD-15) and treats a file that is already absent as removed, so
     // `kept` is a real refusal and never a double-delete.
     const pageIds = await this.sourceTests.pageIdsFor(id);
-    const released = await this.pageExpiry.releaseBytes(pageIds);
+    const released = await this.pageExpiry.releaseBytes(pageIds, TRIGGER);
     if (released.kept > 0) {
       // Which page refused is already logged by page id, and never by path,
       // inside the service that tried (AD-15, AD-20). No row is written here,
@@ -255,7 +264,7 @@ export class ProfileDeletionService {
   private async markReleasedPages(pageIds: readonly string[]): Promise<void> {
     if (pageIds.length === 0) return;
     try {
-      await this.pageExpiry.markReleased(pageIds, new Date());
+      await this.pageExpiry.markReleased(pageIds, new Date(), TRIGGER);
     } catch (cause) {
       // Counts and page ids only, never a path (AD-15, AD-20).
       this.logger.error(

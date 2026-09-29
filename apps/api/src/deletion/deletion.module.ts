@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { AiModule } from '../ai/ai.module.js';
 import { AllowanceModule } from '../allowance/allowance.module.js';
 import { requireParentJwtSecret } from '../common/env.js';
 import { ExplanationModule } from '../explanation/explanation.module.js';
@@ -8,6 +9,7 @@ import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
 import { PracticeTestModule } from '../practicetest/practice-test.module.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
 import { SourceTestModule } from '../sourcetest/source-test.module.js';
+import { AccountDeletionService } from './account-deletion.service.js';
 import { ParentDeletionController } from './parent-deletion.controller.js';
 import { ProfileDeletionService } from './profile-deletion.service.js';
 
@@ -34,9 +36,11 @@ import { ProfileDeletionService } from './profile-deletion.service.js';
  * `requireParentJwtSecret()` (AD-25). The same arrangement every other
  * parent-facing module makes, for the same reason.
  *
- * **It exports the service and nothing else.** Story 8.4's account deletion is
- * the caller it is exported for; a second surface assembling this order would be
- * a second answer to what "delete a child" means.
+ * **It exports its two services and nothing else.** They are siblings rather than
+ * one method with a flag: the profile path writes usage tombstones and refuses to
+ * refund the month, and the account path erases the tombstones and has no
+ * surviving account for a usage figure to be about. A second surface assembling
+ * either order would be a second answer to what deletion means.
  */
 @Module({
   imports: [
@@ -53,13 +57,20 @@ import { ProfileDeletionService } from './profile-deletion.service.js';
     // The charged instants of the child's Explanations. Their rows cascade.
     ExplanationModule,
     // Period windows, so a past charging instant resolves to the period it fell
-    // in through the one module that computes periods (AD-14).
+    // in through the one module that computes periods (AD-14). For
+    // `ProfileDeletionService` alone: an account deletion writes no tombstone and
+    // so resolves no window.
     AllowanceModule,
+    // The sole writer of `ai_call` (AD-17), whose cost rows are the one thing an
+    // account deletion erases that a profile deletion does not. `ai` imports
+    // nothing at all, so the leaf orchestrator stays a leaf and no cycle is
+    // expressible — no `forwardRef` here either.
+    AiModule,
     // For the tombstone transaction, and for the one count `grading` owns.
     PrismaModule,
   ],
   controllers: [ParentDeletionController],
-  providers: [ProfileDeletionService, ParentElevationGuard],
-  exports: [ProfileDeletionService],
+  providers: [ProfileDeletionService, AccountDeletionService, ParentElevationGuard],
+  exports: [ProfileDeletionService, AccountDeletionService],
 })
 export class DeletionModule {}
