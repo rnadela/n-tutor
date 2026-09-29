@@ -2053,3 +2053,67 @@ source_spec: `spec-8-2-early-image-deletion.md`
 severity: low
 reason: `deletePageImages` refuses with `EXTRACTION_NOT_PERSISTED` whenever `ExtractionService.hasPersistedExtraction` answers false, and that method only reads whether an `extraction` row exists — it cannot distinguish "still running" from "permanently failed with no retry queued". This is a pre-existing gap in the extraction job's own retry/recovery policy, not something this story's gate introduced, and the 90-day sweep is unaffected since it never checks extraction status. A parent in this state keeps the photos until the sweep, not forever.
 status: open
+
+### DW-258: The two surfaces the UX names for deletion — Parent View -> Settings -> Data & deletion, and a Student Profile detail screen — do not exist, so the delete control lands on a row of the Students list
+origin: spec-deferred ac95ca094aaf
+location: apps/web/src/app/parent/students/page.tsx
+source_spec: `spec-8-3-student-profile-deletion.md`
+severity: medium
+reason: `apps/web/src/app/parent/` has no `settings` route and no per-profile detail route; the whole profile UI is one table at `students/page.tsx`. Story 8.2's deferred ledger already records the same missing-surface problem ("the missing list surface is larger than this story and is where 8.3/8.4's Data & deletion entry point will also have to land"). The control is reachable and password-gated where it is; what is missing is the navigation surface, which is larger than this story.
+status: open
+
+### DW-259: No test drives the assembled Students screen: the delete flow is proved through exported pure functions, a separately mounted dialog and isolated fetch calls.
+origin: spec-deferred dc94da0ecfe4
+location: apps/web/src/app/parent/students/page.spec.tsx
+source_spec: `spec-8-3-student-profile-deletion.md`
+severity: medium
+reason: `apps/web/vitest.config.ts` runs `environment: 'node'` with no DOM, so `page.spec.tsx` tests `deleteBody`, `refusalText` and the extracted `StudentRowNotes` rather than rendering `StudentsPage`. Nothing asserts that the preview is fetched before the dialog opens, or that the dialog receives the real API counts. This is the tier-wide convention Story 8.2 already deferred, not something this story introduced; changing it is a decision about how `apps/web` is tested.
+status: open
+
+### DW-260: The api integration suite fails a different random handful of cases on almost every full run, with setup requests answering 404, across unrelated spec files.
+origin: spec-deferred 1ef1885c46e8
+location: apps/api/vitest.config.ts
+source_spec: `spec-8-3-student-profile-deletion.md`
+severity: low
+reason: Three full runs during this story failed in `practice-test`, `parent-pin`, `uncommitted-state` and `extraction` int-specs with a different set each time; every file passes when run alone. Reproduced on the baseline commit `798a672` with the working tree stashed, so it predates this story. `vitest.config.ts` sets `fileParallelism: false`, so it is shared state or connection exhaustion across files rather than concurrency between them.
+status: open
+
+### DW-261: `restoreNote` is still carried only as a `title` tooltip, unreachable on touch and to a screen reader.
+origin: spec-deferred 76b937aec11d
+location: apps/web/src/app/parent/students/page.tsx
+source_spec: `spec-8-3-student-profile-deletion.md`
+severity: low
+reason: The archive and delete notes were converted to visible text with `aria-describedby` (P14), but restore's was left as it was: it is not the sentence that distinguishes keeping history from destroying it, so it fell outside the finding. It is the same class of problem and the same one-line fix, wherever this screen is next touched.
+status: open
+
+### DW-262: The deletion-preview counts shown in the confirmation dialog are read once and never re-validated against the state at the moment of confirm.
+origin: spec-deferred 24822fea655c
+location: apps/web/src/app/parent/students/page.tsx
+source_spec: `spec-8-3-student-profile-deletion.md`
+severity: low
+reason: `onDeleteRequested` fetches the preview once and stores it in `confirmingDelete`; `onDeleteConfirmed` runs the real delete later with no re-fetch. The server's own transaction re-reads and refuses on a page-set drift, so bytes can never orphan, but a non-page count (an Explanation, an Attempt) that changed between preview and confirm would leave the parent confirming against a number the dialog is still showing but the delete no longer matches.
+status: open
+
+### DW-263: No test exercises two overlapping `DELETE` requests for the same profile (a double submit, or two tabs).
+origin: spec-deferred 674c31f0e40f
+location: apps/api/src/deletion/profile-deletion.service.ts
+source_spec: `spec-8-3-student-profile-deletion.md`
+severity: low
+reason: `ProfileDeletionService.delete`'s structure implies the loser of the race gets a 404 from `removeOwned`'s `deleteMany` count check, but nothing in `profile-deletion.service.spec.ts` or the int-spec drives two concurrent `delete` calls to confirm it, unlike the mid-flight page-arrival case, which is tested.
+status: open
+
+### DW-264: `PageExpiryService.releaseBytes`'s new chunking reuses `PAGE_EXPIRY_SWEEP_BATCH_SIZE`, a constant named and originally sized for the unrelated 90-day background sweep.
+origin: spec-deferred 6334024e374b
+location: apps/api/src/sourcetest/page-expiry.service.ts
+source_spec: `spec-8-3-student-profile-deletion.md`
+severity: low
+reason: Tuning that constant for sweep throughput now silently changes filesystem concurrency for a live, user-facing delete request, and vice versa; no test pins either behavior to the shared value, so the coupling is invisible until it causes an incident. A dedicated constant for the deletion path would decouple the two call sites' tuning.
+status: open
+
+### DW-265: No test exercises a page mid-upload (`Uploading` status) at the moment its profile is deleted.
+origin: spec-deferred c4e034a2537a
+location: apps/api/src/sourcetest/page-ingest.service.ts
+source_spec: `spec-8-3-student-profile-deletion.md`
+severity: low
+reason: `pageIdsFor` deliberately includes `Uploading` rows so their bytes are unlinked, but nothing drives the actual race of an in-flight upload write landing concurrently with a profile deletion's unlink — structurally different from the already-tested mid-flight page-arrival case, and a plausible real-world overlap (a parent uploading a new page while the profile is deleted from another tab).
+status: open

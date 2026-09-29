@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { TaxonomyService, type TaxonomyItem } from '../admin/taxonomy.service.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
 import {
   NAME_SHAPE,
   NOTHING_TO_CHANGE,
@@ -109,6 +109,28 @@ export class StudentProfileService {
     return this.withGradeLevel(row);
   }
 
+  /**
+   * One profile of this account, archived or not, or `null`.
+   *
+   * The unfiltered counterpart to `findSelectable`: Story 8.3's deletion path
+   * has to establish ownership before it verifies a password, and archiving is
+   * not a gate on deletion — an archived child is deleted like any other. It is
+   * here rather than in the deletion module because `identity` is the sole
+   * reader of `student_profile` as much as its sole writer (AD-17), and a second
+   * reader elsewhere is the drift that rule exists to prevent.
+   *
+   * `null` rather than a throw, because the caller turns it into its own 404
+   * alongside the other refusals it authors.
+   */
+  async findOwned(parentAccountId: string, id: string): Promise<StudentProfileView | null> {
+    const row = await this.prisma.studentProfile.findFirst({
+      where: { id, parentAccountId },
+      select: PROFILE_FIELDS,
+    });
+    if (!row) return null;
+    return this.withGradeLevel(row);
+  }
+
   /** The Grade Levels a parent may choose from right now. */
   listGradeLevels(): Promise<TaxonomyItem[]> {
     return this.taxonomy.listSelectableGradeLevels();
@@ -206,6 +228,32 @@ export class StudentProfileService {
       where: { id, parentAccountId, archivedAt: { not: null } },
       data: { archivedAt: null },
     });
+  }
+
+  /**
+   * Erases one profile of this account — no soft-delete, no husk row and no
+   * `deletedAt` column anywhere (FR-33).
+   *
+   * Takes the **caller's** transaction, so the row deletion and the usage
+   * tombstones that make it honest commit or abort together; a crash between
+   * them would refund the account's month. `identity` stays the sole writer of
+   * `student_profile` (AD-17): the `deletion` module decides the *order* of the
+   * purges and this method performs the one write it owns.
+   *
+   * A `deleteMany` scoped by both ids, exactly as `archive` and `update` scope
+   * theirs: another account's id matches nothing, removes nothing and answers
+   * 404 — never 403, which would confirm the row exists somewhere.
+   *
+   * What goes with it is what the schema says goes with it: the child's
+   * `UncommittedState`, `Attempt`, `Explanation` and `TopicMastery` rows all
+   * cascade from here. Everything held by a `Restrict` edge — Source Tests,
+   * Practice Tests, Generation Jobs — must already be gone, or this statement
+   * raises rather than removing them as a side effect. That is the point of the
+   * edge and the reason the caller walks it inward-out first.
+   */
+  async removeOwned(tx: TransactionClient, parentAccountId: string, id: string): Promise<void> {
+    const removed = await tx.studentProfile.deleteMany({ where: { id, parentAccountId } });
+    if (removed.count !== 1) throw new NotFoundException(PROFILE_NOT_FOUND);
   }
 
   // --- Internals ---------------------------------------------------------

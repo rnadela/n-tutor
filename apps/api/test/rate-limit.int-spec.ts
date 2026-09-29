@@ -10,8 +10,16 @@ process.env.AUTH_RATE_TTL_MS = '60000';
 process.env.PARENT_AUTH_RATE_LIMIT = String(LIMIT);
 process.env.PARENT_AUTH_RATE_TTL_MS = '60000';
 
-const { createHarness, createSignedInParent, OPERATOR_EMAIL } = await import('./harness.js');
-const { resetParentAccounts } = await import('./harness.js');
+const {
+  createGradeLevel,
+  createHarness,
+  createSignedInParent,
+  createStudentProfile,
+  elevationTokenWithClaims,
+  OPERATOR_EMAIL,
+} = await import('./harness.js');
+const { resetParentAccounts, resetTaxonomy } = await import('./harness.js');
+const { PARENT_ELEVATION_AUDIENCE } = await import('../src/identity/pin-policy.js');
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 
@@ -118,6 +126,77 @@ describe('credential rate limiting', () => {
       }
       await request(h.app.getHttpServer()).get('/api/health').expect(200);
       await adminLogin(h).expect(401);
+    });
+  });
+});
+
+/**
+ * The Story 8.3 deletion route.
+ *
+ * `DELETE /api/parent/students/:id` runs argon2 on every request and skips both
+ * the default and the admin `login` buckets, so `@ParentCredentialRoute()` is
+ * the *only* thing standing between it and a password-guessing flood that also
+ * happens to be a CPU denial of service (AD-23). Nothing else asserts that it
+ * carries the marker, and a decorator silently dropped in a refactor leaves no
+ * other trace.
+ *
+ * The elevation bearer is minted directly rather than crossed for: the PIN set
+ * and the PIN verify are credential routes too, and spending two of the budget
+ * on setup would leave nothing to measure the route under test with.
+ */
+describe('the Student Profile deletion route’s credential budget', () => {
+  async function elevatedParent(h: Harness): Promise<{ token: string; profileId: string }> {
+    await resetTaxonomy(h.prisma);
+    await resetParentAccounts(h.prisma);
+    const parent = await createSignedInParent(h);
+    const gradeLevel = await createGradeLevel(h);
+    const profile = await createStudentProfile(h, parent.parentAccountId, {
+      gradeLevelId: gradeLevel.id,
+    });
+    const token = await elevationTokenWithClaims(
+      h.parentJwt,
+      {
+        email: parent.email,
+        scope: PARENT_ELEVATION_AUDIENCE,
+        epoch: 0,
+        sub: parent.parentAccountId,
+        elevatedAt: Date.now(),
+      },
+      // An elevation token without an expiry is not one, and the guard says so.
+      { expiresIn: 3600 },
+    );
+    return { token, profileId: profile.id };
+  }
+
+  it('rejects a wrong-password delete flood from one address with 429', async () => {
+    await withHarness(async (h) => {
+      const { token, profileId } = await elevatedParent(h);
+      const attempt = () =>
+        request(h.app.getHttpServer())
+          .delete(`/api/parent/students/${profileId}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ password: 'not-the-password' });
+
+      // Each one is a 409 and deletes nothing — the budget is spent by the
+      // route being called, not by the answer it happens to give, exactly as
+      // the PIN-verify case above spends it.
+      for (let i = 0; i < LIMIT; i += 1) await attempt().expect(409);
+      await attempt().expect(429);
+    });
+  });
+
+  it('does not spend the parent budget on the deletion preview', async () => {
+    await withHarness(async (h) => {
+      const { token, profileId } = await elevatedParent(h);
+      for (let i = 0; i < LIMIT * 3; i += 1) {
+        await request(h.app.getHttpServer())
+          .get(`/api/parent/students/${profileId}/deletion-preview`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+      }
+      // The preview runs no argon2, so it is deliberately not a credential
+      // route — and the budget is still whole afterwards.
+      await parentSignIn(h).expect(401);
     });
   });
 });

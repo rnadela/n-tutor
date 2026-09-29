@@ -893,6 +893,84 @@ export class SourceTestService implements SourceTestReader {
     });
   }
 
+  // --- Story 8.3: what this module contributes to a profile deletion -------
+
+  /**
+   * When each of this child's committed Source Tests was committed.
+   *
+   * The Upload charge is *derived* from exactly these instants (AD-14), so a
+   * deletion has to collect them before the rows go: each one resolves to the
+   * period window it fell in, and the tombstone written for that window keeps
+   * the count honest once the row is gone. Nothing outside this module reads
+   * `source_test` for it (AD-17).
+   *
+   * Drafts are excluded by the same condition `countSubmittedIn` uses: a draft
+   * was never committed, so it was never charged and leaves nothing behind.
+   *
+   * `tx` is **not optional in practice**: the deletion reads this inside the same
+   * transaction that deletes the rows, so a Source Test committed between the
+   * collection and the commit is either seen here or not deleted there. Reading
+   * it outside would leave a window in which an upload is charged, deleted, and
+   * never tombstoned — a silent refund of the account's month.
+   */
+  async submittedInstantsFor(studentProfileId: string, tx?: TransactionClient): Promise<Date[]> {
+    const rows = await (tx ?? this.prisma).sourceTest.findMany({
+      where: { studentProfileId, status: 'Submitted', submittedAt: { not: null } },
+      select: { submittedAt: true },
+    });
+    return rows.flatMap((row) => (row.submittedAt === null ? [] : [row.submittedAt]));
+  }
+
+  /**
+   * Every page of this child that may still have bytes on disk.
+   *
+   * Ids alone, never paths: the caller hands them back to the one service that
+   * unlinks, which derives the path from the id (AD-15). `Deleted` pages are
+   * excluded because their bytes are already gone and their `storagePath` is
+   * already null; `Uploading` ones are **not**, because a row can be left
+   * mid-ingest with a file already written, and a file whose row is about to be
+   * deleted is precisely the orphan §5.2 says does not exist.
+   *
+   * Read **twice** by the deletion: once outside the transaction, to know what to
+   * unlink, and once inside it with `tx`, to prove nothing appeared in between. A
+   * parent can photograph a page onto a Draft Source Test of the child they are
+   * deleting while the deletion is in flight, and that page's row would cascade
+   * away with its Source Test while its bytes stayed on disk.
+   */
+  async pageIdsFor(studentProfileId: string, tx?: TransactionClient): Promise<string[]> {
+    const rows = await (tx ?? this.prisma).pageImage.findMany({
+      where: { sourceTest: { studentProfileId }, state: { not: 'Deleted' } },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
+  /** What this module would destroy, for the confirmation the parent reads. */
+  async countsFor(studentProfileId: string): Promise<{ sourceTests: number; pageImages: number }> {
+    const [sourceTests, pageImages] = await Promise.all([
+      this.prisma.sourceTest.count({ where: { studentProfileId } }),
+      this.prisma.pageImage.count({ where: { sourceTest: { studentProfileId } } }),
+    ]);
+    return { sourceTests, pageImages };
+  }
+
+  /**
+   * Deletes every Source Test of this child, inside the caller's transaction.
+   *
+   * One statement, because everything hanging off a Source Test cascades from
+   * it: its `PageImage` rows, its `ExtractionJob` and its `Extraction` with the
+   * whole extracted tree. What does **not** cascade is what `Restrict` holds —
+   * Practice Tests and Generation Jobs — so this raises rather than removing
+   * them as a side effect, which is exactly why the caller purges those first.
+   *
+   * Profile-scoped and not account-scoped: the ownership check that decides
+   * whether this may run at all lives in the deletion service, with the password
+   * gate, and this stays a pure purge with no opinion about who asked.
+   */
+  async purgeForStudentProfile(tx: TransactionClient, studentProfileId: string): Promise<void> {
+    await tx.sourceTest.deleteMany({ where: { studentProfileId } });
+  }
+
   /**
    * The Subject label of each given Source Test, keyed by Source Test id.
    *

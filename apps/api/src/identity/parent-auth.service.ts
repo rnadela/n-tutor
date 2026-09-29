@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import {
   CHILD_DATA_CONSENT_VERSION,
   DEFAULT_PARENT_SESSION_TTL_SECONDS,
+  DUMMY_HASH,
   PARENT_SESSION_AUDIENCE,
   PARENT_SESSION_ISSUER,
   RESET_EMAIL_SUBJECT,
@@ -30,12 +31,17 @@ import {
 import { ParentAccountService } from './parent-account.service.js';
 
 /**
- * A real argon2id hash, verified when the email is unknown so that an unknown
- * email and a wrong password cost the same and take the same path. Deliberately
- * local: `admin` must never become a dependency of `identity` (AD-17).
+ * Re-exported, not defined here.
+ *
+ * The constant moved to `auth-policy.ts` when Story 8.3 gave
+ * `ParentAccountService` its own password verification: this module already
+ * imports that service, so a hash defined here and imported there would close an
+ * ESM cycle for one string. It stays exported from this module because this is
+ * where every caller and every spec has always addressed it, and because the
+ * sign-in path below is still its principal reader. It is still deliberately
+ * `identity`'s own: `admin` must never become a dependency of it (AD-17).
  */
-export const DUMMY_HASH =
-  '$argon2id$v=19$m=65536,t=3,p=4$c29tZS1zdGF0aWMtZHVtbXktc2FsdA$8kPvZkBw7C1LEIOsWMLA3cLTSbn0OcaXJAsnJ4npvHc';
+export { DUMMY_HASH } from './auth-policy.js';
 
 export interface ParentSession {
   token: string;

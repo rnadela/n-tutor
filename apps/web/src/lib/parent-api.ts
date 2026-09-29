@@ -39,6 +39,21 @@ export interface StudentProfileView {
   createdAt: string;
 }
 
+/**
+ * What deleting a Student Profile would destroy, by count and by kind.
+ *
+ * Counts only. The API deliberately sends no titles, dates or ids: a preview is
+ * a warning, not a second way to read a child's work.
+ */
+export interface StudentDeletionPreview {
+  sourceTests: number;
+  pageImages: number;
+  practiceTests: number;
+  attempts: number;
+  explanations: number;
+  masteryTopics: number;
+}
+
 export interface PinStatus {
   pinSet: boolean;
   /** An ISO instant while the gate is shut, `null` while it is open. */
@@ -1349,6 +1364,40 @@ export const parentApi = {
       `/parent/students/${encodeURIComponent(id)}/restore`,
       { method: 'POST', headers: elevated(token) },
       parentCopy.students.failed,
+    ),
+
+  /**
+   * What deleting this child would destroy, read before the confirmation opens
+   * so the sentence the parent confirms against names real numbers.
+   */
+  studentDeletionPreview: (token: string, id: string) =>
+    call<StudentDeletionPreview>(
+      `/parent/students/${encodeURIComponent(id)}/deletion-preview`,
+      { headers: elevated(token) },
+      parentCopy.students.deleteFailed,
+    ),
+
+  /**
+   * Erases the profile and everything under it, re-authenticated by the
+   * **account password** — never the Parent PIN, which guards a different thing.
+   *
+   * The password travels in the body of the DELETE rather than in a header or a
+   * query string: a query string is logged by every proxy between here and the
+   * API, and a header is not where a one-shot credential belongs either.
+   *
+   * A wrong password answers 409, whose `message` `failureDetailFrom` already
+   * surfaces as `reason` — a sentence the screen shows as it stands. It is
+   * deliberately **not** a 401, which `endsParentView` would read as the
+   * elevation expiring and which would take the parent off the screen holding
+   * the refusal. A 503 carries no such sentence, so the fallback below is what
+   * the parent reads when the stored photographs could not all be removed; both
+   * leave every row exactly where it was.
+   */
+  deleteStudent: (token: string, id: string, password: string) =>
+    call<void>(
+      `/parent/students/${encodeURIComponent(id)}`,
+      { method: 'DELETE', headers: elevated(token), body: JSON.stringify({ password }) },
+      parentCopy.students.deleteFailed,
     ),
 
   // --- Student Mode ------------------------------------------------------

@@ -4,13 +4,13 @@ import { PageIngestService } from './page-ingest.service.js';
 import { PAGE_EXPIRY_SWEEP_BATCH_SIZE, pageImageExpiryCutoff } from './source-test-policy.js';
 
 /**
- * Which of the two triggers asked for a removal, as it appears in the log.
+ * Which of the three triggers asked for a removal, as it appears in the log.
  *
- * A closed union rather than a free string: the log line is the only place the
- * two are distinguishable after the fact, and "whatever the caller passed" is
- * not a distinction an operator can rely on.
+ * A closed union rather than a free string: the log line is the only place they
+ * are distinguishable after the fact, and "whatever the caller passed" is not a
+ * distinction an operator can rely on.
  */
-type ExpiryTrigger = 'Retention sweep' | 'Parent-requested deletion';
+type ExpiryTrigger = 'Retention sweep' | 'Parent-requested deletion' | 'Student Profile deletion';
 
 /**
  * The FR-32 retention sweep: 90 days after a Source Test was submitted, the
@@ -35,10 +35,17 @@ type ExpiryTrigger = 'Retention sweep' | 'Parent-requested deletion';
  *   leaves the row `Ready` for the next pass and is logged by page id alone
  *   (AD-15, AD-20).
  *
- * Two triggers reach that behaviour and only two: the 90-day schedule
- * (`sweepExpired`) and the parent's own early deletion (`expireNow`, FR-33).
- * Both delegate to `removeAndMark`, so the rules above are stated once and the
- * outcome of an early deletion is indistinguishable from an expiry.
+ * Three triggers reach the unlink and only three: the 90-day schedule
+ * (`sweepExpired`), the parent's own early deletion (`expireNow`, FR-33), and
+ * Story 8.3's Student Profile deletion (`releaseBytes`). The first two delegate
+ * to `removeAndMark`, so the rules above are stated once and the outcome of an
+ * early deletion is indistinguishable from an expiry; the third unlinks and
+ * marks nothing up front, because the rows it belongs to are about to be deleted
+ * outright — and `markReleased` puts the rows right in the one case where that
+ * deletion then fails. All three go through `unlink` below, which is the **one**
+ * unlink site that reports a shortfall, and the one place it is logged by page
+ * id. (`SourceTestService` removes bytes in two other places, where the row goes
+ * with them and nothing survives to be inconsistent; neither is an expiry.)
  */
 @Injectable()
 export class PageExpiryService {
@@ -111,6 +118,110 @@ export class PageExpiryService {
   }
 
   /**
+   * Unlinks the bytes of the given pages and marks **nothing** — the third
+   * trigger, for Story 8.3's Student Profile deletion.
+   *
+   * The rows these pages belong to are about to be deleted outright, so in the
+   * ordinary case there is no row left to mark and no next pass to converge: a
+   * file still on disk after its row is gone is precisely the orphan §5.2 says
+   * does not exist. So this reports `kept` and the caller refuses the whole
+   * deletion on any shortfall, leaving every row and every other byte exactly
+   * where they were. The parent retries; nothing was lost.
+   *
+   * When the deletion that asked for this **fails after the fact**, the rows do
+   * survive, and they are then rows whose bytes are already gone — which is what
+   * `markReleased` below exists to correct.
+   *
+   * `removedIds` and not a count: a partial shortfall still removed some pages'
+   * bytes, and the caller must mark exactly those rows before refusing — never
+   * the ones that were never unlinked, whose files are still on disk. Which page
+   * refused is already in the log line below and in `remove()`'s own warning,
+   * both by page id and never by path (AD-15, AD-20).
+   */
+  async releaseBytes(pageIds: readonly string[]): Promise<{ removedIds: string[]; kept: number }> {
+    const gone = await this.unlink(pageIds, 'Student Profile deletion');
+    return { removedIds: gone, kept: pageIds.length - gone.length };
+  }
+
+  /**
+   * Says on the rows what `releaseBytes` already did to the files.
+   *
+   * The one caller is a Student Profile deletion whose transaction failed *after*
+   * the bytes came away. The rows are still there, because the transaction rolled
+   * back — but their photographs are not, and a `Ready` row with a `storagePath`
+   * pointing at a file that no longer exists is a row lying about what it holds.
+   * `readPageBytes` would select it and `ingest.read()` would raise
+   * `PageBytesUnavailable` in front of a parent who was told nothing had happened.
+   *
+   * Marking it here puts it in exactly the state the sweep would have left it in,
+   * so the strip says "photograph removed" with a date, which is true.
+   *
+   * The guard is `state: { not: 'Deleted' }` rather than the sweep's
+   * `state: 'Ready'`, because `releaseBytes` selects `Uploading` rows too: a row
+   * left mid-ingest can have a file already written, and once that file is gone
+   * the row must not be promoted to `Ready` over nothing. A row another pass
+   * already marked is excluded, so its original `bytesDeletedAt` stands.
+   */
+  async markReleased(pageIds: readonly string[], now: Date): Promise<number> {
+    if (pageIds.length === 0) return 0;
+    const marked = await this.prisma.pageImage.updateMany({
+      where: { id: { in: [...pageIds] }, state: { not: 'Deleted' } },
+      data: { state: 'Deleted', bytesDeletedAt: now, storagePath: null },
+    });
+    if (marked.count > 0) {
+      this.logger.warn(
+        `A Student Profile deletion did not complete after its bytes were removed; ${marked.count} page images were marked to match what is actually on disk.`,
+      );
+    }
+    return marked.count;
+  }
+
+  /**
+   * The one call site of `ingest.remove` that carries the shortfall logging, and
+   * the routine all three expiry triggers reach it through. Returns the ids whose
+   * bytes are actually gone, in no order.
+   *
+   * (`SourceTestService` calls `ingest.remove` in two other places — the failure
+   * path of an add that never finished, and the parent's own page delete — where
+   * the row goes in the same breath and there is no shortfall to report. Those
+   * are not expiry, and they are not this.)
+   *
+   * The failure mode this log line exists for: a page whose unlink keeps failing
+   * is otherwise invisible — `remove()` warns per page and every caller reports
+   * only a count. One line per pass names the shortfall, so a disk that has been
+   * refusing the same page for a week is something an operator can see. Counts
+   * and page ids only, never a path (AD-15, AD-20).
+   *
+   * **Unlinked in chunks**, not all at once. The sweep is already bounded by
+   * `PAGE_EXPIRY_SWEEP_BATCH_SIZE`, but a Student Profile deletion is bounded
+   * only by how much a child uploaded: one `Promise.all` over a year of pages is
+   * that many concurrent `unlink` syscalls, which is how a process runs out of
+   * file handles. The same constant bounds the fan-out here, because it is the
+   * same question — how many page removals may be in flight at once — and two
+   * numbers for it would be two answers.
+   */
+  private async unlink(pageIds: readonly string[], trigger: ExpiryTrigger): Promise<string[]> {
+    if (pageIds.length === 0) return [];
+
+    const gone: string[] = [];
+    for (let from = 0; from < pageIds.length; from += PAGE_EXPIRY_SWEEP_BATCH_SIZE) {
+      const chunk = pageIds.slice(from, from + PAGE_EXPIRY_SWEEP_BATCH_SIZE);
+      const removed = await Promise.all(
+        chunk.map(async (id) => ((await this.ingest.remove(id)) ? id : null)),
+      );
+      for (const id of removed) if (id !== null) gone.push(id);
+    }
+
+    const kept = pageIds.length - gone.length;
+    if (kept > 0) {
+      this.logger.warn(
+        `${trigger} could not remove the stored bytes of ${kept} of ${pageIds.length} page images.`,
+      );
+    }
+    return gone;
+  }
+
+  /**
    * Unlink, then mark — the whole of both triggers' behaviour, in one place.
    *
    * `trigger` names which one asked, because the two lines are otherwise
@@ -124,24 +235,10 @@ export class PageExpiryService {
   ): Promise<number> {
     if (due.length === 0) return 0;
 
-    const gone = (
-      await Promise.all(
-        due.map(async (page) => ((await this.ingest.remove(page.id)) ? page.id : null)),
-      )
-    ).filter((id): id is string => id !== null);
-
-    // The one failure mode that silently breaks the retention promise: a page
-    // whose unlink keeps failing is re-selected every pass, stays `Ready`, and
-    // is otherwise invisible — `remove()` warns per page and the returned count
-    // reports only what was marked. One line per pass names the shortfall, so a
-    // disk that has been refusing the same page for a week is something an
-    // operator can see. Counts and page ids only, never a path (AD-15, AD-20).
-    const kept = due.length - gone.length;
-    if (kept > 0) {
-      this.logger.warn(
-        `${trigger} could not remove the stored bytes of ${kept} of ${due.length} due page images; they stay Ready and are retried next pass.`,
-      );
-    }
+    const gone = await this.unlink(
+      due.map((page) => page.id),
+      trigger,
+    );
     if (gone.length === 0) return 0;
 
     // `state: 'Ready'` is repeated in the update's own `where` so a row another

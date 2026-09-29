@@ -17,11 +17,14 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { DestructiveConfirmDialog } from '@/components/Dialog';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
   parentApi,
+  ParentApiError,
   type AuthPolicy,
+  type StudentDeletionPreview,
   type StudentProfileView,
   type TaxonomyItem,
 } from '@/lib/parent-api';
@@ -67,6 +70,66 @@ interface Draft {
 
 const EMPTY_DRAFT: Draft = { displayName: '', gradeLevelId: '' };
 
+/**
+ * What to show a parent about a refusal: the API's own sentence when it authored
+ * one, then the error's message, then the screen's fallback.
+ *
+ * The API states a rule-refusal as a 409 whose body carries the sentence, and
+ * `ParentApiError` surfaces it as `reason`. Showing the generic fallback instead
+ * would replace "that is not the account password" with "that change could not
+ * be saved", which is a message a parent cannot act on.
+ */
+export function refusalText(cause: unknown, fallback: string): string {
+  if (cause instanceof ParentApiError && cause.reason !== null) return cause.reason;
+  return cause instanceof Error ? cause.message : fallback;
+}
+
+/**
+ * The ids the row's two notes carry, and the ids its two controls point their
+ * `aria-describedby` at. One function so the two sides cannot drift: a
+ * `describedby` naming an id nothing renders is silently no description at all.
+ */
+export const archiveNoteId = (profileId: string) => `student-archive-note-${profileId}`;
+export const deleteNoteId = (profileId: string) => `student-delete-note-${profileId}`;
+
+/**
+ * The sentences that say which of the row's two destructive-looking controls
+ * keeps the child's history.
+ *
+ * Rendered as text rather than hidden in a `title`: a tooltip does not exist on
+ * touch at all, and both controls carry an `aria-label` that would override a
+ * `title` for a screen reader — so the one thing telling Archive and Delete
+ * apart would be unreachable to exactly the people most likely to confuse them.
+ * The story requires the surface to say which is which, so the surface says it.
+ *
+ * Its own component so that requirement is assertable without standing up the
+ * whole screen, its router and its elevation.
+ */
+export function StudentRowNotes({ profileId, archived }: { profileId: string; archived: boolean }) {
+  return (
+    <Box sx={{ display: 'grid', gap: `${density.gap / 2}px`, mt: 1 }}>
+      {/* Only while archiving is the action on offer: a restored-from-archive
+          row's control is Restore, and its own note describes that. */}
+      {!archived && (
+        <Typography
+          id={archiveNoteId(profileId)}
+          component="p"
+          sx={{ fontSize: 13, color: 'text.secondary' }}
+        >
+          {parentCopy.students.archiveNote}
+        </Typography>
+      )}
+      <Typography
+        id={deleteNoteId(profileId)}
+        component="p"
+        sx={{ fontSize: 13, color: 'text.secondary' }}
+      >
+        {parentCopy.students.deleteNote}
+      </Typography>
+    </Box>
+  );
+}
+
 /** The Students screen: create, rename, change grade level, archive, restore. */
 export default function StudentsPage() {
   const router = useRouter();
@@ -90,6 +153,26 @@ export default function StudentsPage() {
   // One write at a time per row, so a double-tap cannot issue two requests
   // whose responses land out of order.
   const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
+  /**
+   * The child a confirmation is open for, with the counts it names.
+   *
+   * The counts are read **before** the dialog opens rather than while it is up:
+   * FR-33 requires the sentence the parent confirms against to name what will be
+   * destroyed, and a dialog that opened first and filled in its own numbers
+   * afterwards would be a dialog that is briefly confirmable against nothing.
+   */
+  const [confirmingDelete, setConfirmingDelete] = useState<{
+    profile: StudentProfileView;
+    counts: StudentDeletionPreview;
+  } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  /** The row whose preview is in flight, so a second tap issues no second read. */
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  /**
+   * Why the last confirm was refused, shown inside the dialog rather than on the
+   * page: the page's own alert sits under the modal backdrop.
+   */
+  const [deleteRefusal, setDeleteRefusal] = useState<string | null>(null);
 
   const token = elevation?.token ?? null;
   const requestId = useRef(0);
@@ -148,8 +231,18 @@ export default function StudentsPage() {
     applyIfCurrent(current.current, issued, setProfiles)(students);
   }, [token]);
 
-  /** One write, with the row locked, the announcement made and errors shown. */
-  async function write(id: string, run: () => Promise<string>): Promise<boolean> {
+  /**
+   * One write, with the row locked, the announcement made and errors shown.
+   *
+   * `showRefusal` decides **where** a refusal lands. By default it is the page's
+   * own alert; a caller whose control lives inside a modal passes its own setter,
+   * because the page alert sits under the backdrop and is invisible from there.
+   */
+  async function write(
+    id: string,
+    run: () => Promise<string>,
+    showRefusal: (text: string) => void = setError,
+  ): Promise<boolean> {
     if (token === null || pendingIds.has(id)) return false;
     setPendingIds((ids) => new Set(ids).add(id));
     setError(null);
@@ -163,7 +256,10 @@ export default function StudentsPage() {
         leave();
         return false;
       }
-      setError(cause instanceof Error ? cause.message : parentCopy.students.failed);
+      // A 409 carries the API's own policy sentence as `reason`, which is what
+      // the parent has to read to act: "that is not the account password" is
+      // actionable and "that change could not be saved" is not.
+      showRefusal(refusalText(cause, parentCopy.students.failed));
       return false;
     } finally {
       setPendingIds((ids) => {
@@ -175,6 +271,75 @@ export default function StudentsPage() {
   }
 
   const isPending = (id: string) => pendingIds.has(id);
+
+  /**
+   * Reads what would go, then opens the confirmation naming it.
+   *
+   * The preview is guarded and staleness-checked like every other read on this
+   * screen: two taps would otherwise issue two reads, and the later response
+   * would overwrite the counts the open dialog is already showing — a parent
+   * confirming against numbers that changed under them. `confirmingDelete` is
+   * checked too, not only `previewingId`: once a preview settles and the dialog
+   * is open for one profile, a tap on a *different* row's Delete control would
+   * otherwise start a second preview and, on success, swap the open dialog's
+   * subject and counts out from under the parent reading them.
+   */
+  async function onDeleteRequested(profile: StudentProfileView): Promise<void> {
+    if (token === null || isPending(profile.id) || previewingId !== null) return;
+    if (confirmingDelete !== null) return;
+    setError(null);
+    setDeleteRefusal(null);
+    setPreviewingId(profile.id);
+    const issued = (requestId.current += 1);
+    current.current.value = issued;
+    try {
+      const counts = await parentApi.studentDeletionPreview(token, profile.id);
+      applyIfCurrent(current.current, issued, (fresh: StudentDeletionPreview) =>
+        setConfirmingDelete({ profile, counts: fresh }),
+      )(counts);
+    } catch (cause) {
+      if (endsParentView(cause)) {
+        leave();
+        return;
+      }
+      setError(refusalText(cause, parentCopy.students.deleteFailed));
+    } finally {
+      setPreviewingId(null);
+    }
+  }
+
+  /**
+   * The delete itself. A refusal leaves the dialog open with the reason **in**
+   * it: the parent mistyped a password, and closing the thing they were typing
+   * into would make them start again — while showing the reason on the page
+   * behind would put it under the backdrop, where they cannot read it.
+   */
+  async function onDeleteConfirmed(password: string): Promise<void> {
+    const pending = confirmingDelete;
+    if (pending === null || token === null) return;
+    setDeleting(true);
+    // A stale refusal must never sit beside a fresh attempt.
+    setDeleteRefusal(null);
+    try {
+      const done = await write(
+        pending.profile.id,
+        async () => {
+          await parentApi.deleteStudent(token, pending.profile.id, password);
+          return parentCopy.students.deleted(pending.profile.displayName);
+        },
+        setDeleteRefusal,
+      );
+      if (done) setConfirmingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  /** Closing the confirmation drops the refusal with it. */
+  function onDeleteCancelled(): void {
+    setConfirmingDelete(null);
+    setDeleteRefusal(null);
+  }
 
   async function onCreate(): Promise<void> {
     if (token === null || creating || !canCreateStudent(draft.displayName, draft.gradeLevelId)) {
@@ -401,8 +566,8 @@ export default function StudentsPage() {
                             <Button
                               type="button"
                               disabled={isPending(profile.id)}
-                              title={parentCopy.students.archiveNote}
                               aria-label={`${parentCopy.students.archive} ${profile.displayName}`}
+                              aria-describedby={archiveNoteId(profile.id)}
                               sx={{ minHeight: density.tapTarget }}
                               onClick={() => {
                                 // Archiving is not deleting, and the
@@ -423,7 +588,29 @@ export default function StudentsPage() {
                               {parentCopy.students.archive}
                             </Button>
                           )}
+                          {/* Beside archiving, and visibly a different action:
+                              its own label, its own note saying what it does
+                              *not* keep, and a password-gated confirmation
+                              rather than a browser prompt. */}
+                          <Button
+                            type="button"
+                            color="error"
+                            disabled={
+                              isPending(profile.id) ||
+                              previewingId !== null ||
+                              confirmingDelete !== null
+                            }
+                            aria-label={`${parentCopy.students.delete} ${profile.displayName}`}
+                            aria-describedby={deleteNoteId(profile.id)}
+                            sx={{ minHeight: density.tapTarget }}
+                            onClick={() => {
+                              void onDeleteRequested(profile);
+                            }}
+                          >
+                            {parentCopy.students.delete}
+                          </Button>
                         </Box>
+                        <StudentRowNotes profileId={profile.id} archived={profile.archived} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -497,6 +684,25 @@ export default function StudentsPage() {
               </Button>
             </Box>
           </>
+        )}
+
+        {/* The account password, never the Parent PIN, and a body that names
+            every count and kind rather than "everything saved under it". */}
+        {confirmingDelete !== null && (
+          <DestructiveConfirmDialog
+            open
+            subject={confirmingDelete.profile.displayName}
+            body={parentCopy.students.deleteBody(
+              confirmingDelete.profile.displayName,
+              confirmingDelete.counts,
+            )}
+            refusal={deleteRefusal}
+            busy={deleting}
+            onCancel={onDeleteCancelled}
+            onConfirm={(password) => {
+              void onDeleteConfirmed(password);
+            }}
+          />
         )}
 
         {/* Client-side, so the provider holding the token stays mounted. */}

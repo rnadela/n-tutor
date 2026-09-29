@@ -10,6 +10,21 @@
 import { MAX_PIN_ATTEMPTS, PIN_LENGTH, pinCooldownMinutes } from './pin-policy.js';
 import { DISPLAY_NAME_MAX_LENGTH } from './student-profile-policy.js';
 
+/**
+ * A real argon2id hash, verified when the account being authenticated has no
+ * credential, so that an unknown email, a credential-less account and a wrong
+ * password all cost the same and take the same path.
+ *
+ * It lives in this policy file rather than in a service because two services now
+ * need it — `ParentAuthService` at sign-in and `ParentAccountService` when it
+ * re-authenticates a parent for a destructive action — and one of them is the
+ * other's dependency, so a constant defined in either would close an ESM cycle.
+ * It is still deliberately `identity`'s own: `admin` must never become a
+ * dependency of it (AD-17), and keeps a separate constant of its own.
+ */
+export const DUMMY_HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$c29tZS1zdGF0aWMtZHVtbXktc2FsdA$8kPvZkBw7C1LEIOsWMLA3cLTSbn0OcaXJAsnJ4npvHc';
+
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 256;
 

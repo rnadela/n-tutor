@@ -8,6 +8,7 @@ import { AnalyticsModule } from './analytics/analytics.module.js';
 import { CorrelationIdMiddleware } from './common/correlation.js';
 import { requireIntEnv } from './common/env.js';
 import { SchedulerModule } from './common/scheduler.js';
+import { DeletionModule } from './deletion/deletion.module.js';
 import { ExplanationModule } from './explanation/explanation.module.js';
 import { ExtractionModule } from './extraction/extraction.module.js';
 import { GradingModule } from './grading/grading.module.js';
@@ -100,6 +101,14 @@ export const PARENT_THROTTLER = 'parent';
     // does, because a module absent from this list is a module whose boot never
     // fails.
     AnalyticsModule,
+    // The FR-33 deletion path: a composition over `identity`, `sourcetest`,
+    // `practicetest`, `explanation` and `allowance` that owns no entity and
+    // writes only the usage tombstones nobody else's cluster claims. Registered
+    // last, beside `AnalyticsModule`, because every arrow points out of it and
+    // nothing above imports it — and registered at all, rather than left until
+    // something does, because a module absent from this list is a module whose
+    // boot never fails.
+    DeletionModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

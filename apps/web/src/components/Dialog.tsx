@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
+import Alert from '@mui/material/Alert';
 import MuiDialog, { type DialogProps } from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -220,6 +221,35 @@ export type DestructiveConfirmDialogProps = Omit<
   open: boolean;
   /** Exactly what will be destroyed, named in the copy rather than implied. */
   subject: string;
+  /**
+   * The sentence above the password field, when the default is not specific
+   * enough.
+   *
+   * FR-33 requires a Student Profile's confirmation to name every count and kind
+   * that will be destroyed, and `commonCopy.destructive.irreversible` says only
+   * "everything saved under it" — true, and not enough to decide on. So the
+   * caller may supply its own sentence.
+   *
+   * It overrides the **body and nothing else**: the title still names the
+   * subject, the password field is still there, and the confirm control is still
+   * disabled until a password is typed. An override is a way to say more, never
+   * a way past the gate.
+   */
+  body?: React.ReactNode;
+  /**
+   * Why the last confirm was refused, shown **inside** the dialog.
+   *
+   * A destructive confirmation deliberately stays open when the server refuses
+   * it — a mistyped password is a thing to retype, not a thing to start over —
+   * and a refusal rendered on the page behind it would sit under the backdrop,
+   * invisible to exactly the parent who has to read it. So the sentence belongs
+   * here, above the field it is about.
+   *
+   * The caller clears it: on the next attempt, so a stale refusal never sits
+   * beside a fresh one, and on cancel, so a reopened dialog does not accuse the
+   * parent of a mistake they made minutes ago.
+   */
+  refusal?: string | null;
   busy?: boolean;
   onCancel(): void;
   /** Fires only once a password has been entered. */
@@ -236,6 +266,8 @@ export type DestructiveConfirmDialogProps = Omit<
 export function DestructiveConfirmDialog({
   open,
   subject,
+  body,
+  refusal = null,
   busy = false,
   onCancel,
   onConfirm,
@@ -296,7 +328,16 @@ export function DestructiveConfirmDialog({
         />
       }
     >
-      <DialogContentText>{commonCopy.destructive.irreversible(trimmedSubject)}</DialogContentText>
+      <DialogContentText>
+        {body ?? commonCopy.destructive.irreversible(trimmedSubject)}
+      </DialogContentText>
+      {/* Inside the dialog, above the field it is about, and announced: the
+          page behind this sits under the backdrop. */}
+      {refusal !== null && refusal !== '' && (
+        <Alert severity="error" role="alert" variant="outlined" sx={{ mt: 1, mb: 1 }}>
+          {refusal}
+        </Alert>
+      )}
       <TextField
         type="password"
         autoComplete="current-password"

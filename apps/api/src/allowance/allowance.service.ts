@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { AccountTier } from '../generated/prisma/enums.js';
+import type { AccountTier, UsageClass } from '../generated/prisma/enums.js';
 import { ParentAccountService } from '../identity/parent-account.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SourceTestService } from '../sourcetest/source-test.service.js';
@@ -95,18 +95,20 @@ export class AllowanceService {
    * that matters and it is unchanged.
    */
   private readonly counters: Readonly<Record<keyof UsageCounts, ArtifactCounter>> = {
-    upload: (accountId, window) => this.sourceTests.countSubmittedIn(accountId, window),
-    generation: (accountId, window) =>
+    upload: async (accountId, window) =>
+      (await this.sourceTests.countSubmittedIn(accountId, window)) +
+      (await this.tombstonedIn(accountId, window, 'Upload')),
+    generation: async (accountId, window) =>
       // The half-open window the whole module is stated in: `[start, end)`, so
       // a Practice Test charged at the instant a period ends belongs to the
       // next one and is counted exactly once.
-      this.prisma.practiceTest.count({
+      (await this.prisma.practiceTest.count({
         where: {
           parentAccountId: accountId,
           chargedAt: { gte: window.start, lt: window.end },
         },
-      }),
-    explanation: (accountId, window) =>
+      })) + (await this.tombstonedIn(accountId, window, 'Generation')),
+    explanation: async (accountId, window) =>
       // The same half-open window and the same shape as `generation` above, over
       // `explanation`'s own charging column. Counted **here and nowhere else**:
       // there is no counter column, no period column and no reset job, and a row
@@ -118,13 +120,50 @@ export class AllowanceService {
       // `explanation` imports `allowance`, so importing it back would be a cycle
       // bought for nothing, since what is counted is a column and not a
       // behaviour.
-      this.prisma.explanation.count({
+      (await this.prisma.explanation.count({
         where: {
           parentAccountId: accountId,
           chargedAt: { gte: window.start, lt: window.end },
         },
-      }),
+      })) + (await this.tombstonedIn(accountId, window, 'Explanation')),
   };
+
+  /**
+   * What this account's **deleted** artifacts of one class still count for in
+   * this window.
+   *
+   * Usage stays derived (AD-14): there is still no counter column, no period
+   * column and no reset job. A `usage_tombstone` row is not a counter — it is
+   * written once, inside the transaction that erased the artifacts it stands in
+   * for, and is never decremented, reset or moved. Adding it here is the one
+   * place a deleted artifact keeps being counted, and it is here rather than in
+   * `deletion` for the reason every other count is here: two places that compute
+   * an allowance are two answers to it.
+   *
+   * The same half-open `[start, end)` the three live counts use, over
+   * `periodStart` — which is the window start the charge fell in, resolved from
+   * the artifact's own charging instant by `resolveWindow` and therefore stable
+   * after the fact. A tombstone counted in the wrong period would be a silent
+   * refund in one month and a silent double-charge in another.
+   *
+   * No rows is `0` and never `null`: `_sum` over an empty set is null, and a
+   * null added to a count is `NaN`.
+   */
+  private async tombstonedIn(
+    accountId: string,
+    window: PeriodWindow,
+    usageClass: UsageClass,
+  ): Promise<number> {
+    const summed = await this.prisma.usageTombstone.aggregate({
+      where: {
+        parentAccountId: accountId,
+        usageClass,
+        periodStart: { gte: window.start, lt: window.end },
+      },
+      _sum: { count: true },
+    });
+    return summed._sum.count ?? 0;
+  }
 
   /** The window this account's counters are measured over, in its own zone. */
   async windowFor(accountId: string, now: Date = new Date()): Promise<PeriodWindow> {

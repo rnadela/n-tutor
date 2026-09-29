@@ -166,6 +166,11 @@ model ParentAccount {
   /// must never vanish as a side effect of an account removal.
   practiceTests  PracticeTest[]
   generationJobs GenerationJob[]
+  /// The anonymous usage counts left behind when a Student Profile under this
+  /// account was deleted (Story 8.3). `Cascade` from the other side: a
+  /// tombstone is a statement about this account and nothing else, so 8.4's
+  /// account deletion erases it rather than being blocked by it.
+  usageTombstones UsageTombstone[]
 
   @@map("parent_account")
 }
@@ -1777,4 +1782,61 @@ model TopicMastery {
   /// table exists for and the unique index exists for a different reason.
   @@index([studentProfileId])
   @@map("topic_mastery")
+}
+
+/// Which of the three derived usage counts a tombstone stands in for.
+///
+/// The classes `allowance` already counts, and nothing else: Upload for a
+/// Source Test committed in the window, Generation for a Practice Test charged
+/// on first reaching draft, Explanation for a charged Explanation.
+enum UsageClass {
+  Upload
+  Generation
+  Explanation
+
+  @@map("usage_class")
+}
+
+/// What a deleted artifact leaves behind so its charge keeps being counted.
+///
+/// Usage is **derived** (AD-14): `allowance` counts artifacts inside the period
+/// window and never decrements a column. Story 8.3 removes a child's artifacts
+/// outright, so counting alone would silently refund the account's month and
+/// make delete-and-recreate a path to unlimited free generation. Collapsing the
+/// charged rows into this table before they go is what keeps the figure honest.
+///
+/// **It carries nothing a child could be read out of**: a Parent Account, the
+/// start of the period the charge fell in, the usage class and a number. No
+/// student id, no title, no text, no artifact id — the row is the *count* that
+/// survives, not the thing that was counted.
+///
+/// `periodStart` is stable after the fact because `resolveWindow` is
+/// deterministic for a past instant: the effective-dated timezone history says
+/// which zone was in force when the artifact was charged, so a later zone change
+/// does not move a tombstone into another period.
+///
+/// `Cascade` from ParentAccount: a tombstone is a statement *about* an account,
+/// so Story 8.4's account deletion erases it rather than being blocked by it.
+model UsageTombstone {
+  id              String     @id @default(uuid())
+  parentAccountId String
+  /// The window start the collapsed charges fell in, as `resolveWindow` computed
+  /// it for each artifact's own charging instant.
+  periodStart     DateTime
+  usageClass      UsageClass
+  /// How many charged artifacts this row stands in for. Additive: a second
+  /// deletion in the same period and class increments it rather than inserting
+  /// beside it.
+  count           Int
+  createdAt       DateTime   @default(now())
+
+  parentAccount ParentAccount @relation(fields: [parentAccountId], references: [id], onDelete: Cascade)
+
+  /// One row per account, period and class — which is what makes the write an
+  /// upsert with an increment rather than an insert a second deletion could
+  /// duplicate.
+  @@unique([parentAccountId, periodStart, usageClass])
+  /// The read `allowance` makes: this account's tombstones inside one window.
+  @@index([parentAccountId, periodStart])
+  @@map("usage_tombstone")
 }

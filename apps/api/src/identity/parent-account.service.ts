@@ -4,10 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import * as argon2 from 'argon2';
 import { DEFAULT_TIMEZONE, isSupportedTimeZone } from '../common/timezone.js';
 import { Prisma } from '../generated/prisma/client.js';
 import type { AccountTier } from '../generated/prisma/enums.js';
 import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
+import { DUMMY_HASH } from './auth-policy.js';
 
 export { DEFAULT_TIMEZONE };
 
@@ -304,6 +306,36 @@ export class ParentAccountService {
       where: { id },
       select: { id: true, email: true, passwordHash: true },
     });
+  }
+
+  /**
+   * Whether `password` is this account's, by account id.
+   *
+   * The hash is read and verified **inside its owner** and never leaves it
+   * (AD-17): a caller elsewhere that wanted to re-authenticate a parent would
+   * otherwise need `passwordHash` in hand, and a credential that travels is a
+   * credential that gets logged. Resolved by id, never by a token's email claim
+   * — the guard has already established which account this is, and that is the
+   * account whose password must be the one verified.
+   *
+   * An account with no credential verifies against `DUMMY_HASH` and answers
+   * `false`: the work is done either way, so a credential-less account is
+   * indistinguishable in cost from a wrong password. A malformed stored hash
+   * makes argon2 throw, and that is `false` too — a verification that could not
+   * be made is not a verification that succeeded.
+   */
+  async verifyPassword(accountId: string, password: string): Promise<boolean> {
+    const credential = await this.findCredentialById(accountId);
+    const hash = credential?.passwordHash ?? DUMMY_HASH;
+    try {
+      const matched = await argon2.verify(hash, password);
+      // The dummy is a real hash, so a caller who somehow supplied its
+      // pre-image would `verify` against it. The presence of a stored
+      // credential is therefore part of the answer, not only of the cost.
+      return matched && credential?.passwordHash != null;
+    } catch {
+      return false;
+    }
   }
 
   /**

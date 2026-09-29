@@ -910,3 +910,72 @@ describe('the topic drill-down call', () => {
     expect(SOURCE).toContain('weightedTopic: string;');
   });
 });
+
+describe('deleting a Student Profile', () => {
+  it('reads the preview at the deletion-preview path, with the elevation bearer', async () => {
+    const fetchMock = respondWith(200, {
+      sourceTests: 1,
+      pageImages: 2,
+      practiceTests: 0,
+      attempts: 0,
+      explanations: 0,
+      masteryTopics: 0,
+    });
+
+    const preview = await parentApi.studentDeletionPreview('elev-token', 'profile-1');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/parent/students/profile-1/deletion-preview');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer elev-token');
+    expect(init.method).toBeUndefined();
+    expect(preview.pageImages).toBe(2);
+  });
+
+  it('deletes with DELETE, the elevation bearer, and the password in the body', async () => {
+    const fetchMock = respondWith(204);
+
+    await parentApi.deleteStudent('elev-token', 'profile-1', 'correct-horse-battery-staple');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/parent/students/profile-1');
+    expect(url).not.toContain('password');
+    expect(init.method).toBe('DELETE');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer elev-token');
+    // In the body, never the query string: a query string is logged by every
+    // proxy between here and the API.
+    expect(JSON.parse(String(init.body))).toEqual({ password: 'correct-horse-battery-staple' });
+  });
+
+  it('escapes the profile id into the path', async () => {
+    const fetchMock = respondWith(204);
+
+    await parentApi.deleteStudent('elev-token', 'a/b?c', 'hunter2');
+
+    const [url] = fetchMock.mock.calls[0]! as unknown as [string];
+    expect(url).toContain('/parent/students/a%2Fb%3Fc');
+  });
+
+  it('surfaces a 409’s sentence as the refusal’s reason, and does not end Parent View', async () => {
+    respondWith(409, { message: 'That is not the account password.' });
+
+    await expect(parentApi.deleteStudent('elev-token', 'profile-1', 'wrong')).rejects.toMatchObject(
+      {
+        status: 409,
+        reason: 'That is not the account password.',
+        notElevated: false,
+      },
+    );
+  });
+
+  it('shows the screen’s own sentence for a 503, which carries no reason', async () => {
+    respondWith(503, {});
+
+    await expect(
+      parentApi.deleteStudent('elev-token', 'profile-1', 'hunter2'),
+    ).rejects.toMatchObject({
+      status: 503,
+      message: parentCopy.students.deleteFailed,
+      reason: null,
+    });
+  });
+});

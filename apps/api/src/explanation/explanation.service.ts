@@ -13,7 +13,7 @@ import {
   type ExplanationInput,
 } from '../practicetest/practice-test.service.js';
 import { remainingFor } from '../practicetest/practice-test-policy.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
 import type { ExplanationFlagDisposition } from '../generated/prisma/enums.js';
 import { adminQueueEntries, type AdminFlaggedExplanationView } from './admin-flag-queue.js';
 import {
@@ -1369,6 +1369,41 @@ export class ExplanationService {
     return entries;
   }
 
+  // --- Story 8.3: what this module contributes to a profile deletion -------
+
+  /**
+   * When each of this child's charged Explanations was charged.
+   *
+   * The only thing this module hands a deletion. Explanations cascade from the
+   * Student Profile and their flags cascade from them, so the rows need no purge
+   * of their own — the Admin queue empties itself when the profile row goes, and
+   * a flag about an Explanation that no longer exists is not a queue entry
+   * anybody could act on.
+   *
+   * What *cannot* go with them is the charge: the Explanation Allowance is
+   * derived from exactly these instants (AD-14), so they are collected inside
+   * the deletion's own transaction and collapsed into tombstones. A row with a
+   * null `chargedAt` — Story 6.4's free regeneration — is absent here, because it
+   * cost nothing. Reading it outside the transaction would leave a window in
+   * which an Explanation is charged, cascaded away and never tombstoned.
+   */
+  async chargedInstantsFor(studentProfileId: string, tx?: TransactionClient): Promise<Date[]> {
+    const rows = await (tx ?? this.prisma).explanation.findMany({
+      where: { ...deletionScope(studentProfileId), chargedAt: { not: null } },
+      select: { chargedAt: true },
+    });
+    return rows.flatMap((row) => (row.chargedAt === null ? [] : [row.chargedAt]));
+  }
+
+  /** What this module would destroy, for the confirmation the parent reads. */
+  async countsFor(studentProfileId: string): Promise<{ explanations: number }> {
+    return {
+      explanations: await this.prisma.explanation.count({
+        where: deletionScope(studentProfileId),
+      }),
+    };
+  }
+
   // --- Internals ---------------------------------------------------------
 
   /**
@@ -1529,6 +1564,33 @@ const FLAG_INSTANT = { createdAt: true } as const;
  */
 function studentFlaggedAtOf(flags: readonly { createdAt: Date }[]): string | null {
   return flags[0]?.createdAt.toISOString() ?? null;
+}
+
+/**
+ * Every Explanation that goes when a Student Profile is deleted.
+ *
+ * An Explanation cascades from **three** directions: the child, the Attempt, and
+ * the Question of a Practice Test. `practicetest` deliberately widens the set of
+ * Practice Tests a deletion takes — a row whose own `studentProfileId` names
+ * another child but whose Source Test is this one's goes too, because otherwise
+ * it would block the Source Test delete on its `Restrict` edge — and this mirrors
+ * that widening one table down.
+ *
+ * Unreachable today, because generation copies `studentProfileId` from the Source
+ * Test and the two branches name the same rows. It is written anyway because the
+ * consequence of the asymmetry is not a crash: a charged Explanation reached only
+ * by the widened branch would cascade away with no tombstone, which is a silent
+ * refund of the account's month and a preview that understated what would go.
+ * The cost of stating it is one `OR`; the cost of discovering it later is a
+ * billing figure nobody can reconstruct.
+ */
+function deletionScope(studentProfileId: string) {
+  return {
+    OR: [
+      { studentProfileId },
+      { question: { practiceTest: PracticeTestService.deletionScope(studentProfileId) } },
+    ],
+  };
 }
 
 /** One `(Attempt, Question)` pair as a single map key. Two ids, one lookup. */

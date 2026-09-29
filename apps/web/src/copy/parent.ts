@@ -1,4 +1,14 @@
 /**
+ * What a Student Profile deletion would destroy, as the API reports it.
+ *
+ * Type-only, so this module gains no runtime dependency on a `'use client'` one
+ * — the same arrangement `common.ts` makes for `GradeState`. The field names are
+ * the API's own: one shape, named once, and no second vocabulary for the same
+ * six numbers.
+ */
+import type { StudentDeletionPreview } from '@/lib/parent-api';
+
+/**
  * The single copy module for the parent-facing auth screens. No user-facing
  * string is a hardcoded literal in a component (AD-32).
  *
@@ -43,6 +53,26 @@ const BLANKS_NOTE = (unanswered: number): string =>
   `${unanswered} question${unanswered === 1 ? '' : 's'} left blank`;
 /** No question was skipped. Said rather than left out, so nothing is implied. */
 const BLANKS_NONE = 'Nothing left blank';
+
+export type StudentDeletionCounts = StudentDeletionPreview;
+
+/**
+ * `"3 photographs"`, or `null` when there are none.
+ *
+ * `null` rather than `"0 photographs"`: a confirmation a parent has to read
+ * carefully must not be padded with kinds that hold nothing, and "0" in a
+ * warning reads as a figure rather than as an absence.
+ */
+function countPhrase(count: number, singular: string, plural: string): string | null {
+  if (count <= 0) return null;
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/** `"a, b and c"` — the list separator a sentence uses, not a bullet list. */
+function listOf(parts: readonly string[]): string {
+  if (parts.length <= 1) return parts[0] ?? '';
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
 
 export const parentCopy = {
   appName: 'n-test-reviewer',
@@ -256,13 +286,62 @@ export const parentCopy = {
 
     archive: 'Archive',
     /** Archiving is visibly not deleting: the copy says what is kept. */
-    archiveNote: 'Archiving hides the profile from Student Mode and keeps its history.',
+    archiveNote:
+      'Archiving hides the profile from Student Mode and keeps its history. Nothing is deleted.',
     archiveConfirm: (name: string) =>
       `Archive ${name}? The profile is hidden from Student Mode and its history is kept. Nothing is deleted.`,
     archived: (name: string) => `${name} is archived and hidden from Student Mode.`,
     restore: 'Restore',
     restoreNote: 'Restoring puts the profile back in Student Mode.',
     restored: (name: string) => `${name} is active again.`,
+
+    delete: 'Delete',
+    /**
+     * Beside `archiveNote` in the same row, because the two controls must read
+     * as different actions rather than as two words for one.
+     */
+    deleteNote: 'Deleting removes the profile and everything saved under it, for good.',
+    /**
+     * The confirmation's body. FR-33 requires it to name the child, every count
+     * and kind that will be destroyed, and that it cannot be undone — and to say
+     * that the month's allowance does not come back, because a parent who
+     * deleted to free up uploads would otherwise learn that afterwards.
+     *
+     * Only the kinds that have something in them are listed: "0 practice tests"
+     * is noise in a sentence a parent is meant to read carefully. A child with
+     * nothing saved under them gets the short form.
+     */
+    deleteBody: (name: string, counts: StudentDeletionCounts) => {
+      const parts = [
+        countPhrase(counts.sourceTests, 'uploaded test', 'uploaded tests'),
+        countPhrase(counts.pageImages, 'photograph', 'photographs'),
+        countPhrase(counts.practiceTests, 'practice test', 'practice tests'),
+        countPhrase(counts.attempts, 'finished run', 'finished runs'),
+        countPhrase(counts.explanations, 'explanation', 'explanations'),
+        countPhrase(
+          counts.masteryTopics,
+          'topic with progress saved',
+          'topics with progress saved',
+        ),
+      ].filter((part): part is string => part !== null);
+      // The typographic apostrophe every other string in this file uses. A
+      // sentence that mixed the two would be visibly two people's copy.
+      const destroyed =
+        parts.length === 0
+          ? `${name}’s profile will be removed. Nothing else is saved under it.`
+          : `${name}’s profile will be removed, along with ${listOf(parts)}.`;
+      return `${destroyed} This cannot be undone, and this month’s allowance is not given back.`;
+    },
+    /**
+     * What the live region says once it is done.
+     *
+     * "and everything saved under them" would be a claim the body has just
+     * spent a sentence denying for a child with nothing saved under them, so it
+     * states the one thing that is true in both cases: the profile is gone, and
+     * it is not coming back.
+     */
+    deleted: (name: string) => `${name}’s profile was deleted. This cannot be undone.`,
+    deleteFailed: 'The profile could not be deleted. Nothing was removed. Try again.',
 
     failed: 'That change could not be saved. Try again.',
     back: 'Back to Parent View',

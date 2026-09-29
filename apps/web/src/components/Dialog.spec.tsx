@@ -331,3 +331,107 @@ describe('the passwordless destructive confirmation', () => {
     expect(markup).not.toContain('MuiButton-contained');
   });
 });
+
+describe('a destructive confirmation whose body is overridden', () => {
+  const COUNTED = 'Noah’s profile will be removed, along with 3 photographs.';
+
+  function render(body?: React.ReactNode): string {
+    return renderOverlay(
+      <DestructiveConfirmDialog
+        open
+        subject="Noah"
+        {...(body === undefined ? {} : { body })}
+        onCancel={noop}
+        onConfirm={noop}
+        disablePortal
+        keepMounted
+      />,
+    );
+  }
+
+  it('shows the caller’s sentence in place of the generic one', () => {
+    // FR-33 requires the confirmation to name every count and kind; "everything
+    // saved under it" is true and not enough to decide on.
+    const markup = render(COUNTED);
+    expect(markup).toContain(COUNTED);
+    expect(markup).not.toContain(commonCopy.destructive.irreversible('Noah'));
+  });
+
+  it('falls back to the generic sentence when no body is given', () => {
+    expect(render()).toContain(commonCopy.destructive.irreversible('Noah'));
+  });
+
+  it('still names the subject in the title', () => {
+    // The override replaces the body and nothing else.
+    expect(render(COUNTED)).toContain(commonCopy.destructive.title('Noah'));
+  });
+
+  it('keeps the account-password field, and asks for no PIN', () => {
+    const markup = render(COUNTED);
+    expect(markup).toContain(commonCopy.destructive.passwordLabel);
+    expect(markup).toContain(commonCopy.destructive.passwordHint);
+    expect(markup).toContain('type="password"');
+    expect(markup).not.toMatch(/\bPIN\b/u);
+  });
+
+  it('keeps the confirm control disabled until a password is typed', () => {
+    // The override must not become a way past the safeguard.
+    const markup = render(COUNTED);
+    expect(markup).toMatch(/<button[^>]*disabled/u);
+    expect(markup.match(/<button[^>]*disabled/gu)?.length).toBe(1);
+    expect(canConfirmDestructive('')).toBe(false);
+  });
+});
+
+describe('a destructive confirmation the server has refused', () => {
+  const REFUSAL = 'That is not the account password.';
+
+  function render(refusal: string | null): string {
+    return renderOverlay(
+      <DestructiveConfirmDialog
+        open
+        subject="Noah"
+        refusal={refusal}
+        onCancel={noop}
+        onConfirm={noop}
+        disablePortal
+        keepMounted
+      />,
+    );
+  }
+
+  it('shows the reason inside the dialog, where the backdrop cannot hide it', () => {
+    // The page's own alert sits under the modal backdrop, so a refusal rendered
+    // there is invisible to exactly the parent who has to read it.
+    const markup = render(REFUSAL);
+    expect(markup).toContain(REFUSAL);
+  });
+
+  it('announces it, rather than only drawing it', () => {
+    const markup = render(REFUSAL);
+    expect(markup).toContain('role="alert"');
+  });
+
+  it('shows nothing at all before anything has been refused', () => {
+    const markup = render(null);
+    expect(markup).not.toContain('role="alert"');
+    expect(markup).not.toContain(REFUSAL);
+  });
+
+  it('treats an empty string as nothing to say, not as a blank accusation', () => {
+    expect(render('')).not.toContain('role="alert"');
+  });
+
+  it('keeps the password field and its gate while a refusal is up', () => {
+    // The dialog stays open on a refusal precisely so the password can be
+    // retyped — so the field, and the gate in front of it, have to survive.
+    const markup = render(REFUSAL);
+    expect(markup).toContain(commonCopy.destructive.passwordLabel);
+    expect(markup).toContain('type="password"');
+    expect(markup.match(/<button[^>]*disabled/gu)?.length).toBe(1);
+  });
+
+  it('still shows the body naming what will be destroyed', () => {
+    expect(render(REFUSAL)).toContain(commonCopy.destructive.irreversible('Noah'));
+  });
+});

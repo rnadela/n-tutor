@@ -1570,6 +1570,96 @@ export class PracticeTestService {
     return { attemptId: attempt.id, studentProfileId: attempt.studentProfileId };
   }
 
+  // --- Story 8.3: what this module contributes to a profile deletion -------
+
+  /**
+   * The `where` that matches every Practice Test and Generation Job this
+   * deletion must take with the child.
+   *
+   * **Deliberately wider than `studentProfileId` alone.** A row whose own
+   * `studentProfileId` names another child but whose Source Test is this child's
+   * would survive the profile delete and then block the Source Test delete on
+   * its `Restrict` edge — a deletion that fails halfway on a row nobody can see.
+   * The widened match means the ordering argument holds whatever the data looks
+   * like, and it is stated once here so the collect and the purge cannot drift:
+   * a row that is purged and not collected is a silently refunded charge.
+   */
+  static deletionScope(studentProfileId: string) {
+    return { OR: [{ studentProfileId }, { sourceTest: { studentProfileId } }] };
+  }
+
+  /**
+   * The same widening, one level down: every Attempt that goes when this child's
+   * Practice Tests go.
+   *
+   * An Attempt cascades from **both** the child and the Practice Test, so the set
+   * that disappears is the union — and a count scoped to the child alone would
+   * understate what the confirmation promises to destroy for exactly the rows
+   * `deletionScope` exists to catch.
+   */
+  private static attemptDeletionScope(studentProfileId: string) {
+    return {
+      OR: [
+        { studentProfileId },
+        { practiceTest: PracticeTestService.deletionScope(studentProfileId) },
+      ],
+    };
+  }
+
+  /**
+   * When each of this child's charged Practice Tests was charged.
+   *
+   * The Generation charge is *derived* from exactly these instants (AD-14), so a
+   * deletion collects them before the rows go and writes the tombstones that
+   * keep the count honest. A row with a null `chargedAt` is simply absent: it
+   * cost nothing, so it leaves nothing behind.
+   *
+   * Read inside the deletion's own transaction, so a draft that reaches `Draft`
+   * and charges itself between the collection and the commit is either counted
+   * here or still standing afterwards, and never deleted uncounted.
+   */
+  async chargedInstantsFor(studentProfileId: string, tx?: TransactionClient): Promise<Date[]> {
+    const rows = await (tx ?? this.prisma).practiceTest.findMany({
+      where: { ...PracticeTestService.deletionScope(studentProfileId), chargedAt: { not: null } },
+      select: { chargedAt: true },
+    });
+    return rows.flatMap((row) => (row.chargedAt === null ? [] : [row.chargedAt]));
+  }
+
+  /** What this module would destroy, for the confirmation the parent reads. */
+  async countsFor(studentProfileId: string): Promise<{ practiceTests: number; attempts: number }> {
+    const [practiceTests, attempts] = await Promise.all([
+      this.prisma.practiceTest.count({
+        where: PracticeTestService.deletionScope(studentProfileId),
+      }),
+      this.prisma.attempt.count({
+        where: PracticeTestService.attemptDeletionScope(studentProfileId),
+      }),
+    ]);
+    return { practiceTests, attempts };
+  }
+
+  /**
+   * Deletes this child's Practice Tests and then the Generation Jobs that
+   * produced them, inside the caller's transaction.
+   *
+   * **The order is the correctness argument.** `PracticeTest.generationJob` is
+   * `Cascade`, so deleting the jobs first would take the tests with them — and
+   * `PracticeTest.sourceTest` is `Restrict`, so a test left standing would block
+   * the Source Test delete that follows. Tests first, then jobs, then (in the
+   * caller) Source Tests, then the profile row.
+   *
+   * Everything below a Practice Test cascades from it: its Questions with their
+   * Choices and topic labels, and the child's Attempts with their Answers,
+   * grades, disputes and Explanations. Nothing here reaches for any of those
+   * delegates, and nothing outside this module deletes one (AD-17).
+   */
+  async purgeForStudentProfile(tx: TransactionClient, studentProfileId: string): Promise<void> {
+    const scope = PracticeTestService.deletionScope(studentProfileId);
+    await tx.practiceTest.deleteMany({ where: scope });
+    await tx.generationJob.deleteMany({ where: scope });
+  }
+
   /**
    * What a set of `(Attempt, Question)` pairs point at, for this account only.
    *
