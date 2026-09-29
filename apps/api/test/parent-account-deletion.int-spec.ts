@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import sharp from 'sharp';
 import request from 'supertest';
+import type { AccountTier } from '../src/generated/prisma/enums.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const { storagePathFor, uploadRoot } = await import('../src/sourcetest/source-test-policy.js');
@@ -128,11 +129,17 @@ describe('a parent deletes the whole Parent Account', () => {
     children: Child[];
   }
 
-  /** A signed-in, elevated parent with a Grade Level and a Subject to hand. */
-  async function elevatedParent(): Promise<Account> {
+  /**
+   * A signed-in, elevated parent with a Grade Level and a Subject to hand.
+   *
+   * `tier` is how a fixture that keeps two children alive at once states the
+   * headroom it needs: opting into a tier that allows two active Student
+   * Profiles, never out of the Account-Tier cap.
+   */
+  async function elevatedParent(tier?: AccountTier): Promise<Account> {
     const gradeLevel = await createGradeLevel(h);
     const subject = await createSubject(h, { gradeLevelId: gradeLevel.id });
-    const parent = await createSignedInParent(h);
+    const parent = await createSignedInParent(h, tier ? { tier } : {});
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
     return {
@@ -300,7 +307,7 @@ describe('a parent deletes the whole Parent Account', () => {
    * this fixture went through.
    */
   async function fullAccount(): Promise<Account> {
-    const account = await elevatedParent();
+    const account = await elevatedParent('Plus');
     await childOf(account);
     await childOf(account);
 

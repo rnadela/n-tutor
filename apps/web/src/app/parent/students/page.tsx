@@ -50,6 +50,23 @@ export function canCreateStudent(displayName: string, gradeLevelId: string): boo
 }
 
 /**
+ * What a refused create puts on the screen.
+ *
+ * A rule rather than an expression inside the catch, for the reason
+ * `canCreateStudent` is one: the decision is then testable as a decision, not
+ * only through a control's rendered state.
+ *
+ * The API states a rule-refusal as a 409 whose body carries its own sentence —
+ * here, the Account Tier and the number of active Student Profiles it allows.
+ * That sentence is the only place a parent learns why, so it wins over this
+ * screen's generic fallback, which says nothing they can act on. This app
+ * states no tier and no figure of its own; it only decides whose words to show.
+ */
+export function createRefusal(cause: unknown): string {
+  return refusalText(cause, parentCopy.students.failed);
+}
+
+/**
  * Re-exported rather than defined here: other parent-scoped screens need the
  * same rules, so they live in `@/lib/parent-view` and every screen reads them
  * from one place. The names stay reachable here because that is where this
@@ -352,7 +369,7 @@ export default function StudentsPage() {
         leave();
         return;
       }
-      setError(cause instanceof Error ? cause.message : parentCopy.students.failed);
+      setError(createRefusal(cause));
     } finally {
       setCreating(false);
     }

@@ -226,7 +226,7 @@ describe('parent auth', () => {
   // --- Sign-in -----------------------------------------------------------
 
   it('signs in with the right password and sets the cookie', async () => {
-    const parent = await createCredentialedParent(h.parentAuth, { password: PASSWORD });
+    const parent = await createCredentialedParent(h, { password: PASSWORD });
     const response = await server()
       .post('/api/auth/sign-in')
       .send({ email: parent.email, password: PASSWORD })
@@ -236,7 +236,7 @@ describe('parent auth', () => {
   });
 
   it('gives one message for a wrong password and for an unknown email', async () => {
-    const parent = await createCredentialedParent(h.parentAuth, { password: PASSWORD });
+    const parent = await createCredentialedParent(h, { password: PASSWORD });
 
     const wrong = await server()
       .post('/api/auth/sign-in')
@@ -319,7 +319,7 @@ describe('parent auth', () => {
   });
 
   it('re-mints the cookie for a token older than the re-mint threshold', async () => {
-    const parent = await createCredentialedParent(h.parentAuth);
+    const parent = await createCredentialedParent(h);
     // Issued two days ago: past the re-mint threshold, well inside the ceiling.
     const aged = await h.parentJwt.signAsync(
       {
@@ -378,7 +378,7 @@ describe('parent auth', () => {
   });
 
   it('does not accept a parent session token on an admin route', async () => {
-    const parent = await createCredentialedParent(h.parentAuth);
+    const parent = await createCredentialedParent(h);
     const session = await h.parentAuth.mintSession({
       id: parent.parentAccountId,
       email: parent.email,
@@ -393,7 +393,7 @@ describe('parent auth', () => {
   // --- Password reset ----------------------------------------------------
 
   it('writes one token and dispatches one message for a registered email', async () => {
-    const parent = await createCredentialedParent(h.parentAuth);
+    const parent = await createCredentialedParent(h);
 
     await server()
       .post('/api/auth/password-reset/request')
@@ -432,7 +432,7 @@ describe('parent auth', () => {
   });
 
   it('is still 204 when the transport fails', async () => {
-    const parent = await createCredentialedParent(h.parentAuth);
+    const parent = await createCredentialedParent(h);
     h.mail.failNext();
     await server()
       .post('/api/auth/password-reset/request')
@@ -441,7 +441,7 @@ describe('parent auth', () => {
   });
 
   it('retires the previous link when a new one is requested', async () => {
-    const parent = await createCredentialedParent(h.parentAuth);
+    const parent = await createCredentialedParent(h);
     await server()
       .post('/api/auth/password-reset/request')
       .send({ email: parent.email })
@@ -456,7 +456,7 @@ describe('parent auth', () => {
   });
 
   it('replaces the password, marks the token used, and rejects a replay', async () => {
-    const parent = await createCredentialedParent(h.parentAuth, { password: PASSWORD });
+    const parent = await createCredentialedParent(h, { password: PASSWORD });
     await server()
       .post('/api/auth/password-reset/request')
       .send({ email: parent.email })
@@ -485,7 +485,7 @@ describe('parent auth', () => {
   });
 
   it('ends every session minted before the reset', async () => {
-    const parent = await createCredentialedParent(h.parentAuth, { password: PASSWORD });
+    const parent = await createCredentialedParent(h, { password: PASSWORD });
     const signIn = await server()
       .post('/api/auth/sign-in')
       .send({ email: parent.email, password: PASSWORD })
@@ -512,7 +512,7 @@ describe('parent auth', () => {
       .send({ token: 'no-such-token', password: 'a-brand-new-passphrase' })
       .expect(400);
 
-    const parent = await createCredentialedParent(h.parentAuth);
+    const parent = await createCredentialedParent(h);
     await server()
       .post('/api/auth/password-reset/request')
       .send({ email: parent.email })

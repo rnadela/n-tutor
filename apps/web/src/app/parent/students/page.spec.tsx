@@ -9,6 +9,7 @@ import {
   applyIfCurrent,
   archiveNoteId,
   canCreateStudent,
+  createRefusal,
   deleteNoteId,
   endsParentView,
   refusalText,
@@ -233,6 +234,46 @@ describe('what a refused delete puts on the screen', () => {
     // refusal the parent needs to read.
     const refused = new ParentApiError('generic', 409, null, false, false, 'Wrong password.');
     expect(endsParentView(refused)).toBe(false);
+  });
+});
+
+describe('what a refused create puts on the screen', () => {
+  /**
+   * The server's sentence, kept deliberately opaque.
+   *
+   * What is under test is that the API's own words win, not what those words
+   * say — and the words themselves name an Account Tier and a profile limit,
+   * neither of which this app may restate. A fixture spelling them out would
+   * both break that rule and compare the expectation against itself.
+   */
+  const SERVER_SAID = 'A sentence only the API authored.';
+  const atLimit = new ParentApiError('generic', 409, null, false, false, SERVER_SAID);
+
+  it('shows the API’s own sentence rather than the screen’s generic one', () => {
+    expect(createRefusal(atLimit)).toBe(SERVER_SAID);
+    expect(createRefusal(atLimit)).not.toBe(parentCopy.students.failed);
+  });
+
+  it('falls back to the error’s own message when the API authored no sentence', () => {
+    expect(createRefusal(new ParentApiError('boom', 503))).toBe('boom');
+  });
+
+  it('falls back to the screen’s sentence for a throw that is not an Error', () => {
+    expect(createRefusal('boom')).toBe(parentCopy.students.failed);
+  });
+
+  it('leaves the parent in Parent View: a refused create is not an expired session', () => {
+    expect(endsParentView(atLimit)).toBe(false);
+  });
+
+  it('states no tier and no profile figure of its own', () => {
+    // The limit and the tier originate in the API, exactly as the allowance
+    // refusals do. This app must not carry a second copy of either.
+    const ours = JSON.stringify(parentCopy.students);
+    for (const tier of ['Free', 'Plus', 'Family', 'Internal']) {
+      expect(ours).not.toContain(tier);
+    }
+    expect(ours).not.toMatch(/\d+\s+(active\s+)?Student Profile/iu);
   });
 });
 

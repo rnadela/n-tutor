@@ -9,6 +9,7 @@ const {
   createHarness,
   createSignedInParent,
   createStudentProfile,
+  createStudentProfileWithHeadroom,
   createSubject,
   elevate,
   resetParentAccounts,
@@ -73,7 +74,13 @@ describe('Analytics dashboard: one parent-scoped composition behind the PIN', ()
     subjectId: string;
   }
 
-  /** One account past the PIN, with two children and a Subject to hang Topics on. */
+  /**
+   * One account past the PIN, with two children and a Subject to hang Topics on.
+   *
+   * The account stays on the tier it signed up with, because the Explanation
+   * Allowance cases below assert that tier's own figures; the sibling is created
+   * under tier headroom that is handed back afterwards.
+   */
   async function account(overrides: { email?: string } = {}): Promise<Account> {
     const gradeLevel = await createGradeLevel(h);
     const subject = await createSubject(h, { gradeLevelId: gradeLevel.id });
@@ -83,7 +90,7 @@ describe('Analytics dashboard: one parent-scoped composition behind the PIN', ()
     const profile = await createStudentProfile(h, parent.parentAccountId, {
       gradeLevelId: gradeLevel.id,
     });
-    const sibling = await createStudentProfile(h, parent.parentAccountId, {
+    const sibling = await createStudentProfileWithHeadroom(h, parent.parentAccountId, {
       gradeLevelId: gradeLevel.id,
     });
     return {

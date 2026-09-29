@@ -1,10 +1,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
+import type { AccountTier } from '../src/generated/prisma/enums.js';
 
-const { DISPLAY_NAME_MAX_LENGTH, NAME_SHAPE, NOTHING_TO_CHANGE } = await import(
-  '../src/identity/student-profile-policy.js'
-);
+const {
+  DISPLAY_NAME_MAX_LENGTH,
+  NAME_SHAPE,
+  NOTHING_TO_CHANGE,
+  cannotAddStudentProfile,
+  cannotRestoreStudentProfile,
+} = await import('../src/identity/student-profile-policy.js');
+const { limitsFor } = await import('../src/allowance/tiers.js');
 const { CHANGES_IS_NOT_A_FIELD } = await import('../src/identity/dto/student-profile.dto.js');
 const { GRADE_LEVEL_NOT_SELECTABLE, PROFILE_NOT_FOUND } = await import(
   '../src/identity/student-profile.service.js'
@@ -17,6 +23,7 @@ const {
   createStudentProfile,
   elevate,
   resetParentAccounts,
+  setAccountTier,
   resetTaxonomy,
   setPinFor,
 } = await import('./harness.js');
@@ -45,8 +52,12 @@ describe('Student Profiles', () => {
   });
 
   /** A parent standing inside Parent View, with the bearer its routes take. */
-  async function elevatedParent(): Promise<{ parentAccountId: string; token: string }> {
-    const parent = await createSignedInParent(h);
+  async function elevatedParent(
+    tier?: AccountTier,
+  ): Promise<{ parentAccountId: string; token: string }> {
+    // `tier` is how a case needing several active children states the headroom it
+    // needs: opting into a tier that allows them, never out of the cap below.
+    const parent = await createSignedInParent(h, tier ? { tier } : {});
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
     return { parentAccountId: parent.parentAccountId, token };
@@ -231,10 +242,30 @@ describe('Student Profiles', () => {
     expect(ids).not.toContain(disabled.id);
   });
 
-  it('creates past any Account Tier figure — the cap is Epic 9, not this story', async () => {
+  // --- The Account-Tier cap on active profiles (FR-3, FR-31) ---------------
+
+  /**
+   * Every expected figure below is read from `limitsFor`; not one is written
+   * here. A recalibration in `tiers.ts` therefore moves these cases with it
+   * rather than turning them red.
+   */
+  const FREE_LIMIT = limitsFor('Free').studentProfiles!;
+
+  /** Fills an account to exactly its tier's limit, through the sole writer. */
+  async function fillToLimit(
+    parentAccountId: string,
+    gradeLevelId: string,
+    limit: number,
+  ): Promise<void> {
+    for (let index = 0; index < limit; index += 1) {
+      await createStudentProfile(h, parentAccountId, { gradeLevelId });
+    }
+  }
+
+  it('creates while the account is under its tier limit', async () => {
     const { parentAccountId, token } = await elevatedParent();
     const grade = await createGradeLevel(h);
-    // The account is `Free` by schema default; no figure is restated here.
+    // A signed-up account is `Free`; the figure is the tier's, not this file's.
     await expect(
       h.prisma.parentAccount.findUniqueOrThrow({
         where: { id: parentAccountId },
@@ -242,14 +273,207 @@ describe('Student Profiles', () => {
       }),
     ).resolves.toEqual({ tier: 'Free' });
 
-    for (let index = 0; index < 6; index += 1) {
+    await server()
+      .post('/api/parent/students')
+      .set('Authorization', bearer(token))
+      .send({ displayName: 'Noah', gradeLevelId: grade.id })
+      .expect(201);
+    expect(await h.prisma.studentProfile.count({ where: { parentAccountId } })).toBe(1);
+  });
+
+  it('refuses a create at the tier limit, naming the tier and the limit, and writes nothing', async () => {
+    const { parentAccountId, token } = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    await fillToLimit(parentAccountId, grade.id, FREE_LIMIT);
+    const before = await h.prisma.studentProfile.findMany({ where: { parentAccountId } });
+
+    const response = await server()
+      .post('/api/parent/students')
+      .set('Authorization', bearer(token))
+      .send({ displayName: 'Mia', gradeLevelId: grade.id })
+      .expect(409);
+    expect(messagesOf(response)).toContain(cannotAddStudentProfile('Free', FREE_LIMIT));
+
+    // A refusal writes nothing and deletes nothing.
+    expect(await h.prisma.studentProfile.findMany({ where: { parentAccountId } })).toEqual(before);
+  });
+
+  it('does not let an archived child occupy a slot', async () => {
+    const { parentAccountId, token } = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    const filled = await Promise.all(
+      Array.from({ length: FREE_LIMIT }, () =>
+        createStudentProfile(h, parentAccountId, { gradeLevelId: grade.id }),
+      ),
+    );
+    for (const profile of filled) {
+      await server()
+        .post(`/api/parent/students/${profile.id}/archive`)
+        .set('Authorization', bearer(token))
+        .expect(204);
+    }
+
+    await server()
+      .post('/api/parent/students')
+      .set('Authorization', bearer(token))
+      .send({ displayName: 'Mia', gradeLevelId: grade.id })
+      .expect(201);
+
+    // The archived children kept their rows and their instants.
+    for (const profile of filled) {
+      expect((await profileRow(profile.id)).archivedAt).not.toBeNull();
+    }
+  });
+
+  it('refuses the next create after a downgrade, and archives nothing it now exceeds', async () => {
+    const { parentAccountId, token } = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    const familyLimit = limitsFor('Family').studentProfiles!;
+    await setAccountTier(h, parentAccountId, 'Family');
+    await fillToLimit(parentAccountId, grade.id, familyLimit);
+
+    await setAccountTier(h, parentAccountId, 'Free');
+
+    const response = await server()
+      .post('/api/parent/students')
+      .set('Authorization', bearer(token))
+      .send({ displayName: 'Mia', gradeLevelId: grade.id })
+      .expect(409);
+    expect(messagesOf(response)).toContain(cannotAddStudentProfile('Free', FREE_LIMIT));
+
+    // Every profile the higher tier allowed is still there, and still active.
+    expect(await h.prisma.studentProfile.count({ where: { parentAccountId } })).toBe(familyLimit);
+    expect(
+      await h.prisma.studentProfile.count({ where: { parentAccountId, archivedAt: null } }),
+    ).toBe(familyLimit);
+  });
+
+  it('refuses a restore that would exceed the limit, leaving the profile archived', async () => {
+    const { parentAccountId, token } = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    const plusLimit = limitsFor('Plus').studentProfiles!;
+    // Headroom for one more than Free allows, so there is an archived child to
+    // try to restore while the account sits at a limit of exactly one.
+    await setAccountTier(h, parentAccountId, 'Plus');
+    const profiles = await Promise.all(
+      Array.from({ length: plusLimit }, () =>
+        createStudentProfile(h, parentAccountId, { gradeLevelId: grade.id }),
+      ),
+    );
+    const archived = profiles[0]!;
+    await server()
+      .post(`/api/parent/students/${archived.id}/archive`)
+      .set('Authorization', bearer(token))
+      .expect(204);
+    const archivedAt = (await profileRow(archived.id)).archivedAt;
+
+    await setAccountTier(h, parentAccountId, 'Free');
+
+    const response = await server()
+      .post(`/api/parent/students/${archived.id}/restore`)
+      .set('Authorization', bearer(token))
+      .expect(409);
+    expect(messagesOf(response)).toContain(cannotRestoreStudentProfile('Free', FREE_LIMIT));
+
+    // Still archived, at the original instant.
+    expect((await profileRow(archived.id)).archivedAt).toEqual(archivedAt);
+  });
+
+  it('restores once a slot is free again', async () => {
+    const { parentAccountId, token } = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    const created = await createStudentProfile(h, parentAccountId, { gradeLevelId: grade.id });
+    await server()
+      .post(`/api/parent/students/${created.id}/archive`)
+      .set('Authorization', bearer(token))
+      .expect(204);
+
+    await server()
+      .post(`/api/parent/students/${created.id}/restore`)
+      .set('Authorization', bearer(token))
+      .expect(204);
+    expect((await profileRow(created.id)).archivedAt).toBeNull();
+  });
+
+  it('consults no limit for an unlimited tier — Internal creates every time', async () => {
+    const { parentAccountId, token } = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    expect(limitsFor('Internal').studentProfiles).toBeNull();
+    await setAccountTier(h, parentAccountId, 'Internal');
+
+    // Comfortably past every capped tier's figure, without naming one.
+    const beyond =
+      Math.max(
+        ...(['Free', 'Plus', 'Family'] as const).map(
+          (tier) => limitsFor(tier).studentProfiles ?? 0,
+        ),
+      ) + 1;
+    for (let index = 0; index < beyond; index += 1) {
       await server()
         .post('/api/parent/students')
         .set('Authorization', bearer(token))
         .send({ displayName: `Child ${index}`, gradeLevelId: grade.id })
         .expect(201);
     }
-    expect(await h.prisma.studentProfile.count({ where: { parentAccountId } })).toBe(6);
+    expect(await h.prisma.studentProfile.count({ where: { parentAccountId } })).toBe(beyond);
+  });
+
+  it('consults no limit for an unlimited tier on restore either', async () => {
+    const { parentAccountId, token } = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    await setAccountTier(h, parentAccountId, 'Internal');
+
+    // Past every capped tier's figure, all archived, then all restored at once —
+    // the same guard `create` above proves takes no limit for Internal.
+    const beyond =
+      Math.max(
+        ...(['Free', 'Plus', 'Family'] as const).map(
+          (tier) => limitsFor(tier).studentProfiles ?? 0,
+        ),
+      ) + 1;
+    const profiles = await Promise.all(
+      Array.from({ length: beyond }, () =>
+        createStudentProfile(h, parentAccountId, { gradeLevelId: grade.id }),
+      ),
+    );
+    for (const profile of profiles) {
+      await server()
+        .post(`/api/parent/students/${profile.id}/archive`)
+        .set('Authorization', bearer(token))
+        .expect(204);
+    }
+    for (const profile of profiles) {
+      await server()
+        .post(`/api/parent/students/${profile.id}/restore`)
+        .set('Authorization', bearer(token))
+        .expect(204);
+    }
+    expect(
+      await h.prisma.studentProfile.count({ where: { parentAccountId, archivedAt: null } }),
+    ).toBe(beyond);
+  });
+
+  it('lets exactly one of two creates racing the last free slot through', async () => {
+    const { parentAccountId, token } = await elevatedParent();
+    const grade = await createGradeLevel(h);
+    // One slot left under the tier, and two creates reaching for it at once.
+    await setAccountTier(h, parentAccountId, 'Plus');
+    const plusLimit = limitsFor('Plus').studentProfiles!;
+    await fillToLimit(parentAccountId, grade.id, plusLimit - 1);
+
+    const attempt = (name: string) =>
+      server()
+        .post('/api/parent/students')
+        .set('Authorization', bearer(token))
+        .send({ displayName: name, gradeLevelId: grade.id });
+    const [first, second] = await Promise.all([attempt('Noah'), attempt('Mia')]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([201, 409]);
+    // The account row lock, not a clamp: the count lands exactly on the limit.
+    expect(
+      await h.prisma.studentProfile.count({ where: { parentAccountId, archivedAt: null } }),
+    ).toBe(plusLimit);
   });
 
   // --- Rename and Grade-Level change ---------------------------------------
@@ -626,7 +850,7 @@ describe('Student Profiles', () => {
   // --- Ordering ------------------------------------------------------------
 
   it('orders both lists by name, and lists only the active ones as selectable', async () => {
-    const { parentAccountId, token } = await elevatedParent();
+    const { parentAccountId, token } = await elevatedParent('Family');
     const grade = await createGradeLevel(h);
     for (const displayName of ['Zoe', 'Ada', 'Noah']) {
       await createStudentProfile(h, parentAccountId, { displayName, gradeLevelId: grade.id });

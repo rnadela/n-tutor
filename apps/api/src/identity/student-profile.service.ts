@@ -1,9 +1,19 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { TaxonomyService, type TaxonomyItem } from '../admin/taxonomy.service.js';
+import { limitsFor } from '../allowance/tiers.js';
+import type { AccountTier } from '../generated/prisma/enums.js';
 import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
+import { ParentAccountService } from './parent-account.service.js';
 import {
   NAME_SHAPE,
   NOTHING_TO_CHANGE,
+  cannotAddStudentProfile,
+  cannotRestoreStudentProfile,
   isAcceptableDisplayName,
   normaliseDisplayName,
 } from './student-profile-policy.js';
@@ -55,13 +65,30 @@ export const PROFILE_NOT_FOUND = 'Student Profile not found.';
  *   belonging to another account therefore matches nothing and changes nothing:
  *   a 404, never a 403, which would confirm the profile exists somewhere.
  *
- * Nothing here enforces an Account-Tier cap: that is Epic 9 (FR-31).
+ * The Account-Tier cap on **active** profiles (FR-3, FR-31) is enforced here,
+ * and only on the two paths that raise the active count: `create` and `restore`.
+ * `update`, `archive`, `removeOwned` and `removeAllOwned` are ungated because
+ * none of them raises it — renaming a child, changing their Grade Level or
+ * archiving them leaves the account no fuller than it was. A tier that moves
+ * below the live count is not a reason to touch a row either: an account over
+ * its limit after a downgrade keeps every profile and is simply refused the
+ * next one.
+ *
+ * The check, the count and the write share one transaction with the account row
+ * locked through `ParentAccountService.findByIdForUpdate`, so two concurrent
+ * creates serialise and an Admin tier change cannot interleave between the read
+ * of the tier and the write it authorised. The figure itself is never restated:
+ * it is read from `allowance`'s pure `tiers.ts`, which is a module, not an
+ * injected service — `AllowanceService` depends on `identity`, so taking it
+ * would close a cycle for a number a function hands over.
  */
 @Injectable()
 export class StudentProfileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly taxonomy: TaxonomyService,
+    // Intra-module: both are providers of IdentityModule, so this closes no cycle.
+    private readonly accounts: ParentAccountService,
   ) {}
 
   // --- Reads -------------------------------------------------------------
@@ -154,18 +181,22 @@ export class StudentProfileService {
     const displayName = this.requireName(input.displayName);
     const gradeLevel = await this.requireSelectableGradeLevel(input.gradeLevelId);
 
-    const [row, activeCount] = await this.prisma.$transaction(async (tx) => {
+    const [row, activeBefore] = await this.prisma.$transaction(async (tx) => {
+      // The cap is checked inside the transaction that writes, with the account
+      // row held, so the count it read cannot move under the insert.
+      const before = await this.requireProfileHeadroom(
+        tx,
+        parentAccountId,
+        cannotAddStudentProfile,
+      );
       const created = await tx.studentProfile.create({
         data: { parentAccountId, displayName, gradeLevelId: gradeLevel.id },
         select: PROFILE_FIELDS,
       });
-      const count = await tx.studentProfile.count({
-        where: { parentAccountId, archivedAt: null },
-      });
-      return [created, count] as const;
+      return [created, before] as const;
     });
 
-    return { profile: viewOf(row, gradeLevel), isFirst: activeCount === 1 };
+    return { profile: viewOf(row, gradeLevel), isFirst: activeBefore === 0 };
   }
 
   /**
@@ -220,13 +251,27 @@ export class StudentProfileService {
     });
   }
 
-  /** The inverse, so a mistyped tap is recoverable without a delete. */
+  /**
+   * The inverse, so a mistyped tap is recoverable without a delete.
+   *
+   * Gated by the Account-Tier cap, because restoring raises the active count and
+   * FR-3 bounds that count — a Free account with one active and one archived
+   * child would otherwise reach two active in two taps. A refusal takes nothing
+   * away: the profile stays archived, keeps the instant it was archived at, and
+   * is restorable as soon as a slot is free.
+   *
+   * Restoring an already-active profile is a no-op that never reaches the guard:
+   * it raises nothing, so an account sitting at its limit may still make it.
+   */
   async restore(parentAccountId: string, id: string): Promise<void> {
     const row = await this.requireOwned(parentAccountId, id);
     if (row.archivedAt === null) return;
-    await this.prisma.studentProfile.updateMany({
-      where: { id, parentAccountId, archivedAt: { not: null } },
-      data: { archivedAt: null },
+    await this.prisma.$transaction(async (tx) => {
+      await this.requireProfileHeadroom(tx, parentAccountId, cannotRestoreStudentProfile);
+      await tx.studentProfile.updateMany({
+        where: { id, parentAccountId, archivedAt: { not: null } },
+        data: { archivedAt: null },
+      });
     });
   }
 
@@ -291,6 +336,39 @@ export class StudentProfileService {
   }
 
   // --- Internals ---------------------------------------------------------
+
+  /**
+   * The Account-Tier cap on active profiles, and the number of active profiles
+   * there were when it passed.
+   *
+   * Takes the caller's transaction so the check and the write it authorises
+   * cannot be raced apart, and locks the account row: under READ COMMITTED two
+   * concurrent creates would otherwise both read the same count and both find
+   * the last slot free. `findByIdForUpdate` is the lock the Admin tier change
+   * already takes for the same reason — there is no second row-lock idiom here.
+   *
+   * `studentProfiles: null` is Internal: unlimited, and not a sentinel — no
+   * comparison is made at all, rather than one against a stand-in number. The
+   * count is still taken, because it is the count `create` derives `isFirst`
+   * from and an Internal account's second child is no more the first than a Free
+   * account's would be. `sentence` is the caller's, so one guard serves both
+   * paths without knowing which refusal it is raising.
+   */
+  private async requireProfileHeadroom(
+    tx: TransactionClient,
+    parentAccountId: string,
+    sentence: (tier: AccountTier, limit: number) => string,
+  ): Promise<number> {
+    const account = await this.accounts.findByIdForUpdate(tx, parentAccountId);
+    const limit = limitsFor(account.tier).studentProfiles;
+    const active = await tx.studentProfile.count({
+      where: { parentAccountId, archivedAt: null },
+    });
+    if (limit !== null && active >= limit) {
+      throw new ConflictException(sentence(account.tier, limit));
+    }
+    return active;
+  }
 
   private requireName(raw: string): string {
     if (!isAcceptableDisplayName(raw)) throw new BadRequestException(NAME_SHAPE);

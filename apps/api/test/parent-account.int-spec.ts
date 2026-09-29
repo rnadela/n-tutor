@@ -11,6 +11,7 @@ import {
   createParentAccount,
   createSignedInParent,
   createStudentProfile,
+  createStudentProfileWithHeadroom,
   createSubject,
   elevate,
   parentStyleToken,
@@ -189,6 +190,24 @@ describe('parent account tier assignment and consumption', () => {
       expect(typeof consumption.studentProfileLimit).toBe('number');
       expect(consumption.studentProfileLimit).toBe(limitsFor(tier).studentProfiles);
     }
+  });
+
+  it('reports the tier’s profile limit, unmoved by the live profile count (DW-282)', async () => {
+    // The limit is the tier's figure, not a remainder: creating a child spends
+    // no allowance and moves no limit. Nothing here restates a number.
+    const account = await createParentAccount(h.identity, { email: 'profile-limit@example.test' });
+    const grade = await createGradeLevel(h);
+    await createStudentProfile(h, account.id, { gradeLevelId: grade.id });
+
+    const { body } = await request(server())
+      .get(`/api/admin/parent-accounts/${account.id}`)
+      .set(auth())
+      .expect(200);
+
+    expect(body.consumption.studentProfileLimit).toBe(limitsFor('Free').studentProfiles);
+    // And no count of profiles is published on this surface at all.
+    expect(body.consumption).not.toHaveProperty('studentProfiles');
+    expect(body.consumption).not.toHaveProperty('studentProfileCount');
   });
 
   it('gives Internal an unlimited profile limit and three unlimited allowances', async () => {
@@ -567,7 +586,11 @@ describe('parent account tier assignment and consumption', () => {
       state: { status: 'Draft' | 'Submitted'; submittedAt?: Date },
     ): Promise<void> {
       const gradeLevel = await createGradeLevel(h);
-      const profile = await createStudentProfile(h, parentAccountId, {
+      // One case commits two uploads for one account, so this needs a second
+      // active child. The account's own tier must stay put — the cases above
+      // assert its figures — so the profile is created under tier headroom that
+      // is handed straight back.
+      const profile = await createStudentProfileWithHeadroom(h, parentAccountId, {
         gradeLevelId: gradeLevel.id,
       });
       await h.prisma.sourceTest.create({

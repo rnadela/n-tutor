@@ -17,6 +17,7 @@ const {
   createHarness,
   createSignedInParent,
   createStudentProfile,
+  createStudentProfileWithHeadroom,
   createSubject,
   elevate,
   resetParentAccounts,
@@ -91,13 +92,15 @@ describe('Explanation suppression and free regeneration: removed once, replaced 
     const gradeLevel = await createGradeLevel(h);
     const subject = await createSubject(h, { gradeLevelId: gradeLevel.id });
 
+    // The account keeps its sign-up tier, whose Explanation figure the cases
+    // below assert; the sibling is created under tier headroom handed back after.
     const parent = await createSignedInParent(h);
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
     const profile = await createStudentProfile(h, parent.parentAccountId, {
       gradeLevelId: gradeLevel.id,
     });
-    const sibling = await createStudentProfile(h, parent.parentAccountId, {
+    const sibling = await createStudentProfileWithHeadroom(h, parent.parentAccountId, {
       gradeLevelId: gradeLevel.id,
     });
     const cookie = await bindDevice(h, token, profile.id);

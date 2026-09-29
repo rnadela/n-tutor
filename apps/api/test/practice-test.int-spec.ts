@@ -42,6 +42,7 @@ const {
   createHarness,
   createSignedInParent,
   createStudentProfile,
+  createStudentProfileWithHeadroom,
   createSubject,
   elevate,
   resetParentAccounts,
@@ -125,6 +126,9 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
    * generator reads *something*, not that it reads what extraction wrote.
    */
   async function generatable(pageCount = 2): Promise<Ready> {
+    // The account keeps its sign-up tier, because the Generation Allowance cases
+    // assert that tier's own figures. The siblings several cases add are created
+    // under tier headroom that is handed straight back.
     const parent = await createSignedInParent(h);
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
@@ -3096,7 +3100,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       // A sibling on the same account. The release was made for the other child,
       // and this device is bound to this one.
       const grade = await createGradeLevel(h);
-      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+      const sibling = await createStudentProfileWithHeadroom(h, ready.parentAccountId, {
         gradeLevelId: grade.id,
       });
       const cookie = await bindDevice(h, ready.token, sibling.id);
@@ -3549,7 +3553,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       await release(ready.token, id).expect(200);
       // The release was made for one child; this device is bound to the other.
       const grade = await createGradeLevel(h);
-      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+      const sibling = await createStudentProfileWithHeadroom(h, ready.parentAccountId, {
         gradeLevelId: grade.id,
       });
       const cookie = await bindDevice(h, ready.token, sibling.id);
@@ -3760,7 +3764,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       // A sibling's release, on this same account.
       const sibling = await releasedForChild(20);
       const grade = await createGradeLevel(h);
-      const other = await createStudentProfile(h, sibling.ready.parentAccountId, {
+      const other = await createStudentProfileWithHeadroom(h, sibling.ready.parentAccountId, {
         gradeLevelId: grade.id,
       });
       const siblingCookie = await bindDevice(h, sibling.ready.token, other.id);
@@ -3942,7 +3946,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       const theirAttempt = await startAttempt(theirs.cookie, theirs.id).expect(201);
       // A sibling on this same account, working on their own release.
       const grade = await createGradeLevel(h);
-      const sibling = await createStudentProfile(h, mine.ready.parentAccountId, {
+      const sibling = await createStudentProfileWithHeadroom(h, mine.ready.parentAccountId, {
         gradeLevelId: grade.id,
       });
       const siblingCookie = await bindDevice(h, mine.ready.token, sibling.id);
@@ -5312,7 +5316,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       const strangers = await releasedForChild(null);
       const open = await startAttempt(cookie, id).expect(201);
       const grade = await createGradeLevel(h);
-      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+      const sibling = await createStudentProfileWithHeadroom(h, ready.parentAccountId, {
         gradeLevelId: grade.id,
       });
       const siblingCookie = await bindDevice(h, ready.token, sibling.id);
@@ -5649,7 +5653,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       const cookie = await bindDevice(h, ready.token, ready.studentProfileId);
       const strangers = await releasedForChild(null);
       const grade = await createGradeLevel(h);
-      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+      const sibling = await createStudentProfileWithHeadroom(h, ready.parentAccountId, {
         gradeLevelId: grade.id,
       });
       const siblingCookie = await bindDevice(h, ready.token, sibling.id);
@@ -5685,7 +5689,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       // answers identically for a single-profile account, so a case built on one
       // would pass with `studentProfileId` dropped from the query.
       const grade = await createGradeLevel(h);
-      const sibling = await createStudentProfile(h, ready.parentAccountId, {
+      const sibling = await createStudentProfileWithHeadroom(h, ready.parentAccountId, {
         gradeLevelId: grade.id,
       });
       const siblingCookie = await bindDevice(h, ready.token, sibling.id);

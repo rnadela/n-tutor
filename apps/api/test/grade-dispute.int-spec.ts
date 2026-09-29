@@ -98,7 +98,9 @@ describe('Grade dispute and override: raised once, adjusted in one transaction',
     const gradeLevel = await createGradeLevel(h);
     const subject = await createSubject(h, { gradeLevelId: gradeLevel.id });
 
-    const parent = await createSignedInParent(h);
+    // `Plus`: this fixture needs two active Student Profiles, so it opts into a
+    // tier with that headroom rather than out of the Account-Tier cap.
+    const parent = await createSignedInParent(h, { tier: 'Plus' });
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
     const profile = await createStudentProfile(h, parent.parentAccountId, {

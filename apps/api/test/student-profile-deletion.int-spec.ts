@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import sharp from 'sharp';
 import request from 'supertest';
+import type { AccountTier } from '../src/generated/prisma/enums.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const { storagePathFor, uploadRoot } = await import('../src/sourcetest/source-test-policy.js');
@@ -108,11 +109,17 @@ describe('a parent deletes a Student Profile and everything under it', () => {
     subjectId: string;
   }
 
-  /** A signed-in, elevated parent with a Grade Level and a Subject to hand. */
-  async function elevatedParent(): Promise<Parent> {
+  /**
+   * A signed-in, elevated parent with a Grade Level and a Subject to hand.
+   *
+   * `tier` is how a case that keeps two children alive at once states the
+   * headroom it needs: opting into a tier that allows two active Student
+   * Profiles, never out of the Account-Tier cap.
+   */
+  async function elevatedParent(tier?: AccountTier): Promise<Parent> {
     const gradeLevel = await createGradeLevel(h);
     const subject = await createSubject(h, { gradeLevelId: gradeLevel.id });
-    const parent = await createSignedInParent(h);
+    const parent = await createSignedInParent(h, tier ? { tier } : {});
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
     return {
@@ -401,7 +408,7 @@ describe('a parent deletes a Student Profile and everything under it', () => {
     });
 
     it('leaves a sibling profile on the same account completely untouched', async () => {
-      const parent = await elevatedParent();
+      const parent = await elevatedParent('Plus');
       const doomed = await childOf(parent);
       const sibling = await childOf(parent);
 
@@ -512,7 +519,7 @@ describe('a parent deletes a Student Profile and everything under it', () => {
     });
 
     it('increments the one row rather than inserting beside it on a second deletion', async () => {
-      const parent = await elevatedParent();
+      const parent = await elevatedParent('Plus');
       const first = await childOf(parent);
       const second = await childOf(parent);
       const window = await h.allowance.windowFor(parent.parentAccountId);

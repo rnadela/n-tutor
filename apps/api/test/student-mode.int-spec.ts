@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
+import type { AccountTier } from '../src/generated/prisma/enums.js';
 
 const { PARENT_SESSION_COOKIE, PARENT_SESSION_ISSUER } = await import(
   '../src/identity/auth-policy.js'
@@ -57,13 +58,15 @@ describe('Student Mode and the device binding', () => {
   });
 
   /** A parent standing inside Parent View, with the bearer its routes take. */
-  async function elevatedParent(): Promise<{
+  async function elevatedParent(tier?: AccountTier): Promise<{
     parentAccountId: string;
     email: string;
     cookie: string;
     token: string;
   }> {
-    const parent = await createSignedInParent(h, { password: PASSWORD });
+    // `tier` is how a case that needs a second active child states the headroom
+    // it needs: opting into a tier that allows two, not out of the profile cap.
+    const parent = await createSignedInParent(h, { password: PASSWORD, ...(tier ? { tier } : {}) });
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
     return { ...parent, token };
@@ -96,7 +99,7 @@ describe('Student Mode and the device binding', () => {
   });
 
   it('leaves the binding on the first profile when a second is created', async () => {
-    const parent = await elevatedParent();
+    const parent = await elevatedParent('Plus');
     const grade = await createGradeLevel(h);
 
     const first = await server()
@@ -162,7 +165,7 @@ describe('Student Mode and the device binding', () => {
   // --- The deliberate exit -------------------------------------------------
 
   it('binds to the named profile on the deliberate exit', async () => {
-    const parent = await elevatedParent();
+    const parent = await elevatedParent('Plus');
     const grade = await createGradeLevel(h);
     const a = await createStudentProfile(h, parent.parentAccountId, {
       displayName: 'Ada',
@@ -210,7 +213,7 @@ describe('Student Mode and the device binding', () => {
   });
 
   it('refuses to bind to an archived profile, leaving the binding untouched', async () => {
-    const parent = await elevatedParent();
+    const parent = await elevatedParent('Plus');
     const grade = await createGradeLevel(h);
     const bound = await createStudentProfile(h, parent.parentAccountId, {
       displayName: 'Ada',

@@ -52,7 +52,9 @@ describe('Weak Areas: classified on the way out of the stored row, never stored'
     await resetParentAccounts(h.prisma);
     await resetTaxonomy(h.prisma);
     h.ai.reset();
-    parentAccountId = (await createParentAccount(h.identity)).id;
+    // `Plus`: one case below adds a sibling, so the account needs two active
+    // Student Profiles. Opting into a tier with headroom, never out of the cap.
+    parentAccountId = (await createParentAccount(h.identity, { tier: 'Plus' })).id;
     gradeLevelId = (await createGradeLevel(h)).id;
     subjectId = (await createSubject(h, { gradeLevelId })).id;
     studentProfileId = (await createStudentProfile(h, parentAccountId, { gradeLevelId })).id;

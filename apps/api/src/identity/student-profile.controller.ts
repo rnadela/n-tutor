@@ -81,6 +81,10 @@ export class StudentProfileController {
    *
    * A second creation does not rebind: the binding then changes only through
    * the deliberate exit below.
+   *
+   * Answers 409 when the account is already at its Account Tier's active
+   * Student Profile limit (FR-31). The sentence names the tier and the figure
+   * and is the service's, not this controller's.
    */
   @Post('students')
   @HttpCode(HttpStatus.CREATED)
@@ -154,6 +158,13 @@ export class StudentProfileController {
     await this.students.archive(req.elevated!.parentAccountId, id);
   }
 
+  /**
+   * Un-archives a profile, putting it back in front of Student Mode.
+   *
+   * Restoring raises the account's **active** profile count, so it answers 409
+   * at the Account Tier's limit exactly as creation does (FR-31) — and leaves
+   * the profile archived, with the instant it was archived at.
+   */
   @Post('students/:id/restore')
   @HttpCode(HttpStatus.NO_CONTENT)
   async restore(

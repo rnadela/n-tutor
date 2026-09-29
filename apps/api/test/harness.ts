@@ -14,6 +14,7 @@ import {
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { TaxonomyService } from '../src/admin/taxonomy.service.js';
 import { AllowanceService } from '../src/allowance/allowance.service.js';
+import { TIER_LIMITS } from '../src/allowance/tiers.js';
 import { ParentAccountAdminService } from '../src/admin/parent-account-admin.service.js';
 import {
   ParentAccountService,
@@ -542,6 +543,64 @@ export async function createSubject(
   return created;
 }
 
+/**
+ * A Student Profile created under whatever tier headroom it needs, on an account
+ * whose own tier must stay put.
+ *
+ * Some suites assert a `Free` account's allowance figures *and* need a second
+ * active child — two things no single tier provides, because the tiers that allow
+ * two profiles are also the tiers with unlimited Explanations. So the account is
+ * moved onto a tier that allows the profile, the profile is created through the
+ * sole writer and therefore through the cap, and the account is put back on the
+ * tier it came in on.
+ *
+ * That last step is not a bypass: an account whose tier moves below its profile
+ * count keeps every profile (FR-3 bounds what may be *added*, and a downgrade
+ * archives nothing), so the fixture ends in a state production reaches too. The
+ * create itself is never exempt — it is checked against a tier that genuinely
+ * allows it.
+ *
+ * **The account is left over its own limit.** A later plain `createStudentProfile`
+ * on the same account therefore throws the tier's 409, which will read in a
+ * failure report as an unrelated refusal rather than as the cap doing its job. A
+ * fixture that needs a further child on that account calls this helper again, or
+ * states the tier outright.
+ *
+ * A fixture whose account has no tier-sensitive assertion should ask for a tier
+ * outright instead, through `createSignedInParent`'s `tier` or `setAccountTier`.
+ */
+export async function createStudentProfileWithHeadroom(
+  h: Pick<Harness, 'students' | 'prisma' | 'identity'>,
+  parentAccountId: string,
+  input: { displayName?: string; gradeLevelId: string },
+): Promise<StudentProfileView> {
+  const { tier } = await h.identity.findById(parentAccountId);
+  const wanted =
+    (await h.prisma.studentProfile.count({ where: { parentAccountId, archivedAt: null } })) + 1;
+  const headroom = tierAllowingProfiles(wanted);
+  if (headroom !== tier) await setAccountTier(h, parentAccountId, headroom);
+  try {
+    return await createStudentProfile(h, parentAccountId, input);
+  } finally {
+    if (headroom !== tier) await setAccountTier(h, parentAccountId, tier);
+  }
+}
+
+/**
+ * The cheapest tier whose Student Profile limit covers `wanted`, read from the
+ * one tiers table — no figure and no tier name is written here.
+ */
+function tierAllowingProfiles(wanted: number): AccountTier {
+  const ceiling = (tier: AccountTier) =>
+    TIER_LIMITS[tier].studentProfiles ?? Number.POSITIVE_INFINITY;
+  const fits = (Object.keys(TIER_LIMITS) as AccountTier[])
+    .filter((tier) => ceiling(tier) >= wanted)
+    .sort((a, b) => ceiling(a) - ceiling(b));
+  const tier = fits[0];
+  if (!tier) throw new Error(`No Account Tier allows ${wanted} active Student Profiles.`);
+  return tier;
+}
+
 /** A Student Profile created through `identity`'s sole writer. */
 export async function createStudentProfile(
   h: Pick<Harness, 'students'>,
@@ -603,21 +662,50 @@ export function adminSecretTokenAtParentAudience(jwt: JwtService): Promise<strin
   );
 }
 
-/** A Parent Account with a credential, created through the sign-up path. */
+/**
+ * Moves an existing account onto a tier: a **fixture-only** tier write.
+ *
+ * It goes through `identity`'s own writer, in a transaction, and that is where
+ * the resemblance to the Admin tier change ends — it takes no row lock through
+ * `findByIdForUpdate` and writes no `admin_audit` row, so it is not a stand-in
+ * for that path and no spec about it should be built on this.
+ *
+ * A fixture that calls this is **opting into a tier**, never out of the Student
+ * Profile cap: the cap applies to every fixture profile, because every fixture
+ * profile is created through `h.students.create`. A spec that wants a second
+ * active child under one account is a spec whose account needs a tier that
+ * allows two, and saying so here is what makes that requirement visible.
+ */
+export function setAccountTier(
+  h: Pick<Harness, 'prisma' | 'identity'>,
+  parentAccountId: string,
+  tier: AccountTier,
+): Promise<ParentAccount> {
+  return h.prisma.$transaction((tx) => h.identity.setTier(tx, parentAccountId, tier));
+}
+
+/**
+ * A Parent Account with a credential, created through the sign-up path.
+ *
+ * `tier` is applied **after** sign-up, because the sign-up DTO refuses a tier
+ * (Story 9.1) — a new account is always `Free`, and a fixture that needs more
+ * profile headroom states the tier it needs here.
+ */
 export async function createCredentialedParent(
-  parentAuth: ParentAuthService,
-  overrides: { email?: string; password?: string; timezone?: string } = {},
+  h: Pick<Harness, 'parentAuth' | 'prisma' | 'identity'>,
+  overrides: { email?: string; password?: string; timezone?: string; tier?: AccountTier } = {},
 ): Promise<{ email: string; password: string; parentAccountId: string }> {
   fixtureCounter += 1;
   const email = overrides.email ?? `credentialed-${fixtureCounter}@example.test`;
   const password = overrides.password ?? 'correct-horse-battery-staple';
-  const session = await parentAuth.signUp({
+  const session = await h.parentAuth.signUp({
     email,
     password,
     timezone: overrides.timezone ?? 'UTC',
     termsVersion: TERMS_VERSION,
     noticeVersion: CHILD_DATA_CONSENT_VERSION,
   });
+  if (overrides.tier) await setAccountTier(h, session.parentAccountId, overrides.tier);
   return { email, password, parentAccountId: session.parentAccountId };
 }
 
@@ -629,10 +717,10 @@ export async function createCredentialedParent(
  * on.
  */
 export async function createSignedInParent(
-  h: Pick<Harness, 'parentAuth'>,
-  overrides: { email?: string; password?: string; timezone?: string } = {},
+  h: Pick<Harness, 'parentAuth' | 'prisma' | 'identity'>,
+  overrides: { email?: string; password?: string; timezone?: string; tier?: AccountTier } = {},
 ): Promise<{ email: string; password: string; parentAccountId: string; cookie: string }> {
-  const parent = await createCredentialedParent(h.parentAuth, overrides);
+  const parent = await createCredentialedParent(h, overrides);
   const session = await h.parentAuth.mintSession({
     id: parent.parentAccountId,
     email: parent.email,

@@ -2261,3 +2261,59 @@ source_spec: `spec-9-1-account-tier-assignment-data-model-effect.md`
 severity: low
 reason: `AccountConsumption.studentProfileLimit` is typed `number | null` -- identical to a shape a live count would have. A future caller reading the field's type alone has no signal it can't be decremented or compared as a running count; only the comment says so.
 status: open
+
+### DW-284: `restore` establishes ownership outside the transaction it now writes in, so a concurrent archive or delete makes its `updateMany` a silent no-op that still answers 204.
+origin: spec-deferred 86daafa5f73a
+location: apps/api/src/identity/student-profile.service.ts:390
+source_spec: `spec-9-2-student-profile-limit-enforcement.md`
+severity: low
+reason: `requireOwned` runs on `this.prisma`; the headroom guard and the `updateMany` then run inside `$transaction`. Between the two, a delete or an archive from another request leaves `updated.count === 0`, and `restore` returns void regardless, so the caller is told the child is active again when nothing was written. The shape predates this story -- `restore` was a bare `updateMany` with the same read before it -- but the new transaction was the natural place to have closed it.
+status: open
+
+### DW-285: Fixtures name tiers as literals (`'Plus'`, `'Family'`) across ten spec files while `tierAllowingProfiles` already derives the right tier from `TIER_LIMITS`, but is private to the harness.
+origin: spec-deferred 6a39d15c62be
+location: apps/api/test/harness.ts:587
+source_spec: `spec-9-2-student-profile-limit-enforcement.md`
+severity: low
+reason: A recalibration that dropped `Plus.studentProfiles` to 1 -- which the epic schedules for after the first month of real accounts -- would redden a dozen suites that have nothing to do with tiers. Exporting the helper and having those fixtures ask for "a tier that allows N" would keep the one figures table authoritative. Not done now because it is a mechanical edit across ten files whose failure mode is a loud red test, not silent drift.
+status: open
+
+### DW-286: The two-concurrent-creates case cannot fail deterministically: if the requests happen to serialise, `[201, 409]` holds even with the row lock removed.
+origin: spec-deferred 1d5ce7102fc7
+location: apps/api/test/student-profile.int-spec.ts:421
+source_spec: `spec-9-2-student-profile-limit-enforcement.md`
+severity: low
+reason: `Promise.all` over two supertest requests gives no guarantee the two database transactions overlap. The case is correct when it races and is worth keeping, but it is a weaker guard on `findByIdForUpdate` than its comment reads as. A deterministic version needs an injected barrier between the count and the insert.
+status: open
+
+### DW-287: `create` and `restore` use `prisma.$transaction` where the rest of the codebase uses `prisma.withTransaction`, which is also the only place a transaction timeout can be set -- and both now block on a
+origin: spec-deferred 75e7bff4dfa8
+location: apps/api/src/identity/student-profile.service.ts:184
+source_spec: `spec-9-2-student-profile-limit-enforcement.md`
+severity: low
+reason: `admin`, `deletion`, `grading`, `practicetest` and `sourcetest` all go through `withTransaction`. With `SELECT ... FOR UPDATE` on the account row, Prisma's default 5s interactive-transaction budget (P2028) becomes a reachable failure mode that nothing handles or documents. `create` already used `$transaction` before this story, so the idiom drift is pre-existing; the lock is what makes the timeout matter.
+status: open
+
+### DW-288: `apps/api/test/practice-test.int-spec.ts` is flaky at baseline: a full-file run fails 0-6 tests with 404s and 401s raised inside its fixtures, and the failing set never repeats.
+origin: spec-deferred 8959f30f4331
+location: apps/api/test/practice-test.int-spec.ts
+source_spec: `spec-9-2-student-profile-limit-enforcement.md`
+severity: medium
+reason: Measured at `7a94b63` with this story's changes stashed: one full-file run passed 202/202, a second failed 2 ("credits nothing to a value that merely starts with the right digits", "answers the one shared 404 for a foreign Attempt"). With this story applied: one full-suite run passed 1699/1699, later full-file runs failed 3 and 5, always inside `setPinFor`, `elevate`, `checkLegibility` or an enqueue -- never on a `ConflictException` and never in a cap assertion. Every spec this story touched passes; the flake is a pre-existing fixture/teardown race in that one file.
+status: open
+
+### DW-289: The Students screen's refused-create wiring is still not revert-detectable: re-inlining `cause.message` in `onCreate` orphans a tested rule but leaves the web suite green.
+origin: spec-deferred dc3bdc824014
+location: apps/web/src/app/parent/students/page.tsx:358
+source_spec: `spec-9-2-student-profile-limit-enforcement.md`
+severity: medium
+reason: `createRefusal` is now exported and asserted, which pins the decision itself, but `page.spec.tsx` is a node-env file with `renderToStaticMarkup` only and no `@testing-library`, so nothing can invoke `onCreate`. Closing the gap means introducing a DOM test environment to that file, which is a larger change than this story. The user-visible half of the story is therefore guarded by a rule plus a reading of one call site.
+status: open
+
+### DW-290: `create` locks `parent_account` and then inserts `student_profile`, while account deletion walks the rows inward-out and reaches `parent_account` last -- opposite lock orders on the same two tables.
+origin: spec-deferred e46e4251de0e
+location: apps/api/src/deletion/account-deletion.service.ts:150
+source_spec: `spec-9-2-student-profile-limit-enforcement.md`
+severity: low
+reason: `account-deletion.service.ts` takes no explicit lock on the account row, so the orders differ rather than conflict by design. Postgres would detect the cycle and abort one transaction (40P01), which surfaces as a 500 on one of the two requests. It needs the same parent to be creating a child and deleting their account at the same instant, so it is remote, but nothing documents the ordering either way.
+status: open

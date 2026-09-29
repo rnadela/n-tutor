@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
+import type { AccountTier } from '../src/generated/prisma/enums.js';
 
 const { PROFILE_NOT_FOUND } = await import('../src/identity/student-profile.service.js');
 const {
@@ -52,14 +53,21 @@ describe('Uncommitted parent state', () => {
     h.mail.reset();
   });
 
-  /** A parent inside Parent View, with one child and the bearer its routes take. */
-  async function elevatedParentWithChild(): Promise<{
+  /**
+   * A parent inside Parent View, with one child and the bearer its routes take.
+   *
+   * `tier` is how a case that goes on to add siblings states the headroom it
+   * needs: an account asking for more active Student Profiles is opting into a
+   * tier that allows them, never out of the Account-Tier cap. Left unset, the
+   * account is `Free` and the cap applies as it does in production.
+   */
+  async function elevatedParentWithChild(tier?: AccountTier): Promise<{
     parentAccountId: string;
     cookie: string;
     token: string;
     profileId: string;
   }> {
-    const parent = await createSignedInParent(h);
+    const parent = await createSignedInParent(h, tier ? { tier } : {});
     await setPinFor(h, parent.cookie, PIN);
     const token = await elevate(h, parent.cookie, PIN);
     const grade = await createGradeLevel(h);
@@ -322,7 +330,7 @@ describe('Uncommitted parent state', () => {
   // --- The profile key ------------------------------------------------------
 
   it('keeps a sibling’s list empty, and refuses a save naming an unknown profile', async () => {
-    const parent = await elevatedParentWithChild();
+    const parent = await elevatedParentWithChild('Plus');
     const grade = await createGradeLevel(h);
     const sibling = await createStudentProfile(h, parent.parentAccountId, {
       gradeLevelId: grade.id,
@@ -349,7 +357,7 @@ describe('Uncommitted parent state', () => {
   });
 
   it('refuses a row read into a different profile rather than rebinding it', async () => {
-    const parent = await elevatedParentWithChild();
+    const parent = await elevatedParentWithChild('Plus');
     const grade = await createGradeLevel(h);
     const sibling = await createStudentProfile(h, parent.parentAccountId, {
       gradeLevelId: grade.id,
@@ -379,7 +387,7 @@ describe('Uncommitted parent state', () => {
   });
 
   it('answers the by-id read’s every failure identically, leaking no existence', async () => {
-    const parent = await elevatedParentWithChild();
+    const parent = await elevatedParentWithChild('Family');
     const other = await elevatedParentWithChild();
     const grade = await createGradeLevel(h);
     const sibling = await createStudentProfile(h, parent.parentAccountId, {
