@@ -11,7 +11,7 @@
  */
 
 import path from 'node:path';
-import { optionalEnv, requireIntEnv } from '../common/env.js';
+import { optionalBoolEnv, optionalEnv, requireIntEnv } from '../common/env.js';
 import { UNCOMMITTED_STATE_TTL_MS } from '../identity/uncommitted-state-policy.js';
 
 /**
@@ -78,6 +78,64 @@ export const MAX_DECODED_PIXELS = 64 * 1024 * 1024;
 
 /** Where page bytes live when nothing overrides it. Never served statically. */
 export const DEFAULT_UPLOAD_ROOT = path.resolve(process.cwd(), '.uploads');
+
+// --- Page Image retention (FR-32) ----------------------------------------
+//
+// The 90 is written once, here, beside the other figures this module owns. It
+// is a different clock from `SOURCE_TEST_TTL_MS` above and must never be
+// confused with it: that one is the 72h draft TTL (AD-16), which kills a Source
+// Test that was never committed; this one removes the *photographs* of a Source
+// Test that was.
+
+/**
+ * How long a submitted Source Test's photographs are kept: 90 days from the
+ * moment the upload was committed (FR-32).
+ *
+ * Anchored on `submittedAt` rather than `createdAt` because the commit is the
+ * event the promise is made about, and a draft that was never submitted is
+ * already owned by the 72h TTL — putting it under this clock as well would give
+ * it a second, much longer life.
+ */
+export const PAGE_IMAGE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+/** Submission plus the retention window. Activity never moves it. */
+export function pageImageExpiryFrom(
+  submittedAt: Date,
+  retentionMs: number = PAGE_IMAGE_RETENTION_MS,
+): Date {
+  return new Date(submittedAt.getTime() + retentionMs);
+}
+
+/**
+ * Whether one page's bytes are due for removal, given its Source Test's
+ * `submittedAt`.
+ *
+ * Null means never submitted, which is never due: that Source Test is a draft
+ * and the 72h TTL owns it. Inclusive at the boundary, exactly as `isExpired` is
+ * — the bytes are over the instant the clock reaches the expiry.
+ */
+export function isPageImageExpired(submittedAt: Date | null, now: Date): boolean {
+  if (submittedAt === null) return false;
+  return pageImageExpiryFrom(submittedAt).getTime() <= now.getTime();
+}
+
+/** The `submittedAt` a page must be at or before to be swept, as one figure. */
+export function pageImageExpiryCutoff(
+  now: Date,
+  retentionMs: number = PAGE_IMAGE_RETENTION_MS,
+): Date {
+  return new Date(now.getTime() - retentionMs);
+}
+
+/**
+ * The most pages one sweep pass removes.
+ *
+ * The same ceiling `uncommitted-state-policy.ts` puts on its own sweep, and for
+ * the same reason: a pass whose cost is bounded only by how much backlog exists
+ * is not bounded at all. A larger backlog simply drains over the next few
+ * passes — the schedule runs daily and the clock does not move while it drains.
+ */
+export const PAGE_EXPIRY_SWEEP_BATCH_SIZE = 100;
 
 // --- Messages ------------------------------------------------------------
 //
@@ -218,6 +276,50 @@ export function uploadRoot(): string {
 
 export function maxPageBytes(): number {
   return sourceTestRuntime().maxPageBytes;
+}
+
+export interface PageExpiryRuntime {
+  /** Whether this process registers the schedule at all. */
+  workerEnabled: boolean;
+  /** The pg-boss cron expression the sweep runs on. */
+  cron: string;
+}
+
+/**
+ * Daily at 03:17 UTC. A retention promise measured in days needs a pass a day
+ * and nothing finer; deep in the night because that is when a parent is least
+ * likely to be uploading, and off the hour because every other system in the
+ * world also schedules on the hour.
+ */
+export const DEFAULT_PAGE_EXPIRY_CRON = '17 3 * * *';
+
+let pageExpiryResolved: PageExpiryRuntime | null = null;
+
+/**
+ * Reads the two overrides once, at boot, the same way `sourceTestRuntime()`
+ * does — so a mistyped flag is a process that refuses to start rather than a
+ * retention promise that silently stopped being kept.
+ */
+export function pageExpiryRuntime(): PageExpiryRuntime {
+  if (pageExpiryResolved === null) {
+    const cron = optionalEnv('PAGE_EXPIRY_CRON', DEFAULT_PAGE_EXPIRY_CRON).trim();
+    // Five fields, and that is the whole check: pg-boss parses the rest, and an
+    // expression it cannot parse must not be discovered by a schedule that
+    // quietly never fires.
+    if (cron.split(/\s+/).length !== 5) {
+      throw new Error(`PAGE_EXPIRY_CRON must be a five-field cron expression, got "${cron}".`);
+    }
+    pageExpiryResolved = {
+      workerEnabled: optionalBoolEnv('PAGE_EXPIRY_WORKER_ENABLED', true),
+      cron,
+    };
+  }
+  return pageExpiryResolved;
+}
+
+/** Test seam: forgets the resolved values so a new environment is read. */
+export function resetPageExpiryRuntime(): void {
+  pageExpiryResolved = null;
 }
 
 /**

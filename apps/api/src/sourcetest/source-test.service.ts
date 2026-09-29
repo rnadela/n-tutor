@@ -81,6 +81,13 @@ export interface PageImageView {
    */
   legibility: PageLegibility | null;
   createdAt: string;
+  /**
+   * When the FR-32 retention sweep removed this page's stored bytes, or null
+   * while they are still there. The row states its own availability and the
+   * date it changed — that is the whole of what the strip needs to say a
+   * photograph is gone, and it is still not a path and still not a URL.
+   */
+  bytesDeletedAt: string | null;
 }
 
 /** A Source Test as every read path states it, pages in stored order. */
@@ -122,6 +129,7 @@ const PAGE_FIELDS = {
   byteSize: true,
   legibility: true,
   createdAt: true,
+  bytesDeletedAt: true,
 } as const;
 
 const SOURCE_TEST_FIELDS = {
@@ -1344,6 +1352,7 @@ export class SourceTestService implements SourceTestReader {
         byteSize: page.byteSize,
         legibility: page.legibility,
         createdAt: page.createdAt.toISOString(),
+        bytesDeletedAt: page.bytesDeletedAt?.toISOString() ?? null,
       })),
     };
   }

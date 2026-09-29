@@ -1,10 +1,17 @@
-import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Logger } from '@nestjs/common';
 import sharp from 'sharp';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PageIngestService, UnsupportedImageFormat } from './page-ingest.service.js';
-import { MAX_DECODED_PIXELS, STORED_MIME } from './source-test-policy.js';
+import {
+  MAX_DECODED_PIXELS,
+  STORED_MIME,
+  resetSourceTestRuntime,
+  storagePathFor,
+} from './source-test-policy.js';
 
 /**
  * `normalize` on its own: the one method where the format of what arrived is
@@ -293,6 +300,64 @@ describe('what ingest refuses', () => {
     expect(message).not.toContain(RULE);
     expect(message).not.toContain('sample-page');
     expect(message).toMatch(/^Page ingest could not decode an allowed format: \S+\.$/);
+    warnSpy.mockRestore();
+  });
+});
+
+describe('what `remove` reports about the bytes', () => {
+  /**
+   * `remove()` is the only thing standing between a page whose bytes survived
+   * and a row that claims they are gone: the retention sweep marks a row
+   * `Deleted` on a `true` and leaves it `Ready` on a `false`. A `false` that
+   * became a `true` would write the tombstone over a photograph that is still
+   * on disk, and no clock would ever come back for it — so the answer is
+   * asserted here, from the real method, rather than only from the sweep's own
+   * stub.
+   */
+  const PAGE = '55555555-5555-4555-8555-555555555555';
+  const root = path.join(tmpdir(), `nts-remove-spec-${randomUUID()}`);
+  const stored = storagePathFor(PAGE, root);
+
+  beforeEach(() => {
+    vi.stubEnv('UPLOAD_ROOT', root);
+    resetSourceTestRuntime();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    resetSourceTestRuntime();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('answers true when it unlinked the file, and the file is gone', async () => {
+    await mkdir(path.dirname(stored), { recursive: true });
+    await writeFile(stored, Buffer.from([1, 2, 3]));
+
+    expect(await ingest.remove(PAGE)).toBe(true);
+    await expect(readFile(stored)).rejects.toThrow();
+  });
+
+  it('answers true when the file was already absent', async () => {
+    // "Already gone" and "just removed" are the same outcome for every caller,
+    // and this is what lets the sweep converge on a row whose bytes a crashed
+    // earlier pass had already unlinked.
+    expect(await ingest.remove(PAGE)).toBe(true);
+  });
+
+  it('answers false when the bytes could not be removed', async () => {
+    // A non-ENOENT fault: the path is a directory with something in it, so
+    // `unlink` refuses with EPERM or EISDIR depending on the platform — either
+    // way it is not ENOENT and the bytes are still there.
+    await mkdir(stored, { recursive: true });
+    await writeFile(path.join(stored, 'occupant'), Buffer.from([0]));
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    expect(await ingest.remove(PAGE)).toBe(false);
+
+    // Warned by page id alone, never by path (AD-15, AD-20).
+    const [message] = warnSpy.mock.calls[0] as [string];
+    expect(message).toContain(PAGE);
+    expect(message).not.toContain(root);
     warnSpy.mockRestore();
   });
 });

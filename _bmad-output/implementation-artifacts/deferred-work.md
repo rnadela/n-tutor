@@ -1997,3 +1997,27 @@ source_spec: `spec-7-5-weak-area-drill-down-targeted-regeneration.md`
 severity: low
 reason: `e2e/tests/parent-analytics.spec.ts` only exercises the spendable/success path; no test triggers a failing allowance read or a 409 from the fire request against the rendered screen.
 status: open
+
+### DW-251: A Page Image left in the Uploading state is never selected by any clock, so its bytes stay on disk for ever.
+origin: spec-deferred d020e5f8ab00
+location: apps/api/src/sourcetest/page-expiry.service.ts:56
+source_spec: `spec-8-1-automatic-page-image-expiry.md`
+severity: medium
+reason: sweepExpired() filters `state: 'Ready'`. A page whose ingest crashed after writing the file but before flipping the row to Ready is unreachable by the 90-day sweep and by the 72h draft TTL alike. Same class as the pre-existing orphan-bytes gap in deletePage(), which the intent puts out of scope for this story.
+status: open
+
+### DW-252: The API integration suite is flaky: random specs fail with 404/401 on requests whose fixtures were just created.
+origin: spec-deferred cebb56ccf0c1
+location: apps/api/test/
+source_spec: `spec-8-1-automatic-page-image-expiry.md`
+severity: medium
+reason: Reproduced at baseline d203172a34bbf9f85e80c2866702ee2ced04d361 with this story's changes stashed: three consecutive runs of test/practice-test.int-spec.ts alone gave 6, 2 and 0 failures. Post-story full runs fail in different files each time (practice-test, source-test, parent-pin, extraction, student-profile). Pre-existing and unrelated to this story; every spec this story adds passes in isolation and in the full run.
+status: open
+
+### DW-253: A pg-boss schedule that fails to install produces no signal beyond one log line.
+origin: spec-deferred e18b9e40bd33
+location: apps/api/src/common/scheduler.ts
+source_spec: `spec-8-1-automatic-page-image-expiry.md`
+severity: medium
+reason: SchedulerService.apply() catches every failure of createQueue/work/schedule and only logs it, and a boot whose start() fails now logs and continues by design. There is no health indicator, counter or alert by which a retention sweep that never runs becomes visible in production.
+status: open

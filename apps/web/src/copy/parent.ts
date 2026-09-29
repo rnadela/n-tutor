@@ -290,6 +290,18 @@ export const parentCopy = {
      * bytes are never served.
      */
     pageLabel: (ordinal: number) => `Page ${ordinal}`,
+
+    /**
+     * What the row says once the photograph has been removed, 90 days after the
+     * upload was committed.
+     *
+     * Stated plainly and without apology: nothing went wrong, and the practice
+     * built from this page is untouched. `photoDeletedOn` is the same sentence
+     * with the date the row carries, used when there is one — the caller
+     * formats the date, because the strip never parses one.
+     */
+    photoDeleted: 'Photo deleted',
+    photoDeletedOn: (date: string) => `Photo deleted on ${date}`,
     childLabel: 'Child',
     loading: 'Loading the pages…',
     empty: 'There are no pages yet. Add the first one below.',

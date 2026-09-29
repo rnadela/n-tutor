@@ -27,6 +27,31 @@ export const controlSx = {
 /** The `<h2>` the ordered list is named by, rather than repeating its words. */
 export const ORDER_HEADING_ID = 'capture-order-heading';
 
+/**
+ * The caption a removed page carries.
+ *
+ * Fixed `en-GB` in UTC rather than the viewer's locale: this is the one date on
+ * the strip, it is a retention fact rather than an appointment, and a date that
+ * renders differently per machine is a date no test can pin. The plain sentence
+ * is used when the row has no date — a row written before the column existed —
+ * and when the date will not parse.
+ */
+function deletedCaption(bytesDeletedAt: string | null): string {
+  if (bytesDeletedAt === null) return parentCopy.capture.photoDeleted;
+  const instant = new Date(bytesDeletedAt);
+  // A timestamp that will not parse is the API's problem, not the parent's:
+  // "Photo deleted on Invalid Date" is worse than the plain sentence, which is
+  // true either way.
+  if (!Number.isFinite(instant.getTime())) return parentCopy.capture.photoDeleted;
+  const formatted = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  }).format(instant);
+  return parentCopy.capture.photoDeletedOn(formatted);
+}
+
 export interface PageStripProps {
   pages: readonly PageImageView[];
   /**
@@ -95,6 +120,22 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
             {parentCopy.capture.pageLabel(page.ordinal)}
           </Typography>
 
+          {/* A removed photograph is a designed state, not a failure: the
+              caption says what happened, in the row's own place in the order,
+              and nothing else is offered. No image element (there never was
+              one — bytes are never served), no error colour (nothing went
+              wrong), no retry and no edit control, because every write against
+              the submitted Source Test that holds it would answer 409.
+
+              It is rendered instead of the legibility badge rather than beside
+              it: a verdict about how readable a photograph was reads as a
+              judgement on a photograph that no longer exists. */}
+          {page.state === 'Deleted' && (
+            <Typography component="span" data-testid={`page-deleted-${page.ordinal}`}>
+              {deletedCaption(page.bytesDeletedAt)}
+            </Typography>
+          )}
+
           {/* The row's legibility state, once the check has run over this page
               set: the strip is the ordered list that names each page's ordinal
               *and* its readability.
@@ -104,7 +145,7 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
               parent who cannot tell the two colours apart still gets the
               verdict. Absent before the check, because nothing has judged the
               page and a badge would be inventing a verdict. */}
-          {page.legibility !== null && (
+          {page.state !== 'Deleted' && page.legibility !== null && (
             <Typography
               component="span"
               data-testid={`legibility-badge-${page.ordinal}`}
@@ -122,7 +163,7 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
             </Typography>
           )}
 
-          {editable && (
+          {editable && page.state !== 'Deleted' && (
             <>
               <Button
                 type="button"

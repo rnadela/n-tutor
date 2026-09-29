@@ -30,6 +30,24 @@ function page(ordinal: number, legibility: PageImageView['legibility'] = null): 
     byteSize: 512,
     legibility,
     createdAt: '2026-01-01T00:00:00.000Z',
+    bytesDeletedAt: null,
+  };
+}
+
+/**
+ * The same row after the ninety-day retention sweep took its photograph.
+ *
+ * Exactly what the sweep writes and nothing more: it sets `state`,
+ * `bytesDeletedAt` and (invisibly to this layer) the storage path, and leaves
+ * the dimensions, the byte size and the legibility verdict where they were. A
+ * fixture that nulled them would be testing the strip against a row shape
+ * production never produces.
+ */
+function deletedPage(ordinal: number, bytesDeletedAt: string | null): PageImageView {
+  return {
+    ...page(ordinal, 'High'),
+    state: 'Deleted',
+    bytesDeletedAt,
   };
 }
 
@@ -183,6 +201,96 @@ describe('a submitted Source Test is terminal', () => {
     expect(PAGE_SOURCE).toContain('const checkable = isDraft &&');
     expect(PAGE_SOURCE).toContain('const checked = isDraft && isChecked(gate)');
     expect(PAGE_SOURCE).toContain('{isDraft && (');
+  });
+});
+
+describe('a page whose photograph has been deleted', () => {
+  // Only a submitted Source Test can hold one — the clock starts at the commit
+  // — and a submitted Source Test is already not editable. Both are rendered
+  // anyway: the removal state has to be a designed state under either flag,
+  // never a control that would collect a 409.
+  const WITH_DELETED = [
+    page(1, 'High'),
+    deletedPage(2, '2026-04-02T00:00:00.000Z'),
+    page(3, 'Low'),
+  ];
+
+  it('keeps its place in the order and says the photograph is gone', () => {
+    const row = rowFor(render({ pages: WITH_DELETED, editable: false }), 2);
+    expect(row).toContain(parentCopy.capture.pageLabel(2));
+    expect(row).toContain(parentCopy.capture.photoDeletedOn('02 Apr 2026'));
+  });
+
+  it('is a branch of its own, reached only by the removed row', () => {
+    // The caption is the thing that distinguishes this state, so the assertion
+    // is that it is here and nowhere else — a `<img>` assertion would pass for
+    // every state, because the strip renders no image element at all.
+    const markup = render({ pages: WITH_DELETED, editable: true });
+    expect(rowFor(markup, 2)).toContain('data-testid="page-deleted-2"');
+    expect(rowFor(markup, 1)).not.toContain('page-deleted');
+    expect(rowFor(markup, 3)).not.toContain('page-deleted');
+  });
+
+  it('shows no retry and no edit control, even where the strip is editable', () => {
+    const markup = render({ pages: WITH_DELETED, editable: true });
+    const row = rowFor(markup, 2);
+    expect(row).not.toContain(parentCopy.capture.retake);
+    expect(row).not.toContain('type="file"');
+    expect(row).not.toContain('<button');
+    expect(row).not.toContain(parentCopy.capture.delete);
+    // The neighbours still have theirs, so the absence above is this row's.
+    expect(rowFor(markup, 1)).toContain('<button');
+  });
+
+  it('wears no error styling: nothing went wrong', () => {
+    // Page 3 is blurry, so its badge carries the error-coloured class MUI
+    // emitted for `error.main`. Taking that class off the rendered markup
+    // rather than naming a colour is what makes this an assertion about *this*
+    // row's styling and not about the palette's values.
+    const markup = render({ pages: WITH_DELETED, editable: false });
+    const badge =
+      /data-testid="legibility-badge-3"[^>]*class="([^"]+)"|class="([^"]+)"[^>]*data-testid="legibility-badge-3"/u.exec(
+        markup,
+      );
+    // Only the emotion-generated class, which is where the colour actually
+    // lives; `MuiTypography-root` and friends are on every span in the strip.
+    const errorClasses = (badge?.[1] ?? badge?.[2] ?? '')
+      .split(/\s+/)
+      .filter((className) => className.startsWith('css-'));
+    expect(errorClasses.length).toBeGreaterThan(0);
+
+    const row = rowFor(markup, 2);
+    for (const className of errorClasses) expect(row).not.toContain(className);
+  });
+
+  it('shows no legibility verdict over a photograph that no longer exists', () => {
+    // The row carries a `High` verdict from when the check ran. Rendering it
+    // would be a judgement on bytes nobody can look at any more.
+    const row = rowFor(render({ pages: WITH_DELETED, editable: false }), 2);
+    expect(row).not.toContain('data-testid="legibility-badge-2"');
+    expect(row).not.toContain(parentCopy.capture.legibility.readable);
+  });
+
+  it('falls back to the plain sentence when the row carries no date', () => {
+    const row = rowFor(render({ pages: [deletedPage(1, null)], editable: false }), 1);
+    expect(row).toContain(parentCopy.capture.photoDeleted);
+  });
+
+  it('falls back to the plain sentence on a date that will not parse', () => {
+    // "Photo deleted on Invalid Date" is the one thing worse than saying less.
+    // A timestamp the API mangled is the API's problem, not the parent's, and
+    // the plain sentence is true either way.
+    const row = rowFor(render({ pages: [deletedPage(1, 'not-a-date')], editable: false }), 1);
+    expect(row).toContain(parentCopy.capture.photoDeleted);
+    expect(row).not.toContain('Invalid Date');
+  });
+
+  it('renders the date the same way on every machine', () => {
+    // Fixed en-GB in UTC, not the viewer's locale: a retention date that
+    // renders differently per machine is a date no test can pin, and this
+    // suite would be the thing that broke on a laptop set to another zone.
+    expect(STRIP_SOURCE).toContain("timeZone: 'UTC'");
+    expect(STRIP_SOURCE).toContain("'en-GB'");
   });
 });
 

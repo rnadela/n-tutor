@@ -108,7 +108,12 @@ export interface PageImageView {
   id: string;
   /** Contiguous `1..N`, and the number the strip shows in text. */
   ordinal: number;
-  state: 'Uploading' | 'Ready';
+  /**
+   * `Deleted` is the terminal retention state: the photograph is gone for good,
+   * 90 days after the upload was committed, and the row survives so the strip
+   * can say so in its place rather than showing a hole.
+   */
+  state: 'Uploading' | 'Ready' | 'Deleted';
   width: number | null;
   height: number | null;
   byteSize: number | null;
@@ -119,6 +124,8 @@ export interface PageImageView {
    */
   legibility: 'Low' | 'Medium' | 'High' | null;
   createdAt: string;
+  /** When the photograph was removed, or null while it is still held. */
+  bytesDeletedAt: string | null;
 }
 
 /** A Source Test, pages in stored order. */

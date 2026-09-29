@@ -7,6 +7,7 @@ import { AiModule } from './ai/ai.module.js';
 import { AnalyticsModule } from './analytics/analytics.module.js';
 import { CorrelationIdMiddleware } from './common/correlation.js';
 import { requireIntEnv } from './common/env.js';
+import { SchedulerModule } from './common/scheduler.js';
 import { ExplanationModule } from './explanation/explanation.module.js';
 import { ExtractionModule } from './extraction/extraction.module.js';
 import { GradingModule } from './grading/grading.module.js';
@@ -54,6 +55,12 @@ export const PARENT_THROTTLER = 'parent';
       }),
     }),
     PrismaModule,
+    // The one scheduling mechanism (AD-5, AD-33): a single pg-boss instance,
+    // started and stopped with the Nest lifecycle. Registered at the top of the
+    // list, ahead of every module that registers a schedule against it, and
+    // registered at all rather than only where it is imported because a module
+    // absent from this list is a module whose boot never fails.
+    SchedulerModule,
     AdminModule,
     IdentityModule,
     // Sole owner and sole writer of SourceTest and PageImage, and sole owner of

@@ -30,6 +30,13 @@ process.env.EXTRACTION_WORKER_ENABLED ??= 'false';
 // would make every assertion about a `Queued` job a coin toss.
 process.env.GENERATION_WORKER_ENABLED ??= 'false';
 
+// No scheduler and no retention sweep in the test tier. A cron firing beside a
+// spec is a coin toss: the expiry specs drive `sweepExpired()` directly, which
+// is exactly why it is a plain public method. `SCHEDULER_ENABLED` is the switch
+// that also keeps a pg-boss schema out of the test database.
+process.env.SCHEDULER_ENABLED ??= 'false';
+process.env.PAGE_EXPIRY_WORKER_ENABLED ??= 'false';
+
 // The injected-fault tests drive the retry loop deliberately, and the real
 // backoff is time spent asserting nothing. One attempt is the default here
 // because most specs want the fault to surface at once; the specs that are

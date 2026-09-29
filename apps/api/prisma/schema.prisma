@@ -360,9 +360,17 @@ enum SourceTestStatus {
 /// the first byte, so a directory scan never has to be. It leaves `Uploading`
 /// only once ingest has sniffed, rotated and re-encoded the bytes (AD-28), so
 /// no downstream consumer ever sees a format the model cannot read.
+///
+/// `Deleted` is the terminal state the FR-32 retention sweep writes: the stored
+/// bytes are gone and never come back, while the row itself is retained so the
+/// page set keeps its ordering and the parent's strip can say *what* is missing
+/// and *when* it went (`bytesDeletedAt`) rather than showing a hole. Nothing
+/// derived from the page — the Extraction and everything built on it — is
+/// touched, so a `Deleted` page never means a lost Practice Test.
 enum PageImageState {
   Uploading
   Ready
+  Deleted
 
   @@map("page_image_state")
 }
@@ -508,11 +516,19 @@ model PageImage {
   legibility   PageLegibility?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
+  /// When the retention sweep unlinked this page's bytes (FR-32). Null for
+  /// every row that still has bytes; set exactly once, in the same update that
+  /// writes `state = Deleted` and nulls `storagePath`. It is what the row says
+  /// about availability, and the date the parent's strip is free to show.
+  bytesDeletedAt DateTime?
 
   sourceTest SourceTest @relation(fields: [sourceTestId], references: [id], onDelete: Cascade)
 
   @@unique([sourceTestId, ordinal])
   @@index([sourceTestId])
+  /// The retention sweep selects by state alone before joining to the parent
+  /// Source Test's `submittedAt`, so the state is the selective column.
+  @@index([state])
   @@map("page_image")
 }
 

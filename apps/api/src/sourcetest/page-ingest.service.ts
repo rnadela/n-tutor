@@ -251,13 +251,22 @@ export class PageIngestService {
    * gone. Anything else is logged by page id alone — never by path (AD-20) —
    * and swallowed, because a file left behind must not fail the transaction
    * that removed the row that was its only reference.
+   *
+   * Returns whether the bytes are gone: `true` when the file was unlinked and
+   * `true` for `ENOENT`, because "already absent" and "just removed" are the
+   * same outcome for every caller. `false` means the bytes survived, which is
+   * what stops the retention sweep marking a row whose photograph is still on
+   * disk — the row would then say the bytes were deleted while they were not,
+   * and nothing would ever come back for them.
    */
-  async remove(pageId: string): Promise<void> {
+  async remove(pageId: string): Promise<boolean> {
     try {
       await unlink(storagePathFor(pageId, uploadRoot()));
+      return true;
     } catch (cause) {
-      if ((cause as NodeJS.ErrnoException)?.code === 'ENOENT') return;
+      if ((cause as NodeJS.ErrnoException)?.code === 'ENOENT') return true;
       this.logger.warn(`Could not remove the stored bytes for page ${pageId}.`);
+      return false;
     }
   }
 }

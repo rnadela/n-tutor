@@ -2,14 +2,17 @@ import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AiModule } from '../ai/ai.module.js';
 import { requireParentJwtSecret } from '../common/env.js';
+import { SchedulerModule } from '../common/scheduler.js';
 import { TaxonomyModule } from '../admin/taxonomy.module.js';
 import { ExtractionModule } from '../extraction/extraction.module.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { ParentElevationGuard } from '../identity/parent-elevation.guard.js';
+import { PageExpiryScheduler } from './page-expiry.scheduler.js';
+import { PageExpiryService } from './page-expiry.service.js';
 import { PageIngestService } from './page-ingest.service.js';
 import { SourceTestController } from './source-test.controller.js';
 import { SourceTestService } from './source-test.service.js';
-import { sourceTestRuntime } from './source-test-policy.js';
+import { pageExpiryRuntime, sourceTestRuntime } from './source-test-policy.js';
 import { SOURCE_TEST_READER } from './source-test-reader.js';
 
 /**
@@ -55,21 +58,33 @@ import { SOURCE_TEST_READER } from './source-test-reader.js';
     // AD-20), so `forwardRef` on both module declarations is the honest
     // expression of it.
     forwardRef(() => ExtractionModule),
+    // The one scheduling mechanism (AD-5, AD-33). Imported for the mechanism
+    // alone: what expires and when is decided here, in the module that owns
+    // Page Image, and registered against it by `PageExpiryScheduler`.
+    SchedulerModule,
   ],
   controllers: [SourceTestController],
   providers: [
     SourceTestService,
     PageIngestService,
+    // The FR-32 retention sweep and the clock that drives it. The service is a
+    // plain method a test calls; the scheduler is the only thing that knows a
+    // cron exists.
+    PageExpiryService,
+    PageExpiryScheduler,
     ParentElevationGuard,
     // The same instance under the token `extraction` injects it by. Binding it
     // here rather than letting `extraction` import the class is what keeps the
     // ESM cycle from being a boot failure; `source-test-reader.ts` states why.
     { provide: SOURCE_TEST_READER, useExisting: SourceTestService },
   ],
-  exports: [SourceTestService, SOURCE_TEST_READER],
+  exports: [SourceTestService, SOURCE_TEST_READER, PageExpiryService],
 })
 export class SourceTestModule {
   constructor() {
+    // Same reason as below: a mistyped cron or retention flag is a process that
+    // refuses to start, not a retention promise that quietly stopped running.
+    pageExpiryRuntime();
     // Resolved and checked as the module is constructed, so a mistyped upload
     // root or size ceiling is a process that refuses to start rather than a 500
     // the first parent to photograph a page discovers.

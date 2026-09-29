@@ -430,7 +430,7 @@ describe('Mastery: recomputed from the window, in the transaction that changed t
     ]);
   });
 
-  it('leaves the grade unwritten and logs, rather than 500ing, when the hand-in transaction\'s own recompute fails', async () => {
+  it("leaves the grade unwritten and logs, rather than 500ing, when the hand-in transaction's own recompute fails", async () => {
     // `submitAttempt`'s guard is documented as never throwing past this point: a
     // recompute fault must be swallowed and logged, and because the recompute shares
     // the transaction that wrote the verdict (AD-10), the verdict rolls back with it —
@@ -439,16 +439,19 @@ describe('Mastery: recomputed from the window, in the transaction that changed t
     const attemptId = await openAttempt(practiceTestId, 1);
 
     const errors: string[] = [];
-    const errorSpy = vi
-      .spyOn(Logger.prototype, 'error')
-      .mockImplementation(function (this: Logger, message: unknown) {
-        errors.push(String(message));
-      });
+    const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(function (
+      this: Logger,
+      message: unknown,
+    ) {
+      errors.push(String(message));
+    });
     const recomputeSpy = vi
       .spyOn(h.grading, 'recomputeMastery')
       .mockRejectedValueOnce(new Error('a fault nobody anticipated'));
     try {
-      await expect(submit(attemptId, [{ questionId: questionIds[0]!, value: right(1) }])).resolves.toBeDefined();
+      await expect(
+        submit(attemptId, [{ questionId: questionIds[0]!, value: right(1) }]),
+      ).resolves.toBeDefined();
     } finally {
       recomputeSpy.mockRestore();
       errorSpy.mockRestore();
@@ -474,11 +477,12 @@ describe('Mastery: recomputed from the window, in the transaction that changed t
     ]);
 
     const errors: string[] = [];
-    const errorSpy = vi
-      .spyOn(Logger.prototype, 'error')
-      .mockImplementation(function (this: Logger, message: unknown) {
-        errors.push(String(message));
-      });
+    const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(function (
+      this: Logger,
+      message: unknown,
+    ) {
+      errors.push(String(message));
+    });
     const recomputeSpy = vi
       .spyOn(h.grading, 'recomputeMastery')
       .mockRejectedValueOnce(new Error('a fault nobody anticipated'));
@@ -500,7 +504,7 @@ describe('Mastery: recomputed from the window, in the transaction that changed t
     for (const line of errors) expect(line).not.toContain('fractions');
   });
 
-  it('excludes a retake sharing a Topic with another paper from that Topic\'s window', async () => {
+  it("excludes a retake sharing a Topic with another paper from that Topic's window", async () => {
     // AD-6's window filter (`countsTowardMastery`) is exercised end to end only when a
     // retake and a qualifying Attempt on a *different* paper share a Topic — every
     // existing multi-Attempt case uses first runs exclusively, so this is the one case
@@ -774,11 +778,12 @@ describe('Mastery: recomputed from the window, in the transaction that changed t
 
   it('never logs a label, a Topic name or a Question when canonicalization fails (AD-20)', async () => {
     const warnings: string[] = [];
-    const warnSpy = vi
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(function (this: Logger, message: unknown) {
-        warnings.push(String(message));
-      });
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(function (
+      this: Logger,
+      message: unknown,
+    ) {
+      warnings.push(String(message));
+    });
     try {
       // A whitespace-only label is refused by `normalize` before any provider call,
       // and the Practice Test id and question prompts carry no such string either, so

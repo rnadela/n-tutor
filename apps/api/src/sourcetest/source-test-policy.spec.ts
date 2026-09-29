@@ -4,6 +4,8 @@ import { UNCOMMITTED_STATE_TTL_MS } from '../identity/uncommitted-state-policy.j
 import {
   ALLOWED_MIMES,
   MAX_PAGES,
+  PAGE_EXPIRY_SWEEP_BATCH_SIZE,
+  PAGE_IMAGE_RETENTION_MS,
   PageOrderMismatch,
   SOURCE_TEST_TTL_MS,
   STORED_EXTENSION,
@@ -14,7 +16,10 @@ import {
   isChecked,
   isClassified,
   isExpired,
+  isPageImageExpired,
   isPageReadable,
+  pageImageExpiryCutoff,
+  pageImageExpiryFrom,
   renumbered,
   reorderedOrThrow,
   storagePathFor,
@@ -171,5 +176,57 @@ describe('the legibility rules', () => {
   it('gates the submit on the check having run, and on nothing it said', () => {
     expect(isChecked({ legibilityCheckedAt: new Date('2026-09-27T10:00:00.000Z') })).toBe(true);
     expect(isChecked({ legibilityCheckedAt: null })).toBe(false);
+  });
+});
+
+describe('the 90-day Page Image retention clock (FR-32)', () => {
+  const SUBMITTED = new Date('2026-01-01T00:00:00.000Z');
+
+  it('states ninety days once, and states them as days', () => {
+    // The figure is asserted against its own arithmetic rather than against a
+    // second literal: a spec that restates the number cannot catch the number
+    // changing. What it does catch is the unit slipping — hours for days, or
+    // the 72h draft TTL being re-used here, which is exactly the confusion the
+    // two clocks invite.
+    expect(PAGE_IMAGE_RETENTION_MS).toBe(90 * 24 * 60 * 60 * 1000);
+    expect(PAGE_IMAGE_RETENTION_MS).not.toBe(SOURCE_TEST_TTL_MS);
+  });
+
+  it('anchors the expiry on submission, not on creation', () => {
+    expect(pageImageExpiryFrom(SUBMITTED).toISOString()).toBe('2026-04-01T00:00:00.000Z');
+  });
+
+  it('is inclusive at the boundary and untouched the millisecond before it', () => {
+    const due = pageImageExpiryFrom(SUBMITTED);
+    expect(isPageImageExpired(SUBMITTED, new Date(due.getTime() - 1))).toBe(false);
+    expect(isPageImageExpired(SUBMITTED, due)).toBe(true);
+    expect(isPageImageExpired(SUBMITTED, new Date(due.getTime() + 1))).toBe(true);
+  });
+
+  it('leaves a page untouched at eighty-nine days', () => {
+    const now = new Date(SUBMITTED.getTime() + 89 * 24 * 60 * 60 * 1000);
+    expect(isPageImageExpired(SUBMITTED, now)).toBe(false);
+  });
+
+  it('never expires the pages of a Source Test that was never submitted', () => {
+    // However old it is. A draft is owned by the 72h TTL (AD-16); putting it
+    // under this clock as well would hand it a second, far longer life.
+    const muchLater = new Date(SUBMITTED.getTime() + 200 * 24 * 60 * 60 * 1000);
+    expect(isPageImageExpired(null, muchLater)).toBe(false);
+  });
+
+  it('derives the sweep cutoff as the mirror of the expiry', () => {
+    // The sweep compares `submittedAt` against a cutoff rather than computing
+    // an expiry per row, so the two have to agree exactly: a test submitted at
+    // the cutoff is due, and the same instant read the other way round is too.
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const cutoff = pageImageExpiryCutoff(now);
+    expect(cutoff.toISOString()).toBe('2026-03-03T00:00:00.000Z');
+    expect(isPageImageExpired(cutoff, now)).toBe(true);
+    expect(isPageImageExpired(new Date(cutoff.getTime() + 1), now)).toBe(false);
+  });
+
+  it('caps one sweep pass at a hundred rows', () => {
+    expect(PAGE_EXPIRY_SWEEP_BATCH_SIZE).toBe(100);
   });
 });
