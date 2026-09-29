@@ -114,6 +114,105 @@ export function DestructiveActions({
   );
 }
 
+export type ConfirmDestructiveDialogProps = Omit<
+  AppDialogProps,
+  'title' | 'onClose' | 'actions' | 'children' | 'describedBy'
+> & {
+  open: boolean;
+  /** The question, naming what goes. */
+  title: string;
+  /** The one sentence a reader needs on arrival: what goes, and what stays. */
+  body: string;
+  busy?: boolean;
+  onCancel(): void;
+  onConfirm(): void;
+};
+
+/**
+ * A destructive confirmation that asks for **no password** (UX-DR27, FR-33).
+ *
+ * A separate component rather than a `requirePassword={false}` flag on
+ * `DestructiveConfirmDialog`: the password there is the safeguard on deleting a
+ * Student Profile or a Parent Account, and a flag that switches it off is a flag
+ * that can be passed to those by mistake. This one is reachable only by callers
+ * that went looking for it.
+ *
+ * It exists for the one action where re-authentication would be theatre: the
+ * photographs of a Source Test are removed, and nothing built from them is — so
+ * there is no loss for a password to stand in front of. The elevation the parent
+ * already proved is the whole authorization.
+ *
+ * It does **not** close itself. The caller keeps `open` true until the write
+ * settles, which is what makes `busy` reach the controls at all; a dialog that
+ * closed on confirm would leave its own in-flight lock permanently unreachable.
+ */
+export function ConfirmDestructiveDialog({
+  open,
+  title,
+  body,
+  busy = false,
+  onCancel,
+  onConfirm,
+  ...rest
+}: ConfirmDestructiveDialogProps) {
+  const bodyId = useId();
+  // Guards the gap between a fast double-tap on confirm and the caller's `busy`
+  // prop actually re-rendering this component disabled.
+  const [firing, setFiring] = useState(false);
+  const [wasOpen, setWasOpen] = useState(open);
+  const [wasBusy, setWasBusy] = useState(busy);
+
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    setFiring(false);
+  }
+  // Released once the caller's request settles, or a failed delete would leave
+  // the confirm control disabled for ever.
+  if (wasBusy !== busy) {
+    setWasBusy(busy);
+    if (!busy) setFiring(false);
+  }
+
+  const locked = busy || firing;
+  return (
+    <AppDialog
+      {...rest}
+      open={open}
+      title={title}
+      // The body is the whole point of this dialog — a count and a consequence
+      // — and without this the overlay announces only its title on arrival.
+      describedBy={bodyId}
+      // Escape and a backdrop click both route through `onClose`; ignoring it
+      // while the delete is in flight keeps the confirmation from being
+      // dismissed out from under the request it is gating.
+      onClose={() => {
+        if (!busy) onCancel();
+      }}
+      actions={
+        <>
+          <Button type="button" onClick={onCancel} disabled={locked}>
+            {commonCopy.destructive.cancel}
+          </Button>
+          {/* Enabled on arrival: there is nothing to type, and a control
+              disabled until some field is filled would be waiting on a field
+              this dialog deliberately does not have. */}
+          <DestructiveButton
+            onClick={() => {
+              setFiring(true);
+              onConfirm();
+            }}
+            disabled={locked}
+          >
+            {commonCopy.destructive.confirm}
+          </DestructiveButton>
+        </>
+      }
+    >
+      <DialogContentText id={bodyId}>{body}</DialogContentText>
+    </AppDialog>
+  );
+}
+
 export type DestructiveConfirmDialogProps = Omit<
   AppDialogProps,
   'title' | 'onClose' | 'actions'

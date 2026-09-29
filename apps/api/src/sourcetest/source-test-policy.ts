@@ -157,6 +157,28 @@ export const SOURCE_TEST_NOT_FOUND = 'That upload is no longer available.';
 /** Distinct from the above on purpose: this one the parent can act on. */
 export const SOURCE_TEST_NOT_DRAFT = 'That upload has already been submitted.';
 
+/**
+ * The mirror of the one above, for the early photo deletion (FR-33): that
+ * action acts on a committed upload and on nothing else.
+ *
+ * It says what to do rather than only what is wrong, because the parent can do
+ * it: the upload they are looking at has not been submitted yet, and submitting
+ * it is the step that makes its photographs removable.
+ */
+export const SOURCE_TEST_NOT_SUBMITTED = 'Submit this upload before removing its photos.';
+
+/**
+ * The early deletion's second gate: the Extraction has to be stored.
+ *
+ * Deleting the photographs costs the parent nothing precisely because
+ * everything the product builds is built from the stored Extraction. Before
+ * that exists the photographs are the only input there is, so the refusal names
+ * the wait rather than a fault — nothing has gone wrong, and the action becomes
+ * available on its own.
+ */
+export const EXTRACTION_NOT_PERSISTED =
+  'This upload is still being read. The photos can be removed once that has finished.';
+
 /** The same indistinguishability, one level down. */
 export const PAGE_NOT_FOUND = 'That page is no longer part of this upload.';
 

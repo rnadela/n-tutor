@@ -738,6 +738,37 @@ describe('Source Test calls', () => {
     expect((init as RequestInit).method).toBe('DELETE');
   });
 
+  it('removes every photograph of an upload with one elevated DELETE on its pages', async () => {
+    // A client wired to a path the server does not serve fails only in front of
+    // a parent, so the verb, the path and the header are all stated here.
+    const fetchMock = respondWith(200, { id: 'st-1', status: 'Submitted', pages: [] });
+
+    await expect(parentApi.deleteSourceTestPageImages('t', 'st-1')).resolves.toMatchObject({
+      id: 'st-1',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/parent/source-tests/st-1/pages');
+    // The whole page set, never one page: no page id in the path.
+    expect(url).not.toMatch(/\/pages\/.+/u);
+    expect(init.method).toBe('DELETE');
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer t');
+  });
+
+  it('answers a refused early deletion with the sentence the API wrote', async () => {
+    // A 409 is the API refusing on a rule it authored — the upload has not been
+    // submitted, or is still being read. It is carried on `reason`, which is
+    // what the screen shows instead of `deletePhotosFailed`: a parent handed
+    // this module's generic line is told less than the server already said, and
+    // nothing they can act on.
+    respondWith(409, { message: 'Submit this upload before removing its photos.' });
+
+    await expect(parentApi.deleteSourceTestPageImages('t', 'st-1')).rejects.toMatchObject({
+      status: 409,
+      reason: 'Submit this upload before removing its photos.',
+    });
+  });
+
   it('still reports a failed delete as a rejection', async () => {
     respondWith(404, { message: 'gone' });
     await expect(parentApi.deleteSourceTestPage('t', 'st-1', 'p-1')).rejects.toBeInstanceOf(

@@ -1,11 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import sharp from 'sharp';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-const { PAGE_IMAGE_RETENTION_MS, storagePathFor, uploadRoot } = await import(
-  '../src/sourcetest/source-test-policy.js'
-);
+const {
+  EXTRACTION_NOT_PERSISTED,
+  PAGE_IMAGE_RETENTION_MS,
+  SOURCE_TEST_NOT_FOUND,
+  SOURCE_TEST_NOT_SUBMITTED,
+  storagePathFor,
+  uploadRoot,
+} = await import('../src/sourcetest/source-test-policy.js');
 const { PageExpiryService } = await import('../src/sourcetest/page-expiry.service.js');
 const {
   bearer,
@@ -50,11 +56,14 @@ async function fileExists(pageId: string): Promise<boolean> {
 }
 
 /**
- * FR-32, against real rows and real files.
+ * FR-32 and FR-33, against real rows and real files.
  *
- * Every case here drives `sweepExpired()` directly. That is the point of it
+ * The retention cases drive `sweepExpired()` directly. That is the point of it
  * being a plain public method: the schedule is off in this tier, and a test that
- * waits on a cron is slow when it passes and flaky when it does not.
+ * waits on a cron is slow when it passes and flaky when it does not. The early
+ * deletion cases go through the route instead, because what is new there is the
+ * gates in front of the routine, and every one of them lives on the request
+ * path.
  */
 describe('Page Images expire ninety days after the upload was committed', () => {
   let h: Harness;
@@ -379,6 +388,276 @@ describe('Page Images expire ninety days after the upload was committed', () => 
       // Test yields an empty set and never touches the filesystem — no
       // `PageBytesUnavailable`, and nothing that carries a path.
       await expect(sourceTests.readPageBytes(test.sourceTestId)).resolves.toEqual([]);
+    });
+  });
+
+  /**
+   * FR-33, over the real route: the same removal, asked for by the parent
+   * instead of by the clock.
+   *
+   * Driven through `DELETE /parent/source-tests/:id/pages` rather than through
+   * `expireNow` directly, because what is new here is the gates in front of the
+   * routine — ownership, the committed status, the persisted Extraction — and
+   * every one of them lives on the request path.
+   */
+  describe('a parent who removes the photographs early', () => {
+    /** A submitted Source Test whose Extraction has actually been stored. */
+    async function extracted(pageCount = 2): Promise<Submitted> {
+      const test = await submitted(pageCount);
+      expect(await h.extractionRunner.runOnce()).toBe(true);
+      return test;
+    }
+
+    function deletePhotos(test: Pick<Submitted, 'token' | 'sourceTestId'>, token = test.token) {
+      return server()
+        .delete(`/api/parent/source-tests/${test.sourceTestId}/pages`)
+        .set('Authorization', bearer(token));
+    }
+
+    it('takes the bytes off disk and leaves the rows saying so', async () => {
+      const test = await extracted(2);
+      for (const pageId of test.pageIds) expect(await fileExists(pageId)).toBe(true);
+
+      const response = await deletePhotos(test).expect(200);
+
+      for (const pageId of test.pageIds) expect(await fileExists(pageId)).toBe(false);
+      const rows = await pageRows(test.sourceTestId);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.state).toBe('Deleted');
+        expect(row.storagePath).toBeNull();
+        expect(row.bytesDeletedAt).not.toBeNull();
+      }
+
+      // The answer is the re-read Source Test, not a 204: the rows survive, and
+      // what they now say is the only account of what happened.
+      expect(response.body.id).toBe(test.sourceTestId);
+      expect(response.body.pages).toHaveLength(2);
+      for (const page of response.body.pages) {
+        expect(page.state).toBe('Deleted');
+        expect(typeof page.bytesDeletedAt).toBe('string');
+      }
+      // AD-15/AD-20: not the path, not a URL, not under any name.
+      const body = JSON.stringify(response.body);
+      expect(body).not.toContain(uploadRoot());
+      expect(body).not.toContain('storagePath');
+    });
+
+    it('is indistinguishable from an expiry: the same state, date and null path', async () => {
+      // Two Source Tests, one emptied by the parent and one by the clock. If the
+      // two paths ever stop being one routine, this is where it shows.
+      const early = await extracted(1);
+      const swept = await submitted(1);
+      await submittedDaysAgo(swept.sourceTestId, 91);
+
+      await deletePhotos(early).expect(200);
+      expect(await expiry.sweepExpired(new Date())).toBe(1);
+
+      const [earlyRow] = await pageRows(early.sourceTestId);
+      const [sweptRow] = await pageRows(swept.sourceTestId);
+      expect(earlyRow!.state).toBe(sweptRow!.state);
+      expect(earlyRow!.storagePath).toBe(sweptRow!.storagePath);
+      expect(earlyRow!.bytesDeletedAt).not.toBeNull();
+      expect(sweptRow!.bytesDeletedAt).not.toBeNull();
+    });
+
+    it('leaves the Source Test, the Extraction and everything derived untouched', async () => {
+      const test = await extracted(2);
+
+      const sourceBefore = await h.prisma.sourceTest.findUniqueOrThrow({
+        where: { id: test.sourceTestId },
+      });
+      const extractionBefore = await h.prisma.extraction.findFirstOrThrow({
+        where: { sourceTestId: test.sourceTestId },
+      });
+      const questionsBefore = await h.prisma.extractedQuestion.findMany({
+        where: { extractionId: extractionBefore.id },
+        orderBy: { ordinal: 'asc' },
+      });
+      expect(questionsBefore.length).toBeGreaterThan(0);
+
+      await deletePhotos(test).expect(200);
+
+      expect(
+        await h.prisma.sourceTest.findUniqueOrThrow({ where: { id: test.sourceTestId } }),
+      ).toEqual(sourceBefore);
+      expect(
+        await h.prisma.extraction.findUniqueOrThrow({ where: { id: extractionBefore.id } }),
+      ).toEqual(extractionBefore);
+      expect(
+        await h.prisma.extractedQuestion.findMany({
+          where: { extractionId: extractionBefore.id },
+          orderBy: { ordinal: 'asc' },
+        }),
+      ).toEqual(questionsBefore);
+    });
+
+    it('still generates a Practice Test afterwards, from the stored Extraction', async () => {
+      // The whole safety argument, proved rather than asserted: the photographs
+      // are gone minutes after the upload and the product still works.
+      const test = await extracted(2);
+      h.ai.reset();
+
+      await deletePhotos(test).expect(200);
+      for (const pageId of test.pageIds) expect(await fileExists(pageId)).toBe(false);
+
+      await server()
+        .post(`/api/parent/source-tests/${test.sourceTestId}/practice-tests`)
+        .set('Authorization', bearer(test.token))
+        .send({ count: 1 })
+        .expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      expect(
+        await h.prisma.practiceTest.findMany({ where: { sourceTestId: test.sourceTestId } }),
+      ).toHaveLength(1);
+    });
+
+    it('succeeds and removes nothing the second time', async () => {
+      const test = await extracted(2);
+      await deletePhotos(test).expect(200);
+      const afterFirst = await pageRows(test.sourceTestId);
+
+      // Idempotent: nothing is unlinked twice and not one date is rewritten.
+      await deletePhotos(test).expect(200);
+      expect(await pageRows(test.sourceTestId)).toEqual(afterFirst);
+    });
+
+    it('leaves the 90-day sweep with nothing left to do', async () => {
+      const test = await extracted(1);
+      await deletePhotos(test).expect(200);
+      await submittedDaysAgo(test.sourceTestId, 91);
+
+      expect(await expiry.sweepExpired(new Date())).toBe(0);
+    });
+
+    it('refuses an upload that has not been submitted', async () => {
+      // A draft's photographs are the only copy of work nothing has read yet,
+      // and the 72h TTL already owns them.
+      const parent = await createSignedInParent(h);
+      await setPinFor(h, parent.cookie, PIN);
+      const token = await elevate(h, parent.cookie, PIN);
+      const gradeLevel = await createGradeLevel(h);
+      const profile = await createStudentProfile(h, parent.parentAccountId, {
+        gradeLevelId: gradeLevel.id,
+      });
+      const draft = await server()
+        .post('/api/parent/source-tests')
+        .set('Authorization', bearer(token))
+        .send({ studentProfileId: profile.id })
+        .expect(200);
+      await server()
+        .post(`/api/parent/source-tests/${draft.body.id}/pages`)
+        .set('Authorization', bearer(token))
+        .attach('file', await photo(11), { filename: 'page.jpg', contentType: 'image/jpeg' })
+        .expect(201);
+      const [page] = await pageRows(draft.body.id);
+
+      const refusal = await server()
+        .delete(`/api/parent/source-tests/${draft.body.id}/pages`)
+        .set('Authorization', bearer(token))
+        .expect(409);
+      expect(refusal.body.message).toBe(SOURCE_TEST_NOT_SUBMITTED);
+
+      // Refused before any unlink: the bytes and the row are exactly as they were.
+      expect(await fileExists(page!.id)).toBe(true);
+      expect((await pageRows(draft.body.id))[0]!.state).toBe('Ready');
+    });
+
+    it('refuses a submitted upload whose Extraction has not been stored yet', async () => {
+      // The job is still `Queued` here: deleting now would destroy the only
+      // input it has, and a retry would have nothing to read.
+      const test = await submitted(1);
+      expect(
+        await h.prisma.extraction.findFirst({ where: { sourceTestId: test.sourceTestId } }),
+      ).toBeNull();
+
+      const refusal = await deletePhotos(test).expect(409);
+      expect(refusal.body.message).toBe(EXTRACTION_NOT_PERSISTED);
+
+      expect(await fileExists(test.pageIds[0]!)).toBe(true);
+      expect((await pageRows(test.sourceTestId))[0]!.state).toBe('Ready');
+    });
+
+    it('answers another account the same 404 an unknown id gets, and deletes nothing', async () => {
+      const test = await extracted(1);
+      const stranger = await createSignedInParent(h);
+      await setPinFor(h, stranger.cookie, PIN);
+      const strangerToken = await elevate(h, stranger.cookie, PIN);
+
+      const foreign = await deletePhotos(test, strangerToken).expect(404);
+      const unknown = await server()
+        .delete(`/api/parent/source-tests/${randomUUID()}/pages`)
+        .set('Authorization', bearer(strangerToken))
+        .expect(404);
+      // Indistinguishability is a claim about the two *bodies*, not only about
+      // the two statuses: a foreign id answered with its own sentence would
+      // confirm the row exists somewhere. Both are asserted, and against each
+      // other.
+      expect(foreign.body.message).toBe(SOURCE_TEST_NOT_FOUND);
+      expect(unknown.body.message).toBe(SOURCE_TEST_NOT_FOUND);
+      expect(foreign.body).toEqual(unknown.body);
+
+      expect(await fileExists(test.pageIds[0]!)).toBe(true);
+      expect((await pageRows(test.sourceTestId))[0]!.state).toBe('Ready');
+    });
+
+    it('still reads and still empties a committed upload whose draft TTL has passed', async () => {
+      // `expiresAt` is the *draft's* 72-hour capture TTL and submit never clears
+      // it. A read that honoured it would 404 every upload older than three days
+      // — which is all of them for essentially the whole ninety-day window this
+      // action exists to shorten — taking the screen the control lives on down
+      // with it. Both the read and the deletion are asserted, because either one
+      // proving ownership with `requireLive` reintroduces the fault.
+      const test = await extracted(1);
+      await h.prisma.sourceTest.update({
+        where: { id: test.sourceTestId },
+        data: { expiresAt: new Date(Date.now() - 1_000) },
+      });
+
+      const read = await server()
+        .get(`/api/parent/source-tests/${test.sourceTestId}`)
+        .set('Authorization', bearer(test.token))
+        .expect(200);
+      expect(read.body.id).toBe(test.sourceTestId);
+      expect(read.body.pages).toHaveLength(1);
+
+      await deletePhotos(test).expect(200);
+      expect(await fileExists(test.pageIds[0]!)).toBe(false);
+      expect((await pageRows(test.sourceTestId))[0]!.state).toBe('Deleted');
+    });
+
+    it('still answers 404 for a draft whose TTL has passed', async () => {
+      // The other half of the same rule, so widening the read to `requireReadable`
+      // cannot quietly hand an expired draft back: an expired draft genuinely is
+      // over, and every read says so.
+      const parent = await createSignedInParent(h);
+      await setPinFor(h, parent.cookie, PIN);
+      const token = await elevate(h, parent.cookie, PIN);
+      const gradeLevel = await createGradeLevel(h);
+      const profile = await createStudentProfile(h, parent.parentAccountId, {
+        gradeLevelId: gradeLevel.id,
+      });
+      const draft = await server()
+        .post('/api/parent/source-tests')
+        .set('Authorization', bearer(token))
+        .send({ studentProfileId: profile.id })
+        .expect(200);
+      await h.prisma.sourceTest.update({
+        where: { id: draft.body.id },
+        data: { expiresAt: new Date(Date.now() - 1_000) },
+      });
+
+      await server()
+        .get(`/api/parent/source-tests/${draft.body.id}`)
+        .set('Authorization', bearer(token))
+        .expect(404);
+    });
+
+    it('is refused outright without the elevation bearer', async () => {
+      const test = await extracted(1);
+      await server().delete(`/api/parent/source-tests/${test.sourceTestId}/pages`).expect(401);
+      expect(await fileExists(test.pageIds[0]!)).toBe(true);
     });
   });
 

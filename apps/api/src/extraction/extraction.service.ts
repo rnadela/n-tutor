@@ -389,6 +389,29 @@ export class ExtractionService implements ExtractionReader {
   }
 
   /**
+   * Whether this Source Test's Extraction has actually been stored.
+   *
+   * The whole of Epic 8's safety argument for letting a parent delete their
+   * child's photographs early is that the Extraction is persisted separately and
+   * everything downstream reads it — so before the job has stored one, deleting
+   * the images destroys the only input there is. This is the question that gate
+   * asks, and `sourcetest` asks it here rather than reading an extraction table
+   * itself (AD-17).
+   *
+   * A `findUnique` on the id alone rather than a call to `readForGeneration`:
+   * that loads every question, every choice and every topic to answer a yes/no.
+   * No ownership proof here, for the same reason `readForGeneration` has none —
+   * the caller has already proved it through `sourcetest`.
+   */
+  async hasPersistedExtraction(sourceTestId: string): Promise<boolean> {
+    const extraction = await this.prisma.extraction.findUnique({
+      where: { sourceTestId },
+      select: { id: true },
+    });
+    return extraction !== null;
+  }
+
+  /**
    * The persisted Extraction as a generation job reads it (AD-17): usable
    * Questions and the page count, and nothing else.
    *

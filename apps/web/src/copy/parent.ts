@@ -302,6 +302,32 @@ export const parentCopy = {
      */
     photoDeleted: 'Photo deleted',
     photoDeletedOn: (date: string) => `Photo deleted on ${date}`,
+
+    /**
+     * Removing the photographs early (FR-33), rather than waiting out the
+     * ninety days.
+     *
+     * The confirmation states the count, because that is what goes, and states
+     * in the same breath that the practice built from those photographs stays —
+     * which is the whole reason this costs the parent nothing and the reason no
+     * password is asked for. Plain and without alarm: nothing is going wrong,
+     * the parent asked for this.
+     */
+    deletePhotos: 'Delete photos',
+    deletePhotosTitle: 'Delete the photos of this upload?',
+    deletePhotosBody: (count: number) =>
+      `${count === 1 ? 'The 1 photo' : `All ${count} photos`} of this upload will be removed. ` +
+      'The practice tests, answers and progress built from them stay exactly as they are. ' +
+      'This cannot be undone.',
+    /** Said from the view the server answered with, never from a prediction. */
+    photosDeleted: (count: number) =>
+      count === 1 ? 'The photo has been removed.' : `All ${count} photos have been removed.`,
+    /**
+     * The fallback only. A refusal the API authored — an upload not submitted
+     * yet, one still being read — arrives as its own sentence and is shown
+     * instead of this one.
+     */
+    deletePhotosFailed: 'The photos could not be removed. Try again.',
     childLabel: 'Child',
     loading: 'Loading the pages…',
     empty: 'There are no pages yet. Add the first one below.',

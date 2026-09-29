@@ -1721,6 +1721,25 @@ export const parentApi = {
       parentCopy.capture.addFailed,
     ),
 
+  /**
+   * Removes every photograph of a committed Source Test, ahead of the 90-day
+   * clock (FR-33).
+   *
+   * The whole page set, and a `SourceTestView` back rather than nothing: the
+   * page rows survive the deletion, and what they now say — the `Deleted` state
+   * and the date on each — is the only account of what is left. The screen
+   * renders and announces from that answer and never from what it predicted.
+   *
+   * Distinct from `deleteSourceTestPage` below in every way that matters: that
+   * one removes a *row* from a draft and renumbers its siblings.
+   */
+  deleteSourceTestPageImages: (token: string, id: string) =>
+    call<SourceTestView>(
+      `/parent/source-tests/${encodeURIComponent(id)}/pages`,
+      { method: 'DELETE', headers: elevated(token) },
+      parentCopy.capture.deletePhotosFailed,
+    ),
+
   deleteSourceTestPage: (token: string, id: string, pageId: string) =>
     call<void>(
       `/parent/source-tests/${encodeURIComponent(id)}/pages/${encodeURIComponent(pageId)}`,

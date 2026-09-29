@@ -209,3 +209,119 @@ describe('what the sweep is not allowed to touch', () => {
     expect(h.updateMany).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('the parent-requested early deletion', () => {
+  it('selects that Source Test own Ready pages, with no cutoff and no cap', async () => {
+    // No clock in the `where` at all: the parent asking *is* the trigger, and a
+    // cutoff here would silently refuse the deletion for the first ninety days
+    // — exactly the window FR-33 exists to shorten.
+    const h = harness({ due: [] });
+    await h.service.expireNow('st-1', NOW);
+    expect(h.recorded.findArgs).toEqual({
+      where: { sourceTestId: 'st-1', state: 'Ready' },
+      select: { id: true },
+    });
+  });
+
+  it('never widens past its own Source Test', async () => {
+    // The one scoping mistake that would empty another child's upload: the
+    // `sourceTestId` is the whole of the selection and is asserted as such.
+    const h = harness({ due: ['a'] });
+    await h.service.expireNow('st-1', NOW);
+    const where = (h.recorded.findArgs as { where: Record<string, unknown> }).where;
+    expect(where.sourceTestId).toBe('st-1');
+    expect(Object.keys(where).sort()).toEqual(['sourceTestId', 'state']);
+  });
+
+  it('unlinks every page before it marks any row, exactly as the sweep does', async () => {
+    const h = harness({ due: ['a', 'b'] });
+    expect(await h.service.expireNow('st-1', NOW)).toBe(2);
+    expect(h.order).toEqual(['find', 'remove:a', 'remove:b', 'update']);
+  });
+
+  it('marks the rows Deleted with the date, drops the path, and keeps the Ready guard', async () => {
+    // Asserted whole rather than loosely: `state: 'Ready'` in the update's own
+    // `where` is what stops a row another pass swept between the select and here
+    // from being re-dated, and a partial match would not notice its loss.
+    const h = harness({ due: ['a'] });
+    await h.service.expireNow('st-1', NOW);
+    expect(h.recorded.updateArgs).toEqual({
+      where: { id: { in: ['a'] }, state: 'Ready' },
+      data: { state: 'Deleted', bytesDeletedAt: NOW, storagePath: null },
+    });
+  });
+
+  it('is a no-op on a Source Test whose pages are already Deleted', async () => {
+    // `state: 'Ready'` in the select is what makes the route idempotent: a
+    // second confirm removes nothing, re-dates nothing and still succeeds.
+    const h = harness({ due: [] });
+    expect(await h.service.expireNow('st-1', NOW)).toBe(0);
+    expect(h.remove).not.toHaveBeenCalled();
+    expect(h.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('leaves a page whose unlink failed Ready for the sweep, and marks the rest', async () => {
+    const h = harness({ due: ['kept', 'gone'], removable: (id) => id === 'gone' });
+    expect(await h.service.expireNow('st-1', NOW)).toBe(1);
+    expect(h.recorded.updateArgs).toMatchObject({ where: { id: { in: ['gone'] } } });
+  });
+
+  it('throws nothing when not one page could be unlinked', async () => {
+    const h = harness({ due: ['a'], removable: () => false });
+    expect(await h.service.expireNow('st-1', NOW)).toBe(0);
+    expect(h.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('reads and writes the page_image delegate and nothing else', async () => {
+    const h = harness({ due: ['a'] });
+    await h.service.expireNow('st-1', NOW);
+    expect(h.findMany).toHaveBeenCalledTimes(1);
+    expect(h.updateMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('which trigger a log line came from', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function captureLogs(): { logs: string[]; warnings: string[] } {
+    const logs: string[] = [];
+    const warnings: string[] = [];
+    vi.spyOn(Logger.prototype, 'log').mockImplementation((message: unknown) => {
+      logs.push(String(message));
+    });
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+    return { logs, warnings };
+  }
+
+  it('names the schedule when the schedule asked', async () => {
+    const captured = captureLogs();
+    await harness({ due: ['a'] }).service.sweepExpired(NOW);
+    expect(captured.logs[0]).toContain('Retention sweep');
+  });
+
+  it('names the parent request when a parent asked', async () => {
+    // Without this the two emit the identical sentence, and an operator reading
+    // a disk that refused a page cannot tell a nightly job from a parent waiting
+    // in front of a screen.
+    const captured = captureLogs();
+    await harness({ due: ['a'] }).service.expireNow('st-1', NOW);
+    expect(captured.logs[0]).toContain('Parent-requested deletion');
+    expect(captured.logs[0]).not.toContain('Retention sweep');
+  });
+
+  it('names the trigger on the shortfall warning too, and still carries no path', async () => {
+    const captured = captureLogs();
+    await harness({ due: ['kept', 'gone'], removable: (id) => id === 'gone' }).service.expireNow(
+      'st-1',
+      NOW,
+    );
+    expect(captured.warnings).toHaveLength(1);
+    expect(captured.warnings[0]).toContain('Parent-requested deletion');
+    expect(captured.warnings[0]).toContain('1 of 2');
+    expect(captured.warnings[0]).not.toContain('/');
+  });
+});

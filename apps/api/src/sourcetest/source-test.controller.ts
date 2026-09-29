@@ -241,6 +241,30 @@ export class SourceTestController {
     );
   }
 
+  /**
+   * Removes every photograph of a committed Source Test, at the parent's
+   * request and ahead of the 90-day clock (FR-33).
+   *
+   * Beside the per-page delete below rather than anywhere else, and at a
+   * distinct path depth, so there is no declaration-order hazard between the
+   * two: `pages` and `pages/:pageId` cannot match each other's requests.
+   *
+   * It answers 200 with the re-read Source Test rather than 204, because the
+   * page rows survive the deletion and what they now say — the `Deleted` state
+   * and the date on each — is the only account of what happened.
+   *
+   * Behind the same elevation guard as every other route on this controller,
+   * and behind nothing else: no password field and no PIN re-prompt. Nothing
+   * derived is lost, which is what makes that the one exception in Epic 8.
+   */
+  @Delete(':id/pages')
+  deletePageImages(
+    @Req() req: ElevatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SourceTestView> {
+    return this.sourceTests.deletePageImages(req.elevated!.parentAccountId, id);
+  }
+
   /** Removes one page; the survivors renumber without their bytes being read. */
   @Delete(':id/pages/:pageId')
   @HttpCode(HttpStatus.NO_CONTENT)

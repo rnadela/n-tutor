@@ -306,3 +306,141 @@ describe('every word comes from the copy module', () => {
     expect(code).not.toMatch(/(aria-label|children)=["']/);
   });
 });
+
+/**
+ * FR-33's one parent-facing control, on the only route keyed by a Source Test
+ * id — deep-linkable, and reached in a later session from the weak-area
+ * drill-down. The capture screen cannot host it: it acquires its Source Test
+ * only by opening or resuming a **Draft**, so a submitted upload sits there
+ * only for the minutes after submit in the same session.
+ */
+describe('the upload photographs and their early deletion', () => {
+  it('reads the Source Test itself, through the call that survives the draft TTL', () => {
+    // `parentApi.sourceTest` proves ownership server-side with `requireReadable`,
+    // so a committed upload resolves long after its 72h draft `expiresAt`.
+    expect(PAGE_SOURCE).toContain('parentApi.sourceTest(token, sourceTestId)');
+    expect(PAGE_SOURCE).toContain('setSourceTest(upload)');
+  });
+
+  it('renders the pages through the strip the capture screen uses, read-only', () => {
+    // One renderer of a page row, so the dated "Photo deleted" caption a removed
+    // page shows here is the same one an expired page shows.
+    expect(PAGE_SOURCE).toContain("from '@/app/parent/capture/PageStrip'");
+    expect(PAGE_SOURCE).toContain('editable={false}');
+    // Page management belongs to the draft: every write against a committed
+    // Source Test answers 409.
+    expect(PAGE_SOURCE).not.toContain('editable={true}');
+  });
+
+  it('offers the delete control on one predicate, and states the same figure', () => {
+    // One predicate, not a status flag and a count: the control exists exactly
+    // when there is a photograph to remove on a committed upload, and the
+    // confirmation names that count.
+    expect(PAGE_SOURCE).toContain("sourceTest?.status === 'Submitted'");
+    expect(PAGE_SOURCE).toContain("pages.filter((page) => page.state !== 'Deleted').length");
+    expect(PAGE_SOURCE).toContain('{livePhotoCount > 0 && (');
+    expect(PAGE_SOURCE).toContain('parentCopy.capture.deletePhotosBody(livePhotoCount)');
+  });
+
+  it('confirms with the passwordless dialog, never the password one', () => {
+    // Nothing built from the photographs is lost, so there is no loss for a
+    // re-authentication to stand in front of — and the password dialog's flag
+    // is the safeguard on 8.3 and 8.4, not something to switch off here.
+    expect(PAGE_SOURCE).toContain('<ConfirmDestructiveDialog');
+    expect(PAGE_SOURCE).not.toContain('DestructiveConfirmDialog');
+    expect(PAGE_SOURCE).not.toContain('type="password"');
+    expect(PAGE_SOURCE).not.toContain('onConfirm={(password');
+  });
+
+  it('keeps the confirmation open until the write settles, so its lock is reachable', () => {
+    expect(PAGE_SOURCE).toContain('busy={deletingPhotos}');
+    expect(PAGE_SOURCE).toContain('setDeletingPhotos(true);');
+
+    // Closed on the answer and on the failure, never before the request. Stated
+    // as "nothing closes it between the handler opening and the call" over
+    // whitespace-insensitive source, so reformatting cannot satisfy it: an
+    // exact newline-and-indent literal would go vacuously true on any reflow.
+    const flat = PAGE_SOURCE.replace(/\s+/gu, ' ');
+    const body = flat.slice(
+      flat.indexOf('function deletePhotos()'),
+      flat.indexOf('parentApi.deleteSourceTestPageImages'),
+    );
+    expect(body).not.toBe('');
+    expect(body).not.toContain('setConfirmingPhotoDelete(false)');
+  });
+
+  it('announces from the view the server answered with, never from a prediction', () => {
+    // A before-minus-after figure is zero on an idempotent second confirm, and
+    // there is no sentence for zero.
+    expect(PAGE_SOURCE).toContain('parentApi.deleteSourceTestPageImages(token, sourceTestId)');
+    expect(PAGE_SOURCE).toContain('setSourceTest(after)');
+    expect(PAGE_SOURCE).toContain('parentCopy.capture.photosDeleted(');
+    expect(PAGE_SOURCE).toContain("after.pages.filter((page) => page.state === 'Deleted').length");
+  });
+
+  it('shows the API own refusal rather than its generic failure line', () => {
+    expect(PAGE_SOURCE).toContain('messageFor(cause, parentCopy.capture.deletePhotosFailed)');
+  });
+});
+
+describe('the early-deletion copy', () => {
+  it('names how many photographs go', () => {
+    expect(parentCopy.capture.deletePhotosBody(3)).toContain('3');
+    expect(parentCopy.capture.deletePhotosBody(1)).toContain('1');
+  });
+
+  it('states that what was built from them stays, and that this is final', () => {
+    const body = parentCopy.capture.deletePhotosBody(3);
+    expect(body.toLowerCase()).toContain('stay');
+    expect(body).toContain('cannot be undone');
+  });
+
+  it('asks for no password and no PIN anywhere in what it says', () => {
+    const strings = [
+      parentCopy.capture.deletePhotos,
+      parentCopy.capture.deletePhotosTitle,
+      parentCopy.capture.deletePhotosBody(3),
+      parentCopy.capture.photosDeleted(3),
+      parentCopy.capture.deletePhotosFailed,
+    ];
+    for (const value of strings) {
+      expect(value.toLowerCase(), value).not.toContain('password');
+      expect(value.toLowerCase(), value).not.toContain('pin');
+      expect(value, value).not.toContain('!');
+    }
+  });
+
+  it('has a sentence for one photograph and for many, and never for none', () => {
+    expect(parentCopy.capture.photosDeleted(1)).toContain('photo');
+    expect(parentCopy.capture.photosDeleted(4)).toContain('4');
+  });
+});
+
+describe('what the upload read is allowed to take down with it', () => {
+  it('degrades to no strip rather than collapsing the screen', () => {
+    // Generation needs none of the page set, and this screen loaded without it
+    // before the strip existed. A transient failure must not take the picker and
+    // the progress panel with it — but a cause that ends the whole parent view
+    // is still rethrown, so the parent is sent back to the PIN gate.
+    expect(PAGE_SOURCE).toContain('if (endsParentView(cause)) throw cause;');
+    expect(PAGE_SOURCE).toContain('SourceTestView | null');
+    expect(PAGE_SOURCE).toContain('{sourceTest !== null && pages.length > 0 && (');
+  });
+
+  it('gives the deletion its own request token, so it cannot cancel the poll', () => {
+    // The shared counter is how the mount load and the progress poll invalidate
+    // each other. Bumping it from the delete would silently drop the poll's next
+    // answer with nothing left to re-issue it, and progress would stop moving.
+    expect(PAGE_SOURCE).toContain('const deleteRequestId = useRef(0);');
+    expect(PAGE_SOURCE).toContain('const issued = (deleteRequestId.current += 1);');
+    expect(PAGE_SOURCE).toContain('applyIfCurrent(currentDelete.current, issued');
+  });
+
+  it('refuses to announce a removal that removed nothing', () => {
+    // A 200 whose pages are all still Ready is every unlink having failed. "0
+    // photos have been removed" is a sentence the copy has no form for and a
+    // claim that is false.
+    expect(PAGE_SOURCE).toContain('if (removed === 0) {');
+    expect(PAGE_SOURCE).toContain('setError(parentCopy.capture.deletePhotosFailed);');
+  });
+});

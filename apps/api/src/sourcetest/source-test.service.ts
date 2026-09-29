@@ -22,6 +22,7 @@ import {
   StudentProfileService,
 } from '../identity/student-profile.service.js';
 import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
+import { PageExpiryService } from './page-expiry.service.js';
 import { PageIngestService, UnsupportedImageFormat } from './page-ingest.service.js';
 import type { PageBytes, SourceTestReader } from './source-test-reader.js';
 import {
@@ -35,6 +36,7 @@ import {
 import {
   CLASSIFICATION_REQUIRED,
   CLASSIFICATION_REQUIRED_FOR_CHECK,
+  EXTRACTION_NOT_PERSISTED,
   LEGIBILITY_CHECK_FAILED,
   LEGIBILITY_CHECK_REQUIRED,
   MAX_PAGES,
@@ -45,6 +47,7 @@ import {
   PageOrderMismatch,
   SOURCE_TEST_NOT_DRAFT,
   SOURCE_TEST_NOT_FOUND,
+  SOURCE_TEST_NOT_SUBMITTED,
   STORED_MIME,
   SUBJECT_NOT_AVAILABLE,
   UNSUPPORTED_IMAGE_FORMAT,
@@ -224,6 +227,12 @@ export class SourceTestService implements SourceTestReader {
     // over a typed request and the prompt it owns; it never sees a client, a
     // model id, a retry policy or a cost row.
     private readonly ai: AiService,
+    // The one routine that removes a page's stored bytes, whichever trigger
+    // asked. No `forwardRef`: it depends on Prisma and `PageIngestService`
+    // alone, so injecting it here adds no cycle — and re-typing its
+    // unlink-then-mark sequence for the early deletion is precisely the defect
+    // Epic 8 forbids.
+    private readonly pageExpiry: PageExpiryService,
   ) {}
 
   // --- Reads -------------------------------------------------------------
@@ -307,9 +316,26 @@ export class SourceTestService implements SourceTestReader {
     }
   }
 
-  /** One Source Test, draft or submitted, with its pages in stored order. */
+  /**
+   * One Source Test, draft or submitted, with its pages in stored order.
+   *
+   * `requireReadable`, not `requireLive`: `expiresAt` is the *draft's* 72-hour
+   * capture TTL and submit deliberately does not clear it, so honouring it here
+   * would make every committed upload disappear three days after the photograph
+   * was taken — for a stored document that is complete and is designed to
+   * outlive its images. `ExtractionService.statusFor` already reads through the
+   * same check for the same reason, and the surfaces that come back to an upload
+   * in a later session (the generate route, the weak-area drill-down) read it
+   * through here.
+   *
+   * An expired **draft** is still a 404, because an expired draft genuinely is
+   * over — `requireReadable` keeps that, so nothing about a draft changes. The
+   * write paths that tail-call this are unaffected either way: each has already
+   * proved its own state through `requireDraft`, which is `requireLive` plus the
+   * status check.
+   */
   async read(parentAccountId: string, sourceTestId: string): Promise<SourceTestView> {
-    return this.viewOf(await this.requireLive(parentAccountId, sourceTestId));
+    return this.viewOf(await this.requireReadable(parentAccountId, sourceTestId));
   }
 
   /**
@@ -437,6 +463,61 @@ export class SourceTestService implements SourceTestReader {
     // Nothing is read back: the route answers 204 and the client re-reads for
     // itself, so a view built here would be two queries nobody consumes.
     await this.ingest.remove(removed);
+  }
+
+  /**
+   * Removes the photographs of a committed Source Test at the parent's request,
+   * ahead of the 90-day clock (FR-33).
+   *
+   * The outcome is deliberately indistinguishable from an expiry, because it is
+   * the same routine: `PageExpiryService` unlinks the bytes and marks each row
+   * `Deleted` with `bytesDeletedAt` and a null `storagePath`, and the rows
+   * survive so the strip can say which page is gone rather than showing a hole.
+   * Nothing derived is touched — not the `SourceTest`, not the Extraction, and
+   * not one Practice Test, Attempt, Explanation or Mastery value.
+   *
+   * The whole page set, never one page: the sweep's unit is the Source Test and
+   * a second unit of deletion would be a second set of rules and a strip mixing
+   * live and removed photographs by choice rather than by the clock. `deletePage`
+   * above is a different action on a different object — it removes a *row* from
+   * a draft and renumbers its siblings.
+   *
+   * Idempotent by construction: `expireNow` selects `Ready` rows, so a second
+   * call finds none, unlinks nothing and re-dates nothing.
+   *
+   * No password and no PIN re-prompt: the elevation guard in front of the route
+   * is the whole authorization, and it is the one destructive action in Epic 8
+   * that is allowed that, because nothing derived is lost.
+   */
+  async deletePageImages(parentAccountId: string, sourceTestId: string): Promise<SourceTestView> {
+    // `requireReadable`, never `requireLive`: `expiresAt` is the draft's 72-hour
+    // capture TTL and submit does not clear it, so proving ownership against it
+    // would 404 exactly the committed uploads this action exists for — every
+    // one older than three days, which is all of them for most of the 90-day
+    // window being shortened.
+    const row = await this.requireReadable(parentAccountId, sourceTestId);
+
+    // A draft's photographs are not removable early: they are the only copy of
+    // work that has not been read yet, and the 72h TTL already owns them.
+    if (row.status !== 'Submitted') throw new ConflictException(SOURCE_TEST_NOT_SUBMITTED);
+
+    // The safety argument, checked rather than assumed. A `Queued` or `Running`
+    // job has not stored anything yet, so deleting the images would destroy its
+    // only input; a `Failed` retryable job could never be retried. The sweep
+    // never meets this case — ninety days on, the job has long settled — so
+    // this gate belongs to the early trigger alone.
+    if (!(await this.extraction.hasPersistedExtraction(sourceTestId))) {
+      throw new ConflictException(EXTRACTION_NOT_PERSISTED);
+    }
+
+    await this.pageExpiry.expireNow(sourceTestId, new Date());
+
+    // Re-read through `requireReadable` by name rather than through `read()`,
+    // so this answer cannot be changed by a future edit to which check that
+    // method happens to use: a `requireLive` here would 404 the committed Source
+    // Test this call has just emptied, every time its 72h draft `expiresAt` has
+    // passed. The two are the same read today, and this one says why it must be.
+    return this.viewOf(await this.requireReadable(parentAccountId, sourceTestId));
   }
 
   /**

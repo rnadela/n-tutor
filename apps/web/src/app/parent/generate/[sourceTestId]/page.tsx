@@ -15,8 +15,9 @@ import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
+import { ORDER_HEADING_ID, PageStrip } from '@/app/parent/capture/PageStrip';
 import { PrimaryButton } from '@/components/Button';
-import { AppDialog } from '@/components/Dialog';
+import { AppDialog, ConfirmDestructiveDialog } from '@/components/Dialog';
 import { useAnnounce } from '@/components/LiveRegion';
 import { Screen } from '@/components/Screen';
 import { parentCopy } from '@/copy/parent';
@@ -28,6 +29,7 @@ import {
   type GenerationAllowanceView,
   type GenerationJobView,
   type GenerationTopicsView,
+  type SourceTestView,
 } from '@/lib/parent-api';
 import {
   GENERATION_POLL_MS,
@@ -75,6 +77,16 @@ const TOPIC_HINT_ID = 'generate-topic-hint';
 const ALL_TOPICS = '__all__';
 
 /**
+ * The page strip's edit callbacks, which a read-only strip never reaches.
+ *
+ * Declared once at module scope rather than as three inline closures, so it is
+ * plain that the strip on this screen edits nothing: page management belongs to
+ * the draft, on the capture screen, and every write against the committed Source
+ * Test this route is reached for answers 409.
+ */
+const noPageEdit = (): void => {};
+
+/**
  * The generate step: pick a count, read the cost, confirm, then watch the job.
  *
  * It is a **route** rather than a section of the capture screen, and that is
@@ -95,6 +107,17 @@ export default function GeneratePage() {
   const token = elevation?.token ?? null;
 
   const [allowance, setAllowance] = useState<GenerationAllowanceView | null>(null);
+  /**
+   * The upload itself, which this screen reads for its pages.
+   *
+   * This route is the only one in the product keyed by a Source Test id, so it
+   * is the only place a parent can come back to a committed upload in a later
+   * session — from the weak-area drill-down, or from their own link. Rendering
+   * the page set here is what makes the removed state visible where the upload
+   * actually lives, and it is where the early deletion (FR-33) has to be
+   * offered for the same reason.
+   */
+  const [sourceTest, setSourceTest] = useState<SourceTestView | null>(null);
   /** The Extraction's own Topic labels, in the order the API gave them. */
   const [topics, setTopics] = useState<string[]>([]);
   /**
@@ -107,6 +130,9 @@ export default function GeneratePage() {
   const [count, setCount] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [starting, setStarting] = useState(false);
+  /** The photo-deletion confirmation, and its write. */
+  const [confirmingPhotoDelete, setConfirmingPhotoDelete] = useState(false);
+  const [deletingPhotos, setDeletingPhotos] = useState(false);
   const [loading, setLoading] = useState(true);
   /**
    * True from the instant a job settles until its allowance re-read resolves.
@@ -130,6 +156,19 @@ export default function GeneratePage() {
   /** The same object identity across renders, so the guard reads live state. */
   const current = useRef({ value: 0 });
   current.current.value = requestId.current;
+
+  /**
+   * The photo deletion's own token, kept apart from the counter above.
+   *
+   * That counter is shared by the mount load and the progress poll, and bumping
+   * it is how each of those invalidates the other's in-flight result. A delete
+   * is a third, independent stream: sharing the counter would make confirming a
+   * deletion silently discard the poll's next answer, with nothing left to
+   * re-issue it — generation progress simply stops moving on screen.
+   */
+  const deleteRequestId = useRef(0);
+  const currentDelete = useRef({ value: 0 });
+  currentDelete.current.value = deleteRequestId.current;
 
   const leave = useCallback(() => {
     clearElevation();
@@ -198,18 +237,37 @@ export default function GeneratePage() {
         }
         throw cause;
       }),
+      // The upload itself. Read through `parentApi.sourceTest`, whose server
+      // side proves ownership with `requireReadable` — so a committed upload
+      // still resolves long after the 72h draft TTL on its `expiresAt` has
+      // passed, which is every upload this screen is reached for in a later
+      // session.
+      //
+      // Degraded rather than fatal, because generation needs none of it: the
+      // page set is what the strip and the delete-photos control are built
+      // from, and this screen loaded without either of them before they
+      // existed. A transient failure here must not take down the picker and
+      // the progress panel with it. A cause that ends the whole parent view —
+      // an expired elevation, a revoked session — is still rethrown, so the
+      // handler below can send the parent back to the PIN gate.
+      parentApi.sourceTest(token, sourceTestId).catch((cause: unknown) => {
+        if (endsParentView(cause)) throw cause;
+        return null;
+      }),
     ]).then(
       applyIfCurrent(
         current.current,
         issued,
-        ([reading, existing, offered]: [
+        ([reading, existing, offered, upload]: [
           GenerationAllowanceView,
           GenerationJobView | null,
           GenerationTopicsView,
+          SourceTestView | null,
         ]) => {
           setAllowance(reading);
           setJob(existing);
           setTopics(offered.topics);
+          setSourceTest(upload);
           setCount(defaultCount(reading.remaining, reading.maxPerRequest));
           setLoading(false);
         },
@@ -366,6 +424,71 @@ export default function GeneratePage() {
       }),
     );
   }
+
+  /**
+   * Removes the photographs of this upload, ahead of the 90-day clock (FR-33).
+   *
+   * The confirmation stays open until the write settles — that is what lets its
+   * `busy` lock reach the controls — and the announcement is phrased from the
+   * view the server answered with, never from a count this screen predicted.
+   */
+  function deletePhotos(): void {
+    if (token === null) return;
+    setDeletingPhotos(true);
+    setError(null);
+    const issued = (deleteRequestId.current += 1);
+    currentDelete.current.value = issued;
+    parentApi.deleteSourceTestPageImages(token, sourceTestId).then(
+      applyIfCurrent(currentDelete.current, issued, (after: SourceTestView) => {
+        setDeletingPhotos(false);
+        setConfirmingPhotoDelete(false);
+        setSourceTest(after);
+        // Counted off the answer: on an idempotent second confirm the removed
+        // pages are still removed, and "how many are gone" is a fact about the
+        // upload rather than about this request. A before-minus-after figure
+        // would be zero here, and there is no sentence for zero.
+        const removed = after.pages.filter((page) => page.state === 'Deleted').length;
+        // A 200 with nothing removed is the one success that is not one: every
+        // unlink failed, the photographs are still there, and the rows the
+        // server answers with say so. Announcing "0 photos have been removed"
+        // would be a sentence the copy has no form for and a claim that is
+        // false. The failure line is what the parent can act on — the pages are
+        // left for the schedule, and trying again costs nothing.
+        if (removed === 0) {
+          setError(parentCopy.capture.deletePhotosFailed);
+          return;
+        }
+        announce(parentCopy.capture.photosDeleted(removed));
+      }),
+      applyIfCurrent(currentDelete.current, issued, (cause: unknown) => {
+        if (endsParentView(cause)) {
+          leave();
+          return;
+        }
+        setDeletingPhotos(false);
+        setConfirmingPhotoDelete(false);
+        // A 409 here is the API refusing on a rule it authored — the upload has
+        // not been submitted, or is still being read — and the parent reads
+        // that sentence rather than this screen's generic one.
+        setError(messageFor(cause, parentCopy.capture.deletePhotosFailed));
+      }),
+    );
+  }
+
+  const pages = sourceTest?.pages ?? [];
+  /**
+   * The photographs that are still held. One predicate, not two: the control is
+   * offered exactly when there is something for it to remove on an upload that
+   * has been committed, and the count it states is the same figure.
+   *
+   * A draft has no such control here at all — this route is only ever reached
+   * for a committed upload — and once every page is `Deleted` the control is
+   * gone, because pressing it would remove nothing.
+   */
+  const livePhotoCount =
+    sourceTest?.status === 'Submitted'
+      ? pages.filter((page) => page.state !== 'Deleted').length
+      : 0;
 
   const options =
     allowance === null ? [] : countOptions(allowance.remaining, allowance.maxPerRequest);
@@ -608,6 +731,59 @@ export default function GeneratePage() {
           </CardContent>
         </Card>
       )}
+
+      {/* The upload's own pages, read-only.
+
+          The same `PageStrip` the capture screen renders, with `editable`
+          false: a second renderer of a page row would be a second version of
+          the removed state, and the dated "Photo deleted" caption a page gets
+          here has to be the one an expired page gets. Every write against a
+          committed Source Test answers 409 anyway, so the strip's controls
+          would only be a way of collecting that refusal. */}
+      {sourceTest !== null && pages.length > 0 && (
+        <Card>
+          <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
+            <Typography id={ORDER_HEADING_ID} component="h2" sx={{ fontSize: 18, fontWeight: 700 }}>
+              {parentCopy.capture.title}
+            </Typography>
+
+            <PageStrip
+              pages={pages}
+              editable={false}
+              busy={deletingPhotos}
+              onMove={noPageEdit}
+              onRetake={noPageEdit}
+              onDelete={noPageEdit}
+            />
+
+            {livePhotoCount > 0 && (
+              <Button
+                type="button"
+                variant="outlined"
+                color="error"
+                sx={{ minHeight: density.tapTarget, justifySelf: 'start' }}
+                disabled={deletingPhotos}
+                onClick={() => setConfirmingPhotoDelete(true)}
+                data-testid="delete-photos"
+              >
+                {parentCopy.capture.deletePhotos}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* No password and no PIN: nothing built from these photographs is lost,
+          so there is no loss for a re-authentication to stand in front of. The
+          elevation the parent already proved is the whole authorization. */}
+      <ConfirmDestructiveDialog
+        open={confirmingPhotoDelete}
+        title={parentCopy.capture.deletePhotosTitle}
+        body={parentCopy.capture.deletePhotosBody(livePhotoCount)}
+        busy={deletingPhotos}
+        onCancel={() => setConfirmingPhotoDelete(false)}
+        onConfirm={deletePhotos}
+      />
 
       {/* The confirmation restates the cost rather than referring back to it:
           it is the last thing read before the allowance is spent. */}

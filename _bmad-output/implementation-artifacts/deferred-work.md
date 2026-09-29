@@ -2021,3 +2021,35 @@ source_spec: `spec-8-1-automatic-page-image-expiry.md`
 severity: medium
 reason: SchedulerService.apply() catches every failure of createQueue/work/schedule and only logs it, and a boot whose start() fails now logs and continues by design. There is no health indicator, counter or alert by which a retention sweep that never runs becomes visible in production.
 status: open
+
+### DW-254: There is no Source Test list anywhere in the product, so a parent can only reach an upload by a link that happens to point at its id.
+origin: spec-deferred 632cea5a3ff3
+location: apps/api/src/sourcetest/source-test.controller.ts:177
+source_spec: `spec-8-2-early-image-deletion.md`
+severity: medium
+reason: The API exposes `@Get('subjects')` and `@Get(':id')` and no list route (`source-test.controller.ts:177,182`), and the only links carrying a source test id are capture's `proceedToGenerate` and the weak-area drill-down. The UX validation report already records this ("there is no entry point for FR-33's early image deletion"), and the PRD's surface map names a Parent View -> Source Tests surface that does not exist. This story places its control on the one id-keyed route that does exist; the missing list surface is larger than this story and is where 8.3/8.4's Data & deletion entry point will also have to land.
+status: open
+
+### DW-255: Nothing proves a page's bytes endpoint answers cleanly rather than failing once a row is Deleted with a null storagePath.
+origin: spec-deferred 76bb28c9241a
+location: apps/api/src/sourcetest/source-test.service.ts:986
+source_spec: `spec-8-2-early-image-deletion.md`
+severity: low
+reason: `readPageBytes()` filters to `state: 'Ready'` so the deleted row is simply absent, and the integration suite proves generation still works, but no test calls a per-page read path after deletion. The exposure is 8.1's and pre-dates this story; the early trigger only makes it reachable minutes after upload instead of after ninety days.
+status: open
+
+### DW-256: The web tier verifies screen wiring by substring-matching the component file's own source text, so a behaviour regression that preserves the wording passes.
+origin: spec-deferred cef8dc227cca
+location: apps/web/vitest.config.ts
+source_spec: `spec-8-2-early-image-deletion.md`
+severity: medium
+reason: `apps/web/vitest.config.ts` runs `environment: 'node'` with no DOM, so the established idiom (`PAGE_SOURCE = readFileSync(page.tsx)` then `expect(PAGE_SOURCE).toContain(...)`) is used by the capture screen's spec and now by the generate screen's. Three of four review layers independently flagged it: renaming a local breaks the tests while breaking the wiring passes them. Pre-existing convention, not introduced here, and changing it is a tier-wide decision about how `apps/web` is tested.
+status: open
+
+### DW-257: A Source Test whose Extraction job reaches a terminal, non-retryable Failed state without ever persisting a row has no path forward: `hasPersistedExtraction` stays false forever, so the early-deletion
+origin: spec-deferred 85cfea265498
+location: apps/api/src/sourcetest/source-test.service.ts:501
+source_spec: `spec-8-2-early-image-deletion.md`
+severity: low
+reason: `deletePageImages` refuses with `EXTRACTION_NOT_PERSISTED` whenever `ExtractionService.hasPersistedExtraction` answers false, and that method only reads whether an `extraction` row exists — it cannot distinguish "still running" from "permanently failed with no retry queued". This is a pre-existing gap in the extraction job's own retry/recovery policy, not something this story's gate introduced, and the 90-day sweep is unaffected since it never checks extraction status. A parent in this state keeps the photos until the sweep, not forever.
+status: open

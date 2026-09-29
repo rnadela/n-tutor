@@ -6,6 +6,7 @@ import { parentTheme } from '@/theme/theme';
 import {
   AppDialog,
   canConfirmDestructive,
+  ConfirmDestructiveDialog,
   DestructiveActions,
   DestructiveConfirmDialog,
   passwordOnToggle,
@@ -250,5 +251,83 @@ describe('the dialog primitive', () => {
     expect(markup).toContain('MuiPaper-elevation0');
     expect(markup).toContain('--Paper-shadow:var(--mui-shadows-0)');
     expect(markup).not.toContain('mui-shadows-24');
+  });
+});
+
+describe('the passwordless destructive confirmation', () => {
+  const BODY = 'All 3 photos of this upload will be removed.';
+
+  function render(props: Partial<React.ComponentProps<typeof ConfirmDestructiveDialog>> = {}) {
+    return renderOverlay(
+      <ConfirmDestructiveDialog
+        open
+        title="Delete the photos of this upload?"
+        body={BODY}
+        onCancel={noop}
+        onConfirm={noop}
+        disablePortal
+        keepMounted
+        {...props}
+      />,
+    );
+  }
+
+  it('renders the body the caller wrote, which is the whole point of the dialog', () => {
+    const markup = render();
+    expect(markup).toContain('Delete the photos of this upload?');
+    expect(markup).toContain(BODY);
+  });
+
+  it('describes itself by that body rather than announcing only its title', () => {
+    const markup = render();
+    const describedBy = /aria-describedby="([^"]+)"/u.exec(markup)?.[1];
+    expect(describedBy).toBeDefined();
+    expect(markup).toContain(`id="${describedBy}"`);
+  });
+
+  it('asks for no password: there is no password field to fill', () => {
+    // The absent field *is* the requirement. Nothing built from the photographs
+    // is lost, so there is no loss for a re-authentication to stand in front of.
+    const markup = render();
+    expect(markup).not.toContain('type="password"');
+    expect(markup).not.toContain('autoComplete="current-password"');
+    expect(markup).not.toContain(commonCopy.destructive.passwordLabel);
+    expect(markup).not.toContain(commonCopy.destructive.passwordHint);
+    expect(markup).not.toContain('<input');
+  });
+
+  it('enables the confirm on arrival, with nothing typed', () => {
+    // Asserted on the controls themselves rather than on the whole markup: a
+    // bare `not.toContain('disabled')` also matches `aria-disabled`, MUI's
+    // `Mui-disabled` class and anything else that merely spells the word, so it
+    // would pass and fail for reasons that have nothing to do with the confirm.
+    const markup = render();
+    expect(markup).toContain(commonCopy.destructive.confirm);
+    expect(markup).toContain(commonCopy.destructive.cancel);
+    expect(markup.match(/<button[^>]*disabled/gu)).toBeNull();
+  });
+
+  it('offers a way out beside the confirm, and offers it first', () => {
+    // The order matters: the cancel is what a parent who opened this by mistake
+    // reaches first, by tab and by eye.
+    const markup = render();
+    const buttons = [...markup.matchAll(/<button[^>]*>(.*?)<\/button>/gu)].map((match) => match[1]);
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toContain(commonCopy.destructive.cancel);
+    expect(buttons[1]).toContain(commonCopy.destructive.confirm);
+  });
+
+  it('locks both controls while the delete is in flight', () => {
+    // Reachable only because the dialog does not close itself on confirm: the
+    // caller keeps it open until the write settles.
+    const markup = render({ busy: true });
+    expect(markup.match(/<button[^>]*disabled/gu)?.length).toBe(2);
+  });
+
+  it('carries the destructive intent as an outlined error button, never a fill', () => {
+    const markup = render();
+    expect(markup).toContain('MuiButton-outlined');
+    expect(markup).toContain('MuiButton-colorError');
+    expect(markup).not.toContain('MuiButton-contained');
   });
 });

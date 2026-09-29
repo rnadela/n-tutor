@@ -4,6 +4,15 @@ import { PageIngestService } from './page-ingest.service.js';
 import { PAGE_EXPIRY_SWEEP_BATCH_SIZE, pageImageExpiryCutoff } from './source-test-policy.js';
 
 /**
+ * Which of the two triggers asked for a removal, as it appears in the log.
+ *
+ * A closed union rather than a free string: the log line is the only place the
+ * two are distinguishable after the fact, and "whatever the caller passed" is
+ * not a distinction an operator can rely on.
+ */
+type ExpiryTrigger = 'Retention sweep' | 'Parent-requested deletion';
+
+/**
  * The FR-32 retention sweep: 90 days after a Source Test was submitted, the
  * photographs of the child's schoolwork stop existing.
  *
@@ -25,6 +34,11 @@ import { PAGE_EXPIRY_SWEEP_BATCH_SIZE, pageImageExpiryCutoff } from './source-te
  * - **It never throws out of a pass and never logs a path.** A failed unlink
  *   leaves the row `Ready` for the next pass and is logged by page id alone
  *   (AD-15, AD-20).
+ *
+ * Two triggers reach that behaviour and only two: the 90-day schedule
+ * (`sweepExpired`) and the parent's own early deletion (`expireNow`, FR-33).
+ * Both delegate to `removeAndMark`, so the rules above are stated once and the
+ * outcome of an early deletion is indistinguishable from an expiry.
  */
 @Injectable()
 export class PageExpiryService {
@@ -63,6 +77,51 @@ export class PageExpiryService {
       // sweep needs.
       take: PAGE_EXPIRY_SWEEP_BATCH_SIZE,
     });
+    return this.removeAndMark(due, now, 'Retention sweep');
+  }
+
+  /**
+   * The same removal, for one Source Test and at the parent's own request
+   * (FR-33), rather than for a batch the clock has reached.
+   *
+   * A second trigger on **one** routine: the unlink-then-mark sequence, its
+   * crash-safety order, its `state: 'Ready'` guard on both the select and the
+   * update, and its refusal to throw are all `removeAndMark`'s and are stated
+   * exactly once. A second copy of that sequence is the defect this method
+   * exists to avoid.
+   *
+   * No cutoff, because the parent asking *is* the clock here, and no batch cap,
+   * because a Source Test holds at most `MAX_PAGES` pages — the cap exists to
+   * bound a backlog of unknown size, and this select has a bound of its own.
+   *
+   * Every gate that decides whether this may be called at all — ownership, the
+   * `Submitted` status, the persisted Extraction — lives with the ownership
+   * check in `SourceTestService`, so this stays a pure deletion routine with no
+   * opinion about who asked.
+   */
+  async expireNow(sourceTestId: string, now: Date): Promise<number> {
+    // `state: 'Ready'` again: a Source Test whose pages a previous call (or the
+    // sweep) already emptied selects nothing, unlinks nothing and marks
+    // nothing, which is what makes the route idempotent.
+    const due = await this.prisma.pageImage.findMany({
+      where: { sourceTestId, state: 'Ready' },
+      select: { id: true },
+    });
+    return this.removeAndMark(due, now, 'Parent-requested deletion');
+  }
+
+  /**
+   * Unlink, then mark — the whole of both triggers' behaviour, in one place.
+   *
+   * `trigger` names which one asked, because the two lines are otherwise
+   * identical and an operator reading a log needs to know whether a disk that
+   * refused a page did so under the schedule or in front of a waiting parent.
+   */
+  private async removeAndMark(
+    due: readonly { id: string }[],
+    now: Date,
+    trigger: ExpiryTrigger,
+  ): Promise<number> {
     if (due.length === 0) return 0;
 
     const gone = (
@@ -80,7 +139,7 @@ export class PageExpiryService {
     const kept = due.length - gone.length;
     if (kept > 0) {
       this.logger.warn(
-        `Retention sweep could not remove the stored bytes of ${kept} of ${due.length} due page images; they stay Ready and are retried next pass.`,
+        `${trigger} could not remove the stored bytes of ${kept} of ${due.length} due page images; they stay Ready and are retried next pass.`,
       );
     }
     if (gone.length === 0) return 0;
@@ -94,7 +153,7 @@ export class PageExpiryService {
     });
 
     if (marked.count > 0) {
-      this.logger.log(`Retention sweep removed the stored bytes of ${marked.count} page images.`);
+      this.logger.log(`${trigger} removed the stored bytes of ${marked.count} page images.`);
     }
     return marked.count;
   }
