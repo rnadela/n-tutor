@@ -118,7 +118,12 @@ export function TaxonomyList(props: TaxonomyListProps) {
             </TableHead>
             <TableBody>
               {items.map((item) => (
-                <TableRow key={item.id} data-testid={`${idPrefix}-row`} data-name={item.name}>
+                <TableRow
+                  key={item.id}
+                  data-testid={`${idPrefix}-row`}
+                  data-name={item.name}
+                  sx={{ '&:hover': { bgcolor: 'action.hover' } }}
+                >
                   <TableCell>
                     {renamingId === item.id ? (
                       <Box
@@ -153,7 +158,19 @@ export function TaxonomyList(props: TaxonomyListProps) {
                     )}
                   </TableCell>
                   <TableCell>
-                    {item.enabled ? adminCopy.taxonomy.enabled : adminCopy.taxonomy.disabled}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Box
+                        aria-hidden
+                        sx={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          bgcolor: item.enabled ? 'success.main' : 'text.secondary',
+                          flexShrink: 0,
+                        }}
+                      />
+                      {item.enabled ? adminCopy.taxonomy.enabled : adminCopy.taxonomy.disabled}
+                    </Box>
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', gap: `${density.gap}px` }}>
@@ -169,6 +186,7 @@ export function TaxonomyList(props: TaxonomyListProps) {
                       </Button>
                       <Button
                         type="button"
+                        color={item.enabled ? 'error' : 'success'}
                         disabled={isPending(item.id)}
                         onClick={() =>
                           withPending(item.id, () => props.onSetEnabled(item, !item.enabled))

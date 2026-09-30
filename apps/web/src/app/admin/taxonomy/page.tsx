@@ -124,63 +124,72 @@ export default function TaxonomyPage() {
         </Alert>
       )}
 
-      <TaxonomyList
-        heading={adminCopy.taxonomy.subjectsHeading}
-        idPrefix="subjects"
-        newItemLabel={adminCopy.taxonomy.newSubjectLabel}
-        addLabel={adminCopy.taxonomy.addSubject}
-        emptyLabel={adminCopy.taxonomy.emptySubjects}
-        items={snapshot.subjects}
-        onCreate={(name) =>
-          run(async () => {
-            const created = await adminApi.createSubject(name);
-            return adminCopy.announce.subjectCreated(created.name);
-          })
-        }
-        onRename={(item: TaxonomyItem, name) =>
-          run(async () => {
-            const renamed = await adminApi.renameSubject(item.id, name);
-            return adminCopy.announce.subjectRenamed(item.name, renamed.name);
-          })
-        }
-        onSetEnabled={(item: TaxonomyItem, enabled) =>
-          run(async () => {
-            await adminApi.setSubjectEnabled(item.id, enabled);
-            return enabled
-              ? adminCopy.announce.subjectEnabled(item.name)
-              : adminCopy.announce.subjectDisabled(item.name);
-          })
-        }
-      />
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+          gap: `${density.sectionMargin}px`,
+          alignItems: 'start',
+        }}
+      >
+        <TaxonomyList
+          heading={adminCopy.taxonomy.subjectsHeading}
+          idPrefix="subjects"
+          newItemLabel={adminCopy.taxonomy.newSubjectLabel}
+          addLabel={adminCopy.taxonomy.addSubject}
+          emptyLabel={adminCopy.taxonomy.emptySubjects}
+          items={snapshot.subjects}
+          onCreate={(name) =>
+            run(async () => {
+              const created = await adminApi.createSubject(name);
+              return adminCopy.announce.subjectCreated(created.name);
+            })
+          }
+          onRename={(item: TaxonomyItem, name) =>
+            run(async () => {
+              const renamed = await adminApi.renameSubject(item.id, name);
+              return adminCopy.announce.subjectRenamed(item.name, renamed.name);
+            })
+          }
+          onSetEnabled={(item: TaxonomyItem, enabled) =>
+            run(async () => {
+              await adminApi.setSubjectEnabled(item.id, enabled);
+              return enabled
+                ? adminCopy.announce.subjectEnabled(item.name)
+                : adminCopy.announce.subjectDisabled(item.name);
+            })
+          }
+        />
 
-      <TaxonomyList
-        heading={adminCopy.taxonomy.gradeLevelsHeading}
-        idPrefix="grade-levels"
-        newItemLabel={adminCopy.taxonomy.newGradeLevelLabel}
-        addLabel={adminCopy.taxonomy.addGradeLevel}
-        emptyLabel={adminCopy.taxonomy.emptyGradeLevels}
-        items={snapshot.gradeLevels}
-        onCreate={(name) =>
-          run(async () => {
-            const created = await adminApi.createGradeLevel(name);
-            return adminCopy.announce.gradeLevelCreated(created.name);
-          })
-        }
-        onRename={(item: TaxonomyItem, name) =>
-          run(async () => {
-            const renamed = await adminApi.renameGradeLevel(item.id, name);
-            return adminCopy.announce.gradeLevelRenamed(item.name, renamed.name);
-          })
-        }
-        onSetEnabled={(item: TaxonomyItem, enabled) =>
-          run(async () => {
-            await adminApi.setGradeLevelEnabled(item.id, enabled);
-            return enabled
-              ? adminCopy.announce.gradeLevelEnabled(item.name)
-              : adminCopy.announce.gradeLevelDisabled(item.name);
-          })
-        }
-      />
+        <TaxonomyList
+          heading={adminCopy.taxonomy.gradeLevelsHeading}
+          idPrefix="grade-levels"
+          newItemLabel={adminCopy.taxonomy.newGradeLevelLabel}
+          addLabel={adminCopy.taxonomy.addGradeLevel}
+          emptyLabel={adminCopy.taxonomy.emptyGradeLevels}
+          items={snapshot.gradeLevels}
+          onCreate={(name) =>
+            run(async () => {
+              const created = await adminApi.createGradeLevel(name);
+              return adminCopy.announce.gradeLevelCreated(created.name);
+            })
+          }
+          onRename={(item: TaxonomyItem, name) =>
+            run(async () => {
+              const renamed = await adminApi.renameGradeLevel(item.id, name);
+              return adminCopy.announce.gradeLevelRenamed(item.name, renamed.name);
+            })
+          }
+          onSetEnabled={(item: TaxonomyItem, enabled) =>
+            run(async () => {
+              await adminApi.setGradeLevelEnabled(item.id, enabled);
+              return enabled
+                ? adminCopy.announce.gradeLevelEnabled(item.name)
+                : adminCopy.announce.gradeLevelDisabled(item.name);
+            })
+          }
+        />
+      </Box>
 
       <AvailabilityMatrix
         subjects={snapshot.subjects}

@@ -73,7 +73,7 @@ export function AvailabilityMatrix(props: AvailabilityMatrixProps) {
                   {adminCopy.taxonomy.subjectsHeading}
                 </TableCell>
                 {gradeLevels.map((gradeLevel) => (
-                  <TableCell key={gradeLevel.id} component="th" scope="col">
+                  <TableCell key={gradeLevel.id} component="th" scope="col" align="center">
                     {gradeLevel.name}
                   </TableCell>
                 ))}
@@ -81,15 +81,19 @@ export function AvailabilityMatrix(props: AvailabilityMatrixProps) {
             </TableHead>
             <TableBody>
               {subjects.map((subject) => (
-                <TableRow key={subject.id}>
-                  <TableCell component="th" scope="row">
+                <TableRow key={subject.id} sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
+                  <TableCell
+                    component="th"
+                    scope="row"
+                    sx={{ borderRight: '1px solid', borderColor: 'divider' }}
+                  >
                     {subject.name}
                   </TableCell>
                   {gradeLevels.map((gradeLevel) => {
                     const key = `${subject.id}:${gradeLevel.id}`;
                     const checked = enabledPairs.has(key);
                     return (
-                      <TableCell key={gradeLevel.id}>
+                      <TableCell key={gradeLevel.id} align="center">
                         <Checkbox
                           checked={checked}
                           disabled={pendingPairs.has(key)}
