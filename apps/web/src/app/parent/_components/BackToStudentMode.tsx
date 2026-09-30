@@ -195,7 +195,7 @@ export function BackToStudentMode() {
   if (token === null) return null;
 
   return (
-    <Box sx={{ mb: `${density.sectionMargin}px` }}>
+    <Box>
       <Button
         type="button"
         variant="outlined"

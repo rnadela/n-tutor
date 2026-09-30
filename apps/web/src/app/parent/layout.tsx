@@ -1,9 +1,7 @@
-import Box from '@mui/material/Box';
-import { BackToStudentMode } from './_components/BackToStudentMode';
 import { ParentIdleExpiry } from './_components/ParentIdleExpiry';
+import { ParentSidebarChrome } from './_components/ParentSidebarChrome';
 import { ParentThemeProvider } from './_components/ParentThemeProvider';
 import { ElevationProvider } from '@/lib/elevation';
-import { density } from '@/theme/tokens';
 
 /**
  * The elevation token is held by a provider mounted here, so it lives exactly
@@ -19,21 +17,12 @@ export default function ParentLayout({ children }: { children: React.ReactNode }
             expiry the same on every Parent View surface (AD-13). It renders
             nothing. */}
         <ParentIdleExpiry />
-        <Box
-          component="main"
-          sx={{
-            minHeight: '100vh',
-            bgcolor: 'background.default',
-            paddingBlock: `${density.sectionMargin}px`,
-            paddingInline: `${density.cardPadding}px`,
-          }}
-        >
-          {/* Above every Parent View surface, so the way out of Parent View
-              exists wherever the parent happens to be standing. It renders
-              itself as nothing while no elevation is held. */}
-          <BackToStudentMode />
-          {children}
-        </Box>
+        {/* The admin-dashboard shell: a sidebar naming every Parent View
+            destination, with the way out of Parent View at its foot so it
+            exists wherever the parent happens to be standing. It falls back
+            to a bare surface on the PIN gate itself, before anything is
+            elevated. */}
+        <ParentSidebarChrome>{children}</ParentSidebarChrome>
       </ElevationProvider>
     </ParentThemeProvider>
   );

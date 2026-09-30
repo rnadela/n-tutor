@@ -2,13 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
@@ -103,63 +101,6 @@ export default function ParentViewPage() {
             <Typography>
               {parentCopy.parentView.ceilingLabel}: {new Date(session.ceilingAt).toLocaleString()}
             </Typography>
-            {/* A client-side navigation on purpose: a full page load would
-                unmount the provider holding the token, and the change screen
-                would find itself unelevated before it rendered. */}
-            <Link component={NextLink} href="/parent/students">
-              {parentCopy.parentView.students}
-            </Link>
-            <Link component={NextLink} href="/parent/capture">
-              {parentCopy.parentView.capture}
-            </Link>
-            {/* A first-class destination, not a step of the generate flow: it
-                is where a parent who left a running job finds the drafts they
-                paid for. Client-side for the same reason as its neighbours. */}
-            <Link component={NextLink} href="/parent/drafts">
-              {parentCopy.parentView.drafts}
-            </Link>
-            {/* The way in to what a child has finished — and the only way in
-                there is. It is where a parent reads what their child was told
-                about a Question, which is the whole reason ungated student-facing
-                explanations are answerable to somebody. Client-side for the same
-                reason as its neighbours. */}
-            <Link component={NextLink} href="/parent/attempts">
-              {parentCopy.parentView.attempts}
-            </Link>
-            {/* The way in to what a child has *reported*, and the only way in there
-                is. The Attempt-detail region shows a concern only to somebody who
-                already opened that Attempt, so without this link a child raising a
-                hand would be a record nobody ever sees — and a report a parent
-                cannot reach is a report that did not surface. Client-side for the
-                same reason as its neighbours. */}
-            <Link component={NextLink} href="/parent/explanation-flags">
-              {parentCopy.parentView.explanationFlags}
-            </Link>
-            {/* The way in to the marks a child says are wrong, and the only way in there
-                is — beside the reported explanations for exactly that one's reason. The
-                Attempt-detail row shows an objection only to somebody who already opened
-                that Attempt, so without this link a child raising a hand about a mark would
-                be a record nobody ever sees. Client-side for the same reason as its
-                neighbours. */}
-            <Link component={NextLink} href="/parent/grade-disputes">
-              {parentCopy.parentView.gradeDisputes}
-            </Link>
-            {/* Where a student is strong and where they are weak — the one place
-                every stored mastery figure is actually read. A dashboard a parent
-                cannot reach is a dashboard that did not ship, and this list is the
-                only way in. Client-side for the same reason as its neighbours. */}
-            <Link component={NextLink} href="/parent/analytics">
-              {parentCopy.parentView.analytics}
-            </Link>
-            <Link component={NextLink} href="/parent/pin/change">
-              {parentCopy.parentView.changePin}
-            </Link>
-            {/* The account's own settings — the only way in, and where a parent
-                ends the account entirely (FR-33). Client-side for the same
-                reason as its neighbours. */}
-            <Link component={NextLink} href="/parent/settings">
-              {parentCopy.parentView.settings}
-            </Link>
           </Box>
         )}
       </CardContent>
