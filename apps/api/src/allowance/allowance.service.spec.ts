@@ -33,14 +33,17 @@ function serviceWith(
   sourceTestCount: ReturnType<typeof vi.fn>;
   /** The same, for the Generation count the cap at the charge enforces against. */
   practiceTestCount: ReturnType<typeof vi.fn>;
+  /** The same, for the Explanation count the cap at the charge enforces against. */
+  explanationCount: ReturnType<typeof vi.fn>;
 } {
   const aggregateArgs: unknown[] = [];
   const sourceTestCount = vi.fn(async () => live.upload);
   const practiceTestCount = vi.fn(async () => live.generation);
+  const explanationCount = vi.fn(async () => live.explanation);
   const prisma = {
     sourceTest: { count: sourceTestCount },
     practiceTest: { count: practiceTestCount },
-    explanation: { count: vi.fn(async () => live.explanation) },
+    explanation: { count: explanationCount },
     usageTombstone: {
       aggregate: vi.fn(async (args: Record<string, never>) => {
         aggregateArgs.push(args);
@@ -77,6 +80,7 @@ function serviceWith(
     aggregateArgs,
     sourceTestCount,
     practiceTestCount,
+    explanationCount,
   };
 }
 
@@ -298,6 +302,80 @@ describe('the Generation count the cap at the charge enforces against', () => {
     const consumption = await service.consumptionFor(ACCOUNT_ID, NOW);
     expect(await service.generationUsedIn(ACCOUNT_ID, window)).toBe(
       consumption.allowances.generation.used,
+    );
+  });
+});
+
+describe('the Explanation count the cap at the charge enforces against', () => {
+  /**
+   * `explanationFor`'s guard counts inside the transaction that writes the row,
+   * behind the account row lock. A count that quietly ran on this module's
+   * connection instead would read outside that snapshot and outside that lock —
+   * the exact race the lock exists to close, and the one this seam's own comment
+   * used to record as deferred — so which client the queries went to is the
+   * assertion.
+   */
+  it('issues both halves of the count on the client it is handed, and on no other', async () => {
+    const { service, explanationCount, aggregateArgs } = serviceWith([]);
+    const count = vi.fn(async () => 6);
+    const aggregate = vi.fn(async () => ({ _sum: { count: 1 } }));
+    const tx = {
+      explanation: { count },
+      usageTombstone: { aggregate },
+    } as unknown as TransactionClient;
+    const window = await service.windowFor(ACCOUNT_ID, NOW);
+
+    expect(await service.explanationUsedIn(ACCOUNT_ID, window, tx)).toBe(6 + 1);
+    expect(count).toHaveBeenCalledTimes(1);
+    expect(aggregate).toHaveBeenCalledTimes(1);
+    // The negative half, and the one that matters: a query that leaked onto this
+    // module's own connection would be a count taken outside the lock.
+    expect(explanationCount).not.toHaveBeenCalled();
+    expect(aggregateArgs).toHaveLength(0);
+  });
+
+  it('runs on this module’s own client when it is handed none', async () => {
+    const { service, aggregateArgs, explanationCount } = serviceWith([
+      tombstone('2026-09-01T00:00:00.000Z', 'Explanation', 5),
+    ]);
+    const window = await service.windowFor(ACCOUNT_ID, NOW);
+
+    expect(await service.explanationUsedIn(ACCOUNT_ID, window)).toBe(3 + 5);
+    expect(explanationCount).toHaveBeenCalledTimes(1);
+    expect(aggregateArgs).toHaveLength(1);
+  });
+
+  /**
+   * The predicate three readers now share — the readout, the pre-call check and
+   * the cap at the charge. An account scope dropped, an `lt` turned into an `lte`,
+   * or a `chargedAt: { not: null }` standing in for the window would each be a
+   * silent miscount that every other case still passes. The `gte`/`lt` pair is
+   * also what keeps Story 6.4's free regeneration out: a null `chargedAt` matches
+   * neither bound.
+   */
+  it('counts this account’s charged Explanations over the half-open window', async () => {
+    const { service, explanationCount } = serviceWith([]);
+    const window = await service.windowFor(ACCOUNT_ID, NOW);
+
+    await service.explanationUsedIn(ACCOUNT_ID, window);
+
+    expect(explanationCount).toHaveBeenCalledWith({
+      where: {
+        parentAccountId: ACCOUNT_ID,
+        // `[start, end)`: a charge at the instant a period ends belongs to the
+        // next one and is counted exactly once.
+        chargedAt: { gte: window.start, lt: window.end },
+      },
+    });
+  });
+
+  it('is the same number the readout states, by construction', async () => {
+    const { service } = serviceWith([tombstone('2026-09-01T00:00:00.000Z', 'Explanation', 8)]);
+    const window = await service.windowFor(ACCOUNT_ID, NOW);
+
+    const consumption = await service.consumptionFor(ACCOUNT_ID, NOW);
+    expect(await service.explanationUsedIn(ACCOUNT_ID, window)).toBe(
+      consumption.allowances.explanation.used,
     );
   });
 });

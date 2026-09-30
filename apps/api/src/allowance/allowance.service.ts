@@ -101,24 +101,11 @@ export class AllowanceService {
     // `uploadUsedIn`: `practicetest` enforces its cap against the same method,
     // so the readout, the request clamp and the cap at the charge are one query.
     generation: async (accountId, window) => this.generationUsedIn(accountId, window),
-    explanation: async (accountId, window) =>
-      // The same half-open window and the same shape as `generation` above, over
-      // `explanation`'s own charging column. Counted **here and nowhere else**:
-      // there is no counter column, no period column and no reset job, and a row
-      // whose `chargedAt` is null — Story 6.4's free regeneration — is simply not
-      // counted, because it cost nothing.
-      //
-      // Through this module's own `PrismaService` rather than through
-      // `ExplanationService`, for the reason the note on the injection says:
-      // `explanation` imports `allowance`, so importing it back would be a cycle
-      // bought for nothing, since what is counted is a column and not a
-      // behaviour.
-      (await this.prisma.explanation.count({
-        where: {
-          parentAccountId: accountId,
-          chargedAt: { gte: window.start, lt: window.end },
-        },
-      })) + (await this.tombstonedIn(accountId, window, 'Explanation')),
+    // Through `explanationUsedIn`, for the reason `upload` and `generation`
+    // above go through theirs: `explanation` enforces its cap against the same
+    // method, so the readout, the pre-call check and the cap at the charge are
+    // one query and cannot drift.
+    explanation: async (accountId, window) => this.explanationUsedIn(accountId, window),
   };
 
   /**
@@ -214,6 +201,56 @@ export class AllowanceService {
       },
     });
     return charged + (await this.tombstonedIn(accountId, window, 'Generation', client));
+  }
+
+  /**
+   * The account's Explanation usage inside `[window.start, window.end)`: charged
+   * `explanation` rows in the window plus `Explanation` tombstones of it.
+   *
+   * **One method, three readers.** `counters.explanation` answers every surface
+   * with it, `explanationFor`'s pre-call check refuses before spending a provider
+   * call against it, and the cap inside the transaction that writes the row
+   * refuses against it — so the number a surface shows and the number a child is
+   * refused at are the same number by construction rather than by two
+   * implementations agreeing today.
+   *
+   * A row whose `chargedAt` is null — Story 6.4's free regeneration — is simply
+   * absent from this count, because it cost nothing. That single meaning for the
+   * null is why a refused mid-call press drops its prose instead of storing it
+   * uncharged.
+   *
+   * `client` is the caller's transaction when there is one. The charging seam
+   * passes the transaction that writes the row so the count runs behind the
+   * account row lock that transaction holds; a plain read passes nothing and runs
+   * on this module's own connection.
+   *
+   * **The lock is what makes the count trustworthy, not the transaction.** Under
+   * Postgres's READ COMMITTED every statement takes its own snapshot, so a count
+   * and a write inside one transaction are not a consistent pair by themselves.
+   * What makes the pair safe is that `FOR UPDATE` on the account keeps any other
+   * charge for it from landing between them. That is why the pre-call check is
+   * advisory however carefully it counts, and why the cap is stated at the charge.
+   *
+   * It reads `explanation` through this module's own Prisma delegate rather than
+   * through `ExplanationService`, the way the other counts read theirs:
+   * `explanation` imports `allowance`, so importing it back would be a cycle
+   * bought for nothing, since what is counted is a column and not a behaviour.
+   *
+   * Half-open `[start, end)`, like every other count here, so a row charged at the
+   * instant a period ends belongs to the next one and is counted exactly once.
+   */
+  async explanationUsedIn(
+    accountId: string,
+    window: PeriodWindow,
+    client?: TransactionClient,
+  ): Promise<number> {
+    const charged = await (client ?? this.prisma).explanation.count({
+      where: {
+        parentAccountId: accountId,
+        chargedAt: { gte: window.start, lt: window.end },
+      },
+    });
+    return charged + (await this.tombstonedIn(accountId, window, 'Explanation', client));
   }
 
   /**

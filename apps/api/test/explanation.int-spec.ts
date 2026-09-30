@@ -1,9 +1,14 @@
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-const { EXPLANATION_FAILED, MAX_EXPLANATION_LENGTH, NO_EXPLANATION_ALLOWANCE } = await import(
+const { EXPLANATION_FAILED, MAX_EXPLANATION_LENGTH } = await import(
   '../src/explanation/explanation-policy.js'
 );
+// The at-cap sentence is `allowance`'s, beside its Upload and Generation
+// siblings. Built here from `TIER_LIMITS` and the account's own window rather
+// than matched with a regex or a literal: a spec that spelled the words would be
+// the second spelling this story exists to remove.
+const { explanationAllowanceExhausted } = await import('../src/allowance/allowance-policy.js');
 const { PRACTICE_TEST_NOT_FOUND } = await import('../src/practicetest/practice-test-policy.js');
 const { AiRejectedError, AiService } = await import('../src/ai/ai.service.js');
 const { NO_ANSWER_GIVEN } = await import('../src/explanation/explanation-prompt.js');
@@ -196,6 +201,100 @@ describe('Explanations: asked for once, generated once, charged once', () => {
     });
   }
 
+  /**
+   * The refusal this account would be answered with, built the way the API builds
+   * it: the tier's figure out of `TIER_LIMITS`, the reset instant and the zone out
+   * of the account's own period window.
+   */
+  async function atCap(parentAccountId: string): Promise<string> {
+    const window = await h.allowance.windowFor(parentAccountId);
+    return explanationAllowanceExhausted({
+      limit: TIER_LIMITS.Free.explanation!,
+      resetAt: window.end,
+      timezone: window.timezone,
+    });
+  }
+
+  /** The practice test the fixture's Attempt was sat at. */
+  async function practiceTestOf(attemptId: string): Promise<string> {
+    return (
+      await h.prisma.attempt.findUniqueOrThrow({
+        where: { id: attemptId },
+        select: { practiceTestId: true },
+      })
+    ).practiceTestId;
+  }
+
+  /**
+   * The ordinals `extraQuestion` hands out, allocated from here and never by a
+   * caller.
+   *
+   * A case that fills a period twice — or fills one and then presses for a real
+   * Explanation on a further Question — would otherwise have to pick two
+   * non-overlapping ranges by hand, and two cases picking the same base is a
+   * collision nothing would report as anything but a confusing count. It only ever
+   * has to be past the fixture's own ordinals and monotonic, so it is never reset.
+   */
+  let nextOrdinal = 1000;
+
+  /** One more Question on the fixture's test, so a charge has somewhere to go. */
+  async function extraQuestion(attemptId: string): Promise<string> {
+    nextOrdinal += 1;
+    const question = await h.prisma.practiceTestQuestion.create({
+      data: {
+        practiceTestId: await practiceTestOf(attemptId),
+        ordinal: nextOrdinal,
+        format: 'ShortAnswer',
+        prompt: [{ kind: 'text', value: 'Filler.' }],
+        answer: [{ kind: 'text', value: 'Filler.' }],
+      },
+      select: { id: true },
+    });
+    return question.id;
+  }
+
+  /**
+   * `rows` charged Explanations, written straight to the table.
+   *
+   * Driving real presses would need `rows` distinct Questions and `rows` provider
+   * calls and would assert nothing the cases using this are about. `chargedAt`
+   * defaults to now — the current period — and a case that wants last period's
+   * charges hands its own instant in.
+   */
+  async function charge(run: Sat, rows: number, chargedAt: Date = new Date()): Promise<void> {
+    for (let index = 0; index < rows; index += 1) {
+      await h.prisma.explanation.create({
+        data: {
+          parentAccountId: run.parentAccountId,
+          studentProfileId: run.studentProfileId,
+          attemptId: run.attemptId,
+          questionId: await extraQuestion(run.attemptId),
+          body: [{ kind: 'text', value: 'Already paid for.' }],
+          chargedAt,
+        },
+      });
+    }
+  }
+
+  /**
+   * Every way a student-scoped refusal could leak a billing fact, asserted on the
+   * body that actually crossed the wire.
+   *
+   * The positive assertions compare against the builder's own output, so a leak
+   * introduced *in* the builder would pass them. This is the boundary AD-20/AD-26
+   * is promised at, so it is checked here rather than only in the policy's unit
+   * spec.
+   */
+  function carriesNoBillingFact(message: string): void {
+    for (const tier of ['Free', 'Plus', 'Family', 'Internal']) {
+      expect(message).not.toContain(tier);
+    }
+    // No usage figure, in any of the spellings a counter reaches a reader in.
+    expect(message).not.toMatch(/\d+\s*(of|\/)\s*\d+/u);
+    expect(message).not.toMatch(/\bleft\b|remaining/iu);
+    expect(message).not.toMatch(/cost|price|token|upgrade|\$/iu);
+  }
+
   it('writes one charged row and answers 201 with the segments on the first press', async () => {
     const run = await sat();
     const response = await explain(run.cookie, run.attemptId, run.questionIds[0]!).expect(201);
@@ -214,6 +313,14 @@ describe('Explanations: asked for once, generated once, charged once', () => {
     expect(stored[0]!.questionId).toBe(run.questionIds[0]);
     expect(stored[0]!.studentProfileId).toBe(run.studentProfileId);
     expect(stored[0]!.chargedAt).not.toBeNull();
+    // And the charge landed inside the period the cap was counted over. The window
+    // and the stamp are derived from **one** instant in the service, which is what
+    // keeps a press that spans a period rollover counted against the period it
+    // charges into; a second `new Date()` at insert time would be a row a boundary
+    // crossing could put in a period the count never measured.
+    const window = await h.allowance.windowFor(run.parentAccountId);
+    expect(stored[0]!.chargedAt!.getTime()).toBeGreaterThanOrEqual(window.start.getTime());
+    expect(stored[0]!.chargedAt!.getTime()).toBeLessThan(window.end.getTime());
   });
 
   it('answers the stored row on every later press, with no second call and no second row', async () => {
@@ -284,39 +391,15 @@ describe('Explanations: asked for once, generated once, charged once', () => {
     // One real Explanation, so the case can prove an already-generated one stays
     // readable after the cap is reached.
     await explain(run.cookie, run.attemptId, run.questionIds[0]!).expect(201);
-    // The rest of the period's charge, written directly: driving `limit` real
-    // presses would need `limit` distinct Questions and would assert nothing this
-    // case is about.
-    const filler = await h.prisma.attempt.findUniqueOrThrow({
-      where: { id: run.attemptId },
-      select: { practiceTestId: true },
-    });
-    for (let index = 1; index < limit; index += 1) {
-      const question = await h.prisma.practiceTestQuestion.create({
-        data: {
-          practiceTestId: filler.practiceTestId,
-          ordinal: 100 + index,
-          format: 'ShortAnswer',
-          prompt: [{ kind: 'text', value: 'Filler.' }],
-          answer: [{ kind: 'text', value: 'Filler.' }],
-        },
-        select: { id: true },
-      });
-      await h.prisma.explanation.create({
-        data: {
-          parentAccountId: run.parentAccountId,
-          studentProfileId: run.studentProfileId,
-          attemptId: run.attemptId,
-          questionId: question.id,
-          body: [{ kind: 'text', value: 'Already paid for.' }],
-          chargedAt: new Date(),
-        },
-      });
-    }
+    // The rest of the period's charge, through the shared helper.
+    await charge(run, limit - 1);
     h.ai.reset();
 
     const refused = await explain(run.cookie, run.attemptId, run.questionIds[1]!).expect(409);
-    expect(refused.body.message).toBe(NO_EXPLANATION_ALLOWANCE);
+    expect(refused.body.message).toBe(await atCap(run.parentAccountId));
+    // And what the sentence may not carry, asserted on the body that crossed the
+    // wire rather than only on the builder that produced it.
+    carriesNoBillingFact(refused.body.message);
     // Nothing generated and nothing written.
     expect(explanationCalls()).toBe(0);
     expect(await chargedRows(run.parentAccountId)).toBe(limit);
@@ -329,28 +412,227 @@ describe('Explanations: asked for once, generated once, charged once', () => {
   it('never reports a cap on an unlimited tier', async () => {
     const run = await sat();
     await h.parentAccounts.assignTier(h.operatorId, run.parentAccountId, 'Plus');
-    // Far past the Free ceiling, and still generating.
+    // Far past the Free ceiling, and still generating. Real presses, so the row
+    // lock is genuinely taken on each one and genuinely issues no count.
     for (let index = 0; index < TIER_LIMITS.Free.explanation! + 2; index += 1) {
-      const question = await h.prisma.practiceTestQuestion.create({
-        data: {
-          practiceTestId: (
-            await h.prisma.attempt.findUniqueOrThrow({
-              where: { id: run.attemptId },
-              select: { practiceTestId: true },
-            })
-          ).practiceTestId,
-          ordinal: 200 + index,
-          format: 'ShortAnswer',
-          prompt: [{ kind: 'text', value: 'Another one.' }],
-          answer: [{ kind: 'text', value: 'Another answer.' }],
-        },
-        select: { id: true },
-      });
-      await explain(run.cookie, run.attemptId, question.id).expect(201);
+      await explain(run.cookie, run.attemptId, await extraQuestion(run.attemptId)).expect(201);
     }
     expect(
       (await h.allowance.consumptionFor(run.parentAccountId)).allowances.explanation.limit,
     ).toBe(null);
+  });
+
+  it('counts an Explanation tombstone towards the cap, and refuses on it', async () => {
+    // A deleted Explanation is not a refund (AD-14): the provider call was paid
+    // for. A tombstone is what keeps it counted, and an account whose charged rows
+    // plus tombstones reach the limit is at the limit.
+    const limit = TIER_LIMITS.Free.explanation!;
+    const run = await sat();
+    const window = await h.allowance.windowFor(run.parentAccountId);
+    await charge(run, limit - 1);
+    await h.prisma.usageTombstone.create({
+      data: {
+        parentAccountId: run.parentAccountId,
+        periodStart: window.start,
+        usageClass: 'Explanation',
+        count: 1,
+      },
+    });
+    h.ai.reset();
+
+    const refused = await explain(run.cookie, run.attemptId, run.questionIds[0]!).expect(409);
+    expect(refused.body.message).toBe(await atCap(run.parentAccountId));
+    // Nothing generated and nothing written: the tombstone is the last unit.
+    expect(explanationCalls()).toBe(0);
+    expect(await chargedRows(run.parentAccountId)).toBe(limit - 1);
+  });
+
+  it('does not count last period’s charges against this period', async () => {
+    // Usage is derived from a window, not from a running total: a full period
+    // before this one leaves this one untouched, with no reset job to have run.
+    const limit = TIER_LIMITS.Free.explanation!;
+    const run = await sat();
+    const window = await h.allowance.windowFor(run.parentAccountId);
+    // One millisecond before this window opens is the previous period, whatever
+    // month the suite runs in.
+    await charge(run, limit, new Date(window.start.getTime() - 1));
+    expect(
+      (await h.allowance.consumptionFor(run.parentAccountId)).allowances.explanation.used,
+    ).toBe(0);
+    h.ai.reset();
+
+    await explain(run.cookie, run.attemptId, run.questionIds[0]!).expect(201);
+    expect(explanationCalls()).toBe(1);
+  });
+
+  it('lets exactly one of two concurrent presses take the last unit', async () => {
+    // Two different Questions, so the unique key refuses neither and the only thing
+    // that can serialise them is the account row lock inside the charging
+    // transaction. Without it both would read the same pre-charge usage under READ
+    // COMMITTED and both would charge.
+    const limit = TIER_LIMITS.Free.explanation!;
+    const run = await sat();
+    await charge(run, limit - 1);
+    h.ai.reset();
+
+    // **A barrier, because `Promise.all` alone does not overlap the two charging
+    // transactions.** Both presses pass the advisory pre-call check while there is
+    // still a unit left, but left to themselves the first one commits before the
+    // second gets as far as its own transaction — and then the *pre-call* check
+    // refuses the second, which is a pass this case would score with the row lock
+    // deleted. Holding the first press inside its provider call until the second
+    // has also finished its own puts both of them in the transaction at once,
+    // which is the state the lock exists for.
+    const ai = h.app.get(AiService);
+    const original = ai.run.bind(ai);
+    let arrived = 0;
+    let release = (): void => {};
+    const both = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ai.run = async (request: any): Promise<any> => {
+      const answer = await original(request);
+      arrived += 1;
+      if (arrived >= 2) release();
+      else await both;
+      return answer;
+    };
+    let first: Awaited<ReturnType<typeof explain>>;
+    let second: Awaited<ReturnType<typeof explain>>;
+    try {
+      [first, second] = await Promise.all([
+        explain(run.cookie, run.attemptId, run.questionIds[0]!),
+        explain(run.cookie, run.attemptId, run.questionIds[1]!),
+      ]);
+    } finally {
+      ai.run = original;
+    }
+    const statuses = [first.status, second.status].sort();
+    // One charged, one refused — and the loser is refused, never a 500.
+    expect(statuses).toEqual([201, 409]);
+    const loser = first.status === 409 ? first : second;
+    expect(loser.body.message).toBe(await atCap(run.parentAccountId));
+    expect(await chargedRows(run.parentAccountId)).toBe(limit);
+
+    // **The assertion that makes this case about the lock.** Both presses got past
+    // the advisory pre-call check and both spent a provider call, so the 201/409
+    // split can only have been decided inside the charging transaction. Without
+    // this, a run where the loser's pre-call count happened to fall after the
+    // winner's commit would satisfy every assertion above with the row lock
+    // deleted.
+    expect(explanationCalls()).toBe(2);
+
+    // And the loser's prose was dropped rather than stored uncharged: a row with a
+    // null `chargedAt` means exactly one thing in this schema — Story 6.4's free
+    // replacement — and a second meaning for that null would make the counter's
+    // own predicate ambiguous.
+    const loserQuestionId = loser === first ? run.questionIds[0]! : run.questionIds[1]!;
+    expect(await h.prisma.explanation.count({ where: { questionId: loserQuestionId } })).toBe(0);
+  });
+
+  it('refuses on the tier the locked row carries when the account is downgraded mid-call', async () => {
+    // The pre-call check reads an unlimited tier and issues no count at all, so
+    // the only figure the refusal can have been measured against is the one read
+    // off the row the charging transaction locked. Carrying the pre-call limit
+    // forward instead would generate, charge and store this press.
+    const limit = TIER_LIMITS.Free.explanation!;
+    const run = await sat();
+    await h.parentAccounts.assignTier(h.operatorId, run.parentAccountId, 'Plus');
+    // Past the Free ceiling, which an unlimited tier allows and Free does not.
+    await charge(run, limit + 1);
+
+    const ai = h.app.get(AiService);
+    const original = ai.run.bind(ai);
+    let downgraded = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ai.run = async (request: any): Promise<any> => {
+      const answer = await original(request);
+      if (!downgraded) {
+        downgraded = true;
+        // Standing in for an Admin tier change landing while the provider is out.
+        await h.parentAccounts.assignTier(h.operatorId, run.parentAccountId, 'Free');
+      }
+      return answer;
+    };
+    try {
+      const refused = await explain(run.cookie, run.attemptId, run.questionIds[0]!).expect(409);
+      expect(refused.body.message).toBe(await atCap(run.parentAccountId));
+      carriesNoBillingFact(refused.body.message);
+    } finally {
+      ai.run = original;
+    }
+
+    // The provider call was spent — the pre-call check could not have refused this
+    // — and nothing was charged or stored for it.
+    expect(explanationCalls()).toBe(1);
+    expect(await h.prisma.explanation.count({ where: { questionId: run.questionIds[0]! } })).toBe(
+      0,
+    );
+    expect(await chargedRows(run.parentAccountId)).toBe(limit + 1);
+  });
+
+  it('grades an Attempt handed in by a child whose account is at its cap', async () => {
+    // Nothing on the grading path reads an allowance. A cap on explaining work is
+    // not a cap on doing it, and a child at the cap still gets every grade.
+    const limit = TIER_LIMITS.Free.explanation!;
+    const run = await sat();
+    await charge(run, limit);
+    const open = await h.prisma.attempt.create({
+      data: {
+        practiceTestId: await practiceTestOf(run.attemptId),
+        parentAccountId: run.parentAccountId,
+        studentProfileId: run.studentProfileId,
+        ordinal: 2,
+        startedAt: new Date(Date.now() - 300_000),
+      },
+      select: { id: true },
+    });
+    h.ai.reset();
+
+    const handedIn = await server()
+      .post(`/api/student/attempts/${open.id}/submit`)
+      .set('Cookie', run.cookie)
+      .send({ answers: [{ questionId: run.questionIds[0]!, value: '3' }] })
+      .expect(200);
+    expect(handedIn.body.submittedAt).toBeTruthy();
+
+    const results = await server()
+      .get(`/api/student/attempts/${open.id}/results`)
+      .set('Cookie', run.cookie)
+      .expect(200);
+    // Every Question on the paper came back with a *named* grade state, and the
+    // score is the concrete fraction. The paper is wider than the fixture's two:
+    // filling the period added a Question per charged row, and each of them was sat
+    // blank.
+    const questions = await h.prisma.practiceTestQuestion.count({
+      where: { practiceTestId: await practiceTestOf(run.attemptId) },
+    });
+    expect(results.body.questions).toHaveLength(questions);
+    // The one Question answered, answered with its stored key, so the fake
+    // grader's folded comparison makes it `Correct` deterministically.
+    const answered = results.body.questions.find(
+      (row: { questionId: string }) => row.questionId === run.questionIds[0]!,
+    );
+    expect(answered.state).toBe('Correct');
+    // And every other Question is `Unanswered` — not `Ungraded`: a blank is a
+    // state the server decides, so "every grade state stays reachable" is the
+    // claim, and nothing was left unjudged because an allowance ran out.
+    for (const row of results.body.questions) {
+      if (row.questionId === run.questionIds[0]!) continue;
+      expect(row.state).toBe('Unanswered');
+    }
+    expect(results.body.score).toEqual({
+      correct: 1,
+      // `Correct`, `Incorrect` and `Unanswered` all count; `Ungraded` does not, and
+      // nothing here is Ungraded.
+      denominator: questions,
+      excludedUngraded: 0,
+    });
+    // And the charge did not move: grading reads no Explanation Allowance and
+    // writes no `explanation` row.
+    expect(await chargedRows(run.parentAccountId)).toBe(limit);
+    expect(explanationCalls()).toBe(0);
   });
 
   it('pitches the register at the Practice Test’s Grade Level, not the child’s', async () => {
@@ -510,18 +792,14 @@ describe('Explanations: asked for once, generated once, charged once', () => {
   });
 
   it('refuses when the cap is reached between the check and the write', async () => {
-    // The whole reason the re-count shares a transaction with the insert: a
-    // concurrent press can spend the last unit while this one is out at the
-    // provider. Standing in for that other press, the period is filled *during*
-    // the AI call -- after the pre-check read remaining, before the write.
+    // Why the cap is stated at the charge and not only before the provider call:
+    // a concurrent press can spend the last unit while this one is out at the
+    // provider, and the pre-call check has no way to know. Standing in for that
+    // other press, the period is filled *during* the AI call -- after the pre-call
+    // check counted headroom, before the write. The refusal therefore can only
+    // have come from the guard inside the transaction.
     const limit = TIER_LIMITS.Free.explanation!;
     const run = await sat();
-    const practiceTestId = (
-      await h.prisma.attempt.findUniqueOrThrow({
-        where: { id: run.attemptId },
-        select: { practiceTestId: true },
-      })
-    ).practiceTestId;
 
     const ai = h.app.get(AiService);
     const original = ai.run.bind(ai);
@@ -531,34 +809,13 @@ describe('Explanations: asked for once, generated once, charged once', () => {
       const answer = await original(request);
       if (!filled) {
         filled = true;
-        for (let index = 0; index < limit; index += 1) {
-          const question = await h.prisma.practiceTestQuestion.create({
-            data: {
-              practiceTestId,
-              ordinal: 200 + index,
-              format: 'ShortAnswer',
-              prompt: [{ kind: 'text', value: 'Filler.' }],
-              answer: [{ kind: 'text', value: 'Filler.' }],
-            },
-            select: { id: true },
-          });
-          await h.prisma.explanation.create({
-            data: {
-              parentAccountId: run.parentAccountId,
-              studentProfileId: run.studentProfileId,
-              attemptId: run.attemptId,
-              questionId: question.id,
-              body: [{ kind: 'text', value: 'Spent by the other press.' }],
-              chargedAt: new Date(),
-            },
-          });
-        }
+        await charge(run, limit);
       }
       return answer;
     };
     try {
       const refused = await explain(run.cookie, run.attemptId, run.questionIds[0]!).expect(409);
-      expect(refused.body.message).toBe(NO_EXPLANATION_ALLOWANCE);
+      expect(refused.body.message).toBe(await atCap(run.parentAccountId));
     } finally {
       ai.run = original;
     }

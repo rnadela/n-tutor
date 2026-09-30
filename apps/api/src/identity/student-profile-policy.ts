@@ -51,12 +51,13 @@ export const NOTHING_TO_CHANGE = 'Give a name or a Grade Level to change.';
  * The head both Account-Tier refusals share: the tier this account is on and
  * the number of active Student Profiles it allows.
  *
- * Unlike `NO_EXPLANATION_ALLOWANCE`, which is read by a **student** and
- * therefore names neither tier nor figure, this pair is read by the parent who
- * owns the account and who is the only person who can act on it — so it names
- * both. The Upload and Generation refusals (`allowance-policy.ts`) are the
- * parent-facing shape this one predates and now matches. It still does not
- * invite an upgrade: the tier and the limit are the fact, not a pitch.
+ * Unlike `explanationAllowanceExhausted` (`allowance-policy.ts`), which is read
+ * by a **student** and therefore names neither the tier nor a usage figure, this
+ * pair is read by the parent who owns the account and who is the only person who
+ * can act on it — so it names both. The Upload and Generation refusals in that
+ * same file are the parent-facing shape this one predates and now matches. It
+ * still does not invite an upgrade: the tier and the limit are the fact, not a
+ * pitch.
  *
  * The figure is the caller's, read from `limitsFor(tier).studentProfiles`. No
  * number is written here, and none is written at either throw site.

@@ -1,17 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { remainingFor } from '../practicetest/practice-test-policy.js';
-import { TIER_LIMITS } from '../allowance/tiers.js';
 import {
   EXPLANATION_EMPTY,
   EXPLANATION_TOO_LONG,
   ExplanationPayloadInvalid,
   validateExplanationPayload,
 } from './explanation-payload.js';
-import {
-  EXPLANATION_FAILED,
-  MAX_EXPLANATION_LENGTH,
-  NO_EXPLANATION_ALLOWANCE,
-} from './explanation-policy.js';
+import { EXPLANATION_FAILED, MAX_EXPLANATION_LENGTH } from './explanation-policy.js';
 import { fakeExplanationPayload } from './explanation-schema.js';
 
 /**
@@ -101,32 +95,22 @@ describe('what the fake transport answers with', () => {
   });
 });
 
-describe('the cap arithmetic, and the sentences around it', () => {
-  it('refuses a Free account that has used its whole period', () => {
-    const limit = TIER_LIMITS.Free.explanation;
-    expect(limit).not.toBeNull();
-    expect(remainingFor(limit!, limit)).toBe(0);
-    expect(remainingFor(limit! - 1, limit)).toBe(1);
-  });
-
-  it('never reports a cap on an unlimited tier', () => {
-    // `null` is unlimited and never a sentinel number.
-    expect(TIER_LIMITS.Plus.explanation).toBeNull();
-    expect(remainingFor(10_000, TIER_LIMITS.Plus.explanation)).toBeGreaterThan(0);
-  });
-
-  it('floors at zero for usage above the limit, rather than going negative', () => {
-    // A tier downgraded mid-period refuses; it does not produce a nonsense count.
-    expect(remainingFor(50, 10)).toBe(0);
-  });
-
-  it('blames the plan and names no tier, figure or price', () => {
-    expect(NO_EXPLANATION_ALLOWANCE).toMatch(/resets at the start of the next one/u);
-    for (const forbidden of [/\bFree\b/u, /\bPlus\b/u, /\d/u, /upgrade/iu, /!/u]) {
-      expect(NO_EXPLANATION_ALLOWANCE).not.toMatch(forbidden);
-    }
-  });
-
+/**
+ * This module's own refusal sentence, and the only one left here.
+ *
+ * **The at-cap refusal is not this file's any more.** Its wording is asserted in
+ * `allowance/allowance-policy.spec.ts`, beside the sentence itself and beside its
+ * Upload and Generation siblings.
+ *
+ * **Nor is the cap arithmetic.** Neither Explanation cap check goes through
+ * `remainingFor` any more — both compare `used >= limit` directly, against a limit
+ * that is `null` for an unlimited tier and returned early on — so cases pinning
+ * `remainingFor` from here were pinning a function this module's paths no longer
+ * call. `remainingFor` is covered where it is the subject and still has callers,
+ * in `practicetest/practice-test-policy.spec.ts`, and that every Explanation
+ * figure matches `tiers.md` is `allowance/tiers.spec.ts`'s, row for row.
+ */
+describe('the failure sentence', () => {
   it('says one sentence for every failure class, and apologises for none of them', () => {
     for (const forbidden of [/sorry/iu, /!/u, /error/iu, /timeout/iu, /provider/iu, /model/iu]) {
       expect(EXPLANATION_FAILED).not.toMatch(forbidden);

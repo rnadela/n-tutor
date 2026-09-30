@@ -6,13 +6,15 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai/ai.service.js';
+import { explanationAllowanceExhausted } from '../allowance/allowance-policy.js';
 import { AllowanceService } from '../allowance/allowance.service.js';
+import { limitsFor } from '../allowance/tiers.js';
 import type { RichText } from '../extraction/rich-text.js';
+import { ParentAccountService } from '../identity/parent-account.service.js';
 import {
   PracticeTestService,
   type ExplanationInput,
 } from '../practicetest/practice-test.service.js';
-import { remainingFor } from '../practicetest/practice-test-policy.js';
 import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
 import type { ExplanationFlagDisposition } from '../generated/prisma/enums.js';
 import { adminQueueEntries, type AdminFlaggedExplanationView } from './admin-flag-queue.js';
@@ -28,7 +30,6 @@ import { ExplanationPayloadInvalid, validateExplanationPayload } from './explana
 import {
   EXPLANATION_FAILED,
   FLAG_ALREADY_DISPOSED,
-  NO_EXPLANATION_ALLOWANCE,
   NO_EXPLANATION_TO_FLAG,
   NO_EXPLANATION_TO_REGENERATE,
   NO_EXPLANATION_TO_SUPPRESS,
@@ -230,9 +231,11 @@ export class ExplanationUnavailable extends ServiceUnavailableException {
  *   reach a provider call, because it returns two statements earlier.
  * - **Charging is the row.** There is no counter to debit and nothing to
  *   reconcile: `chargedAt` on the row *is* the charge, and counting rows in the
- *   period window is the usage (AD-14). Which is why the re-count and the insert
- *   share one transaction — outside it, two concurrent presses on a Free account
- *   with one unit left could each read "remaining = 1".
+ *   period window is the usage (AD-14). Which is why the cap check and the insert
+ *   share one transaction **serialized by the account row lock** — outside that
+ *   lock, two concurrent presses on a Free account with one unit left would each
+ *   read the same pre-charge usage and both charge, transaction or no
+ *   transaction, because READ COMMITTED gives every statement its own snapshot.
  * - **It holds no delegate of anybody else's tables.** Two reads cross the
  *   boundary — `PracticeTestService.explanationInputFor` for the student path,
  *   which brings the ownership proof, the Question, both answers and the Practice
@@ -262,6 +265,12 @@ export class ExplanationService {
     private readonly ai: AiService,
     private readonly allowance: AllowanceService,
     private readonly practiceTests: PracticeTestService,
+    // Held for one thing only: `findByIdForUpdate`, the row lock the charging
+    // seam below serialises on — the same `identity` idiom Stories 9.2, 9.3, 9.4
+    // and the Admin tier change take, and the reason there is no second lock
+    // idiom and no application-level clamp here. `ExplanationModule` already
+    // imports `IdentityModule`, which exports it, so no module wiring moved.
+    private readonly accounts: ParentAccountService,
   ) {}
 
   /**
@@ -333,17 +342,32 @@ export class ExplanationService {
     }
 
     // Read before the provider call, so an account with nothing left is refused
-    // without spending one. The authoritative check is the re-count inside the
-    // write transaction below; this one exists so a capped account is told so
-    // before a model is asked to write prose nobody will be given.
-    const consumption = await this.allowance.consumptionFor(scope.parentAccountId);
-    if (
-      remainingFor(
-        consumption.allowances.explanation.used,
-        consumption.allowances.explanation.limit,
-      ) === 0
-    ) {
-      throw new ConflictException(NO_EXPLANATION_ALLOWANCE);
+    // without spending one. It is **advisory**, and stays: it spends a tier read
+    // and one count, and it saves a provider call for prose nobody would be given.
+    // The honest guarantee is stated at the charge, behind the account row lock —
+    // under READ COMMITTED no count taken outside that lock proves anything,
+    // however carefully it counts.
+    //
+    // The tier and the one count it needs, rather than `consumptionFor`, which
+    // counted all three allowances to answer one question about one of them.
+    const tier = (await this.accounts.findById(scope.parentAccountId)).tier;
+    const preCallLimit = limitsFor(tier).explanation;
+    if (preCallLimit !== null) {
+      // `null` is unlimited: no window is resolved, no count is issued and no
+      // figure is compared.
+      const preCallWindow = await this.allowance.windowFor(scope.parentAccountId);
+      const used = await this.allowance.explanationUsedIn(scope.parentAccountId, preCallWindow);
+      if (used >= preCallLimit) {
+        throw new ConflictException(
+          explanationAllowanceExhausted({
+            limit: preCallLimit,
+            // The window's exclusive end *is* the reset instant, stated in the
+            // zone the window was actually cut in.
+            resetAt: preCallWindow.end,
+            timezone: preCallWindow.timezone,
+          }),
+        );
+      }
     }
 
     // A Question whose stored prompt or correct answer could not be read degrades
@@ -361,32 +385,55 @@ export class ExplanationService {
 
     const body = await this.write(scope.parentAccountId, input, attemptId, questionId);
 
-    // Read again rather than reusing the figures above: a provider call takes
-    // seconds to tens of seconds, and in that time the period can turn over or the
-    // account's tier can change. Counting the window that was current when the
-    // press started would charge a row into a period the count never measured.
-    const authoritative = await this.allowance.consumptionFor(scope.parentAccountId);
-    const limit = authoritative.allowances.explanation.limit;
-    const windowStart = new Date(authoritative.periodStart);
-    const windowEnd = new Date(authoritative.periodEnd);
+    // Resolved again rather than reusing the window above: a provider call takes
+    // seconds to tens of seconds, and in that time the period can turn over.
+    // Counting the window that was current when the press started would charge a
+    // row into a period the count never measured. Both the window and the charge
+    // are derived from the same instant — the `land()` precedent — so a period
+    // boundary crossing the gap between two clock reads cannot manufacture one.
+    // The tier is re-read too, off the locked row inside the transaction, so a
+    // change made during the call is the one the cap is measured against.
+    const chargedAt = new Date();
+    const window = await this.allowance.windowFor(scope.parentAccountId, chargedAt);
 
     let row: { body: unknown };
     try {
       row = await this.prisma.withTransaction(async (tx) => {
-        // Counted again, inside the transaction that writes the row. Derived from
-        // charged rows — never a counter column, and never decremented (AD-14).
-        // The same known, deferred gap `practicetest`'s own charging seam carries:
-        // Postgres's default Read Committed isolation lets two concurrent requests
-        // read the same pre-charge usage, so this narrows the window rather than
-        // closing it.
-        const charged = await tx.explanation.count({
-          where: {
-            parentAccountId: scope.parentAccountId,
-            chargedAt: { gte: windowStart, lt: windowEnd },
-          },
-        });
-        if (remainingFor(charged, limit) === 0) {
-          throw new ConflictException(NO_EXPLANATION_ALLOWANCE);
+        // The cap, in the transaction that charges and before the row that
+        // charges. Taken first thing, so it cannot invert against a lock this
+        // transaction already holds.
+        //
+        // **The lock is the whole of the correctness.** Under Postgres's READ
+        // COMMITTED every statement takes its own snapshot, so a count and a
+        // write inside one transaction are not a consistent pair by themselves:
+        // what serialises them is that no other charge for this account can
+        // commit between them. This is the gap this method's own comment used to
+        // record as deferred — two presses for two different Questions reading
+        // the same pre-charge usage and both charging — and `findByIdForUpdate`
+        // closes it, exactly as Stories 9.3 and 9.4 closed it at their own
+        // charge sites.
+        const account = await this.accounts.findByIdForUpdate(tx, scope.parentAccountId);
+        const limit = limitsFor(account.tier).explanation;
+        // `null` is unlimited: no count is issued and no figure is compared. The
+        // row lock above is still taken — reading the tier is what decides this,
+        // and the read is the lock — so an unlimited account pays for the lock
+        // and for no count.
+        if (limit !== null) {
+          // The one method every reader counts Explanation usage through, issued
+          // on this transaction's client so it runs behind the lock this
+          // transaction holds, over the window this press is actually charging
+          // into. Charged rows plus `Explanation` tombstones, derived — never a
+          // counter column and never decremented (AD-14).
+          const used = await this.allowance.explanationUsedIn(scope.parentAccountId, window, tx);
+          if (used >= limit) {
+            throw new ConflictException(
+              explanationAllowanceExhausted({
+                limit,
+                resetAt: window.end,
+                timezone: window.timezone,
+              }),
+            );
+          }
         }
         return tx.explanation.create({
           data: {
@@ -403,8 +450,10 @@ export class ExplanationService {
             generation: 1,
             // The durable marker the Explanation Allowance is counted from (AD-14).
             // Written here, in the transaction that writes the row, so a paid call
-            // is never uncounted and a refused one never charges.
-            chargedAt: new Date(),
+            // is never uncounted and a refused one never charges. The same instant
+            // the window above was resolved from, so the row lands in the period
+            // it was counted against.
+            chargedAt,
           },
           select: { body: true },
         });
@@ -1193,8 +1242,8 @@ export class ExplanationService {
    *
    * **No allowance is read anywhere on this path**, which is what makes "free at every
    * tier including Free" a property of the code rather than a promise: there is no
-   * `consumptionFor` call, no re-count, no `remainingFor` and therefore nothing that
-   * could refuse it. A Free account already at its cap gets its replacement, and the
+   * tier read, no window, no `explanationUsedIn`, no row lock and therefore nothing
+   * that could refuse it. A Free account already at its cap gets its replacement, and the
    * counter does not move — because the row is written with `chargedAt: null` and
    * `allowance.service.ts` counts `chargedAt: { gte, lt }`. That is the whole of "free",
    * and it needs no second counter and no `excludedFromCount` column.

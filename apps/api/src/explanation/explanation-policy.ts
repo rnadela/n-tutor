@@ -6,28 +6,20 @@
  * that line, and a student surface whose whole discipline is "one sentence per
  * refusal" cannot afford two spellings of the same one.
  *
- * Nothing here names a tier, a limit, a price, a model or a provider (AD-20,
- * AD-26). None of those is a student-scoped fact, and a sentence a child reads is
- * the last place one should first appear.
+ * Nothing here names a tier, a price, a model or a provider (AD-20, AD-26). None
+ * of those is a student-scoped fact, and a sentence a child reads is the last
+ * place one should first appear.
+ *
+ * **The Explanation Allowance refusal is not here.** It is
+ * `explanationAllowanceExhausted` in `allowance/allowance-policy.ts`, beside its
+ * Upload and Generation siblings, the same way this file defers
+ * `PRACTICE_TEST_NOT_FOUND` to `practicetest`: the limit, the period and the
+ * reset instant it names are `allowance`'s facts, and one formatter for three
+ * allowances is why the three can never disagree about a reset date. It still
+ * names no tier and no usage figure, because a child reads it.
  */
 
 import { PRACTICE_TEST_NOT_FOUND } from '../practicetest/practice-test-policy.js';
-
-/**
- * Nothing of the Explanation Allowance is left this period.
- *
- * It names the allowance and states that it comes back; it does not name the
- * tier, the number, or what an upgrade would buy. **The blame is on the plan**,
- * never on the child and never on the asking: a child who has read ten
- * explanations has done nothing wrong, and a sentence that implied otherwise
- * would teach them not to ask.
- *
- * No exclamation mark and no apology. The web renders it with the instant the
- * period turns over, which the API states separately and this sentence therefore
- * does not restate — one figure, one source.
- */
-export const NO_EXPLANATION_ALLOWANCE =
-  'No Explanation Allowance is left this period. It resets at the start of the next one.';
 
 /**
  * The Explanation could not be written.

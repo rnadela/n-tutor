@@ -383,9 +383,12 @@ export const studentCopy = {
      * spec asserts over its own source.
      *
      * **Nothing here counts.** No "3 of 10 left", no "1 explanation used", no
-     * badge and no running total: an allowance is a billing fact and a child is
-     * never shown one (AD-26). The one sentence that mentions the limit at all is
-     * `atCap`, and it says the plan ran out rather than how far.
+     * badge and no running total: a **usage count** is a billing fact and a child
+     * is never shown one (AD-26). The one sentence that mentions the limit at all
+     * is `atCap`, and the limit is not this module's to state: the API's own
+     * refusal names the limit and the date the allowance comes back, and never a
+     * usage figure and never an Account Tier. This module hands that sentence
+     * through whole and adds nothing numeric of its own.
      *
      * **Blame lands on the plan, never on the child.** A child who has read ten
      * explanations has done nothing wrong, and a sentence that implied otherwise
@@ -441,9 +444,13 @@ export const studentCopy = {
       /**
        * Nothing is left of the plan's explanations this period.
        *
-       * The sentence naming the limit is the **API's own**, handed in whole: it is
-       * written once, in the API's policy file, and a second spelling here would be
-       * two answers to one refusal. This wraps it in the one thing the server has
+       * The sentence naming the limit and the reset date is the **API's own**,
+       * handed in whole: it is written once, in `allowance`'s policy file, and a
+       * second spelling here would be two answers to one refusal. It names the
+       * limit and the reset date and never a usage count — that discipline is the
+       * API's and is asserted there.
+       *
+       * This wraps it in the one thing the server has
        * no business knowing — that the reader is a child and the answer is not
        * about them.
        *

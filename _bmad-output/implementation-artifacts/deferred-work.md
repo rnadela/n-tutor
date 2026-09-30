@@ -2357,3 +2357,67 @@ source_spec: `spec-9-4-generation-allowance-enforcement.md`
 severity: low
 reason: `apps/web/src/app/parent/analytics/topics/[topicId]/page.tsx`'s `topic-drill-down-spent` node still renders the static `parentCopy.topicDrillDown.spent` ("No Generation Allowance is left this period, so nothing can be made right now.") whenever `!cost.spendable`, rather than `allowance.exhaustedReason`. Out of this story's scope (not in its Code Map), and it does not violate any Always/Never bullet since the static sentence still names no tier, limit or date — but the two parent-facing surfaces for the same block now state different levels of detail, and nothing in `page.spec.tsx` (a source-text match, not an executed render) would catch further drift.
 status: open
+
+### DW-296: The charging transaction now holds a `parent_account` row lock but passes no `timeout`/`maxWait`, so a contended press can abort on Prisma's 2s default lock wait and answer a child a 500 instead of
+origin: spec-deferred 66f530876c65
+location: apps/api/src/explanation/explanation.service.ts (explanationFor's charging transaction); apps/api/src/sourcetest/source-test.service.ts (submit)
+source_spec: `spec-9-5-explanation-allowance-enforcement.md`
+severity: medium
+reason: `prisma.withTransaction` forwards `{ timeout, maxWait }` and the generation runner's `land()` passes `LAND_TIMEOUT_MS` / `LAND_MAX_WAIT_MS` (practice-test.service.ts:3521). Neither Story 9.3's `SourceTestService.submit` guard nor this one passes any, so both run on Prisma's defaults (maxWait 2s, timeout 5s) while holding `FOR UPDATE` on the account. Not introduced here in isolation — it is the sanctioned sibling idiom — so giving only the Explanation site a timeout would create the second idiom the spec forbids. Both sites want one decision.
+status: open
+
+### DW-297: The counting window is resolved before the transaction opens, so a timezone history row written between the resolve and the lock makes the cap count a stale window.
+origin: spec-deferred 22447d947f72
+location: apps/api/src/explanation/explanation.service.ts (explanationFor)
+source_spec: `spec-9-5-explanation-allowance-enforcement.md`
+severity: low
+reason: `allowance.windowFor(parentAccountId, chargedAt)` runs outside `withTransaction`; only the tier is re-read off the locked row. A zone change committed in that gap moves the window's edges, and the count inside the transaction is then measured over the pre-change window. Extremely narrow — a zone change lands from the next boundary onward by design — and the same shape the sibling guards carry.
+status: open
+
+### DW-298: `chargedAt` is captured before the lock wait, so a press that blocks stamps a charging instant earlier than the instant it actually committed.
+origin: spec-deferred e8e9dccf8c6f
+location: apps/api/src/explanation/explanation.service.ts (explanationFor)
+source_spec: `spec-9-5-explanation-allowance-enforcement.md`
+severity: low
+reason: One instant is deliberately shared by the window derivation and the row stamp, which is what makes the count and the charge agree. The cost is that a long lock wait can commit a row stamped in a period earlier than the commit — at a period boundary, into the period the count measured rather than the one the write landed in. Defensible as the design, but unpinned: the new assertion that a written `chargedAt` falls inside the account's window cannot fail against a second clock read, because a test cannot stage a press that straddles a month boundary.
+status: open
+
+### DW-299: The int-spec's `atCap()` helper recomputes the account's window after the response, so a period turning over between the two makes the expected sentence disagree with the one the API built.
+origin: spec-deferred 65830f60cc4d
+location: apps/api/test/explanation.int-spec.ts (atCap)
+source_spec: `spec-9-5-explanation-allowance-enforcement.md`
+severity: low
+reason: `atCap(parentAccountId)` reads `h.allowance.windowFor(...)` at assertion time, not at request time. A suite run crossing a month boundary in that gap would render a different reset date. Narrow, and the same shape the pre-existing cases carry.
+status: open
+
+### DW-300: The `extraQuestion` fixture appends Questions to a Practice Test without updating its stored `questionCount`, so the row and the paper disagree.
+origin: spec-deferred 7c76cbdbd591
+location: apps/api/test/explanation.int-spec.ts (extraQuestion)
+source_spec: `spec-9-5-explanation-allowance-enforcement.md`
+severity: low
+reason: `sat()` writes `questionCount` at creation; `extraQuestion` adds rows past it. The grading-at-cap case works around the drift by counting live rows instead of reading `questionCount`, which is exactly the shape that would hide a real defect in a future case that trusts the column.
+status: open
+
+### DW-301: The composed at-cap text a child reads mixes two nouns for one thing and two date dialects.
+origin: spec-deferred df551003ea44
+location: apps/api/src/allowance/allowance-policy.ts (resetDateIn); apps/web/src/copy/student.ts (results.explain.atCap)
+source_spec: `spec-9-5-explanation-allowance-enforcement.md`
+severity: low
+reason: The panel renders `This account allows 10 explanations … resets on October 1, 2026.` (the API's sentence, `en-US` through `resetDateIn`) followed by the web's `That is about the plan, not about you …`. `allowance-policy.ts` states as policy that "plan" is a word this product uses nowhere else, while student copy uses it deliberately, and student copy elsewhere renders dates as `28 September 2026`. Neither is wrong; together they read as two voices.
+status: open
+
+### DW-302: The integration-level no-billing-fact guard checks fewer patterns than its unit-level counterpart, so a leak the unit spec would catch could pass the boundary check.
+origin: spec-deferred b15584edb0d9
+location: apps/api/test/explanation.int-spec.ts (carriesNoBillingFact)
+source_spec: `spec-9-5-explanation-allowance-enforcement.md`
+severity: low
+reason: `allowance-policy.spec.ts`'s assertions on `explanationSentence()` also check for the literal words "Account Tier" and `/\bplans?\b/iu`. `explanation.int-spec.ts`'s `carriesNoBillingFact`, which runs against the body that actually crossed the wire, checks only the four tier names and usage/cost patterns — it would not catch a hypothetical future build of the sentence that named "Account Tier" or "plan" without also naming a tier.
+status: open
+
+### DW-303: The new concurrency case synchronizes two presses with a hand-rolled Promise barrier that has no timeout, so a regression that changes how many times the barrier's hook fires can hang the suite
+origin: spec-deferred 9125347b270e
+location: apps/api/test/explanation.int-spec.ts (lets exactly one of two concurrent presses take the last unit)
+source_spec: `spec-9-5-explanation-allowance-enforcement.md`
+severity: low
+reason: `lets exactly one of two concurrent presses take the last unit` releases a barrier from inside the `ai.run` mock with no `Promise.race` against a timeout. If the implementation ever called `ai.run` a different number of times than the test expects, or a request errored before reaching the release, the awaited barrier would never resolve.
+status: open

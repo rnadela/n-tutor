@@ -366,6 +366,14 @@ describe('what asks for an explanation', () => {
 
 describe('what the explain copy is allowed to say', () => {
   const copy = studentCopy.results.explain;
+  /**
+   * An opaque stand-in for the API's own at-cap sentence, and deliberately not a
+   * copy of it: the sentence is written once, in the API's `allowance` policy
+   * file, and a web test carrying its words would be a second spelling that drifts
+   * the moment the first one is reworded. What these cases assert is what this
+   * module wraps it in, which is the same whatever it says.
+   */
+  const API_SENTENCE = 'THE SENTENCE THE API HANDED OVER.';
   const sentences = [
     copy.control,
     copy.heading,
@@ -374,7 +382,7 @@ describe('what the explain copy is allowed to say', () => {
     copy.failed,
     copy.offline,
     copy.atCap(null),
-    copy.atCap('No Explanation Allowance is left this period.'),
+    copy.atCap(API_SENTENCE),
     copy.announcement(1),
     copy.announcement(4),
     copy.flagControl,
@@ -412,9 +420,27 @@ describe('what the explain copy is allowed to say', () => {
 
   it('puts the blame for the cap on the plan', () => {
     expect(copy.atCap(null)).toMatch(/Your plan/u);
-    expect(copy.atCap('No more this period.')).toMatch(/not about you/u);
+    expect(copy.atCap(API_SENTENCE)).toMatch(/not about you/u);
     // And says the work already done is still readable.
     expect(copy.atCap(null)).toMatch(/still here/u);
+  });
+
+  it('hands the API’s sentence through whole rather than rewriting it', () => {
+    // The limit and the reset date are the API's to state and are written once, in
+    // its `allowance` policy file. This module's job is to wrap that sentence, so
+    // the sentence has to survive verbatim — a reword, a truncation or a re-render
+    // here would be a second answer to one refusal. Asserted against an opaque
+    // sentinel, so this case cannot drift when the API's wording changes.
+    const wrapped = copy.atCap(API_SENTENCE);
+    expect(wrapped).toContain(API_SENTENCE);
+    // And the wrapper is additive: the child-facing clause is this module's own and
+    // sits beside the API's words rather than replacing any of them.
+    expect(wrapped).toMatch(/not about you/u);
+    expect(wrapped).toMatch(/still here/u);
+    expect(wrapped.length).toBeGreaterThan(API_SENTENCE.length);
+    // The fallback is the only branch that writes a sentence of its own, and it is
+    // reached only when the refusal arrived without one.
+    expect(copy.atCap(null)).not.toContain(API_SENTENCE);
   });
 
   it('names the Question in the announcement, from a handed-in ordinal', () => {

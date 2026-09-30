@@ -220,6 +220,41 @@ describe('Explanation suppression and free regeneration: removed once, replaced 
     return stored.id;
   }
 
+  /**
+   * The ordinals `extraQuestion` hands out, allocated from here and never by a
+   * caller, so two cases — or one case filling a period twice — cannot pick the
+   * same base. It only has to be past the fixture's own ordinals and monotonic.
+   */
+  let nextOrdinal = 1000;
+
+  /** One more Question on the fixture's test, so a charge has somewhere to go. */
+  async function extraQuestion(account: Account): Promise<string> {
+    nextOrdinal += 1;
+    const question = await h.prisma.practiceTestQuestion.create({
+      data: {
+        practiceTestId: account.practiceTestId,
+        ordinal: nextOrdinal,
+        format: 'ShortAnswer',
+        prompt: [{ kind: 'text', value: 'Filler.' }],
+        answer: [{ kind: 'text', value: 'Filler.' }],
+      },
+      select: { id: true },
+    });
+    return question.id;
+  }
+
+  /**
+   * `rows` charged Explanations, each on a Question of its own.
+   *
+   * Driving `rows` real presses would need `rows` distinct Questions and `rows`
+   * provider calls and would assert nothing the cases using this are about.
+   */
+  async function charge(account: Account, rows: number): Promise<void> {
+    for (let index = 0; index < rows; index += 1) {
+      await storeExplanation(account, await extraQuestion(account));
+    }
+  }
+
   // --- The routes, spelled once -------------------------------------------
 
   function explain(cookie: string, attemptId: string, questionId: string) {
@@ -621,21 +656,8 @@ describe('Explanation suppression and free regeneration: removed once, replaced 
     await flagged(account, account.questionIds[0]!);
     await suppress(account.token, account.attemptId, account.questionIds[0]!).expect(200);
 
-    // The rest of the period's charge, written directly: driving `limit` real presses would
-    // need `limit` distinct Questions and would assert nothing this case is about.
-    for (let index = 1; index < limit; index += 1) {
-      const question = await h.prisma.practiceTestQuestion.create({
-        data: {
-          practiceTestId: account.practiceTestId,
-          ordinal: 100 + index,
-          format: 'ShortAnswer',
-          prompt: [{ kind: 'text', value: 'Filler.' }],
-          answer: [{ kind: 'text', value: 'Filler.' }],
-        },
-        select: { id: true },
-      });
-      await storeExplanation(account, question.id);
-    }
+    // The rest of the period's charge, through the shared helper.
+    await charge(account, limit - 1);
     const before = await h.allowance.consumptionFor(account.parentAccountId);
     expect(before.allowances.explanation.limit).toBe(TIER_LIMITS.Free.explanation);
     expect(before.allowances.explanation.used).toBe(limit);
@@ -646,6 +668,18 @@ describe('Explanation suppression and free regeneration: removed once, replaced 
     const after = await h.allowance.consumptionFor(account.parentAccountId);
     expect(after.allowances.explanation.used).toBe(before.allowances.explanation.used);
     expect(await chargedRows(account.parentAccountId)).toBe(limit);
+    // And the mechanism, not only the figure: the replacement row carries **no**
+    // charging instant, which is the whole of how it opts out of the count. A
+    // second meaning for that null would make the counter's own predicate
+    // ambiguous, so this is asserted on the row rather than inferred from the sum.
+    const replacement = await h.prisma.explanation.findFirstOrThrow({
+      where: { attemptId: account.attemptId, questionId: account.questionIds[0]! },
+      orderBy: { generation: 'desc' },
+      select: { generation: true, chargedAt: true, suppressedAt: true },
+    });
+    expect(replacement.generation).toBe(2);
+    expect(replacement.chargedAt).toBeNull();
+    expect(replacement.suppressedAt).toBeNull();
   });
 
   it('serves the replacement to the child, marked as a new explanation and nothing more', async () => {
