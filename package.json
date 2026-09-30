@@ -1,5 +1,5 @@
 {
-  "name": "n-test-reviewer",
+  "name": "n-tutor",
   "private": true,
   "version": "0.0.0",
   "packageManager": "pnpm@11.25.0",
@@ -16,7 +16,8 @@
     "db:migrate": "pnpm --filter api exec prisma migrate deploy",
     "db:seed": "pnpm --filter api run seed",
     "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
-    "e2e:prepare": "node e2e/prepare.mts"
+    "e2e:prepare": "node e2e/prepare.mts",
+    "ship": "bash scripts/deploy.sh"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

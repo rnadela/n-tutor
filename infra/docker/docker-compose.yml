@@ -1,0 +1,103 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - api
+      - web
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 64M
+
+  api:
+    image: ${API_IMAGE:-ghcr.io/rnadela/n-tutor/api:latest}
+    restart: unless-stopped
+    expose:
+      - '3001'
+    environment:
+      - NODE_ENV=production
+      - API_PORT=3001
+      - DATABASE_URL=${DATABASE_URL}
+      - WEB_ORIGIN=https://n-tutor.ralphnadela.com
+      - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET}
+      - ADMIN_JWT_TTL_SECONDS=${ADMIN_JWT_TTL_SECONDS:-28800}
+      - PARENT_JWT_SECRET=${PARENT_JWT_SECRET}
+      - PARENT_SESSION_TTL_SECONDS=${PARENT_SESSION_TTL_SECONDS:-2592000}
+      - COOKIE_SECURE=true
+      - UPLOAD_ROOT=/app/uploads
+      - MAIL_TRANSPORT=${MAIL_TRANSPORT:-log}
+      - MAIL_FROM=${MAIL_FROM:-no-reply@n-tutor.ralphnadela.com}
+      - MAIL_API_URL=${MAIL_API_URL:-}
+      - MAIL_API_KEY=${MAIL_API_KEY:-}
+      - AI_TRANSPORT=${AI_TRANSPORT:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - EXTRACTION_WORKER_ENABLED=${EXTRACTION_WORKER_ENABLED:-true}
+      - GENERATION_WORKER_ENABLED=${GENERATION_WORKER_ENABLED:-true}
+      - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-true}
+      - PAGE_EXPIRY_WORKER_ENABLED=${PAGE_EXPIRY_WORKER_ENABLED:-true}
+      - NODE_OPTIONS=--max-old-space-size=384
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.40'
+          memory: 512M
+        reservations:
+          memory: 192M
+
+  web:
+    image: ${WEB_IMAGE:-ghcr.io/rnadela/n-tutor/web:latest}
+    restart: unless-stopped
+    expose:
+      - '3000'
+    environment:
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=160
+    deploy:
+      resources:
+        limits:
+          cpus: '0.30'
+          memory: 200M
+        reservations:
+          memory: 100M
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ntutor}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-ntutor_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ntutor}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.30'
+          memory: 384M
+        reservations:
+          memory: 192M
+
+volumes:
+  postgres_data:
+  caddy_data:
+  uploads_data:
