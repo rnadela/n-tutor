@@ -86,13 +86,13 @@ development_status:
   6-5-grade-dispute-override: done
   epic-6-retrospective: optional
 
-  epic-7: in-progress
+  epic-7: backlog
   7-1-topic-canonicalization: done
   7-2-mastery-computation: done
   7-3-weak-area-identification: done
   7-4-analytics-dashboard: done
   7-5-weak-area-drill-down-targeted-regeneration: done
-  7-6-admin-topic-curation: in-progress
+  7-6-admin-topic-curation: backlog
   epic-7-retrospective: optional
 
   epic-8: backlog
