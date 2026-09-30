@@ -2240,6 +2240,51 @@ export class PracticeTestService {
   }
 
   /**
+   * Whose Mastery a set of Practice Tests can have moved: the distinct Student
+   * Profiles with a submitted Attempt at any of them.
+   *
+   * **`submittedAttemptsFor`'s inverse, and it lives beside it for that reason.**
+   * That one asks "which runs are this child's"; this asks "whose runs are these
+   * papers'". `Attempt` is this module's entity (AD-17), so both questions are
+   * answered here and neither is answered by a caller holding the delegate.
+   *
+   * Story 7.6's merge is the caller: re-pointing a tag from one Topic to another
+   * changes what every child who has sat a paper carrying that tag has shown on the
+   * survivor, and the set of those children is not knowable from `topic_mastery`
+   * alone — a child whose window Questions were all `Ungraded` has no stored row to
+   * be found by and still needs recomputing.
+   *
+   * **`submittedAt: { not: null }`, exactly as the sibling filters.** An open Attempt
+   * is not evidence of anything, and a child who started a paper and walked away is
+   * not a profile whose figures moved. Which *run* counts toward Mastery is still
+   * `grading/mastery-eligibility.ts`'s predicate and is deliberately not applied
+   * here: a first run is not a fact about this table, and recomputing a profile that
+   * turns out to have no qualifying evidence is a delete, which is the right answer
+   * for it anyway.
+   *
+   * `distinct` rather than a `Set` in application code, so the rows that cross the
+   * wire are the answer rather than one row per Attempt of a heavily-retaken paper.
+   * An empty input never reaches the database.
+   *
+   * `tx` is required, as on every read on this path: the caller is inside the
+   * transaction that is re-pointing the tags, and a read of its own would be a second
+   * snapshot of rows that transaction is writing against.
+   */
+  async profilesWithSubmittedAttemptsOn(
+    tx: TransactionClient,
+    practiceTestIds: readonly string[],
+  ): Promise<string[]> {
+    const ids = [...new Set(practiceTestIds)];
+    if (ids.length === 0) return [];
+    const rows = await tx.attempt.findMany({
+      where: { practiceTestId: { in: ids }, submittedAt: { not: null } },
+      distinct: ['studentProfileId'],
+      select: { studentProfileId: true },
+    });
+    return rows.map((row) => row.studentProfileId);
+  }
+
+  /**
    * One handed-in Attempt's answer key, as **the reader** needs it.
    *
    * The sibling of `gradingInputFor` and deliberately **not** that read widened.

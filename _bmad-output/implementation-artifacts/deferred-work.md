@@ -2469,3 +2469,67 @@ source_spec: `spec-9-6-allowances-surface-atomic-monthly-reset.md`
 severity: low
 reason: `consumption-format.ts` exists so `parent-api.ts` need not import the admin client for a type, but `admin-api.ts` keeps re-exporting the four names, so the edge remains available to any new file with no lint rule refusing it. Separately, the parent's "unlimited" word and its tier labels are read from `adminCopy.accounts.*` — pre-existing for `limitLabel`, extended to `tierLabel` here. A shared copy namespace plus a `no-restricted-imports` rule is one fix for both; note `pnpm lint` is broken repo-wide, so the rule could not be added today.
 status: open
+
+### DW-310: The web workspace has no DOM test environment, so no test renders an Admin screen or exercises it against a mocked client; screen specs assert over source text instead.
+origin: spec-deferred 7f443504dde6
+location: apps/web/vitest.config.ts
+source_spec: `spec-7-6-admin-topic-curation.md`
+severity: medium
+reason: apps/web/vitest.config.ts sets environment: 'node' and the workspace ships no testing-library/jsdom dependency. apps/web/src/app/admin/topics/page.spec.tsx therefore readFileSync's page.tsx and TopicCurationList.tsx and matches strings/regexes, exactly as the pre-existing flagged-explanations/page.spec.tsx beside it does. Such assertions pass for a component that renders nothing and break on a format-preserving refactor. The sibling justifies its form by naming an e2e spec; there is no e2e spec for /admin/topics.
+status: open
+
+### DW-311: A merge builds one `id: { in: [...] }` list per touched QuestionTopic row and recomputes Mastery one profile per round trip, all inside a single transaction with no cap or batching.
+origin: spec-deferred 55ce576e5f48
+location: apps/api/src/grading/grading.service.ts
+source_spec: `spec-7-6-admin-topic-curation.md`
+severity: low
+reason: grading.service.ts repointTopicTags selects every tag id then issues deleteMany/updateMany over those id lists; topic-curation.service.ts merge loops recomputeMastery per affected profile in the same withTransaction. At a term's worth of tags this can approach the Postgres bind-parameter limit and hold locks long enough to hit a statement timeout, which rolls the whole merge back. The bounded form (delete by `topicId` + `questionId in alreadyTagged`, then updateMany by `topicId`) removes the id lists entirely.
+status: open
+
+### DW-312: The DOM-less test environment cannot observe conditional rendering, so a regression that silently hid the merge's "cannot be undone" warning would not fail any test.
+origin: spec-deferred 46f6ec156965
+location: apps/web/src/app/admin/_components/TopicCurationList.tsx:310
+source_spec: `spec-7-6-admin-topic-curation.md`
+severity: medium
+reason: TopicCurationList.tsx renders the topic-merge-confirmation block only when targetId !== ''. page.spec.tsx asserts only that the copy call and the testid substring exist in the raw file, and that the testid's text precedes props.onMerge(topic, target)'s text by character offset -- it never asserts what the guard expression is. Flipping the guard to render only while no target is chosen (i.e. while Merge is disabled) leaves every checked substring and their relative order unchanged, so the suite stays green while an operator could fire an irreversible merge never having seen the warning. Same root cause as the existing "no DOM test environment" item above; this is the concrete instance found this pass.
+status: open
+
+### DW-313: confirm/rename/merge read a Topic row then write to it later in the same transaction with no handling for the row vanishing in between.
+origin: spec-deferred bc532b5d3355
+location: apps/api/src/admin/topic-curation.service.ts
+source_spec: `spec-7-6-admin-topic-curation.md`
+severity: low
+reason: TopicCurationService.confirm/.rename/.merge and TopicService.confirm/rename/ removeMerged never catch Prisma's P2025 (record not found). A concurrent merge folding away the same Topic between the read and the write throws unhandled, surfacing as a 500 instead of the 404 every other unknown-Topic path returns. No row-level lock is taken either, so two simultaneous merges can both pass the initial checks before either commits. The transaction still rolls back cleanly on the fault -- no data is at risk, only the returned status code is wrong -- and admin curation is single-operator, low-traffic, so the window is narrow.
+status: open
+
+### DW-314: A rename to a name that trims/bounds to the same value still writes an UPDATE and clears the cached embedding, forcing an unnecessary re-embed on the next cascade run.
+origin: spec-deferred db462958859f
+location: apps/api/src/topics/topic.service.ts
+source_spec: `spec-7-6-admin-topic-curation.md`
+severity: low
+reason: TopicService.rename re-derives the match key and clears embedding/embeddingModel unconditionally, with no short-circuit for "nothing actually changed" the way confirm's already-confirmed case is short-circuited and tested. No test covers a rename to the current name. Costs one wasted stage-3 embed call; no incorrect data.
+status: open
+
+### DW-315: listProvisional and listForSubject are unbounded reads with no pagination, on sets the story's own premise says accumulate over a term.
+origin: spec-deferred f1df44e2e771
+location: apps/api/src/topics/topic.service.ts
+source_spec: `spec-7-6-admin-topic-curation.md`
+severity: medium
+reason: Both TopicService.listProvisional and TopicService.listForSubject (called via TopicCurationService) issue a plain findMany with no take/cursor. Fine at current data volumes; becomes a slow response or oversized payload as the provisional queue or a Subject's canonical set grows across terms.
+status: open
+
+### DW-316: A merge's audit row is recorded only under the merged Topic's id; the surviving Topic's own audit history has nothing pointing at the tags/history it absorbed.
+origin: spec-deferred 3f3338144d9d
+location: apps/api/src/admin/topic-curation.service.ts
+source_spec: `spec-7-6-admin-topic-curation.md`
+severity: low
+reason: TopicCurationService.merge calls this.audit.record(tx, actorId, 'topic.merge', 'Topic', topicId, ...) where topicId is the merged (now-deleted) Topic; targetTopicId is only a detail field. An operator reviewing the survivor's own audit trail later has no entry showing it absorbed another Topic's history.
+status: open
+
+### DW-317: The merge-target dropdown offers no in-panel retry on a failed loadTargets fetch; the operator must close and reopen the merge control to retry.
+origin: spec-deferred 0ea31bb34001
+location: apps/web/src/app/admin/_components/TopicCurationList.tsx
+source_spec: `spec-7-6-admin-topic-curation.md`
+severity: low
+reason: TopicCurationList's openMerge sets targetsError on any loadTargets failure but renders no retry action beside it, unlike the page-level load failure which shows an explicit Retry button.
+status: open

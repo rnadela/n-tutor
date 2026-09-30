@@ -109,3 +109,33 @@ export class TopicInputError extends Error {
     this.name = 'TopicInputError';
   }
 }
+
+/**
+ * A rename whose new key is already another Topic's key, within one Subject.
+ *
+ * The unique index on `(subjectId, matchKey)` is what makes stage 1 a lookup, so a
+ * rename that would land on a taken key is not a write that can be allowed to
+ * succeed by merging two rows silently — the operator asked for a spelling change
+ * and got a collision, and the answer is to merge the two Topics deliberately
+ * instead. Named rather than left as a raw P2002 for the reason `TopicInputError`
+ * is: `topics` has no route of its own, and whichever surface calls a write decides
+ * what a collision looks like on the wire.
+ *
+ * It names no id: the message reaches an operator, and the two ids are already in
+ * the request they made.
+ */
+export const TOPIC_NAME_TAKEN = 'Another topic in that subject already uses that name.';
+
+/**
+ * A curation write this module refuses on a standing fact about the request.
+ *
+ * A plain named error, exactly as `TopicInputError` is and for the same reason:
+ * this module stays callable, and unit-testable, without a framework. Never
+ * retried — a second identical rename collides identically.
+ */
+export class TopicNameConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TopicNameConflictError';
+  }
+}

@@ -1,15 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai/ai.service.js';
 import { Prisma } from '../generated/prisma/client.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
 import { topicMatchKey } from './topic-match-key.js';
 import {
   MAX_TOPIC_LABEL_LENGTH,
   TOPIC_CANDIDATE_LIMIT,
   TOPIC_LABEL_REQUIRED,
+  TOPIC_NAME_TAKEN,
   TOPIC_SIMILARITY_THRESHOLD,
   TOPIC_SUBJECT_UNKNOWN,
   TopicInputError,
+  TopicNameConflictError,
 } from './topic-policy.js';
 import { buildTopicResolutionPrompt } from './topic-resolution-prompt.js';
 import {
@@ -57,6 +59,20 @@ export interface TopicDescription {
   subjectName: string;
   /** Whether the cascade minted it rather than a human confirming it (Story 7.6). */
   provisional: boolean;
+}
+
+/**
+ * One provisional Topic as the curation queue reads it: a description plus the
+ * instant it was minted.
+ *
+ * `createdAt` is here and nowhere else in this module's reads, because it is the
+ * queue's **order** rather than a fact about the concept — the oldest unreviewed
+ * Topic is the one that has had the longest to accumulate near-duplicates behind
+ * it. Still no `matchKey`, no embedding and no count: the key is stage 1's, the
+ * vector is stage 2's, and a tagged-Question count is `grading`'s to state (AD-17).
+ */
+export interface ProvisionalTopic extends TopicDescription {
+  createdAt: Date;
 }
 
 /**
@@ -244,30 +260,205 @@ export class TopicService {
    * is all a reader is being told.
    */
   async describe(topicIds: readonly string[]): Promise<Map<string, TopicDescription>> {
+    return this.describeWithin(this.prisma, topicIds);
+  }
+
+  /**
+   * `describe`, inside the caller's open transaction.
+   *
+   * **The same statement, on the caller's snapshot**, and one implementation rather
+   * than two: `describe` is this method against the pooled client. Story 7.6's
+   * curation has to read the two Topics of a merge *within* the transaction that
+   * re-points their tags — a read on a second connection would be a second snapshot,
+   * and a cross-Subject merge could be admitted on a Subject id that had already
+   * moved. It is the same read a caller outside a transaction makes, so it is the
+   * same code.
+   *
+   * It exists because AD-17 makes `Topic` this module's table: an orchestrator that
+   * reached for `tx.topic` to check a Subject id would be holding a delegate it may
+   * not hold, for the sake of one `select`.
+   */
+  async describeWithin(
+    tx: TransactionClient,
+    topicIds: readonly string[],
+  ): Promise<Map<string, TopicDescription>> {
     const ids = [...new Set(topicIds)];
     if (ids.length === 0) return new Map();
-    const rows = await this.prisma.topic.findMany({
+    const rows = await tx.topic.findMany({
       where: { id: { in: ids } },
-      select: {
-        id: true,
-        name: true,
-        subjectId: true,
-        provisional: true,
-        subject: { select: { name: true } },
-      },
+      select: TOPIC_DESCRIPTION_FIELDS,
     });
-    return new Map(
-      rows.map((row) => [
-        row.id,
-        {
-          topicId: row.id,
-          name: row.name,
-          subjectId: row.subjectId,
-          subjectName: row.subject.name,
-          provisional: row.provisional,
+    return new Map(rows.map((row) => [row.id, describedFrom(row)]));
+  }
+
+  // --- Curation (Story 7.6) ----------------------------------------------
+
+  /**
+   * Every Topic the cascade minted and nobody has judged, oldest first.
+   *
+   * **Across every Subject, deliberately.** The queue is a list of decisions waiting
+   * on an operator, and a per-Subject queue would make "is there anything to review"
+   * a question that has to be asked once per Subject — which is how an unreviewed
+   * near-duplicate sits in a Subject nobody thought to open. The merge itself is
+   * still scoped to one Subject; only the *queue* spans them.
+   *
+   * **`(createdAt asc, id asc)`, and never `createdAt` alone.** Two Topics minted by
+   * one hand-in are written milliseconds apart and can tie on a `TIMESTAMP(3)`
+   * column; on a tie the order is Postgres's choice, and a queue that reordered
+   * itself between two reads is one an operator loses their place in. The id breaks
+   * it, exactly as `submittedAttemptsFor` breaks its own tie.
+   *
+   * No `matchKey`, no embedding and no tagged-Question count: the first two are the
+   * cascade's internals, and the third is a fact about `question_topic`, which is
+   * `grading`'s table (AD-17) and is counted by its owner.
+   */
+  async listProvisional(): Promise<ProvisionalTopic[]> {
+    const rows = await this.prisma.topic.findMany({
+      where: { provisional: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { ...TOPIC_DESCRIPTION_FIELDS, createdAt: true },
+    });
+    return rows.map((row) => ({ ...describedFrom(row), createdAt: row.createdAt }));
+  }
+
+  /**
+   * One Subject's whole canonical set, by name.
+   *
+   * **The merge target list, and it is the whole set rather than the provisional
+   * part of it.** The ordinary merge is a provisional near-duplicate folded into the
+   * confirmed Topic it should have matched, so a list of provisional rows alone would
+   * hide every good target. The `provisional` flag travels with each row so the
+   * operator can see which is which.
+   *
+   * `(name asc, id asc)`: two Topics of one Subject may legitimately share a name —
+   * the unique index is on the *key*, and two different keys can render the same
+   * spelling — so the id breaks the tie for the same reason the queue's does.
+   *
+   * An unknown Subject answers `[]` rather than refusing. Whether a Subject exists is
+   * `admin`'s question, asked through the taxonomy's own reader; this module answers
+   * "what is in that canonical set", and the answer for a set that does not exist is
+   * that it holds nothing.
+   */
+  async listForSubject(subjectId: string): Promise<TopicDescription[]> {
+    const rows = await this.prisma.topic.findMany({
+      where: { subjectId },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      select: TOPIC_DESCRIPTION_FIELDS,
+    });
+    return rows.map(describedFrom);
+  }
+
+  /**
+   * Marks one Topic as judged by a human. Nothing else about it moves.
+   *
+   * **Confirm is the one action that means "a human has looked at this".** It does
+   * not touch the name, the key, the vector or a single `TopicMastery` row: a
+   * confirmed Topic is the same Topic, and a confirm that also tidied a spelling
+   * would be a second, hidden decision inside the one an operator asked for.
+   *
+   * **Idempotent by doing nothing.** A second confirm on an already-confirmed row
+   * issues no `UPDATE` at all, so `updatedAt` does not move either — "the row is
+   * returned unchanged" is a fact about the row and not only about the columns the
+   * caller happened to look at. The caller still audits it, because a redundant
+   * action an operator took is still an action an operator took.
+   *
+   * `null` for an id with no row. Whether that is a 404 is the surface's call.
+   */
+  async confirm(tx: TransactionClient, topicId: string): Promise<TopicDescription | null> {
+    const before = await tx.topic.findUnique({
+      where: { id: topicId },
+      select: TOPIC_DESCRIPTION_FIELDS,
+    });
+    if (before === null) return null;
+    if (!before.provisional) return describedFrom(before);
+
+    const after = await tx.topic.update({
+      where: { id: topicId },
+      data: { provisional: false },
+      select: TOPIC_DESCRIPTION_FIELDS,
+    });
+    return describedFrom(after);
+  }
+
+  /**
+   * Gives one Topic a new name, and with it a new match key and no cached vector.
+   *
+   * **The key is re-derived through `topicMatchKey` and never edited.** It is stage
+   * 1's one derivation, used for the lookup and for the write alike, so a rename that
+   * left the stored key behind would leave a Topic that goes on matching the spelling
+   * it no longer has — silently, and for as long as the Subject is taught.
+   *
+   * **The cached vector is cleared, and that is not tidiness.** `embedding` is a
+   * vector of the *name*. After a rename it describes a spelling the row no longer
+   * has, and stage 2 would go on comparing against it with a cosine that looks
+   * perfectly healthy. Cleared through `Prisma.DbNull` and not a bare `null`, for the
+   * reason `mint` states: on a nullable `Json` column a bare `null` is the JSON value
+   * `null`, which is a cached vector of nothing rather than no vector at all. The
+   * model name goes with it, because a snapshot with no vector under it is a claim
+   * about a row that no longer holds one. Stage 3 refills both, from the new name.
+   *
+   * **`provisional` is not touched.** Confirm is the action that means a human
+   * judged this; a rename that also confirmed would perform a decision nobody made.
+   * The queue row carries both controls, so fixing a spelling and confirming is two
+   * clicks rather than one hidden one.
+   *
+   * The name is bounded exactly as a minted one is, through the same `boundedLabel`:
+   * two paths to a `topic.name` with two different bounds is how a key outgrows its
+   * btree. A name that is blank once trimmed is refused — a Topic with no name is not
+   * a rename this module can perform.
+   *
+   * `null` for an id with no row; `TopicNameConflictError` when the new key is
+   * already another Topic's within that Subject. No `TopicMastery` row and no
+   * `QuestionTopic` row is read or written here: a Topic's spelling has no bearing on
+   * what a child has shown.
+   */
+  async rename(
+    tx: TransactionClient,
+    topicId: string,
+    name: string,
+  ): Promise<TopicDescription | null> {
+    const bounded = boundedLabel(name);
+    if (bounded.length === 0) throw new TopicInputError(TOPIC_LABEL_REQUIRED);
+
+    const before = await tx.topic.findUnique({ where: { id: topicId }, select: { id: true } });
+    if (before === null) return null;
+
+    try {
+      const after = await tx.topic.update({
+        where: { id: topicId },
+        data: {
+          name: bounded,
+          matchKey: topicMatchKey(bounded),
+          embedding: Prisma.DbNull,
+          embeddingModel: null,
         },
-      ]),
-    );
+        select: TOPIC_DESCRIPTION_FIELDS,
+      });
+      return describedFrom(after);
+    } catch (cause) {
+      if (!isUniqueViolation(cause)) throw cause;
+      throw new TopicNameConflictError(TOPIC_NAME_TAKEN);
+    }
+  }
+
+  /**
+   * Deletes the Topic a merge folded away, inside the caller's transaction.
+   *
+   * **The only deletion of a `Topic` row anywhere in the system**, and it exists for
+   * one caller: a merge that has already re-pointed every tag off this row. Calling
+   * it with tags still pointing here would take them with it — `question_topic.topic`
+   * is `onDelete: Cascade` — which is a Mastery history deleted rather than moved. So
+   * the order the orchestrator runs in is the contract, not a preference.
+   *
+   * The cascade on `topic_mastery` is the same edge and is wanted here: the merged
+   * Topic's stored figures are about a Topic that no longer exists, and the survivor's
+   * are recomputed from the window immediately afterwards, in this same transaction.
+   *
+   * It reads nothing first: the orchestrator has already resolved this row and its
+   * Subject through `describeWithin` on this very `tx`.
+   */
+  async removeMerged(tx: TransactionClient, topicId: string): Promise<void> {
+    await tx.topic.delete({ where: { id: topicId } });
   }
 
   // --- Internals ---------------------------------------------------------
@@ -538,6 +729,40 @@ export class TopicService {
  */
 function boundedLabel(label: string): string {
   return label.trim().slice(0, MAX_TOPIC_LABEL_LENGTH).trim();
+}
+
+/**
+ * The columns every public read of this module answers with, stated once.
+ *
+ * One `select` shared by `describe`, the curation queue, the per-Subject set and both
+ * writes, so no reader can quietly widen into `matchKey` or `embedding`: the key is
+ * stage 1's internal and the vector is stage 2's, and neither is anything a surface
+ * outside this module has business holding (AD-20). The Subject name travels through
+ * the relation in the same statement, so no caller has an N+1 to write.
+ */
+const TOPIC_DESCRIPTION_FIELDS = {
+  id: true,
+  name: true,
+  subjectId: true,
+  provisional: true,
+  subject: { select: { name: true } },
+} as const;
+
+/** One selected row as this module's callers read it. */
+function describedFrom(row: {
+  id: string;
+  name: string;
+  subjectId: string;
+  provisional: boolean;
+  subject: { name: string };
+}): TopicDescription {
+  return {
+    topicId: row.id,
+    name: row.name,
+    subjectId: row.subjectId,
+    subjectName: row.subject.name,
+    provisional: row.provisional,
+  };
 }
 
 /** The unique-constraint violation, as the client reports it. */

@@ -47,6 +47,12 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
             <Button component={Link} href="/admin/flagged-explanations">
               {adminCopy.nav.flaggedExplanations}
             </Button>
+            {/* The Topic curation queue. Same reason as above: a canonical set nobody
+                can open is one that accumulates near-duplicates until every parent's
+                Mastery picture fragments. */}
+            <Button component={Link} href="/admin/topics">
+              {adminCopy.nav.topics}
+            </Button>
             <Button
               onClick={() => {
                 clearToken();

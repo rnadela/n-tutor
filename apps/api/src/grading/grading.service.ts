@@ -1259,6 +1259,136 @@ export class GradingService {
     }
   }
 
+  // --- Topic curation support (Story 7.6) --------------------------------
+
+  /**
+   * How many Questions carry each of the given Topics.
+   *
+   * **`question_topic` is this module's table (AD-17)**, so the count lives here and
+   * not in the Admin service that shows it. The curation queue states it beside every
+   * provisional Topic because it is the whole of a merge's blast radius stated in
+   * advance: an operator folding away a Topic with four hundred tags behind it is
+   * doing something materially different from one folding away a Topic with none.
+   *
+   * One `groupBy` for the whole set rather than a count per row: the queue is a list,
+   * and a count per entry would be N round trips behind one screen.
+   *
+   * **A Topic with no tags is simply absent from the map**, which is what `groupBy`
+   * answers with and is the honest shape: there is no row to count. Callers read it
+   * as zero. An empty input never reaches the database.
+   *
+   * No `tx`: this is a read behind a screen, never inside a transaction anything is
+   * waiting on.
+   */
+  async topicTagCounts(topicIds: readonly string[]): Promise<Map<string, number>> {
+    const ids = [...new Set(topicIds)];
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.questionTopic.groupBy({
+      by: ['topicId'],
+      where: { topicId: { in: ids } },
+      _count: { _all: true },
+    });
+    return new Map(rows.map((row) => [row.topicId, row._count._all]));
+  }
+
+  /**
+   * Moves every canonical tag off one Topic and onto another, inside the caller's
+   * transaction, and answers with whose Mastery that can have moved.
+   *
+   * **It partitions rather than updating, and the unique index is why.**
+   * `question_topic` is unique on `(questionId, topicId)`. A Question tagged with
+   * both the merged and the surviving Topic — the ordinary case for two spellings of
+   * one concept on one paper — makes a blanket `updateMany` a constraint violation,
+   * and `skipDuplicates` does not exist for updates. So the colliding tags are
+   * **deleted** and the rest are re-pointed: the Question ends carrying the survivor
+   * exactly once, which is the idempotence that unique index exists for. Nothing is
+   * lost by the delete — the Question already carried the target, and a tag is a
+   * boolean fact about a (Question, Topic) pair rather than a quantity.
+   *
+   * **The affected-profile set is a union, and both halves are necessary.**
+   *
+   * 1. Every profile with a submitted Attempt at a *touched* Practice Test, asked of
+   *    `practicetest` because `Attempt` is its entity. This half exists because a
+   *    child whose window Questions were all `Ungraded` has **no `TopicMastery` row**
+   *    to be found by and whose figures still have to be recomputed.
+   * 2. Every profile already holding a row on **either** Topic. This half exists
+   *    because a stored row can outlive the evidence behind it — a paper deleted, a
+   *    run that no longer qualifies — and such a row on the merged Topic is about to
+   *    be cascaded away while the survivor's stays stale.
+   *
+   * Recomputing a profile that turns out to have no evidence at all is a delete,
+   * which is the right answer for it anyway, so the union erring wide is free.
+   *
+   * **It is deliberately not the merge.** It writes no `Topic` row — that is `topics`'
+   * (AD-17) — and it recomputes nothing: the caller runs `recomputeMastery` over the
+   * profiles this returns, in this same transaction, because AD-12 gives Mastery one
+   * recompute path and this is not it.
+   *
+   * The two Topics' rows are read **before** anything is deleted, because the merged
+   * Topic's own `TopicMastery` rows disappear with it under `onDelete: Cascade` the
+   * moment the caller removes the row.
+   */
+  async repointTopicTags(
+    tx: TransactionClient,
+    fromTopicId: string,
+    toTopicId: string,
+  ): Promise<{ repointed: number; affectedProfileIds: string[] }> {
+    const tags = await tx.questionTopic.findMany({
+      where: { topicId: fromTopicId },
+      select: { id: true, questionId: true, practiceTestId: true },
+    });
+
+    // Asked before any write, so it describes the state the merge is acting on. A row
+    // on either Topic counts: the merged Topic's is about to be cascaded away, and the
+    // survivor's is about to become wrong.
+    const held = await tx.topicMastery.findMany({
+      where: { topicId: { in: [fromTopicId, toTopicId] } },
+      distinct: ['studentProfileId'],
+      select: { studentProfileId: true },
+    });
+
+    // The Practice Tests the tags sat on — every one of them, including those whose
+    // tag collides and is deleted rather than moved. A collision still changes the
+    // merged Topic's side of the picture, and the profile has to be recomputed for the
+    // survivor either way.
+    const touchedTestIds = [...new Set(tags.map((tag) => tag.practiceTestId))];
+    const fromAttempts = await this.practiceTests.profilesWithSubmittedAttemptsOn(
+      tx,
+      touchedTestIds,
+    );
+
+    const affectedProfileIds = [
+      ...new Set([...fromAttempts, ...held.map((row) => row.studentProfileId)]),
+    ];
+
+    if (tags.length === 0) return { repointed: 0, affectedProfileIds };
+
+    // One statement to find every Question that already carries the target, narrowed
+    // to the Questions actually in play rather than to the target's whole tag set.
+    const existing = await tx.questionTopic.findMany({
+      where: { topicId: toTopicId, questionId: { in: tags.map((tag) => tag.questionId) } },
+      select: { questionId: true },
+    });
+    const alreadyTagged = new Set(existing.map((row) => row.questionId));
+
+    const colliding = tags.filter((tag) => alreadyTagged.has(tag.questionId));
+    const moving = tags.filter((tag) => !alreadyTagged.has(tag.questionId));
+
+    // Deleted first. Re-pointing first would put a moving row onto a `(questionId,
+    // topicId)` pair a colliding row still occupies in this same transaction.
+    if (colliding.length > 0) {
+      await tx.questionTopic.deleteMany({ where: { id: { in: colliding.map((tag) => tag.id) } } });
+    }
+    if (moving.length > 0) {
+      await tx.questionTopic.updateMany({
+        where: { id: { in: moving.map((tag) => tag.id) } },
+        data: { topicId: toTopicId },
+      });
+    }
+
+    return { repointed: moving.length, affectedProfileIds };
+  }
+
   /**
    * Every Topic this child has a stored Mastery figure for, each with its counts
    * and its Weak Area verdict.

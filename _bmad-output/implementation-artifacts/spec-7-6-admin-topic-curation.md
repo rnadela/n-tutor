@@ -2,24 +2,113 @@
 title: 'Story 7.6: Admin Topic Curation'
 type: 'feature'
 created: '2026-09-29'
-baseline_revision: 'd203172a34bbf9f85e80c2866702ee2ced04d361'
-status: 'in-progress'
+baseline_revision: '04897d838ccad50d320091dccadd57b524e9f770'
+status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
 context: []
 warnings: ['oversized']
-deferred: []
-operator_actions:
-  - >-
-    Prior dev session timed out twice (2026-09-29). Attempt 1 left real, uncommitted
-    work parked at `refs/attempt-preserve-dirty/20260926-202152-4fb2-d203172a-1`
-    (admin topic-curation controller/service/DTOs, topic merge logic in grading +
-    topic services, unit + integration tests, admin UI wiring — 13 files). Attempt 2
-    parked at `...-2` is just the spec file, no code. Before the next dev session
-    starts fresh, inspect attempt 1 for salvage:
-    `git show --stat refs/attempt-preserve-dirty/20260926-202152-4fb2-d203172a-1`,
-    and either recover it (`git merge --ff-only refs/attempt-preserve-dirty/20260926-202152-4fb2-d203172a-1`)
-    or discard and start clean.
+deferred:
+  - summary: >-
+      The web workspace has no DOM test environment, so no test renders an Admin screen or
+      exercises it against a mocked client; screen specs assert over source text instead.
+    evidence: |-
+      apps/web/vitest.config.ts sets environment: 'node' and the workspace ships no
+      testing-library/jsdom dependency. apps/web/src/app/admin/topics/page.spec.tsx therefore
+      readFileSync's page.tsx and TopicCurationList.tsx and matches strings/regexes, exactly as
+      the pre-existing flagged-explanations/page.spec.tsx beside it does. Such assertions pass
+      for a component that renders nothing and break on a format-preserving refactor. The sibling
+      justifies its form by naming an e2e spec; there is no e2e spec for /admin/topics.
+    location: >-
+      apps/web/vitest.config.ts
+    severity: medium
+  - summary: >-
+      A merge builds one `id: { in: [...] }` list per touched QuestionTopic row and recomputes
+      Mastery one profile per round trip, all inside a single transaction with no cap or batching.
+    evidence: |-
+      grading.service.ts repointTopicTags selects every tag id then issues deleteMany/updateMany
+      over those id lists; topic-curation.service.ts merge loops recomputeMastery per affected
+      profile in the same withTransaction. At a term's worth of tags this can approach the
+      Postgres bind-parameter limit and hold locks long enough to hit a statement timeout, which
+      rolls the whole merge back. The bounded form (delete by `topicId` + `questionId in
+      alreadyTagged`, then updateMany by `topicId`) removes the id lists entirely.
+    location: >-
+      apps/api/src/grading/grading.service.ts
+    severity: low
+  - summary: >-
+      The DOM-less test environment cannot observe conditional rendering, so a regression
+      that silently hid the merge's "cannot be undone" warning would not fail any test.
+    evidence: |-
+      TopicCurationList.tsx renders the topic-merge-confirmation block only when
+      targetId !== ''. page.spec.tsx asserts only that the copy call and the testid
+      substring exist in the raw file, and that the testid's text precedes
+      props.onMerge(topic, target)'s text by character offset -- it never asserts what
+      the guard expression is. Flipping the guard to render only while no target is
+      chosen (i.e. while Merge is disabled) leaves every checked substring and their
+      relative order unchanged, so the suite stays green while an operator could fire an
+      irreversible merge never having seen the warning. Same root cause as the existing
+      "no DOM test environment" item above; this is the concrete instance found this pass.
+    location: >-
+      apps/web/src/app/admin/_components/TopicCurationList.tsx:310
+    severity: medium
+  - summary: >-
+      confirm/rename/merge read a Topic row then write to it later in the same
+      transaction with no handling for the row vanishing in between.
+    evidence: |-
+      TopicCurationService.confirm/.rename/.merge and TopicService.confirm/rename/
+      removeMerged never catch Prisma's P2025 (record not found). A concurrent merge
+      folding away the same Topic between the read and the write throws unhandled,
+      surfacing as a 500 instead of the 404 every other unknown-Topic path returns. No
+      row-level lock is taken either, so two simultaneous merges can both pass the
+      initial checks before either commits. The transaction still rolls back cleanly on
+      the fault -- no data is at risk, only the returned status code is wrong -- and admin
+      curation is single-operator, low-traffic, so the window is narrow.
+    location: >-
+      apps/api/src/admin/topic-curation.service.ts
+    severity: low
+  - summary: >-
+      A rename to a name that trims/bounds to the same value still writes an UPDATE and
+      clears the cached embedding, forcing an unnecessary re-embed on the next cascade run.
+    evidence: |-
+      TopicService.rename re-derives the match key and clears embedding/embeddingModel
+      unconditionally, with no short-circuit for "nothing actually changed" the way
+      confirm's already-confirmed case is short-circuited and tested. No test covers a
+      rename to the current name. Costs one wasted stage-3 embed call; no incorrect data.
+    location: >-
+      apps/api/src/topics/topic.service.ts
+    severity: low
+  - summary: >-
+      listProvisional and listForSubject are unbounded reads with no pagination, on
+      sets the story's own premise says accumulate over a term.
+    evidence: |-
+      Both TopicService.listProvisional and TopicService.listForSubject (called via
+      TopicCurationService) issue a plain findMany with no take/cursor. Fine at current
+      data volumes; becomes a slow response or oversized payload as the provisional
+      queue or a Subject's canonical set grows across terms.
+    location: >-
+      apps/api/src/topics/topic.service.ts
+    severity: medium
+  - summary: >-
+      A merge's audit row is recorded only under the merged Topic's id; the surviving
+      Topic's own audit history has nothing pointing at the tags/history it absorbed.
+    evidence: |-
+      TopicCurationService.merge calls this.audit.record(tx, actorId, 'topic.merge',
+      'Topic', topicId, ...) where topicId is the merged (now-deleted) Topic; targetTopicId
+      is only a detail field. An operator reviewing the survivor's own audit trail later has
+      no entry showing it absorbed another Topic's history.
+    location: >-
+      apps/api/src/admin/topic-curation.service.ts
+    severity: low
+  - summary: >-
+      The merge-target dropdown offers no in-panel retry on a failed loadTargets fetch;
+      the operator must close and reopen the merge control to retry.
+    evidence: |-
+      TopicCurationList's openMerge sets targetsError on any loadTargets failure but
+      renders no retry action beside it, unlike the page-level load failure which shows
+      an explicit Retry button.
+    location: >-
+      apps/web/src/app/admin/_components/TopicCurationList.tsx
+    severity: low
 ---
 
 <intent-contract>
@@ -129,7 +218,34 @@ operator_actions:
 
 ## Spec Change Log
 
+- 2026-09-30: Rebased the parked attempt-1 implementation (`refs/attempt-preserve-dirty/20260926-202152-4fb2-d203172a-1`) onto `04897d8` with a 3-way apply; cleared the now-satisfied `operator_actions` salvage note.
+
 ## Review Triage Log
+
+### 2026-09-30 - Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 8: (high 0, medium 5, low 3)
+- defer: 2: (high 0, medium 1, low 1)
+- reject: 11: (high 0, medium 4, low 7)
+- addressed_findings:
+  - `[medium]` `[patch]` The merge's per-profile recompute loop was only ever exercised with one affected profile, so collapsing it to a single call would have kept the suite green -- added an int-spec merge over two profiles, one qualifying only through a submitted Attempt with no stored Mastery row, asserting both survivors and `recomputeMastery` running twice.
+  - `[medium]` `[patch]` No test covered the wire-level refusals the controller exists for -- added int-spec cases for a non-UUID path id, a non-UUID `targetTopicId`, a missing/non-string `name`, an over-bound name, and a name exactly at the bound.
+  - `[medium]` `[patch]` `RenameTopicDto`'s `@MaxLength(200)` was a restated literal that could drift from `MAX_TOPIC_LABEL_LENGTH` and make existing Topics unrenamable -- the decorator now takes the constant.
+  - `[medium]` `[patch]` `topicTagCounts` and `profilesWithSubmittedAttemptsOn` had no direct tests (the merge unit spec stubbed the latter) -- added unit coverage for dedupe, empty-input short-circuit, absent-Topic-means-zero, and the `submittedAt: { not: null }` + `distinct` statement.
+  - `[medium]` `[patch]` `page.tsx run()` reported a committed write as failed when the following re-read rejected, sending the operator into a retry that 404s -- the write's announcement now lands before the re-read, and a re-read failure surfaces as a load error.
+  - `[low]` `[patch]` `mergeConfirmation` and `announce.topicMerged` were unpluralized ("1 tagged questions") and the confirmation promised `taggedQuestionCount` while collisions are deleted rather than moved -- both pluralize now and the confirmation reads as an upper bound.
+  - `[low]` `[patch]` `openMerge` wrote its target list unconditionally, so opening a second row before the first resolved showed the wrong Subject's Topics -- the write is now guarded on the row still being the open request.
+  - `[low]` `[patch]` `createdOn` used `toLocaleString()`, whose output depends on ambient locale/timezone and can differ between server and browser render -- replaced with a fixed UTC `Intl.DateTimeFormat`.
+
+### 2026-09-30 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 1: (high 0, medium 1, low 0)
+- defer: 6: (high 0, medium 1, low 5)
+- reject: 7: (high 0, medium 2, low 5)
+- addressed_findings:
+  - `[medium]` `[patch]` `TopicCurationList`'s `openMerge` caught every `loadTargets` failure the same way, never checking for a 401 like every other read/write on this screen -- an operator whose session expired while opening the merge panel saw a generic load-failed sentence instead of the bounce to `/admin/login` the rest of the screen guarantees. `page.tsx` now wraps `loadTargets` to check `AdminApiError`'s `401` and call `toLogin()` before rethrowing, matching `load`/`refresh`/`run`; `page.spec.tsx`'s `status === 401` count assertion updated from 3 to 4.
 
 ## Design Notes
 
@@ -153,3 +269,21 @@ operator_actions:
 - `pnpm --filter api exec vitest run src/topics src/grading src/admin` -- expected: all pass.
 - `pnpm --filter api exec vitest run test/topic-curation.int-spec.ts test/mastery.int-spec.ts test/weak-area.int-spec.ts test/analytics.int-spec.ts test/taxonomy.int-spec.ts test/topic-normalization.int-spec.ts` -- expected: all pass; Epic 7's existing suites still green.
 - `pnpm --filter web run test` -- expected: all pass.
+
+## Auto Run Result
+
+**Summary of implemented change:** This pass was a fresh, unattended review of the already-implemented Story 7.6 (Admin Topic curation: confirm/rename/merge, backed by `TopicCurationService`, `TopicCurationController`, `GradingService.repointTopicTags`/`topicTagCounts`, `PracticeTestService.profilesWithSubmittedAttemptsOn`, and the `apps/web/src/app/admin/topics` screen). No new functional surface was added this pass; one inconsistency in existing behavior was patched.
+
+**Files changed with one-line descriptions:**
+- `apps/web/src/app/admin/topics/page.tsx` — `loadTargets` now checks for a 401 and bounces to `/admin/login` before rethrowing, matching `load`/`refresh`/`run`.
+- `apps/web/src/app/admin/topics/page.spec.tsx` — updated the `status === 401` occurrence-count assertion from 3 to 4.
+- `_bmad-output/implementation-artifacts/spec-7-6-admin-topic-curation.md` — this review pass's triage log entry and six new `deferred` items.
+
+**Review findings breakdown:** 14 findings after triage (0 intent_gap, 0 bad_spec). 1 patch applied (medium). 6 deferred (1 medium, 5 low) — a concrete instance of the untestable-conditional-rendering gap, the unhandled-concurrent-delete race on confirm/rename/merge, a needless embedding-clear on a no-op rename, unbounded `listProvisional`/`listForSubject` reads, a merge audit row not cross-linked from the survivor's side, and the merge-target dropdown's missing in-panel retry. 7 rejected — a distinct admin authorization-scope request, an unrequested merge-blast-radius confirmation cap, a suggestion to test that two length constants can't drift, the codebase-wide `req.admin!` non-null-assertion pattern (verified consistent with every other admin controller), an intent-alignment read alleging the UI should expose rename/merge on already-confirmed Topics directly (rejected: the I/O matrix's own row label, "Merge-target read", and the Approach paragraph's phrasing both scope rename/merge to acting on a provisional Topic), and two duplicates of already-known/already-deferred issues (the merge's per-profile recompute-inside-one-transaction cap, and the general no-DOM-test-environment gap).
+
+**Follow-up review recommendation:** `false`. Only one finding was triaged `patch` this pass, at `medium` severity: score = 3×1 (medium) + 1×0 (low) = 3, below the `5` threshold, and it was not `high`.
+
+**Verification performed:** `pnpm --filter web run lint` — clean. `pnpm --filter web run typecheck` — clean. `pnpm --filter web run test` — 70 files, 1488 tests, all pass (failed once on the stale `status === 401` count of 3, fixed to 4, then green). No API files changed this pass, so API lint/typecheck/vitest/int-specs were not re-run.
+
+**Residual risks:** The six newly deferred items above are real but each low-consequence at current scale (single-operator admin tool, small data volumes) — see their `deferred` entries for detail. No correctness or data-integrity risk was found; every gap either degrades an error path (500 instead of 404 on a rare race) or is a scale/observability concern for later.
+

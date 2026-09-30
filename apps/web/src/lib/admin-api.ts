@@ -35,6 +35,43 @@ export interface FlaggedExplanation {
   raisedAt: string;
 }
 
+/**
+ * One provisional Topic awaiting an operator's judgement, exactly as the API states it.
+ *
+ * `taggedQuestionCount` is the merge's blast radius stated in advance: folding away a
+ * Topic four hundred Questions carry is materially different from folding away one
+ * nothing carries, and the confirmation sentence names it before the merge fires.
+ *
+ * No match key, no cached vector, no child and no account: a canonical Topic is a
+ * concept a Subject is taught, and curating it needs nothing else (AD-20, AD-26).
+ */
+export interface ProvisionalTopic {
+  topicId: string;
+  name: string;
+  subjectId: string;
+  subjectName: string;
+  /** ISO-8601. The queue's order, oldest first, decided by the API. */
+  createdAt: string;
+  taggedQuestionCount: number;
+}
+
+/** One member of a Subject's canonical set: a merge target an operator may choose. */
+export interface CanonicalTopic {
+  topicId: string;
+  name: string;
+  subjectId: string;
+  subjectName: string;
+  provisional: boolean;
+}
+
+/** What a merge came to. Counts and ids only. */
+export interface TopicMergeResult {
+  mergedTopicId: string;
+  targetTopicId: string;
+  repointed: number;
+  profilesRecomputed: number;
+}
+
 export interface TaxonomyItem {
   id: string;
   name: string;
@@ -225,4 +262,37 @@ export const adminApi = {
    * this operator has to judge.
    */
   flaggedExplanations: () => call<FlaggedExplanation[]>('/admin/flagged-explanations'),
+
+  /**
+   * The Topic curation queue: every provisional Topic across every Subject, oldest
+   * first. An empty list is the ordinary answer and means the queue has drained.
+   */
+  provisionalTopics: () => call<ProvisionalTopic[]>('/admin/topics/provisional'),
+  /**
+   * One Subject's whole canonical set — the merge targets for a row of that Subject.
+   *
+   * Fetched per Subject and never globally: a merge is refused across Subjects, so a
+   * single global list would offer an operator targets every one of which is a 400.
+   */
+  subjectTopics: (subjectId: string) =>
+    call<CanonicalTopic[]>(`/admin/topics/subjects/${subjectId}`),
+  confirmTopic: (topicId: string) =>
+    call<CanonicalTopic>(`/admin/topics/${topicId}/confirm`, { method: 'POST' }),
+  renameTopic: (topicId: string, name: string) =>
+    call<CanonicalTopic>(`/admin/topics/${topicId}/name`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+  /**
+   * Folds one Topic into another of the same Subject.
+   *
+   * Irreversible from this app: the tags move, the merged Topic is removed and every
+   * affected child's Mastery is recomputed, all server-side and all in one
+   * transaction. The screen states that before it calls this.
+   */
+  mergeTopic: (topicId: string, targetTopicId: string) =>
+    call<TopicMergeResult>(`/admin/topics/${topicId}/merge`, {
+      method: 'POST',
+      body: JSON.stringify({ targetTopicId }),
+    }),
 };

@@ -19,6 +19,13 @@ export type AuditAction =
   | 'availability.enable'
   | 'availability.disable'
   | 'parentAccount.tierChange'
+  // Topic curation (Story 7.6). An unaudited curation action is an unexplained
+  // canonical set: a Topic that changed name, stopped being provisional or vanished
+  // with nothing on the record saying who decided that or what it cost. Every one of
+  // the three is written on the same `tx` as the write it describes.
+  | 'topic.confirm'
+  | 'topic.rename'
+  | 'topic.merge'
   | 'auth.signIn.failed';
 
 @Injectable()

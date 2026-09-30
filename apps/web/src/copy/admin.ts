@@ -23,7 +23,90 @@ export const adminCopy = {
      * confirmed report nobody can open is a report that went nowhere.
      */
     flaggedExplanations: 'Flagged Explanations',
+    /**
+     * The way in to the Topic curation queue.
+     *
+     * A destination with no nav entry is one an operator cannot reach — and a canonical
+     * set nobody curates is one that accumulates near-duplicates until every parent's
+     * Mastery picture fragments.
+     */
+    topics: 'Topics',
     signOut: 'Sign out',
+  },
+
+  /**
+   * Topic curation, and the only place its copy is written.
+   *
+   * **Factual and third person**, like every other Admin string. Not one sentence here
+   * names a child, an account, a cost, a tier or a model (AD-20, AD-26): a canonical
+   * Topic is a concept a Subject is taught, and curating it is a decision about the
+   * concept rather than about anyone's work.
+   *
+   * **The merge states its blast radius before it fires.** A merge re-points every tag
+   * onto the survivor, deletes the folded-away Topic and recomputes Mastery for every
+   * affected child — none of which can be undone from this screen — so the confirmation
+   * names both Topics and how many Questions are carried. Every figure in it is a
+   * parameter; this file writes none.
+   */
+  topics: {
+    title: 'Topic curation',
+    intro:
+      'Every topic that was created automatically and has not been reviewed. Confirm one as it stands, rename it, or merge it into another topic of the same subject. A merge moves every tagged question onto the surviving topic and recomputes mastery for the children affected.',
+    /** An empty queue. The normal case, stated rather than left blank. */
+    empty: 'No topics are waiting to be reviewed.',
+    loading: 'Loading topics…',
+    loadFailed: 'The topics could not be listed.',
+    retry: 'Try again',
+    nameColumn: 'Topic',
+    subjectColumn: 'Subject',
+    taggedColumn: 'Tagged questions',
+    createdColumn: 'Created',
+    actionsColumn: 'Actions',
+    confirm: 'Confirm',
+    rename: 'Rename',
+    renameLabel: 'New name',
+    saveName: 'Save name',
+    cancelRename: 'Cancel',
+    merge: 'Merge',
+    startMerge: 'Merge into…',
+    cancelMerge: 'Cancel',
+    mergeTargetLabel: 'Merge into',
+    /** The placeholder option, so the select never starts on a real target. */
+    mergeTargetUnchosen: 'Choose a topic',
+    loadingTargets: 'Loading topics for this subject…',
+    /** A Subject whose canonical set holds nothing else to merge into. */
+    noTargets: 'This subject has no other topic to merge into.',
+    /** Which rows in the target list a human has already judged, and which not. */
+    targetProvisional: 'not reviewed',
+    targetConfirmed: 'reviewed',
+    /**
+     * What a merge is about to do, in full, before it is fired.
+     *
+     * It names both topics and the count because the count is the difference between
+     * folding away a stray spelling and folding away a term's worth of history — and
+     * nothing on this screen undoes it.
+     *
+     * **"Up to", and not a flat figure.** The count is how many questions carry the
+     * merged topic; a question that already carries the survivor has its duplicate tag
+     * removed rather than moved, so the number that actually moves can be smaller. An
+     * exact promise here would contradict the announcement the same action then makes,
+     * over the same merge, with the real figure — and an operator who saw the two
+     * disagree would have no way to tell which had lied.
+     *
+     * Singular and plural, and its own sentence for none: "1 tagged questions" is a
+     * sentence nobody wrote, and a topic nothing carries moves nothing at all.
+     */
+    mergeConfirmation: (merged: string, target: string, taggedQuestionCount: number) => {
+      const moving =
+        taggedQuestionCount === 0
+          ? `${merged} carries no tagged questions`
+          : taggedQuestionCount === 1
+            ? `Up to 1 tagged question moves onto ${target}`
+            : `Up to ${taggedQuestionCount} tagged questions move onto ${target}`;
+      return `Merge ${merged} into ${target}. ${moving}, ${merged} is removed, and mastery is recomputed for every child affected. This cannot be undone.`;
+    },
+    /** The created instant, or the same row with no date when the stored one will not parse. */
+    createdUndated: '—',
   },
 
   /**
@@ -170,6 +253,24 @@ export const adminCopy = {
       `${account} moved from ${from} to ${to}.`,
     consumptionShown: (account: string) => `Consumption shown for ${account}.`,
     consumptionHidden: (account: string) => `Consumption hidden for ${account}.`,
+    topicConfirmed: (name: string) => `Topic ${name} confirmed.`,
+    topicRenamed: (from: string, to: string) => `Topic ${from} renamed to ${to}.`,
+    /**
+     * What the merge came to, with the **real** figure the server reported.
+     *
+     * Singular and plural, and its own clause for none: a merge whose every tagged
+     * question already carried the survivor moves nothing, and "0 tagged questions
+     * moved" states that as though something had been counted wrong.
+     */
+    topicMerged: (merged: string, target: string, repointed: number) => {
+      const moved =
+        repointed === 0
+          ? 'No tagged questions moved'
+          : repointed === 1
+            ? '1 tagged question moved'
+            : `${repointed} tagged questions moved`;
+      return `Topic ${merged} merged into ${target}. ${moved}.`;
+    },
   },
   availabilityCheckboxLabel: (subject: string, gradeLevel: string) =>
     `Offer ${subject} for ${gradeLevel}`,
