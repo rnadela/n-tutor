@@ -9,6 +9,8 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { KeyRound } from 'lucide-react';
+import { AuthBrand } from '@/app/auth/_components/AuthBrand';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
@@ -130,72 +132,93 @@ export default function ParentPinPage() {
   const settingFirstPin = status !== null && !status.pinSet;
 
   return (
-    <Card sx={{ maxWidth: 420, mx: 'auto' }}>
-      <CardContent>
-        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700, mb: `${density.gap}px` }}>
-          {settingFirstPin ? parentCopy.pin.setTitle : parentCopy.pin.enterTitle}
-        </Typography>
-        {loading ? (
-          <Alert severity="info" role="status" variant="outlined">
-            {parentCopy.pin.loading}
-          </Alert>
-        ) : !status || !policy ? (
-          <Alert
-            severity="error"
-            role="alert"
-            variant="outlined"
-            action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
-          >
-            {error ?? parentCopy.errors.generic}
-          </Alert>
-        ) : (
-          <Box
-            component="form"
-            onSubmit={onSubmit}
-            sx={{ display: 'grid', gap: `${density.gap}px` }}
-            noValidate
-          >
-            <Typography>
-              {settingFirstPin ? parentCopy.pin.setIntro : parentCopy.pin.enterIntro}
-            </Typography>
-            <TextField
-              id="parent-pin"
-              label={parentCopy.pin.pinLabel}
-              // Obscured like any other secret, and numeric on a phone keypad.
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              helperText={parentCopy.pin.pinShape(policy.pinLength)}
-              slotProps={{ htmlInput: { maxLength: policy.pinLength } }}
-              value={pin}
-              onChange={(event) => setPin(event.target.value)}
-              disabled={locked}
-              required
-            />
-            {locked && (
-              <Alert severity="warning" role="alert" variant="outlined">
-                {lockedUntil === null
-                  ? parentCopy.pin.lockedUnknown
-                  : parentCopy.pin.locked(lockLiftsAt(lockedUntil))}
-              </Alert>
-            )}
-            {error && !locked && (
-              <Alert severity="error" role="alert" variant="outlined">
-                {error}
-              </Alert>
-            )}
-            <Button type="submit" variant="contained" disabled={busy || locked}>
-              {busy
-                ? settingFirstPin
-                  ? parentCopy.pin.saving
-                  : parentCopy.pin.submitting
-                : settingFirstPin
-                  ? parentCopy.pin.setSubmit
-                  : parentCopy.pin.enterSubmit}
-            </Button>
+    <Box sx={{ maxWidth: 420, mx: 'auto' }}>
+      <AuthBrand />
+      <Card>
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: `${density.gap}px` }}>
+            <KeyRound size={28} aria-hidden="true" />
           </Box>
-        )}
-      </CardContent>
-    </Card>
+          <Typography
+            component="h1"
+            sx={{ fontSize: 20, fontWeight: 700, textAlign: 'center', mb: `${density.gap}px` }}
+          >
+            {settingFirstPin ? parentCopy.pin.setTitle : parentCopy.pin.enterTitle}
+          </Typography>
+          {loading ? (
+            <Alert severity="info" role="status" variant="outlined">
+              {parentCopy.pin.loading}
+            </Alert>
+          ) : !status || !policy ? (
+            <Alert
+              severity="error"
+              role="alert"
+              variant="outlined"
+              action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
+            >
+              {error ?? parentCopy.errors.generic}
+            </Alert>
+          ) : (
+            <Box
+              component="form"
+              onSubmit={onSubmit}
+              sx={{ display: 'grid', gap: `${density.gap}px` }}
+              noValidate
+            >
+              <Typography>
+                {settingFirstPin ? parentCopy.pin.setIntro : parentCopy.pin.enterIntro}
+              </Typography>
+              <TextField
+                id="parent-pin"
+                label={parentCopy.pin.pinLabel}
+                // Obscured like any other secret, and numeric on a phone keypad.
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                helperText={parentCopy.pin.pinShape(policy.pinLength)}
+                slotProps={{
+                  htmlInput: {
+                    maxLength: policy.pinLength,
+                    // Visually separates the digits so the field reads as a PIN
+                    // rather than a password, without splitting it into several
+                    // controls (the divider token is drawn once, per UX-DR11).
+                    style: {
+                      letterSpacing: '0.5em',
+                      textAlign: 'center',
+                      fontSize: '1.25rem',
+                    },
+                  },
+                }}
+                value={pin}
+                onChange={(event) => setPin(event.target.value)}
+                disabled={locked}
+                required
+              />
+              {locked && (
+                <Alert severity="warning" role="alert" variant="outlined">
+                  {lockedUntil === null
+                    ? parentCopy.pin.lockedUnknown
+                    : parentCopy.pin.locked(lockLiftsAt(lockedUntil))}
+                </Alert>
+              )}
+              {error && !locked && (
+                <Alert severity="error" role="alert" variant="outlined">
+                  {error}
+                </Alert>
+              )}
+              <Button type="submit" variant="contained" disabled={busy || locked}>
+                {busy
+                  ? settingFirstPin
+                    ? parentCopy.pin.saving
+                    : parentCopy.pin.submitting
+                  : settingFirstPin
+                    ? parentCopy.pin.setSubmit
+                    : parentCopy.pin.enterSubmit}
+              </Button>
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+    </Box>
   );
 }

@@ -10,11 +10,14 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         sx={{
           minHeight: '100vh',
           bgcolor: 'background.default',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
           paddingBlock: `${density.sectionMargin}px`,
           paddingInline: `${density.cardPadding}px`,
         }}
       >
-        {children}
+        <Box sx={{ width: '100%' }}>{children}</Box>
       </Box>
     </AuthThemeProvider>
   );

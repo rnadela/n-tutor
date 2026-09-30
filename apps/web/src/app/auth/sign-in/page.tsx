@@ -7,9 +7,15 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
 import Link from '@mui/material/Link';
+import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
+import { AuthBrand } from '../_components/AuthBrand';
 import { parentCopy } from '@/copy/parent';
 import { attemptStorage, clearAll } from '@/lib/attempt-store';
 import { parentApi } from '@/lib/parent-api';
@@ -19,6 +25,7 @@ export default function SignInPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -44,47 +51,89 @@ export default function SignInPage() {
   }
 
   return (
-    <Card sx={{ maxWidth: 420, mx: 'auto' }}>
-      <CardContent>
-        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700, mb: `${density.gap}px` }}>
-          {parentCopy.signIn.title}
-        </Typography>
-        <Box
-          component="form"
-          onSubmit={onSubmit}
-          sx={{ display: 'grid', gap: `${density.gap}px` }}
-          noValidate
-        >
-          <TextField
-            id="parent-email"
-            label={parentCopy.signIn.emailLabel}
-            type="email"
-            autoComplete="username"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-          <TextField
-            id="parent-password"
-            label={parentCopy.signIn.passwordLabel}
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-          {error && (
-            <Alert severity="error" role="alert" variant="outlined">
-              {error}
-            </Alert>
-          )}
-          <Button type="submit" variant="contained" disabled={busy}>
-            {busy ? parentCopy.signIn.submitting : parentCopy.signIn.submit}
-          </Button>
-          <Link href="/auth/reset">{parentCopy.signIn.forgot}</Link>
-          <Link href="/auth/sign-up">{parentCopy.signIn.noAccount}</Link>
-        </Box>
-      </CardContent>
-    </Card>
+    <Box sx={{ maxWidth: 420, mx: 'auto' }}>
+      <AuthBrand />
+      <Card>
+        <CardContent>
+          <Typography
+            component="h1"
+            sx={{ fontSize: 20, fontWeight: 700, textAlign: 'center', mb: `${density.gap}px` }}
+          >
+            {parentCopy.signIn.title}
+          </Typography>
+          <Box
+            component="form"
+            onSubmit={onSubmit}
+            sx={{ display: 'grid', gap: `${density.gap}px` }}
+            noValidate
+          >
+            <TextField
+              id="parent-email"
+              label={parentCopy.signIn.emailLabel}
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Mail size={18} aria-hidden="true" />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+              required
+            />
+            <TextField
+              id="parent-password"
+              label={parentCopy.signIn.passwordLabel}
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Lock size={18} aria-hidden="true" />
+                    </InputAdornment>
+                  ),
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowPassword((shown) => !shown)}
+                        edge="end"
+                      >
+                        {showPassword ? (
+                          <EyeOff size={18} aria-hidden="true" />
+                        ) : (
+                          <Eye size={18} aria-hidden="true" />
+                        )}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                },
+              }}
+              required
+            />
+            {error && (
+              <Alert severity="error" role="alert" variant="outlined">
+                {error}
+              </Alert>
+            )}
+            <Button type="submit" variant="contained" disabled={busy}>
+              {busy ? parentCopy.signIn.submitting : parentCopy.signIn.submit}
+            </Button>
+            <Divider />
+            <Stack sx={{ gap: `${density.gap / 2}px`, alignItems: 'center' }}>
+              <Link href="/auth/reset">{parentCopy.signIn.forgot}</Link>
+              <Link href="/auth/sign-up">{parentCopy.signIn.noAccount}</Link>
+            </Stack>
+          </Box>
+        </CardContent>
+      </Card>
+    </Box>
   );
 }
