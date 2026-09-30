@@ -97,16 +97,10 @@ export class AllowanceService {
     // Through `uploadUsedIn`, which is also what `sourcetest` enforces against:
     // the readout and the cap are the same method, so they cannot drift.
     upload: async (accountId, window) => this.uploadUsedIn(accountId, window),
-    generation: async (accountId, window) =>
-      // The half-open window the whole module is stated in: `[start, end)`, so
-      // a Practice Test charged at the instant a period ends belongs to the
-      // next one and is counted exactly once.
-      (await this.prisma.practiceTest.count({
-        where: {
-          parentAccountId: accountId,
-          chargedAt: { gte: window.start, lt: window.end },
-        },
-      })) + (await this.tombstonedIn(accountId, window, 'Generation')),
+    // Through `generationUsedIn`, for the reason `upload` above goes through
+    // `uploadUsedIn`: `practicetest` enforces its cap against the same method,
+    // so the readout, the request clamp and the cap at the charge are one query.
+    generation: async (accountId, window) => this.generationUsedIn(accountId, window),
     explanation: async (accountId, window) =>
       // The same half-open window and the same shape as `generation` above, over
       // `explanation`'s own charging column. Counted **here and nowhere else**:
@@ -172,6 +166,54 @@ export class AllowanceService {
       },
     });
     return committed + (await this.tombstonedIn(accountId, window, 'Upload', client));
+  }
+
+  /**
+   * The account's Generation usage inside `[window.start, window.end)`: Practice
+   * Tests charged in the window plus `Generation` tombstones of it.
+   *
+   * **One method, three readers.** `counters.generation` answers every surface
+   * with it, `request`'s clamp decides what a parent may ask for against it, and
+   * `land`'s guard refuses the draft that would exceed the limit against it — so
+   * the number shown, the number clamped to and the number refused at are the
+   * same number by construction rather than by three implementations agreeing
+   * today.
+   *
+   * `client` is the caller's transaction when there is one. `land` passes the
+   * transaction that writes the Practice Test so the count runs behind the
+   * account row lock that transaction holds; a plain read passes nothing and runs
+   * on this module's own connection.
+   *
+   * **The lock is what makes the count trustworthy, not the transaction.** Under
+   * Postgres's READ COMMITTED every statement takes its own snapshot, so a count
+   * and a write inside one transaction are not a consistent pair by themselves.
+   * What makes the pair safe is that `FOR UPDATE` on the account keeps any other
+   * charge for it from landing between them. That is why the request-time clamp
+   * is advisory however carefully it counts, and why the cap is stated at the
+   * charge.
+   *
+   * It reads `practice_test` through this module's own Prisma delegate rather
+   * than through `PracticeTestService`, the way the other counts read theirs: the
+   * module every surface reads may not depend on a module that depends on it, and
+   * what is read is a column and not a behaviour.
+   *
+   * Half-open `[start, end)`, like every other count here, so a Practice Test
+   * charged at the instant a period ends belongs to the next one and is counted
+   * exactly once. A deleted draft is not a refund (AD-14), which is what the
+   * tombstone half is.
+   */
+  async generationUsedIn(
+    accountId: string,
+    window: PeriodWindow,
+    client?: TransactionClient,
+  ): Promise<number> {
+    const charged = await (client ?? this.prisma).practiceTest.count({
+      where: {
+        parentAccountId: accountId,
+        chargedAt: { gte: window.start, lt: window.end },
+      },
+    });
+    return charged + (await this.tombstonedIn(accountId, window, 'Generation', client));
   }
 
   /**

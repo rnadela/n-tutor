@@ -192,15 +192,11 @@ export { SOURCE_TEST_NOT_FOUND };
 /** No job has been requested for this Source Test yet. */
 export const GENERATION_NOT_REQUESTED = 'No practice test has been generated from this upload yet.';
 
-/**
- * Nothing of the Generation Allowance is left this period.
- *
- * It names the allowance and states the fact; it does not name the tier, the
- * limit or a price, and it does not invite an upgrade. Epic 9 owns the hard
- * block; this is the refusal the clamp already implies.
- */
-export const NO_GENERATION_ALLOWANCE =
-  'No Generation Allowance is left this period. It resets at the start of the next one.';
+// The refusal a request at the Generation Allowance answers with is **not**
+// here. It names the Account Tier, the usage against the limit and the reset
+// date in the account's own zone — three facts that are `allowance`'s and not
+// this module's — so it is built by `generationAllowanceExhausted` beside its
+// Upload sibling, and this file states no allowance sentence at all (Story 9.4).
 
 /** There is nothing to generate from. */
 export const NO_USABLE_QUESTIONS =
@@ -322,6 +318,28 @@ export const GENERATION_REQUEST_REJECTED =
  */
 export const GENERATION_CLOCK_ANOMALY =
   'The practice test could not be written, and trying again will not change that yet.';
+
+/**
+ * Written when the cap stopped the job: the account reached its tier's
+ * Generation Allowance before this draft could land.
+ *
+ * Deliberately **not** `GENERATION_FAILED`. Nothing about the upload and nothing
+ * about the provider was wrong — the draft was produced and refused at the
+ * charge — so "Try again" would be false until the period turns over, and a
+ * retry would spend another provider call to reach the same refusal. Terminal
+ * and never retryable for exactly that reason.
+ *
+ * Nor is it `GENERATION_INPUT_UNUSABLE`: asking the parent to retake the pages
+ * would send them to do work that cannot help.
+ *
+ * Like every other reason here it is a constant written into the job row, and it
+ * names no tier, figure or date — the sentence that does is the parent-facing
+ * refusal `allowance` builds for the request and the allowance read. This one is
+ * what a settled job carries, and a job row is read on a screen that already
+ * shows the allowance.
+ */
+export const GENERATION_ALLOWANCE_SPENT =
+  'No Generation Allowance was left to write this practice test. It resets at the start of the next period.';
 
 // --- Runtime -------------------------------------------------------------
 
@@ -452,8 +470,14 @@ export function normalizeTopicLabel(label: string): string {
  *
  * The UI disabling a radio button is a courtesy; this is the control. A request
  * for nine on an account with two left is a request for two, silently, and the
- * response states the clamped figure so nothing about it is a surprise. A
- * non-positive or non-integer ask clamps to zero, which the caller refuses.
+ * response states the clamped figure so nothing about it is a surprise.
+ *
+ * A non-positive or non-integer ask still clamps to zero, but nothing here
+ * refuses it and no caller reads that zero as a refusal any more:
+ * `RequestPracticeTestsDto` (`@IsInt()`, `@Min(1)`) turns such a body into a 400
+ * before the service is reached, and `request` refuses an account at its cap
+ * *before* clamping, by the allowance sentence. The zero is defence in depth for
+ * a call that bypassed the DTO, and clamping is arithmetic only.
  */
 export function clampCount(requested: number, remaining: number): number {
   if (!Number.isFinite(requested)) return 0;

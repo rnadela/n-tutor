@@ -6,6 +6,7 @@ import {
   DEFAULT_CLAIM_TIMEOUT_MS,
   DEFAULT_POLL_MS,
   EXTRACTION_NOT_READY,
+  GENERATION_ALLOWANCE_SPENT,
   GENERATION_CLOCK_ANOMALY,
   GENERATION_FAILED,
   GENERATION_INPUT_UNUSABLE,
@@ -15,7 +16,6 @@ import {
   GENERATION_UPSTREAM_REJECTED,
   MAX_PER_REQUEST,
   MAX_TOPIC_LABEL_LENGTH,
-  NO_GENERATION_ALLOWANCE,
   SOURCE_TEST_NOT_FOUND,
   WEIGHTED_TOPIC_SHARE,
   WEIGHTED_TOPIC_UNKNOWN,
@@ -60,7 +60,7 @@ describe('messages', () => {
     expect(
       new Set([
         GENERATION_NOT_REQUESTED,
-        NO_GENERATION_ALLOWANCE,
+        GENERATION_ALLOWANCE_SPENT,
         EXTRACTION_NOT_READY,
         GENERATION_FAILED,
         GENERATION_UPSTREAM_REJECTED,
@@ -83,14 +83,24 @@ describe('messages', () => {
       GENERATION_INPUT_UNUSABLE,
       GENERATION_REQUEST_REJECTED,
       GENERATION_CLOCK_ANOMALY,
+      GENERATION_ALLOWANCE_SPENT,
     ].filter((message) => /retake|photo|page/i.test(message));
     expect(retakes).toEqual([GENERATION_INPUT_UNUSABLE]);
+  });
+
+  it('never tells a parent the cap stopped a job is worth trying again', () => {
+    // `GENERATION_FAILED` says "Try again", which is false until the period
+    // turns over: the provider answered and the upload was fine.
+    expect(GENERATION_ALLOWANCE_SPENT).not.toBe(GENERATION_FAILED);
+    expect(GENERATION_ALLOWANCE_SPENT).not.toMatch(/try again/i);
+    // And it is not the input's fault either, so it is not that sentence.
+    expect(GENERATION_ALLOWANCE_SPENT).not.toBe(GENERATION_INPUT_UNUSABLE);
   });
 
   it('says nothing about a provider, a model, a tier or a code', () => {
     for (const message of [
       GENERATION_NOT_REQUESTED,
-      NO_GENERATION_ALLOWANCE,
+      GENERATION_ALLOWANCE_SPENT,
       EXTRACTION_NOT_READY,
       GENERATION_FAILED,
       GENERATION_UPSTREAM_REJECTED,

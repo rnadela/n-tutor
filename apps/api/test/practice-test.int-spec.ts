@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const {
   EXTRACTION_NOT_READY,
+  GENERATION_ALLOWANCE_SPENT,
   GENERATION_CLOCK_ANOMALY,
   GENERATION_FAILED,
   GENERATION_INPUT_UNUSABLE,
@@ -16,7 +17,6 @@ const {
   MAX_TIMER_MINUTES,
   MAX_TOPIC_LABEL_LENGTH,
   MIN_TIMER_MINUTES,
-  NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
   ATTEMPT_ALREADY_SUBMITTED,
   ATTEMPT_NOT_RETAKEABLE,
@@ -34,6 +34,8 @@ const { PracticeTestService } = await import('../src/practicetest/practice-test.
 const { GradingService } = await import('../src/grading/grading.service.js');
 const { AiService } = await import('../src/ai/ai.service.js');
 const { SOURCE_TEST_NOT_FOUND } = await import('../src/sourcetest/source-test-policy.js');
+const { generationAllowanceExhausted } = await import('../src/allowance/allowance-policy.js');
+const { limitsFor } = await import('../src/allowance/tiers.js');
 const {
   bearer,
   checkLegibility,
@@ -255,6 +257,27 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
   }
 
   /**
+   * The sentence a request at cap must answer with, built the way the API builds
+   * it: from this account's own tier, its own derived usage and its own window.
+   *
+   * Never a regex and never a literal. Asserting `toBe` against this is what
+   * pins the tier name, both figures and the reset date at once — and what makes
+   * a figure written into the API by hand fail here rather than pass.
+   */
+  async function expectedRefusal(parentAccountId: string): Promise<string> {
+    const consumption = await h.allowance.consumptionFor(parentAccountId);
+    const { used, limit } = consumption.allowances.generation;
+    expect(limit).not.toBeNull();
+    return generationAllowanceExhausted({
+      tier: consumption.tier,
+      used,
+      limit: limit!,
+      resetAt: new Date(consumption.resetAt),
+      timezone: consumption.timezone,
+    });
+  }
+
+  /**
    * Raises the attempt budget for one case.
    *
    * `setup.ts` pins `AI_MAX_ATTEMPTS` to 1 for the whole suite, because most
@@ -326,15 +349,45 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
         .set('Authorization', bearer(ready.token))
         .expect(200);
 
-      // Free tier: two of two remain, and the ceiling is stated by the API so
-      // the web app holds no figure of its own.
+      // The sign-up tier's own figure, read through `limitsFor` — no allowance
+      // figure appears as a literal anywhere in this suite. The ceiling is
+      // stated by the API so the web app holds no figure of its own.
+      const freeLimit = limitsFor('Free').generation!;
       expect(response.body.used).toBe(0);
-      expect(response.body.limit).toBe(2);
-      expect(response.body.remaining).toBe(2);
+      expect(response.body.limit).toBe(freeLimit);
+      expect(response.body.remaining).toBe(freeLimit);
       expect(response.body.maxPerRequest).toBe(MAX_PER_REQUEST);
+      // Nothing is blocked, so there is no reason to state.
+      expect(response.body.exhaustedReason).toBeNull();
       // Nothing about the tier or the provider reaches a parent surface.
       expect(Object.keys(response.body)).not.toContain('tier');
       expect(JSON.stringify(response.body)).not.toContain('gpt');
+    });
+
+    it('carries the refusal sentence once nothing remains, and none before', async () => {
+      // A parent at cap cannot fire the request, so the 409 is a path they never
+      // walk. The read is where they are told which tier they are on, what of it
+      // is used and when it comes back — and it is the same sentence, from the
+      // same builder, so the two can never disagree.
+      const ready = await generatable();
+      const withHeadroom = await server()
+        .get('/api/parent/allowance/generation')
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      expect(withHeadroom.body.exhaustedReason).toBeNull();
+
+      await requestGeneration(ready, limitsFor('Free').generation!).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const atCap = await server()
+        .get('/api/parent/allowance/generation')
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      expect(atCap.body.remaining).toBe(0);
+      expect(atCap.body.exhaustedReason).toBe(await expectedRefusal(ready.parentAccountId));
+      // Still no tier field on a parent surface: the tier is named in the
+      // sentence the parent reads, never as a label they could switch on.
+      expect(Object.keys(atCap.body)).not.toContain('tier');
     });
 
     it('states the per-request ceiling as what remains on an unlimited tier', async () => {
@@ -374,8 +427,13 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       expect(await generationUsed(ready.parentAccountId)).toBe(2);
 
       const refused = await requestGeneration(ready, 1).expect(409);
-      expect(refused.body.message).toBe(NO_GENERATION_ALLOWANCE);
+      // The three facts the hard block owes a parent: which tier they are on,
+      // what of it is used against the limit in practice tests, and when it comes
+      // back — in their own zone.
+      expect(refused.body.message).toBe(await expectedRefusal(ready.parentAccountId));
       expect(await generationUsed(ready.parentAccountId)).toBe(2);
+      // A refusal charges nothing and enqueues nothing.
+      expect(await h.prisma.generationJob.count()).toBe(1);
     });
 
     it('refuses an Extraction with nothing usable in it', async () => {
@@ -386,6 +444,85 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       const refused = await requestGeneration(ready, 1).expect(409);
       expect(refused.body.message).toBe(NO_USABLE_QUESTIONS);
       expect(await h.prisma.generationJob.count()).toBe(0);
+    });
+
+    it('clamps to what is left rather than refusing, when something remains', async () => {
+      const ready = await generatable();
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      const limit = limitsFor('Free').generation!;
+      expect(await generationUsed(ready.parentAccountId)).toBe(1);
+
+      // Asks for the per-request ceiling with one unit left: accepted, clamped.
+      const accepted = await requestGeneration(ready, MAX_PER_REQUEST).expect(202);
+      expect(accepted.body.requestedCount).toBe(limit - 1);
+    });
+
+    it('issues no count and no refusal on an unlimited tier, however much is charged', async () => {
+      const ready = await generatable();
+      await h.parentAccounts.assignTier(h.operatorId, ready.parentAccountId, 'Internal');
+      // `null` is unlimited, which is the whole precondition of this case.
+      expect(limitsFor('Internal').generation).toBeNull();
+
+      const first = await requestGeneration(ready, MAX_PER_REQUEST).expect(202);
+      expect(first.body.requestedCount).toBe(MAX_PER_REQUEST);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      expect(await generationUsed(ready.parentAccountId)).toBe(MAX_PER_REQUEST);
+
+      // Past every tier's figure, and still accepted at the full ceiling.
+      const second = await requestGeneration(ready, MAX_PER_REQUEST).expect(202);
+      expect(second.body.requestedCount).toBe(MAX_PER_REQUEST);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const read = await server()
+        .get('/api/parent/allowance/generation')
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      expect(read.body.limit).toBeNull();
+      // No refusal sentence anywhere on an unlimited tier.
+      expect(read.body.exhaustedReason).toBeNull();
+    });
+
+    it('counts a Generation tombstone against the cap: a deleted draft is not a refund', async () => {
+      const ready = await generatable();
+      const limit = limitsFor('Free').generation!;
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      // What a deletion leaves behind, written the way `deletion` writes it: the
+      // rows are gone and the usage is not.
+      const window = await h.allowance.windowFor(ready.parentAccountId);
+      await h.prisma.usageTombstone.create({
+        data: {
+          parentAccountId: ready.parentAccountId,
+          usageClass: 'Generation',
+          periodStart: window.start,
+          count: limit - 1,
+        },
+      });
+      expect(await generationUsed(ready.parentAccountId)).toBe(limit);
+
+      const refused = await requestGeneration(ready, 1).expect(409);
+      expect(refused.body.message).toBe(await expectedRefusal(ready.parentAccountId));
+    });
+
+    it('does not count charges from the previous window, which is half-open', async () => {
+      const ready = await generatable();
+      await requestGeneration(ready, 2).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      // Both charges pushed back into the window before this one. `[start, end)`,
+      // so a charge one millisecond before this window's start is not in it.
+      const window = await h.allowance.windowFor(ready.parentAccountId);
+      await h.prisma.practiceTest.updateMany({
+        where: { parentAccountId: ready.parentAccountId },
+        data: { chargedAt: new Date(window.start.getTime() - 1) },
+      });
+      expect(await generationUsed(ready.parentAccountId)).toBe(0);
+
+      // The allowance is whole again, and the request is accepted at full tilt.
+      const accepted = await requestGeneration(ready, limitsFor('Free').generation!).expect(202);
+      expect(accepted.body.requestedCount).toBe(limitsFor('Free').generation);
     });
 
     it('answers 404 for a Source Test belonging to another account, never 403', async () => {
@@ -886,6 +1023,129 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
     });
   });
 
+  // --- The cap at the charge --------------------------------------------
+
+  describe('the Generation Allowance, enforced where the charge is written', () => {
+    /**
+     * Spends part of the account's allowance without landing a draft, the way a
+     * deletion does: a `Generation` tombstone is counted exactly as a charged row
+     * is, and is the only lever this tier has for moving usage without also
+     * moving the Practice Test rows a case is asserting on.
+     */
+    async function spend(parentAccountId: string, count: number): Promise<void> {
+      const window = await h.allowance.windowFor(parentAccountId);
+      await h.prisma.usageTombstone.create({
+        data: {
+          parentAccountId,
+          usageClass: 'Generation',
+          periodStart: window.start,
+          count,
+        },
+      });
+    }
+
+    it('stops a job mid-run: what landed stays charged, and the rest is refused', async () => {
+      const ready = await generatable();
+      const limit = limitsFor('Free').generation!;
+      // Accepted for the whole tier, then the allowance is spent from under it —
+      // exactly what a second job landing a draft in the meantime does. The clamp
+      // at request time cannot see this; the guard at the charge can.
+      const accepted = await requestGeneration(ready, limit).expect(202);
+      expect(accepted.body.requestedCount).toBe(limit);
+      await spend(ready.parentAccountId, limit - 1);
+
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const job = await h.prisma.generationJob.findUniqueOrThrow({
+        where: { id: accepted.body.id },
+      });
+      // One draft landed and stays committed and charged; the next was refused.
+      expect(job.status).toBe('PartiallyComplete');
+      expect(job.producedCount).toBe(1);
+      expect(job.failureKind).toBe('ClientFault');
+      // Never `GENERATION_FAILED`: "Try again" would be false until the period
+      // turns over, and a retry would spend another provider call to be refused.
+      expect(job.failureReason).toBe(GENERATION_ALLOWANCE_SPENT);
+      expect(job.failureReason).not.toBe(GENERATION_FAILED);
+      expect(job.retryable).toBe(false);
+
+      const charged = await h.prisma.practiceTest.findMany({
+        where: { parentAccountId: ready.parentAccountId },
+        select: { id: true, chargedAt: true },
+      });
+      expect(charged).toHaveLength(1);
+      expect(charged[0]!.chargedAt).not.toBeNull();
+      // The whole point: the derived count never exceeds the tier's figure.
+      expect(await generationUsed(ready.parentAccountId)).toBe(limit);
+      // Terminal: nothing left for a worker to pick up.
+      expect(await h.practiceTestRunner.runOnce()).toBe(false);
+    });
+
+    it('rolls the refused draft back whole — no questions, choices or topics', async () => {
+      const ready = await generatable();
+      const limit = limitsFor('Free').generation!;
+      const accepted = await requestGeneration(ready, limit).expect(202);
+      await spend(ready.parentAccountId, limit);
+
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const job = await h.prisma.generationJob.findUniqueOrThrow({
+        where: { id: accepted.body.id },
+      });
+      // Nothing landed at all, so the job failed rather than partially completed.
+      expect(job.status).toBe('Failed');
+      expect(job.producedCount).toBe(0);
+      expect(job.failureKind).toBe('ClientFault');
+      expect(job.failureReason).toBe(GENERATION_ALLOWANCE_SPENT);
+      expect(job.retryable).toBe(false);
+
+      // The Practice Test, its questions, its choices and its topics roll back
+      // together with its `chargedAt`.
+      expect(await h.prisma.practiceTest.count()).toBe(0);
+      expect(await h.prisma.practiceTestQuestion.count()).toBe(0);
+      expect(await h.prisma.practiceTestChoice.count()).toBe(0);
+      expect(await h.prisma.practiceTestQuestionTopic.count()).toBe(0);
+      expect(await generationUsed(ready.parentAccountId)).toBe(limit);
+      expect(await h.practiceTestRunner.runOnce()).toBe(false);
+    });
+
+    it('lets two concurrent requests through, and still charges exactly one draft', async () => {
+      // Two tabs, or a double-tap. Both may be accepted — the honest guarantee is
+      // stated at the charge, not at the request — so what is asserted is the
+      // number of **charged drafts** and not the number of accepted requests.
+      const ready = await generatable();
+      const limit = limitsFor('Free').generation!;
+      await spend(ready.parentAccountId, limit - 1);
+
+      const [first, second] = await Promise.all([
+        requestGeneration(ready, 1),
+        requestGeneration(ready, 1),
+      ]);
+      const accepted = [first, second].filter((response) => response.status === 202);
+      expect(accepted.length).toBeGreaterThanOrEqual(1);
+
+      // Drain every job that was accepted.
+      while (await h.practiceTestRunner.runOnce());
+
+      // Exactly one draft ever charges, whichever order the jobs ran in.
+      expect(await h.prisma.practiceTest.count()).toBe(1);
+      expect(await generationUsed(ready.parentAccountId)).toBe(limit);
+      const jobs = await h.prisma.generationJob.findMany({
+        select: { status: true, failureReason: true, failureKind: true, retryable: true },
+      });
+      // Every accepted job settled — none is left Running or Queued.
+      expect(jobs.every((job) => job.status !== 'Running' && job.status !== 'Queued')).toBe(true);
+      // The loser is refused by the cap, not misreported as a provider fault: it
+      // settles with the cap's own reason, a client fault, and never retryable.
+      const loser = jobs.find((job) => job.status === 'Failed');
+      if (loser) {
+        expect(loser.failureReason).toBe(GENERATION_ALLOWANCE_SPENT);
+        expect(loser.failureKind).toBe('ClientFault');
+        expect(loser.retryable).toBe(false);
+      }
+    });
+  });
+
   // --- The fence ---------------------------------------------------------
 
   describe('a superseded pass', () => {
@@ -1360,7 +1620,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
 
       const refused = await requestGeneration(ready, 1, 'Astrophysics').expect(409);
       expect(refused.body.message).toBe(WEIGHTED_TOPIC_UNKNOWN);
-      expect(refused.body.message).not.toBe(NO_GENERATION_ALLOWANCE);
+      expect(refused.body.message).not.toBe(await expectedRefusal(ready.parentAccountId));
       // And still nothing more enqueued or charged for it.
       expect(await h.prisma.generationJob.count()).toBe(1);
       expect(await generationUsed(ready.parentAccountId)).toBe(2);
@@ -1428,7 +1688,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       expect(await h.practiceTestRunner.runOnce()).toBe(true);
 
       const refused = await requestGeneration(ready, 1, topic).expect(409);
-      expect(refused.body.message).toBe(NO_GENERATION_ALLOWANCE);
+      expect(refused.body.message).toBe(await expectedRefusal(ready.parentAccountId));
       expect(await generationUsed(ready.parentAccountId)).toBe(2);
     });
 

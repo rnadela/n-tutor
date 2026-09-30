@@ -15,7 +15,9 @@ import type {
   QuestionFormat,
 } from '../generated/prisma/enums.js';
 import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai/ai.service.js';
+import { generationAllowanceExhausted } from '../allowance/allowance-policy.js';
 import { AllowanceService } from '../allowance/allowance.service.js';
+import { limitsFor } from '../allowance/tiers.js';
 import {
   EXTRACTION_READER,
   type ExtractionForGeneration,
@@ -28,6 +30,7 @@ import {
   richTextFromPlainText,
   type RichText,
 } from '../extraction/rich-text.js';
+import { ParentAccountService } from '../identity/parent-account.service.js';
 import { PrismaService, type TransactionClient } from '../prisma/prisma.service.js';
 import { renumbered } from '../sourcetest/source-test-policy.js';
 import { SOURCE_TEST_READER, type SourceTestReader } from '../sourcetest/source-test-reader.js';
@@ -35,6 +38,7 @@ import {
   ATTEMPT_ALREADY_SUBMITTED,
   ATTEMPT_NOT_RETAKEABLE,
   EXTRACTION_NOT_READY,
+  GENERATION_ALLOWANCE_SPENT,
   GENERATION_CLOCK_ANOMALY,
   GENERATION_FAILED,
   GENERATION_INPUT_UNUSABLE,
@@ -44,7 +48,6 @@ import {
   GENERATION_UPSTREAM_REJECTED,
   MAX_JOB_ATTEMPTS,
   MAX_PER_REQUEST,
-  NO_GENERATION_ALLOWANCE,
   NO_USABLE_QUESTIONS,
   PRACTICE_TEST_NOT_FOUND,
   WEIGHTED_TOPIC_UNKNOWN,
@@ -128,6 +131,25 @@ export class GenerationClockAnomaly extends Error {
 }
 
 /**
+ * The account reached its tier's Generation Allowance before this draft could
+ * land, so the draft was refused by the statement that would have charged it.
+ *
+ * Terminal, and a **client** fault: the provider answered correctly and this
+ * machine's clock is fine — the account simply may not have another practice
+ * test. A retry would spend another provider call to reach the same refusal, and
+ * would keep doing so until the period turns over.
+ *
+ * Like `GenerationFenced`, it rolls back only the draft in flight: every draft
+ * this job already landed stays committed and stays charged.
+ */
+export class GenerationAllowanceSpent extends Error {
+  constructor() {
+    super(GENERATION_ALLOWANCE_SPENT);
+    this.name = 'GenerationAllowanceSpent';
+  }
+}
+
+/**
  * How long one draft's landing gets. The provider call is already paid for by
  * the time a row is written, so a five-second default that aborts a forty-
  * question draft is a transaction limit deciding to spend the money again.
@@ -170,6 +192,18 @@ export interface GenerationAllowanceView {
   maxPerRequest: number;
   resetAt: string;
   timezone: string;
+  /**
+   * Why nothing can be chosen, when nothing can: the **same sentence** a request
+   * at cap is refused with, built by the same function in `allowance`.
+   *
+   * It rides the read because a parent already at cap cannot fire the request
+   * and so would never see the 409 — the screen would state a sentence of its
+   * own naming neither the tier nor the reset date. `null` whenever anything
+   * remains or the tier is unlimited, which is when the screen's own
+   * remaining-count sentence is the right one: it is describing disabled options
+   * rather than a block.
+   */
+  exhaustedReason: string | null;
 }
 
 /**
@@ -818,6 +852,11 @@ export class PracticeTestService {
     private readonly prisma: PrismaService,
     private readonly ai: AiService,
     private readonly allowance: AllowanceService,
+    // Held for one thing only: `findByIdForUpdate`, the row lock Stories 9.2 and
+    // 9.3 and the Admin tier change already serialise account-scoped writes
+    // with. The cap at the charge needs the same lock, and a second lock idiom
+    // written here would be a second answer to the same question.
+    private readonly accounts: ParentAccountService,
     // Both injected by token against a type-only interface, never against the
     // class: under ESM two services importing each other as values cannot both
     // be decorated, whatever `forwardRef` says. `source-test-reader.ts`
@@ -835,13 +874,30 @@ export class PracticeTestService {
   async allowanceFor(parentAccountId: string): Promise<GenerationAllowanceView> {
     const consumption = await this.allowance.consumptionFor(parentAccountId);
     const { used, limit } = consumption.allowances.generation;
+    const remaining = remainingFor(used, limit);
     return {
       used,
       limit,
-      remaining: remainingFor(used, limit),
+      remaining,
       maxPerRequest: MAX_PER_REQUEST,
       resetAt: consumption.resetAt,
       timezone: consumption.timezone,
+      // The same builder the 409 uses, so there is one sentence for one fact and
+      // `apps/web` holds no tier name, figure or date. `limit === null` is
+      // unlimited and can never be exhausted, and it is also the case the
+      // builder is never handed.
+      exhaustedReason:
+        limit !== null && remaining === 0
+          ? generationAllowanceExhausted({
+              tier: consumption.tier,
+              used,
+              limit,
+              // The window's exclusive end *is* the reset instant, stated in the
+              // zone the window was actually cut in.
+              resetAt: new Date(consumption.resetAt),
+              timezone: consumption.timezone,
+            })
+          : null,
     };
   }
 
@@ -874,10 +930,20 @@ export class PracticeTestService {
   /**
    * Accepts a generation request and enqueues the job, or refuses it.
    *
-   * The count is clamped **here**, against a count of charged rows read inside
-   * the same transaction that writes the job. What the client sent is an
-   * opening bid and nothing more: the UI disabling a radio button is a
-   * courtesy, and a direct call simply does not have to respect it.
+   * The count is clamped **here**, against the Generation usage read behind the
+   * account row lock inside the same transaction that writes the job. What the
+   * client sent is an opening bid and nothing more: the UI disabling a radio
+   * button is a courtesy, and a direct call simply does not have to respect it.
+   *
+   * The clamp is **not** the cap, and is not trying to be. One request produces
+   * 1–5 drafts, each in its own transaction, minutes apart and possibly in a
+   * later period, so nothing counted at request time can bound what will
+   * eventually be charged: another job may land its own drafts in the meantime,
+   * and a job may cross a period boundary. The cap is stated in `land`, by the
+   * statement that writes `chargedAt`. What the lock buys here is that two
+   * concurrent requests for one account read the same post-lock count rather than
+   * both reading the same pre-charge one — and that a parent at cap reads the
+   * sentence instead of being handed a request that would produce nothing.
    *
    * The refusals are ordered so the parent reads the most actionable fact: an
    * upload that has not finished being read, then one with nothing usable in
@@ -918,25 +984,58 @@ export class PracticeTestService {
     const resolvedTopic = resolveWeightedTopic(extraction, weightedTopic ?? null);
 
     const consumption = await this.allowance.consumptionFor(parentAccountId);
-    const { limit } = consumption.allowances.generation;
-    const windowStart = new Date(consumption.periodStart);
-    const windowEnd = new Date(consumption.periodEnd);
+    const window = {
+      start: new Date(consumption.periodStart),
+      end: new Date(consumption.periodEnd),
+      timezone: consumption.timezone,
+    };
 
     return this.prisma.withTransaction(async (tx) => {
-      // Counted inside the transaction that writes the job. Derived from
-      // charged rows — never a counter column, and never decremented (AD-14).
-      // This does not serialize two concurrent requests against each other
-      // (Postgres's default Read Committed isolation lets both read the same
-      // pre-charge usage and both be accepted) — a known, deferred gap; see
-      // the `deferred` entry on concurrent-request overspend.
-      const used = await tx.practiceTest.count({
-        where: {
-          parentAccountId,
-          chargedAt: { gte: windowStart, lt: windowEnd },
-        },
-      });
-      const requestedCount = clampCount(count, remainingFor(used, limit));
-      if (requestedCount === 0) throw new ConflictException(NO_GENERATION_ALLOWANCE);
+      // The account row, locked for the length of this transaction. It does not
+      // make the clamp a cap — nothing at request time can, because the drafts
+      // it is clamping against have not been produced yet and another job may
+      // land its own in the meantime; the cap is stated in `land`, by the
+      // statement that charges. What the lock does buy is that two concurrent
+      // requests for one account read the same post-lock count instead of both
+      // reading the same pre-charge one, so the figure a parent is clamped to is
+      // never one a sibling request already spent.
+      const account = await this.accounts.findByIdForUpdate(tx, parentAccountId);
+      const limit = limitsFor(account.tier).generation;
+      // `null` is unlimited: no count is issued and no figure is compared. The
+      // row lock above is still taken — reading the tier is what decides this,
+      // and the read is the lock — so an unlimited account pays for the lock and
+      // for no count, and its clamp is against the per-request ceiling alone.
+      let used = 0;
+      if (limit !== null) {
+        // The one method the readout and `land`'s cap also count through, issued
+        // on this transaction's client so it runs behind the lock above. Derived
+        // from charged rows plus `Generation` tombstones — never a counter
+        // column, never decremented, and a deleted draft is not a refund (AD-14).
+        used = await this.allowance.generationUsedIn(parentAccountId, window, tx);
+      }
+      // What the client sent is an opening bid; this is what it may actually
+      // have. `remaining === 0` below and `land`'s `used >= limit` are the
+      // **same predicate** written twice, each in the idiom of its own site:
+      // here, where an ask is being sized, "what is left" is the natural
+      // quantity and is also what `clampCount` needs; there, where a single row
+      // is being refused, the comparison Story 9.3's `submit` guard uses keeps
+      // the two cap guards one shape. Neither site invents a third definition of
+      // the limit.
+      const remaining = remainingFor(used, limit);
+      if (limit !== null && remaining === 0) {
+        throw new ConflictException(
+          generationAllowanceExhausted({
+            tier: account.tier,
+            used,
+            limit,
+            // The window's exclusive end *is* the reset instant, stated in the
+            // zone the window was actually cut in.
+            resetAt: window.end,
+            timezone: window.timezone,
+          }),
+        );
+      }
+      const requestedCount = clampCount(count, remaining);
 
       const job = await tx.generationJob.create({
         data: {
@@ -3300,6 +3399,14 @@ export class PracticeTestService {
    * for work another pass is also producing. `attempts` is the value this pass
    * claimed with, so matching it is matching this pass; failing the match
    * throws, and the draft and its `chargedAt` roll back together.
+   *
+   * It is also **where the Generation Allowance is enforced**, and the only
+   * place. The cap check and the `practice_test` INSERT share this transaction,
+   * serialized by the account row lock, so the limit is held by the statement
+   * that charges rather than by a clamp taken minutes earlier against drafts that
+   * had not been produced. A refused draft rolls back its Practice Test, its
+   * questions, its choices, its topics and its `chargedAt` together, and every
+   * draft this job already landed stays committed and stays charged.
    */
   private async land(
     job: ClaimedGenerationJob,
@@ -3332,6 +3439,28 @@ export class PracticeTestService {
 
     await this.prisma.withTransaction(
       async (tx) => {
+        // The cap, in the transaction that charges and before the row that
+        // charges. `findByIdForUpdate` is `identity`'s existing lock idiom — the
+        // same one Stories 9.2 and 9.3 and the Admin tier change use — and no
+        // second idiom is written here. Taken first thing in the transaction, so
+        // it cannot invert against a lock this transaction already holds.
+        const account = await this.accounts.findByIdForUpdate(tx, job.parentAccountId);
+        const limit = limitsFor(account.tier).generation;
+        // `null` is unlimited: no count is issued and no figure is compared.
+        if (limit !== null) {
+          // Counted over the window the draft is actually landing in — the one
+          // computed from `chargedAt` above — so a job that spans a period
+          // boundary is measured against the period it is charging to and not
+          // the one its request was made in.
+          //
+          // The lock is the whole of the correctness: under READ COMMITTED a
+          // count and a write inside one transaction are not a consistent pair,
+          // and what serialises them is that no other charge for this account
+          // can commit between them.
+          const used = await this.allowance.generationUsedIn(job.parentAccountId, window, tx);
+          if (used >= limit) throw new GenerationAllowanceSpent();
+        }
+
         await tx.practiceTest.create({
           data: {
             id: practiceTestId,
@@ -3455,7 +3584,15 @@ export class PracticeTestService {
     const requestRejected = cause instanceof AiInputError;
     // A clock or zone anomaly on this machine. Terminal for its own reason.
     const clockAnomaly = cause instanceof GenerationClockAnomaly;
-    const clientFault = targetMissing || requestRejected;
+    // The cap stopped the job. A **client** fault, and deliberately so: the
+    // provider answered correctly and this machine's clock is fine — the account
+    // simply may not have another practice test, which is the requester's own
+    // condition. Classifying it here also gives it `retryable: false` through the
+    // existing expression rather than a fourth exception to it, and keeps the
+    // "something this module did not anticipate" logger quiet for a state the
+    // module fully anticipates.
+    const allowanceSpent = cause instanceof GenerationAllowanceSpent;
+    const clientFault = targetMissing || requestRejected || allowanceSpent;
 
     // A provider that refused the request outright — a bad key, a model this
     // account cannot use — is upstream, but retrying it buys the same refusal.
@@ -3492,11 +3629,13 @@ export class PracticeTestService {
               ? GENERATION_INPUT_UNUSABLE
               : requestRejected
                 ? GENERATION_REQUEST_REJECTED
-                : clockAnomaly
-                  ? GENERATION_CLOCK_ANOMALY
-                  : refused
-                    ? GENERATION_UPSTREAM_REJECTED
-                    : GENERATION_FAILED,
+                : allowanceSpent
+                  ? GENERATION_ALLOWANCE_SPENT
+                  : clockAnomaly
+                    ? GENERATION_CLOCK_ANOMALY
+                    : refused
+                      ? GENERATION_UPSTREAM_REJECTED
+                      : GENERATION_FAILED,
         // A clock anomaly is nobody's *input* and nobody's provider, but the
         // enum has two values and this is not the parent's upload at fault, so
         // it is reported upstream — and, like a refusal, never retryable.

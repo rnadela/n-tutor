@@ -227,6 +227,16 @@ export interface GenerationAllowanceView {
   /** When the period's counters reset, in the account's own zone. */
   resetAt: string;
   timezone: string;
+  /**
+   * Why nothing can be chosen, when nothing can — the API's own sentence, naming
+   * the Account Tier, the usage against the limit and the reset date.
+   *
+   * `null` whenever anything remains or the tier is unlimited. It is read and
+   * never composed: this app holds no tier name, no limit figure and no reset
+   * date of its own, and the same sentence is what a refused request answers
+   * with.
+   */
+  exhaustedReason: string | null;
 }
 
 /**

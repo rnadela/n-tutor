@@ -794,11 +794,26 @@ export const parentCopy = {
      * Beside a count the account cannot afford. The count stays on screen and
      * stays readable; only its control is disabled, and this says why.
      *
-     * Both figures arrive from the API. The web app holds no limit, no tier and
-     * no per-request ceiling of its own.
+     * For **1 or more** left it describes disabled options rather than a block.
+     * Nothing left is normally not this sentence at all: the API states that one,
+     * on `exhaustedReason`, naming the Account Tier, the usage against the limit
+     * and the date the allowance comes back — three facts this app may not hold
+     * and could not state. The screen renders that sentence instead, so a blocked
+     * parent never reads words that name none of them.
+     *
+     * The zero branch is the **version-skew fallback only**, and nothing else
+     * should reach it: an API that predates `exhaustedReason` answers without the
+     * field, and the response is an unchecked cast, so the screen would otherwise
+     * fall through to "Only 0 practice tests are left". It states the plain fact
+     * and deliberately no tier, no limit and no reset date — the sentence that
+     * names those is the API's, and guessing at them here would be a second copy
+     * that could be wrong.
+     *
+     * The figure arrives from the API. The web app holds no limit, no tier and no
+     * per-request ceiling of its own.
      */
     countUnavailable: (remaining: number) =>
-      remaining === 0
+      remaining <= 0
         ? 'No Generation Allowance is left this period.'
         : remaining === 1
           ? 'Only 1 practice test is left in this period’s Generation Allowance.'

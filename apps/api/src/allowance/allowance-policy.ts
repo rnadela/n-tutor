@@ -9,7 +9,8 @@ import { DEFAULT_TIMEZONE, isSupportedTimeZone } from '../common/timezone.js';
  * figures and the window, and nothing else. It lives here rather than in the
  * enforcing module's own policy file because all three facts it names — the
  * Account Tier, the period and the reset instant — are `allowance`'s, and
- * because Generation (9.4) and Explanation (9.5) will refuse in the same shape.
+ * because Generation (9.4, here now) and Explanation (9.5) refuse in the same
+ * shape — two of the three live here already.
  * Each allowance keeps its own builder — the unit it is denominated in is part
  * of the sentence — but they share `AllowanceRefusal`, the date rendering and
  * the wording, so the siblings join this file rather than writing a second
@@ -82,4 +83,34 @@ export function uploadAllowanceExhausted({
   // tier that allows one upload otherwise reads "1 of 1 have been used".
   const been = used === 1 ? 'has' : 'have';
   return `The ${tier} Account Tier allows ${limit} ${uploads} each period, and ${used} of ${limit} ${been} been used. The allowance resets on ${resetDateIn(resetAt, timezone)}.`;
+}
+
+/**
+ * Nothing of the Generation Allowance is left this period.
+ *
+ * The Upload sibling above, with one difference and only one: the unit. A
+ * parent's Generation Allowance is denominated in **practice tests** and never
+ * in requests, generations or credits — one request may ask for several, and a
+ * figure stated in requests would be a figure that meant nothing.
+ *
+ * Read by the parent, in two places: the 409 a request at cap answers with, and
+ * the allowance read the generate screen loads — because a parent already at cap
+ * cannot fire the request and would otherwise never be told the tier, the
+ * figures or the date. One builder, so the two can never disagree.
+ *
+ * It states the fact and does not invite an upgrade, and it names no figure this
+ * file wrote: `used` and `limit` are the caller's, read through `limitsFor`.
+ */
+export function generationAllowanceExhausted({
+  tier,
+  used,
+  limit,
+  resetAt,
+  timezone,
+}: AllowanceRefusal): string {
+  const tests = limit === 1 ? 'practice test' : 'practice tests';
+  // The verb agrees with `used`, which is the subject of the second clause — a
+  // tier that allows one practice test otherwise reads "1 of 1 have been used".
+  const been = used === 1 ? 'has' : 'have';
+  return `The ${tier} Account Tier allows ${limit} ${tests} each period, and ${used} of ${limit} ${been} been used. The allowance resets on ${resetDateIn(resetAt, timezone)}.`;
 }

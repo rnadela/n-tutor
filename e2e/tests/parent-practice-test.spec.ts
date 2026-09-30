@@ -326,15 +326,34 @@ test.describe('generating practice tests', () => {
     // Both of the Free tier's units already charged — expressed as the charged
     // rows usage is derived from, because no counter column exists.
     await chargeGenerationAllowanceFixture(email, 2);
+    // The allowance read this screen loads, captured off the wire. The at-cap
+    // sentence is the **API's** — it names the Account Tier, the usage against
+    // the limit and the reset date in the account's own zone, none of which the
+    // web app holds — so the assertion is against the value the server sent for
+    // this account rather than against a sentence written here. Nothing is
+    // restated: no tier name, no figure and no date appears in this file.
+    const allowanceResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes('/parent/allowance/generation') && response.status() === 200,
+    );
     await enterGenerate(page);
+    const allowance = await (await allowanceResponse).json();
 
-    await expect(page.getByTestId('generate-usage')).toHaveText('Used this period: 2 of 2.');
+    await expect(page.getByTestId('generate-usage')).toHaveText(
+      `Used this period: ${allowance.used} of ${allowance.limit}.`,
+    );
     for (const count of [1, 2, 3, 4, 5]) {
       await expect(countRow(page, count).getByRole('radio')).toBeDisabled();
     }
-    await expect(page.getByTestId('generate-count-reason')).toHaveText(
-      'No Generation Allowance is left this period.',
-    );
+    // The server really did state a reason, and it really does carry the three
+    // facts the hard block owes a parent — checked on the payload, so a screen
+    // that rendered an empty string could not pass by matching one.
+    expect(allowance.exhaustedReason).toBeTruthy();
+    expect(allowance.exhaustedReason).toContain('Account Tier');
+    expect(allowance.exhaustedReason).toContain(`${allowance.used} of ${allowance.limit}`);
+    expect(allowance.exhaustedReason).toContain('resets on');
+    // And the node states exactly that, word for word.
+    await expect(page.getByTestId('generate-count-reason')).toHaveText(allowance.exhaustedReason);
     // Nothing to spend, so nothing to confirm.
     await expect(page.getByTestId('generate-start')).toBeDisabled();
   });

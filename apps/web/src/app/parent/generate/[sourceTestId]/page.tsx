@@ -653,7 +653,15 @@ export default function GeneratePage() {
                       data-testid="generate-count-reason"
                       sx={{ fontSize: 13 }}
                     >
-                      {parentCopy.generate.countUnavailable(allowance.remaining)}
+                      {/* The API's own sentence when the allowance is spent —
+                          it names the Account Tier, the usage against the limit
+                          and the reset date, none of which this app holds. A
+                          parent at cap cannot fire the request, so this is the
+                          only place they would ever read it. The screen's own
+                          sentence stays for 1–4 left, where it is describing
+                          disabled options rather than a block. */}
+                      {allowance.exhaustedReason ??
+                        parentCopy.generate.countUnavailable(allowance.remaining)}
                     </Typography>
                   )}
                 </FormControl>

@@ -2325,3 +2325,35 @@ source_spec: `spec-9-3-upload-allowance-enforcement.md`
 severity: medium
 reason: `addPages`' per-file catch does `setError(cause instanceof Error ? cause.message : parentCopy.capture.addFailed)`. For a 409, `ParentApiError.message` is the call's generic fallback and the server's sentence lives on `reason`, so `PAGE_LIMIT_REACHED` ("An upload holds at most N pages.") never reaches the parent. The shared `write` catch was fixed by this story; this second refusal site on the same screen was not, and no test observes which sentence it sets. Pre-existing: the catch predates this change and no path this story added routes through it.
 status: open
+
+### DW-292: `land()` now takes the account row lock inside a transaction bounded by the landing timeout, and a lock wait long enough to exhaust that budget is misreported as a provider failure rather than as a
+origin: spec-deferred d7780071fc59
+location: apps/api/src/practicetest/practice-test.service.ts (land)
+source_spec: `spec-9-4-generation-allowance-enforcement.md`
+severity: medium
+reason: `findByIdForUpdate` is the first statement of `land`'s `withTransaction`, which then writes the Practice Test, its questions, choices and topics under `LAND_TIMEOUT_MS` / `LAND_MAX_WAIT_MS`. A blocked acquisition is charged to that same budget, and a transaction timeout is neither `GenerationAllowanceSpent` nor `GenerationClockAnomaly`, so `fail` classifies it `UpstreamFault` with `GENERATION_FAILED` and `retryable: true` — "Try again" for what was really contention. Narrow in the current deployment (one runner, one job at a time) and not covered by any case.
+status: open
+
+### DW-293: No test lands a draft across a period boundary, so the boundary-crossing case `land()`'s per-draft window re-read exists for is unverified.
+origin: spec-deferred ae7e496b35aa
+location: apps/api/test/practice-test.int-spec.ts
+source_spec: `spec-9-4-generation-allowance-enforcement.md`
+severity: medium
+reason: `land` re-reads `allowance.windowFor(parentAccountId, chargedAt)` per draft precisely so a job spanning a rollover is counted against the period it charges to. The integration suite covers the half-open window at *request* time only. The harness has no clock seam, which is the same limitation Story 9.3 recorded for its own boundary fix.
+status: open
+
+### DW-294: The concurrency case never contends `land()`'s row lock: the jobs it accepts are drained one at a time.
+origin: spec-deferred 083285fc42e7
+location: apps/api/test/practice-test.int-spec.ts
+source_spec: `spec-9-4-generation-allowance-enforcement.md`
+severity: medium
+reason: "lets two concurrent requests through, and still charges exactly one draft" fires both requests with `Promise.all`, then drains with `while (await h.practiceTestRunner.runOnce())` — sequential. Its assertion (`practiceTest.count() === 1`) therefore holds under purely sequential execution, so the `FOR UPDATE` the cap's correctness rests on is never actually raced. Driving two `land` transactions concurrently needs a runner seam the harness does not expose.
+status: open
+
+### DW-295: The topic drill-down screen's at-cap message still names no tier, figure or date of its own, unlike the generate screen, which this story moved onto the API's `exhaustedReason` sentence.
+origin: spec-deferred 5e6bdd6b8395
+location: apps/web/src/app/parent/analytics/topics/[topicId]/page.tsx
+source_spec: `spec-9-4-generation-allowance-enforcement.md`
+severity: low
+reason: `apps/web/src/app/parent/analytics/topics/[topicId]/page.tsx`'s `topic-drill-down-spent` node still renders the static `parentCopy.topicDrillDown.spent` ("No Generation Allowance is left this period, so nothing can be made right now.") whenever `!cost.spendable`, rather than `allowance.exhaustedReason`. Out of this story's scope (not in its Code Map), and it does not violate any Always/Never bullet since the static sentence still names no tier, limit or date — but the two parent-facing surfaces for the same block now state different levels of detail, and nothing in `page.spec.tsx` (a source-text match, not an executed render) would catch further drift.
+status: open

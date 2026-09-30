@@ -29,6 +29,57 @@ describe('the count picker', () => {
     expect(PAGE_SOURCE).not.toContain('options.filter');
   });
 
+  it('states the API’s own sentence when the allowance is spent, and its own otherwise', () => {
+    // A parent at cap cannot fire the request, so the 409 is a path they never
+    // walk: the reason node is the only place they would read which tier they
+    // are on, what of it is used and when it comes back. That sentence is the
+    // API's, and it takes precedence over the screen's own.
+    // The precedence, asserted as the expression rather than as whitespace: the
+    // API's sentence when there is one, the screen's own only as the fallback.
+    expect(PAGE_SOURCE).toMatch(
+      /allowance\.exhaustedReason\s*\?\?\s*parentCopy\.generate\.countUnavailable\(allowance\.remaining\)/u,
+    );
+    // And the fallback is genuinely the screen's own sentence, not a second copy
+    // of the API's.
+    expect(parentCopy.generate.countUnavailable(1)).toContain('1 practice test');
+    expect(parentCopy.generate.countUnavailable(4)).toContain('4 practice tests');
+  });
+
+  it('never reads “Only 0 practice tests are left” when an API predates the reason', () => {
+    // The skew case, and the only way zero reaches the copy: `exhaustedReason`
+    // is an unchecked cast, so an API answering without the field leaves the
+    // screen with `undefined ?? countUnavailable(0)`. That must be a sentence a
+    // parent can read, and one that states nothing this app cannot know.
+    const skew = parentCopy.generate.countUnavailable(0);
+    expect(skew).not.toContain('0 practice tests');
+    expect(skew).toBe('No Generation Allowance is left this period.');
+    // Still no tier, limit or reset date guessed at here — those are the API's.
+    expect(skew).not.toContain('Account Tier');
+    expect(skew).not.toMatch(/resets on/i);
+  });
+
+  it('states no tier name, limit figure or reset date of its own', () => {
+    // The three facts the at-cap sentence names are the API's, and the screen
+    // must hold none of them — otherwise there would be two sentences to keep in
+    // step, and only one of them would be right.
+    const copy = [
+      JSON.stringify(parentCopy.generate),
+      // The functions too, exercised over the range the screen can hand them,
+      // because a figure written into one would not show up in a JSON dump.
+      ...[0, 1, 2, 5].flatMap((n) => [
+        parentCopy.generate.countOption(n),
+        parentCopy.generate.usage(n, String(n)),
+        parentCopy.generate.cost(n, n),
+        parentCopy.generate.costUnlimited(n),
+      ]),
+      ...[1, 2, 5].map((n) => parentCopy.generate.countUnavailable(n)),
+    ].join(' ');
+    for (const tier of ['Free', 'Plus', 'Family', 'Internal', 'Account Tier']) {
+      expect(copy).not.toMatch(new RegExp(`\\b${tier}\\b`));
+    }
+    expect(copy).not.toMatch(/resets on/i);
+  });
+
   it('states the reason once for the group, and ties every disabled radio to it', () => {
     // A disabled radio is not focusable, so a reason rendered beside it is
     // unreachable by keyboard and never announced — while a sighted reader

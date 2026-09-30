@@ -25,6 +25,9 @@ function allowance(over: Partial<GenerationAllowanceView> = {}): GenerationAllow
     maxPerRequest: 5,
     resetAt: '2026-10-01T00:00:00.000Z',
     timezone: 'Europe/London',
+    // Nothing blocked by default: the at-cap sentence is the API's, and no
+    // fixture here states a tier, a figure or a date of its own.
+    exhaustedReason: null,
     ...over,
   };
 }

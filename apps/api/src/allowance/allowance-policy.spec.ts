@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { uploadAllowanceExhausted } from './allowance-policy.js';
+import { generationAllowanceExhausted, uploadAllowanceExhausted } from './allowance-policy.js';
 import { limitsFor } from './tiers.js';
 
 /** The tier under test throughout: the one with the smallest Upload Allowance. */
 const TIER = 'Free' as const;
 /** Read, never written: no allowance figure may appear as a literal in a test. */
 const LIMIT = limitsFor(TIER).upload!;
+/** The Generation sibling's own figure, read the same way. */
+const GENERATION_LIMIT = limitsFor(TIER).generation!;
 
 /**
  * A zone far enough east that its calendar date at the boundary is **not** the
@@ -85,5 +87,100 @@ describe('the Upload Allowance refusal', () => {
   it('keeps the plural verb for every other usage', () => {
     expect(sentence()).toContain(`${LIMIT} of ${LIMIT} have been used`);
     expect(sentence({ used: 0 })).toContain(`0 of ${LIMIT} have been used`);
+  });
+});
+
+function generationSentence(
+  overrides: Partial<Parameters<typeof generationAllowanceExhausted>[0]> = {},
+): string {
+  return generationAllowanceExhausted({
+    tier: TIER,
+    used: GENERATION_LIMIT,
+    limit: GENERATION_LIMIT,
+    resetAt: RESET_AT,
+    timezone: FAR_EAST,
+    ...overrides,
+  });
+}
+
+describe('the Generation Allowance refusal', () => {
+  it('names the Account Tier the account is on', () => {
+    expect(generationSentence()).toContain(`${TIER} Account Tier`);
+    // The domain's own name for it. "Plan" is a word this product uses nowhere.
+    expect(generationSentence().toLowerCase()).not.toContain('plan');
+  });
+
+  it('states the usage against the limit, denominated in practice tests', () => {
+    expect(generationSentence()).toContain(`${GENERATION_LIMIT} of ${GENERATION_LIMIT}`);
+    expect(generationSentence()).toContain(`${GENERATION_LIMIT} practice tests`);
+    // Never in requests, generations or credits: one request may ask for
+    // several, so a figure stated in requests would mean nothing.
+    expect(generationSentence().toLowerCase()).not.toMatch(
+      /request|generation|credit|token|upload/,
+    );
+  });
+
+  it('reads the figures from the tiers table rather than restating them', () => {
+    const other = limitsFor('Plus').generation!;
+    expect(other).not.toBe(GENERATION_LIMIT);
+    expect(generationSentence({ tier: 'Plus', used: other, limit: other })).toContain(
+      `${other} of ${other}`,
+    );
+  });
+
+  it('renders the reset date in the account’s own zone, not in UTC', () => {
+    expect(generationSentence()).toContain('October 1, 2026');
+    expect(generationSentence()).not.toContain('September 30, 2026');
+    // And the same instant genuinely reads as the day before in UTC, so the
+    // assertion above is about the zone and not about the fixture.
+    expect(generationSentence({ timezone: 'UTC' })).toContain('September 30, 2026');
+  });
+
+  it('names no figure beyond the two counts and the date', () => {
+    const figures = generationSentence().match(/\d+/gu) ?? [];
+    expect(figures).toEqual([
+      String(GENERATION_LIMIT),
+      String(GENERATION_LIMIT),
+      String(GENERATION_LIMIT),
+      '1',
+      '2026',
+    ]);
+  });
+
+  it('still produces a sentence when the stored zone is not one the platform knows', () => {
+    // A single unrecognised row must never turn a 409 a parent can act on into
+    // a 500 they cannot.
+    const fallback = generationSentence({ timezone: 'Mars/Olympus_Mons' });
+    expect(fallback).toContain(`${TIER} Account Tier`);
+    expect(fallback).toContain('September 30, 2026');
+  });
+
+  it('says it without an exclamation mark and without an apology', () => {
+    expect(generationSentence()).not.toContain('!');
+    expect(generationSentence().toLowerCase()).not.toContain('sorry');
+  });
+
+  it('agrees in number when a tier allows exactly one practice test', () => {
+    const singular = generationSentence({ used: 1, limit: 1 });
+    expect(singular).toContain('1 practice test each period');
+    // The verb agrees with `used`, not with the sentence's default plural.
+    expect(singular).toContain('1 of 1 has been used');
+    expect(singular).not.toContain('have been used');
+  });
+
+  it('keeps the plural verb for every other usage', () => {
+    expect(generationSentence()).toContain(
+      `${GENERATION_LIMIT} of ${GENERATION_LIMIT} have been used`,
+    );
+    expect(generationSentence({ used: 0 })).toContain(`0 of ${GENERATION_LIMIT} have been used`);
+  });
+
+  it('shares the wording and the date rendering with its Upload sibling', () => {
+    // The siblings differ in exactly one thing: the unit. Everything else — the
+    // tier clause, the two figures, the reset sentence — is one shape, which is
+    // why they live in one file.
+    expect(generationSentence().replace(/practice tests?/gu, 'UNIT')).toBe(
+      sentence({ used: GENERATION_LIMIT, limit: GENERATION_LIMIT }).replace(/uploads?/gu, 'UNIT'),
+    );
   });
 });
