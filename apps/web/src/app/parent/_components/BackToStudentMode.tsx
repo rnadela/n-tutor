@@ -15,6 +15,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import FormLabel from '@mui/material/FormLabel';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
+import Typography from '@mui/material/Typography';
 import { parentCopy } from '@/copy/parent';
 import { attemptStorage, retainOnly } from '@/lib/attempt-store';
 import { useElevation } from '@/lib/elevation';
@@ -194,17 +195,87 @@ export function BackToStudentMode() {
   // leave, and the screens have already sent the parent back to the PIN.
   if (token === null) return null;
 
+  // The thumb only slides once a bind is actually running with the dialog
+  // closed — the single-profile auto-bind. While the dialog is open, nothing
+  // has been decided yet, so the switch stays on Parent even if `busy` is
+  // true for the profile list's own fetch.
+  const leaving = busy && !open;
+
   return (
     <Box>
-      <Button
+      {/* Styled as a two-sided switch rather than a button that only names
+          the destination: "Parent" and "Student" both stay visible, so the
+          control shows which side the device is on, not just where one press
+          goes. */}
+      <Box
+        component="button"
         type="button"
-        variant="outlined"
         onClick={() => void onOpen()}
         disabled={busy}
-        sx={{ minHeight: density.tapTarget }}
+        aria-label={leaving ? parentCopy.parentView.exiting : parentCopy.parentView.backToStudent}
+        sx={{
+          position: 'relative',
+          display: 'inline-flex',
+          alignItems: 'stretch',
+          width: 148,
+          height: density.tapTarget,
+          borderRadius: 999,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          p: '3px',
+          font: 'inherit',
+          cursor: busy ? 'default' : 'pointer',
+          opacity: busy ? 0.7 : 1,
+          '&:focus-visible': {
+            outline: '2px solid',
+            outlineColor: 'primary.main',
+            outlineOffset: 2,
+          },
+        }}
       >
-        {busy && !open ? parentCopy.parentView.exiting : parentCopy.parentView.backToStudent}
-      </Button>
+        <Box
+          aria-hidden="true"
+          sx={{
+            position: 'absolute',
+            top: '3px',
+            bottom: '3px',
+            left: leaving ? 'calc(50% + 1px)' : '3px',
+            width: 'calc(50% - 4px)',
+            borderRadius: 999,
+            bgcolor: 'primary.main',
+            transition: 'left 180ms ease',
+          }}
+        />
+        <Typography
+          component="span"
+          sx={{
+            position: 'relative',
+            flex: 1,
+            textAlign: 'center',
+            alignSelf: 'center',
+            fontSize: '0.8125rem',
+            fontWeight: 600,
+            color: leaving ? 'text.secondary' : 'primary.contrastText',
+          }}
+        >
+          {parentCopy.parentView.parentSide}
+        </Typography>
+        <Typography
+          component="span"
+          sx={{
+            position: 'relative',
+            flex: 1,
+            textAlign: 'center',
+            alignSelf: 'center',
+            fontSize: '0.8125rem',
+            fontWeight: 600,
+            color: leaving ? 'primary.contrastText' : 'text.secondary',
+          }}
+        >
+          {parentCopy.parentView.studentSide}
+        </Typography>
+      </Box>
       {/* The outcome, announced with the same sentence the screen shows.
           Mounted only once there is something to announce: an always-present
           empty live region is a second `status` on every Parent View surface,

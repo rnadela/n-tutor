@@ -229,6 +229,19 @@ export const parentCopy = {
     loading: 'Loading Parent View…',
     /** The hamburger toggle that opens the nav drawer on a narrow screen. */
     menuToggle: 'Open Parent View menu',
+    /** Section headers grouping the sidebar's destinations by what they're
+     * about, not by when they shipped. */
+    navGroups: {
+      students: 'Students',
+      practiceTests: 'Practice tests',
+      reports: 'Reports',
+      insights: 'Insights',
+      account: 'Account',
+    },
+    /** The desktop rail's own toggle, between the full sidebar and an
+     * icon-only strip. */
+    collapseSidebar: 'Collapse menu',
+    expandSidebar: 'Expand menu',
 
     /**
      * Leaving Parent View is handing the device to a child, so the control
@@ -236,6 +249,10 @@ export const parentCopy = {
      * this is a parent reading about their child, never the child themself.
      */
     backToStudent: 'Back to Student Mode',
+    /** The toggle's own two sides — short enough to sit inside a switch
+     * rather than the full sentence `backToStudent` names the action with. */
+    parentSide: 'Parent',
+    studentSide: 'Student',
     chooseProfileTitle: 'Who is using this device?',
     chooseProfileIntro:
       'The device will be handed to the child you choose. It stays on that child until you change it here.',

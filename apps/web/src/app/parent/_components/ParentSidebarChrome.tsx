@@ -5,9 +5,26 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
+import {
+  BarChart3,
+  CheckCircle2,
+  Clock,
+  Flag,
+  Home,
+  KeyRound,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Scale,
+  Settings,
+  Upload,
+  Users,
+  type LucideIcon,
+} from 'lucide-react';
 import NextLink from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BackToStudentMode } from './BackToStudentMode';
@@ -15,25 +32,71 @@ import { parentCopy } from '@/copy/parent';
 import { density } from '@/theme/tokens';
 
 const SIDEBAR_WIDTH = 240;
+/** Wide enough for the 44px tap target plus its own breathing room, narrow
+ * enough to read as a rail rather than a half-collapsed sidebar. */
+const RAIL_WIDTH = 72;
+/** Whether the desktop rail remembers being collapsed across visits. Scoped
+ * to Parent View alone, not shared with any other collapsible chrome. */
+const COLLAPSE_STORAGE_KEY = 'n-tutor:parent-sidebar-collapsed';
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface NavGroup {
+  /** Omitted for the single top-level destination, which needs no heading
+   * above it. */
+  label?: string;
+  items: NavItem[];
+}
 
 /**
- * Every destination a signed-in parent can reach from Parent View, in the
- * same order `page.tsx` used to list them as links. One list rather than one
- * `<Link>` per screen: the sidebar and any future "what's in Parent View"
- * surface read from the same array instead of drifting apart.
+ * Every destination a signed-in parent can reach from Parent View, grouped by
+ * what they're about rather than listed flat — one list rather than one
+ * `<Link>` per screen, so the sidebar and any future "what's in Parent View"
+ * surface read from the same data instead of drifting apart.
  */
-const NAV_ITEMS: { href: string; label: string }[] = [
-  { href: '/parent', label: parentCopy.parentView.title },
-  { href: '/parent/students', label: parentCopy.parentView.students },
-  { href: '/parent/capture', label: parentCopy.parentView.capture },
-  { href: '/parent/drafts', label: parentCopy.parentView.drafts },
-  { href: '/parent/attempts', label: parentCopy.parentView.attempts },
-  { href: '/parent/explanation-flags', label: parentCopy.parentView.explanationFlags },
-  { href: '/parent/grade-disputes', label: parentCopy.parentView.gradeDisputes },
-  { href: '/parent/analytics', label: parentCopy.parentView.analytics },
-  { href: '/parent/pin/change', label: parentCopy.parentView.changePin },
-  { href: '/parent/settings', label: parentCopy.parentView.settings },
+const NAV_GROUPS: NavGroup[] = [
+  { items: [{ href: '/parent', label: parentCopy.parentView.title, icon: Home }] },
+  {
+    label: parentCopy.parentView.navGroups.students,
+    items: [{ href: '/parent/students', label: parentCopy.parentView.students, icon: Users }],
+  },
+  {
+    label: parentCopy.parentView.navGroups.practiceTests,
+    items: [
+      { href: '/parent/capture', label: parentCopy.parentView.capture, icon: Upload },
+      { href: '/parent/drafts', label: parentCopy.parentView.drafts, icon: Clock },
+      { href: '/parent/attempts', label: parentCopy.parentView.attempts, icon: CheckCircle2 },
+    ],
+  },
+  {
+    label: parentCopy.parentView.navGroups.reports,
+    items: [
+      {
+        href: '/parent/explanation-flags',
+        label: parentCopy.parentView.explanationFlags,
+        icon: Flag,
+      },
+      { href: '/parent/grade-disputes', label: parentCopy.parentView.gradeDisputes, icon: Scale },
+    ],
+  },
+  {
+    label: parentCopy.parentView.navGroups.insights,
+    items: [{ href: '/parent/analytics', label: parentCopy.parentView.analytics, icon: BarChart3 }],
+  },
+  {
+    label: parentCopy.parentView.navGroups.account,
+    items: [
+      { href: '/parent/pin/change', label: parentCopy.parentView.changePin, icon: KeyRound },
+      { href: '/parent/settings', label: parentCopy.parentView.settings, icon: Settings },
+    ],
+  },
 ];
+
+const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
 
 /** The current screen's own name, for the header's left side. Falls back to
  * the app name for a destination the sidebar does not list (there is none
@@ -42,59 +105,88 @@ function pageTitle(pathname: string): string {
   return NAV_ITEMS.find((item) => item.href === pathname)?.label ?? parentCopy.appName;
 }
 
-/** Three-bar glyph, drawn inline rather than pulling in an icon package for
- * one control. */
-function MenuGlyph() {
-  return (
-    <Box
-      component="svg"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      sx={{ width: 24, height: 24, fill: 'none', stroke: 'currentColor', strokeWidth: 2 }}
-    >
-      <line x1="4" y1="7" x2="20" y2="7" strokeLinecap="round" />
-      <line x1="4" y1="12" x2="20" y2="12" strokeLinecap="round" />
-      <line x1="4" y1="17" x2="20" y2="17" strokeLinecap="round" />
-    </Box>
-  );
-}
-
-/** The destination list, shared between the permanent desktop sidebar and the
- * mobile drawer so the two never drift into two different navigations. */
-function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+/**
+ * The destination list, shared between the permanent desktop sidebar and the
+ * mobile drawer so the two never drift into two different navigations.
+ *
+ * `collapsed` only ever applies on desktop — the drawer always renders it
+ * `false`, since a drawer that opens to an icon-only strip would defeat the
+ * point of opening it.
+ */
+function NavList({
+  pathname,
+  onNavigate,
+  collapsed = false,
+}: {
+  pathname: string;
+  onNavigate?: () => void;
+  collapsed?: boolean;
+}) {
   return (
     <>
-      <Typography
-        component="p"
-        sx={{ fontWeight: 700, mb: `${density.gap}px`, px: `${density.gap}px` }}
-      >
-        {parentCopy.appName}
-      </Typography>
-      <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
-        {NAV_ITEMS.map((item) => {
-          const current = pathname === item.href;
-          return (
-            <Box component="li" key={item.href}>
-              <Button
-                component={NextLink}
-                href={item.href}
-                variant={current ? 'contained' : 'text'}
-                aria-current={current ? 'page' : undefined}
-                onClick={onNavigate}
-                fullWidth
-                sx={{
-                  justifyContent: 'flex-start',
-                  textAlign: 'left',
-                  mb: '4px',
-                  minHeight: density.tapTarget,
-                }}
-              >
-                {item.label}
-              </Button>
-            </Box>
-          );
-        })}
-      </Box>
+      {NAV_GROUPS.map((group) => (
+        <Box
+          key={group.label ?? group.items[0]!.href}
+          component="section"
+          sx={{ mb: `${density.sectionMargin - density.gap}px` }}
+        >
+          {group.label !== undefined && !collapsed ? (
+            <Typography
+              component="p"
+              sx={{
+                fontSize: '0.6875rem',
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'text.secondary',
+                px: `${density.gap}px`,
+                mb: '4px',
+              }}
+            >
+              {group.label}
+            </Typography>
+          ) : null}
+          <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
+            {group.items.map((item) => {
+              const current = pathname === item.href;
+              const Icon = item.icon;
+              const link = (
+                <Button
+                  component={NextLink}
+                  href={item.href}
+                  variant={current ? 'contained' : 'text'}
+                  aria-current={current ? 'page' : undefined}
+                  aria-label={collapsed ? item.label : undefined}
+                  onClick={onNavigate}
+                  fullWidth
+                  startIcon={collapsed ? undefined : <Icon size={18} aria-hidden="true" />}
+                  sx={{
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    textAlign: 'left',
+                    mb: '4px',
+                    minHeight: density.tapTarget,
+                    minWidth: 0,
+                    px: collapsed ? 0 : undefined,
+                  }}
+                >
+                  {collapsed ? <Icon size={20} aria-hidden="true" /> : item.label}
+                </Button>
+              );
+              return (
+                <Box component="li" key={item.href}>
+                  {collapsed ? (
+                    <Tooltip title={item.label} placement="right">
+                      {link}
+                    </Tooltip>
+                  ) : (
+                    link
+                  )}
+                </Box>
+              );
+            })}
+          </Box>
+        </Box>
+      ))}
     </>
   );
 }
@@ -105,6 +197,10 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
  * top-right corner — the same corner an admin console puts a sign-out
  * control in, and the one place it stays reachable without floating over
  * whichever screen the parent is reading.
+ *
+ * Below `md` the sidebar becomes a drawer opened from the header. At `md` and
+ * above it is a permanent rail the parent can collapse to an icon-only strip,
+ * a preference remembered across visits the same device makes.
  *
  * Every route change is a client-side `<Link>`, for the reason `page.tsx`'s
  * links already were: a full load would unmount `ElevationProvider` and the
@@ -117,6 +213,32 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
   // width, so the nav moves into a drawer opened from the header instead.
   const isNarrow = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Read the remembered rail state after mount rather than from `useState`'s
+  // initializer: `localStorage` does not exist during SSR, and reading it in
+  // the initializer would make the server- and first client-render markup
+  // disagree.
+  useEffect(() => {
+    try {
+      setCollapsed(window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === '1');
+    } catch {
+      // A blocked or absent store just means the rail starts expanded, same
+      // as a first-ever visit.
+    }
+  }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(COLLAPSE_STORAGE_KEY, next ? '1' : '0');
+      } catch {
+        // Nothing to persist to; the preference just won't survive a reload.
+      }
+      return next;
+    });
+  }
 
   // A route change is the drawer's own job finishing — closing it here means
   // every nav link works as "navigate and close" without each one wiring that
@@ -146,6 +268,8 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
     );
   }
 
+  const railCollapsed = collapsed && !isNarrow;
+
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       {isNarrow ? (
@@ -163,9 +287,14 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
               flexDirection: 'column',
               px: `${density.cardPadding}px`,
               py: `${density.sectionMargin}px`,
-              gap: `${density.gap}px`,
             }}
           >
+            <Typography
+              component="p"
+              sx={{ fontWeight: 700, mb: `${density.gap}px`, px: `${density.gap}px` }}
+            >
+              {parentCopy.appName}
+            </Typography>
             <NavList pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
           </Box>
         </Drawer>
@@ -174,7 +303,7 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
           component="nav"
           aria-label={parentCopy.parentView.title}
           sx={{
-            width: SIDEBAR_WIDTH,
+            width: railCollapsed ? RAIL_WIDTH : SIDEBAR_WIDTH,
             flexShrink: 0,
             display: 'flex',
             flexDirection: 'column',
@@ -183,10 +312,58 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             bgcolor: 'background.paper',
             px: `${density.cardPadding}px`,
             py: `${density.sectionMargin}px`,
-            gap: `${density.gap}px`,
+            transition: theme.transitions.create('width', {
+              duration: theme.transitions.duration.shortest,
+            }),
+            overflow: 'hidden',
           }}
         >
-          <NavList pathname={pathname} />
+          <Typography
+            component="p"
+            sx={{
+              fontWeight: 700,
+              mb: `${density.gap}px`,
+              px: `${density.gap}px`,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {railCollapsed ? parentCopy.appName.slice(0, 1) : parentCopy.appName}
+          </Typography>
+          <Box sx={{ flexGrow: 1 }}>
+            <NavList pathname={pathname} collapsed={railCollapsed} />
+          </Box>
+          {/* The rail's own toggle, pinned under the destinations rather than
+              inside them — it changes how the nav looks, not where it goes. */}
+          <Tooltip
+            title={
+              collapsed
+                ? parentCopy.parentView.expandSidebar
+                : parentCopy.parentView.collapseSidebar
+            }
+            placement="right"
+          >
+            <IconButton
+              onClick={toggleCollapsed}
+              aria-label={
+                collapsed
+                  ? parentCopy.parentView.expandSidebar
+                  : parentCopy.parentView.collapseSidebar
+              }
+              sx={{
+                alignSelf: railCollapsed ? 'center' : 'flex-end',
+                width: density.tapTarget,
+                height: density.tapTarget,
+              }}
+            >
+              {collapsed ? (
+                <PanelLeftOpen size={20} aria-hidden="true" />
+              ) : (
+                <PanelLeftClose size={20} aria-hidden="true" />
+              )}
+            </IconButton>
+          </Tooltip>
         </Box>
       )}
       <Box
@@ -214,7 +391,7 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
                 aria-label={parentCopy.parentView.menuToggle}
                 sx={{ width: density.tapTarget, height: density.tapTarget }}
               >
-                <MenuGlyph />
+                <Menu size={20} aria-hidden="true" />
               </IconButton>
             ) : null}
             <Typography
