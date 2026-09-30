@@ -2,6 +2,7 @@
 
 import { parentCopy } from '@/copy/parent';
 import { studentCopy } from '@/copy/student';
+import type { AccountConsumption } from '@/lib/consumption-format';
 
 /**
  * Everything the sign-up screen needs to state a requirement, read from the API
@@ -1920,6 +1921,25 @@ export const parentApi = {
       `/parent/source-tests/${encodeURIComponent(id)}/extraction`,
       { headers: elevated(token) },
       parentCopy.capture.generate.readFailed,
+    ),
+
+  /**
+   * All three allowances for this account: the tier, what has been used against
+   * each limit, the Student Profile limit and the one instant they reset at.
+   *
+   * **Every figure here is the API's.** This app holds no tier table, no limit and
+   * no reset date of its own, and composes none: the payload is the same
+   * `consumptionFor` answer the Admin console reads, so the two views cannot
+   * disagree. `limit: null` is unlimited and is never a sentinel number.
+   *
+   * Reading it charges nothing and is answered at cap, which is what lets Settings
+   * state a limit before a parent ever reaches one.
+   */
+  allowances: (token: string) =>
+    call<AccountConsumption>(
+      '/parent/allowances',
+      { headers: elevated(token) },
+      parentCopy.settings.allowancesFailed,
     ),
 
   /** What is left of the Generation Allowance, and the per-request ceiling. */

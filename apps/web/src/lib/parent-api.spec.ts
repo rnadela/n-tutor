@@ -1048,3 +1048,53 @@ describe('deleting the whole Parent Account', () => {
     });
   });
 });
+
+describe('reading the account’s allowances', () => {
+  const PAYLOAD = {
+    periodStart: '2026-08-31T16:00:00.000Z',
+    periodEnd: '2026-09-30T16:00:00.000Z',
+    resetAt: '2026-09-30T16:00:00.000Z',
+    timezone: 'Asia/Manila',
+    tier: 'Free',
+    studentProfileLimit: 3,
+    allowances: {
+      upload: { used: 7, limit: 13 },
+      generation: { used: 19, limit: 23 },
+      explanation: { used: 29, limit: 31 },
+    },
+  } as const;
+
+  it('reads the allowances path with the elevation bearer, and writes nothing', async () => {
+    const fetchMock = respondWith(200, PAYLOAD);
+
+    const consumption = await parentApi.allowances('elev-token');
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    // The account is never in the path: it comes off the verified elevation on
+    // the API side (AD-18), so the bearer is the whole of the addressing here.
+    expect(url.endsWith('/parent/allowances')).toBe(true);
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer elev-token');
+    // A GET: reading an allowance charges nothing and changes nothing.
+    expect(init.method).toBeUndefined();
+    expect(consumption).toEqual(PAYLOAD);
+  });
+
+  it('reports a failed read with the Settings screen’s own sentence', async () => {
+    respondWith(503, {});
+
+    await expect(parentApi.allowances('elev-token')).rejects.toMatchObject({
+      status: 503,
+      message: parentCopy.settings.allowancesFailed,
+    });
+  });
+
+  it('ends Parent View on the guard’s refusal, rather than reporting a fault', async () => {
+    // The route is behind the elevation guard, whose 401 carries `elevated: false`.
+    respondWith(401, { elevated: false });
+
+    await expect(parentApi.allowances('stale-token')).rejects.toMatchObject({
+      status: 401,
+      notElevated: true,
+    });
+  });
+});

@@ -12,10 +12,12 @@ import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { DestructiveConfirmDialog } from '@/components/Dialog';
 import { parentCopy } from '@/copy/parent';
+import type { AccountConsumption } from '@/lib/consumption-format';
 import { useElevation } from '@/lib/elevation';
 import { parentApi, type AccountDeletionPreview } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView, refusalText } from '@/lib/parent-view';
 import { density } from '@/theme/tokens';
+import { AllowancesPanel } from './AllowancesPanel';
 
 /**
  * Re-exported rather than defined here, exactly as the Students screen does it:
@@ -48,12 +50,24 @@ export function DataAndDeletionNote() {
   );
 }
 
-/** The Settings screen: Data & deletion, and the account delete inside it. */
+/** The Settings screen: the account's Allowances, then Data & deletion. */
 export default function SettingsPage() {
   const router = useRouter();
   const { elevation, clearElevation } = useElevation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * The account's three allowances, exactly as the API states them.
+   *
+   * Its own piece of state, read by its own request and reported by its own
+   * error: an allowance the screen could not read must not take the account
+   * delete with it, and a failed delete preview must not blank the allowances.
+   * FR-33's gate is the deletion's, and reading a limit is the routine visit.
+   */
+  const [consumption, setConsumption] = useState<AccountConsumption | null>(null);
+  const [allowancesLoading, setAllowancesLoading] = useState(true);
+  const [allowancesError, setAllowancesError] = useState<string | null>(null);
 
   /**
    * The counts the open confirmation names.
@@ -105,6 +119,32 @@ export default function SettingsPage() {
     }
     setLoading(true);
     setError(null);
+    setAllowancesLoading(true);
+    setAllowancesError(null);
+    // The allowances, on the elevation this screen already holds. A separate
+    // request from the preview above and staleness-checked the same way, so
+    // whichever of the two fails leaves the other's section intact.
+    parentApi.allowances(token).then(
+      applyIfCurrent(current.current, issued, (fresh: AccountConsumption) => {
+        setConsumption(fresh);
+        setAllowancesLoading(false);
+      }),
+      applyIfCurrent(current.current, issued, (cause: unknown) => {
+        if (endsParentView(cause)) {
+          leave();
+          return;
+        }
+        setAllowancesLoading(false);
+        // The figures go with the failure. On a retry they would otherwise be
+        // *last* period's counters standing under an alert saying the read
+        // failed — and a stale allowance is worse than none: it is a specific,
+        // confident number a parent may act on, while an absent one sends them
+        // to the retry the alert is offering. Nothing else on the screen
+        // depends on them, so clearing them costs no other section.
+        setConsumption(null);
+        setAllowancesError(refusalText(cause, parentCopy.settings.allowancesFailed));
+      }),
+    );
     parentApi.accountDeletionPreview(token).then(
       applyIfCurrent(current.current, issued, () => {
         setLoading(false);
@@ -215,6 +255,27 @@ export default function SettingsPage() {
             action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
           >
             {error}
+          </Alert>
+        )}
+
+        {/* Allowances first: reading a limit is the routine visit, and ending
+            the account is not. It renders whatever the deletion preview did,
+            and its own failure is reported here rather than in the page alert
+            above, so a lost allowance read leaves Data & deletion working. */}
+        {consumption !== null && <AllowancesPanel consumption={consumption} />}
+        {consumption === null && allowancesLoading && (
+          <Typography role="status" component="p" sx={{ color: 'text.secondary' }}>
+            {parentCopy.settings.allowancesLoading}
+          </Typography>
+        )}
+        {allowancesError !== null && (
+          <Alert
+            severity="error"
+            role="alert"
+            variant="outlined"
+            action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
+          >
+            {allowancesError}
           </Alert>
         )}
 

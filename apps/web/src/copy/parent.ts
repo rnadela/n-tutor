@@ -375,6 +375,46 @@ export const parentCopy = {
      * has just pressed describes the wrong thing.
      */
     preparing: 'Checking what would be removed…',
+
+    /**
+     * The Allowances section: the Account Tier, the three counters, and the one
+     * instant they all start again at.
+     *
+     * **Not one figure, tier name or date is written here.** Every number arrives
+     * on the API's consumption payload, every limit renders through `limitLabel`,
+     * every tier name through `tierLabel` and the reset date through `dateOnly` in
+     * the account's own zone. The wording follows `analytics.allowance*`, which
+     * states the Explanation counter on the dashboard, so a parent reading both
+     * surfaces reads one sentence pattern.
+     *
+     * Each allowance names **its own unit**, because "2 of 2 used" says nothing
+     * about what was used. The Generation unit is *practice tests* and is nothing
+     * else: not generations, not requests and not credits — the same denomination
+     * the generate screen's cost sentence is bound to.
+     */
+    allowancesHeading: 'Allowances',
+    allowancesIntro:
+      'What this account has used this period. The allowances are the account’s and are shared by every profile on it.',
+    allowancesLoading: 'Loading the allowances…',
+    allowancesFailed: 'The allowances could not be read. Nothing has changed. Try again.',
+    /** The tier line's label. The tier's own name comes from the API. */
+    tierLine: (tier: string) => `Account Tier: ${tier}`,
+    uploadAllowance: 'Upload Allowance',
+    generationAllowance: 'Generation Allowance',
+    explanationAllowance: 'Explanation Allowance',
+    uploadUnit: 'uploaded tests',
+    /** Practice Tests, and never a credit or an abstract unit. */
+    generationUnit: 'practice tests',
+    explanationUnit: 'explanations',
+    allowanceUsed: (used: number, limit: string, unit: string) =>
+      `${used} of ${limit} ${unit} used this period.`,
+    /** No ceiling. Said in words, never as a number and never as "0 left". */
+    allowanceUnlimited: (used: number, unit: string) =>
+      `${used} ${unit} used this period. There is no limit.`,
+    studentProfileLimitLabel: 'Student profiles on this account',
+    /** One date for all three counters, because they start again together. */
+    allowanceResets: (date: string) => `All three counts start again on ${date}.`,
+
     /** The section heading, which is the entry point the UX names. */
     dataAndDeletion: 'Data & deletion',
     deleteAccount: 'Delete this account',

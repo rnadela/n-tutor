@@ -124,3 +124,72 @@ describe('what a refused account delete puts in the dialog', () => {
     expect(parentCopy.settings.deleteAccountFailed).toMatch(/Nothing was removed/i);
   });
 });
+
+describe('the Allowances section on the Settings screen', () => {
+  it('renders the panel, above Data & deletion', () => {
+    // Reading a limit is the routine visit; ending the account is not.
+    expect(CODE).toContain('<AllowancesPanel consumption={consumption} />');
+    expect(CODE.indexOf('<AllowancesPanel')).toBeLessThan(
+      CODE.indexOf('aria-labelledby="data-and-deletion-heading"'),
+    );
+  });
+
+  it('reads the allowances on mount, on the elevation the screen already holds', () => {
+    const load = CODE.slice(CODE.indexOf('const load = useCallback'));
+    const body = load.slice(0, load.indexOf('useEffect'));
+    expect(body).toContain('parentApi.allowances(token)');
+    expect(body).toContain('applyIfCurrent');
+    // A lost elevation goes through the existing path, not a second one.
+    expect(body).toContain('endsParentView(cause)');
+  });
+
+  it('states the loading sentence in a live region while the read is in flight', () => {
+    expect(CODE).toContain('parentCopy.settings.allowancesLoading');
+    expect(parentCopy.settings.allowancesLoading.length).toBeGreaterThan(0);
+    const loading = CODE.slice(CODE.indexOf('allowancesLoading && ('));
+    expect(loading.slice(0, loading.indexOf('</Typography>'))).toContain('role="status"');
+  });
+
+  it('reports a failed allowance read without suppressing Data & deletion', () => {
+    // Its own error state, reported in its own alert: the deletion gate is FR-33's
+    // and must not go dark because a counter could not be read.
+    expect(CODE).toContain(
+      'setAllowancesError(refusalText(cause, parentCopy.settings.allowancesFailed))',
+    );
+    expect(parentCopy.settings.allowancesFailed).toMatch(/Nothing has changed/i);
+    // The failure is rendered from its own state, in its own alert.
+    const alert = CODE.slice(CODE.indexOf('{allowancesError !== null && ('));
+    expect(alert.slice(0, alert.indexOf('</Alert>'))).toContain('{allowancesError}');
+    // And the delete control's own predicate does not read it at all: whatever
+    // the allowance read came to, the deletion gate is decided by the preview,
+    // the in-flight writes and the token.
+    const disabled = CODE.slice(CODE.indexOf('disabled={'));
+    const predicate = disabled.slice(0, disabled.indexOf('}'));
+    expect(predicate).toContain('loading');
+    expect(predicate).toContain('previewing');
+    expect(predicate).toContain('deleting');
+    expect(predicate).toContain('token === null');
+    expect(predicate).not.toContain('allowances');
+  });
+
+  it('leaves no consumption rendered when the allowance read fails', () => {
+    // A retry whose read fails must not leave the previous period's counters on
+    // screen under an alert saying the read failed: a stale allowance is a
+    // specific, confident number a parent may act on, while an absent one sends
+    // them to the retry the alert offers.
+    const handler = CODE.slice(CODE.indexOf('parentApi.allowances(token)'));
+    const failure = handler.slice(handler.indexOf('(cause: unknown)'));
+    const body = failure.slice(0, failure.indexOf('parentApi.accountDeletionPreview'));
+    expect(body).toContain('setConsumption(null)');
+    // And the panel renders only on a consumption, so clearing it is what makes
+    // the alert stand alone.
+    expect(CODE).toContain(
+      '{consumption !== null && <AllowancesPanel consumption={consumption} />}',
+    );
+  });
+
+  it('holds no tier figure, tier name or reset date of its own', () => {
+    expect(CODE).not.toMatch(/\bFree\b|\bPlus\b|\bFamily\b|\bInternal\b/u);
+    expect(CODE).not.toContain('Intl.');
+  });
+});

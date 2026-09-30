@@ -2421,3 +2421,51 @@ source_spec: `spec-9-5-explanation-allowance-enforcement.md`
 severity: low
 reason: `lets exactly one of two concurrent presses take the last unit` releases a barrier from inside the `ai.run` mock with no `Promise.race` against a timeout. If the implementation ever called `ai.run` a different number of times than the test expects, or a request errored before reaching the release, the awaited barrier would never resolve.
 status: open
+
+### DW-304: The Settings screen's own guarantees — the panel rendering, the allowance read firing, and a failed allowance read leaving Data & deletion operative — are asserted by matching the text of `page.tsx`
+origin: spec-deferred 713c88e6e86b
+location: apps/web/src/app/parent/settings/page.spec.tsx (the Allowances describe)
+source_spec: `spec-9-6-allowances-surface-atomic-monthly-reset.md`
+severity: medium
+reason: Every new case in `page.spec.tsx` reads `CODE` (the file's own source, read at line 14) and matches wording. Nothing mounts the screen: the file's comment says the node environment cannot. Inverting the render guard to `consumption === null && <AllowancesPanel …/>`, or moving the allowance failure into the shared `setError` path, leaves every grepped literal present and the suite green while the section never renders or a read failure takes the FR-33 deletion gate down with it. Pre-existing constraint, not introduced here — the same pattern pins the Data & deletion cases — but it is now load-bearing for more claims. A real fix is either a DOM test environment for client screens or extracting the section assembly (panel vs. loading sentence vs. alert, given consumption/loading/error) into one presentational function.
+status: open
+
+### DW-305: `JwtModule.registerAsync({ useFactory: () => ({ secret: requireParentJwtSecret() }) })` is now registered identically in two modules, with a third occurrence imminent.
+origin: spec-deferred 8bef90d2a616
+location: apps/api/src/allowance/allowance.module.ts; apps/api/src/analytics/analytics.module.ts
+source_spec: `spec-9-6-allowances-surface-atomic-monthly-reset.md`
+severity: low
+reason: `analytics.module.ts` and, since this story, `allowance.module.ts` both register the parent secret so `ParentElevationGuard` can be constructed in their own injector. The duplication is the sanctioned idiom this story was told to mirror, so fixing it at one site would create the second idiom; a shared `ParentJwtModule` is one decision covering every site.
+status: open
+
+### DW-306: A reading whose `used` exceeds its `limit` — reachable after an Admin tier downgrade — renders as "15 of 13", and the Allowances surface states no at-cap or over-cap distinction of any kind.
+origin: spec-deferred 9c81b5191e1a
+location: apps/web/src/app/parent/settings/AllowancesPanel.tsx (the rows map)
+source_spec: `spec-9-6-allowances-surface-atomic-monthly-reset.md`
+severity: low
+reason: `AllowancesPanel` renders `allowanceUsed(used, limitLabel(limit), unit)` unconditionally whenever `limit !== null`. The epic's AC for this surface asks only for usage, limit and reset date, and the sentence stays truthful, so this is not a defect against the story — but the surface exists so a parent sees a wall coming, and reaching one is currently indistinguishable from being halfway to it.
+status: open
+
+### DW-307: `GET parent/allowances` answers 404 when the account row is gone while a valid elevation bearer is still presented, rather than re-gating the parent.
+origin: spec-deferred 65ec97515aed
+location: apps/api/src/allowance/parent-allowance.controller.ts:45
+source_spec: `spec-9-6-allowances-surface-atomic-monthly-reset.md`
+severity: low
+reason: `consumptionFor` reads the account through `ParentAccountService.findById`, which throws `NotFoundException`. The web maps that to the section's retry alert rather than to ending Parent View. Every sibling parent-elevated read shares the shape, so it is one decision for all of them, not this route's alone.
+status: open
+
+### DW-308: The window-identity assertion couples itself to the number of usage classes via `expect(issued).toHaveLength(6)`.
+origin: spec-deferred 9ec7e208dfc9
+location: apps/api/src/allowance/allowance.service.spec.ts (the consumptionFor describe)
+source_spec: `spec-9-6-allowances-surface-atomic-monthly-reset.md`
+severity: low
+reason: The case is about all counts riding one window, not about how many queries a read issues. A fourth usage class would fail it on the arity assertion with a message naming nothing that broke, before the set-size assertion it exists for is reached.
+status: open
+
+### DW-309: Nothing prevents a Parent View module from importing `admin-api.ts`, and two parent-visible strings still come out of `adminCopy`.
+origin: spec-deferred e789d3c1eb13
+location: apps/web/src/lib/admin-api.ts; apps/web/src/lib/consumption-format.ts
+source_spec: `spec-9-6-allowances-surface-atomic-monthly-reset.md`
+severity: low
+reason: `consumption-format.ts` exists so `parent-api.ts` need not import the admin client for a type, but `admin-api.ts` keeps re-exporting the four names, so the edge remains available to any new file with no lint rule refusing it. Separately, the parent's "unlimited" word and its tier labels are read from `adminCopy.accounts.*` — pre-existing for `limitLabel`, extended to `tierLabel` here. A shared copy namespace plus a `no-restricted-imports` rule is one fix for both; note `pnpm lint` is broken repo-wide, so the rule could not be added today.
+status: open

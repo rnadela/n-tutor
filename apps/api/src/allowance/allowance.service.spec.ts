@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { UsageClass } from '../generated/prisma/enums.js';
+import type { AccountTier, UsageClass } from '../generated/prisma/enums.js';
 import type { ParentAccountService } from '../identity/parent-account.service.js';
 import type { PrismaService, TransactionClient } from '../prisma/prisma.service.js';
 import { AllowanceService } from './allowance.service.js';
+import { TIER_LIMITS, limitsFor } from './tiers.js';
 
 const ACCOUNT_ID = '99999999-8888-7777-6666-555555555555';
 /** Mid-month, so the window under test is unambiguously September 2026 in UTC. */
@@ -26,6 +27,8 @@ interface Tombstone {
 function serviceWith(
   tombstones: readonly Tombstone[],
   live = { upload: 1, generation: 2, explanation: 3 },
+  /** The tier the stubbed account is on, so a limits case can pick one. */
+  tier: AccountTier = 'Family',
 ): {
   service: AllowanceService;
   aggregateArgs: unknown[];
@@ -70,7 +73,7 @@ function serviceWith(
   } as unknown as PrismaService;
 
   const accounts = {
-    findById: vi.fn(async () => ({ id: ACCOUNT_ID, tier: 'Family' as const })),
+    findById: vi.fn(async () => ({ id: ACCOUNT_ID, tier })),
     // No history: every window is cut in the default zone, which is UTC.
     timezoneHistory: vi.fn(async () => []),
   } as unknown as ParentAccountService;
@@ -377,5 +380,169 @@ describe('the Explanation count the cap at the charge enforces against', () => {
     expect(await service.explanationUsedIn(ACCOUNT_ID, window)).toBe(
       consumption.allowances.explanation.used,
     );
+  });
+});
+
+/**
+ * The readout's own shape — the part the parent surface and the Admin console
+ * both stand on.
+ *
+ * What is under test here is **the derivation, not a reset event**: there is no
+ * reset in this design. `consumptionFor` resolves one window and measures three
+ * counts over it, so the counters move together because they are one derivation
+ * of one window. A future change that resolved a window per counter would leave a
+ * partial reset reachable and every other case in this file green, so the one
+ * window is asserted directly.
+ */
+describe('the consumption readout every surface reads', () => {
+  /** The `[start, end)` pair a count was actually issued over. */
+  interface Bounds {
+    gte: Date;
+    lt: Date;
+  }
+
+  function boundsOf(call: unknown, column: 'submittedAt' | 'chargedAt'): Bounds {
+    const where = (call as [{ where: Record<string, Bounds> }])[0].where;
+    const range = where[column];
+    if (!range) throw new Error(`No ${column} range in the count's where clause.`);
+    return range;
+  }
+
+  /**
+   * Every window a single read issued a query over: the three live counts and the
+   * three tombstone aggregates. Six queries, and the case is that there is one
+   * distinct pair among them.
+   */
+  function windowsIssued(
+    counts: {
+      sourceTestCount: ReturnType<typeof vi.fn>;
+      practiceTestCount: ReturnType<typeof vi.fn>;
+      explanationCount: ReturnType<typeof vi.fn>;
+    },
+    aggregateArgs: readonly unknown[],
+  ): Bounds[] {
+    return [
+      boundsOf(counts.sourceTestCount.mock.calls[0], 'submittedAt'),
+      boundsOf(counts.practiceTestCount.mock.calls[0], 'chargedAt'),
+      boundsOf(counts.explanationCount.mock.calls[0], 'chargedAt'),
+      ...aggregateArgs.map((args) => {
+        const { periodStart } = (args as { where: { periodStart: Bounds } }).where;
+        return periodStart;
+      }),
+    ];
+  }
+
+  const key = (bounds: Bounds) => `${bounds.gte.toISOString()}/${bounds.lt.toISOString()}`;
+
+  it('measures all three counters over one identical window', async () => {
+    const parts = serviceWith([]);
+
+    const consumption = await parts.service.consumptionFor(ACCOUNT_ID, NOW);
+    const issued = windowsIssued(parts, parts.aggregateArgs);
+
+    // One window resolved once, six queries over it. A per-counter resolve is
+    // the partial-reset defect this asserts away.
+    expect(new Set(issued.map(key)).size).toBe(1);
+    expect(issued).toHaveLength(6);
+    for (const bounds of issued) {
+      expect(bounds.gte.toISOString()).toBe(consumption.periodStart);
+      expect(bounds.lt.toISOString()).toBe(consumption.periodEnd);
+    }
+    // Each count issued exactly once: a second issue is a second window's worth
+    // of opportunity to disagree.
+    expect(parts.sourceTestCount).toHaveBeenCalledTimes(1);
+    expect(parts.practiceTestCount).toHaveBeenCalledTimes(1);
+    expect(parts.explanationCount).toHaveBeenCalledTimes(1);
+  });
+
+  it('states the reset as that window’s exclusive end, and nothing else', async () => {
+    const { service } = serviceWith([]);
+
+    const consumption = await service.consumptionFor(ACCOUNT_ID, NOW);
+
+    expect(consumption.resetAt).toBe(consumption.periodEnd);
+    expect(new Date(consumption.resetAt).getTime()).toBeGreaterThan(
+      new Date(consumption.periodStart).getTime(),
+    );
+  });
+
+  it('reads every limit off the tiers table, for a tier that has figures', async () => {
+    const tier = 'Free';
+    const { service } = serviceWith([], { upload: 1, generation: 2, explanation: 3 }, tier);
+
+    const consumption = await service.consumptionFor(ACCOUNT_ID, NOW);
+
+    const limits = limitsFor(tier);
+    expect(consumption.tier).toBe(tier);
+    expect(consumption.studentProfileLimit).toBe(limits.studentProfiles);
+    expect(consumption.allowances.upload.limit).toBe(limits.upload);
+    expect(consumption.allowances.generation.limit).toBe(limits.generation);
+    expect(consumption.allowances.explanation.limit).toBe(limits.explanation);
+  });
+
+  it('passes an unlimited limit through as null, never as a sentinel number', async () => {
+    // The tier whose every figure is unlimited, read from the table rather than
+    // named for its figures.
+    const tier = (Object.keys(TIER_LIMITS) as AccountTier[]).find(
+      (candidate) =>
+        TIER_LIMITS[candidate].upload === null &&
+        TIER_LIMITS[candidate].generation === null &&
+        TIER_LIMITS[candidate].explanation === null &&
+        TIER_LIMITS[candidate].studentProfiles === null,
+    );
+    if (!tier) throw new Error('No Account Tier is unlimited on all four figures.');
+    const { service } = serviceWith([], { upload: 4, generation: 5, explanation: 6 }, tier);
+
+    const consumption = await service.consumptionFor(ACCOUNT_ID, NOW);
+
+    expect(consumption.studentProfileLimit).toBeNull();
+    expect(consumption.allowances.upload.limit).toBeNull();
+    expect(consumption.allowances.generation.limit).toBeNull();
+    expect(consumption.allowances.explanation.limit).toBeNull();
+    // Usage is still counted on an unlimited tier: the readout is a fact, not a
+    // remainder.
+    expect(consumption.allowances.upload.used).toBe(4);
+    expect(consumption.allowances.generation.used).toBe(5);
+    expect(consumption.allowances.explanation.used).toBe(6);
+  });
+
+  it('moves all three counters’ window together in one step across a boundary', async () => {
+    const before = serviceWith([]);
+    const inside = await before.service.consumptionFor(ACCOUNT_ID, NOW);
+    // Exactly the instant the previous period ended. Half-open `[start, end)`:
+    // this instant belongs to the next window, for every counter at once.
+    const boundary = new Date(inside.periodEnd);
+
+    const after = serviceWith([]);
+    const next = await after.service.consumptionFor(ACCOUNT_ID, boundary);
+    const issued = windowsIssued(after, after.aggregateArgs);
+
+    expect(next.periodStart).toBe(inside.periodEnd);
+    expect(new Set(issued.map(key)).size).toBe(1);
+    for (const bounds of issued) {
+      expect(bounds.gte.toISOString()).toBe(next.periodStart);
+      expect(bounds.lt.toISOString()).toBe(next.periodEnd);
+      // The negative half: no counter was left behind on the period that ended.
+      expect(bounds.gte.toISOString()).not.toBe(inside.periodStart);
+    }
+  });
+
+  it('never measures one counter over a window another was not', async () => {
+    // Two reads at two instants inside one period must resolve the same window,
+    // and each read's six queries must agree with each other — so a counter that
+    // resolved its own window would show up as a second distinct pair.
+    const early = serviceWith([]);
+    const late = serviceWith([]);
+
+    await early.service.consumptionFor(ACCOUNT_ID, new Date('2026-09-02T00:00:00.000Z'));
+    await late.service.consumptionFor(ACCOUNT_ID, new Date('2026-09-28T23:59:59.000Z'));
+
+    const pairs = new Set(
+      [
+        ...windowsIssued(early, early.aggregateArgs),
+        ...windowsIssued(late, late.aggregateArgs),
+      ].map(key),
+    );
+    expect(pairs.size).toBe(1);
   });
 });

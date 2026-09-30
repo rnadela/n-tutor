@@ -1,6 +1,7 @@
 'use client';
 
 import { adminCopy } from '@/copy/admin';
+import type { AccountConsumption, AccountTier } from '@/lib/consumption-format';
 import type { RichTextSegment } from '@/lib/parent-api';
 
 /**
@@ -52,9 +53,18 @@ export interface TaxonomySnapshot {
   availability: AvailabilityEntry[];
 }
 
-/** Mirrors the API's AccountTier enum. Carries no figure — only the labels. */
-export const ACCOUNT_TIERS = ['Free', 'Plus', 'Family', 'Internal'] as const;
-export type AccountTier = (typeof ACCOUNT_TIERS)[number];
+/**
+ * The consumption vocabulary, defined in `@/lib/consumption-format` and
+ * re-exported here so every existing admin import keeps resolving.
+ *
+ * It lives there rather than here because Parent View's Settings screen states
+ * the same three allowances from the same API payload, and `parent-api.ts`
+ * importing this module would give Parent View an edge to the admin client —
+ * including its token storage — for a type. `consumption-format` is already the
+ * module both surfaces share.
+ */
+export { ACCOUNT_TIERS } from '@/lib/consumption-format';
+export type { AccountTier, AllowanceReading, AccountConsumption } from '@/lib/consumption-format';
 
 export interface ParentAccountSummary {
   id: string;
@@ -64,26 +74,6 @@ export interface ParentAccountSummary {
   createdAt: string;
   /** The zone in effect for this account right now. */
   timezone: string;
-}
-
-/** `limit: null` is unlimited. Every figure originates in the API's tiers table. */
-export interface AllowanceReading {
-  used: number;
-  limit: number | null;
-}
-
-export interface AccountConsumption {
-  periodStart: string;
-  periodEnd: string;
-  resetAt: string;
-  timezone: string;
-  tier: AccountTier;
-  studentProfileLimit: number | null;
-  allowances: {
-    upload: AllowanceReading;
-    generation: AllowanceReading;
-    explanation: AllowanceReading;
-  };
 }
 
 export interface ParentAccountDetail {
