@@ -39,6 +39,17 @@ export function nameKey(name: string): string {
   return normaliseName(name).toLowerCase();
 }
 
+/**
+ * Grade Level names embed a number ("Grade 10"), so a plain string sort puts
+ * "Grade 10" before "Grade 2". Numeric-aware collation orders them the way a
+ * reader expects.
+ */
+const GRADE_LEVEL_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function sortGradeLevels<T extends { name: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => GRADE_LEVEL_COLLATOR.compare(a.name, b.name));
+}
+
 const ITEM_FIELDS = { id: true, name: true, enabled: true } as const;
 
 function requireName(label: string, name: string): string {
@@ -84,7 +95,7 @@ export class TaxonomyService {
         select: { subjectId: true, gradeLevelId: true, enabled: true },
       }),
     ]);
-    return { subjects, gradeLevels, availability };
+    return { subjects, gradeLevels: sortGradeLevels(gradeLevels), availability };
   }
 
   /**
@@ -118,11 +129,12 @@ export class TaxonomyService {
    * a disabled row so a stored reference keeps resolving.
    */
   async listSelectableGradeLevels(): Promise<TaxonomyItem[]> {
-    return this.prisma.gradeLevel.findMany({
+    const gradeLevels = await this.prisma.gradeLevel.findMany({
       where: { enabled: true },
       select: ITEM_FIELDS,
       orderBy: { name: 'asc' },
     });
+    return sortGradeLevels(gradeLevels);
   }
 
   /** Succeeds for a disabled row — a stored id always resolves. */
