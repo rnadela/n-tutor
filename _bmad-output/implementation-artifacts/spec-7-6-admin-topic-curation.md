@@ -9,6 +9,17 @@ followup_review_recommended: false
 context: []
 warnings: ['oversized']
 deferred: []
+operator_actions:
+  - >-
+    Prior dev session timed out twice (2026-09-29). Attempt 1 left real, uncommitted
+    work parked at `refs/attempt-preserve-dirty/20260926-202152-4fb2-d203172a-1`
+    (admin topic-curation controller/service/DTOs, topic merge logic in grading +
+    topic services, unit + integration tests, admin UI wiring — 13 files). Attempt 2
+    parked at `...-2` is just the spec file, no code. Before the next dev session
+    starts fresh, inspect attempt 1 for salvage:
+    `git show --stat refs/attempt-preserve-dirty/20260926-202152-4fb2-d203172a-1`,
+    and either recover it (`git merge --ff-only refs/attempt-preserve-dirty/20260926-202152-4fb2-d203172a-1`)
+    or discard and start clean.
 ---
 
 <intent-contract>
