@@ -3,7 +3,7 @@ title: 'Story 5.7 — Retaking a Practice Test'
 type: 'feature'
 created: '2026-09-27'
 baseline_revision: '11542fd3e4bcbcb119a21a7d64fb6c34f75b4092'
-status: 'awaiting-operator'
+status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: true
 context: []
@@ -260,10 +260,13 @@ return this.prisma.withTransaction(latestAttemptOf); // read-only, no insert
 
 ## Auto Run Result
 
-Status: awaiting-operator
-Blocking condition: none — the story is complete as far as an agent can take it. The
-e2e layer is the one verification left owed, and it needs a human to free ports 3000
-and 3001 (see `operator_actions` in the frontmatter).
+Status: done
+Operator e2e verification (2026-09-30): ports 3000/3001 were free, no kill needed.
+`pnpm db:up && pnpm db:migrate` ran clean. `student-submit-attempt` (5/5),
+`student-attempt-resilience` (4/4), `student-take-test` (2/2), `student-mode` (8/8) —
+19/19 passed via direct `npx playwright test <file>` (pnpm's `e2e -- <arg>` script did
+not forward the filter arg and ran the full suite instead; direct invocation filtered
+correctly).
 
 ### Summary
 
