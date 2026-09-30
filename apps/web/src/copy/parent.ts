@@ -227,6 +227,8 @@ export const parentCopy = {
      */
     settings: 'Settings and account deletion',
     loading: 'Loading Parent View…',
+    /** The hamburger toggle that opens the nav drawer on a narrow screen. */
+    menuToggle: 'Open Parent View menu',
 
     /**
      * Leaving Parent View is handing the device to a child, so the control
