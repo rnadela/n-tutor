@@ -32,6 +32,9 @@ export const adminCopy = {
      */
     topics: 'Topics',
     signOut: 'Sign out',
+    menuToggle: 'Open Admin menu',
+    collapseSidebar: 'Collapse menu',
+    expandSidebar: 'Expand menu',
   },
 
   /**

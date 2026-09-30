@@ -195,7 +195,7 @@ describe('what the Topic curation screen does', () => {
   });
 
   it('is reachable from the nav, because a queue nobody can open goes nowhere', () => {
-    expect(CHROME).toContain('href="/admin/topics"');
+    expect(CHROME).toMatch(/href:\s*['"]\/admin\/topics['"]/u);
     expect(CHROME).toContain('adminCopy.nav.topics');
   });
 });
