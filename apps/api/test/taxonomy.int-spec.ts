@@ -183,6 +183,18 @@ describe('subject and grade level taxonomy', () => {
     ]);
   });
 
+  it('orders an unnumbered Grade Level before the numbered ones', async () => {
+    await h.taxonomy.createGradeLevel(actor, 'Grade 1');
+    await h.taxonomy.createGradeLevel(actor, 'Kindergarten');
+    await h.taxonomy.createGradeLevel(actor, 'Grade 12');
+
+    expect((await h.taxonomy.listSelectableGradeLevels()).map((g) => g.name)).toEqual([
+      'Kindergarten',
+      'Grade 1',
+      'Grade 12',
+    ]);
+  });
+
   it('returns an empty list for a disabled Grade Level', async () => {
     const subject = await h.taxonomy.createSubject(actor, 'Mathematics');
     const grade = await h.taxonomy.createGradeLevel(actor, 'Grade 4');

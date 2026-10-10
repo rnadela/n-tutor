@@ -1,6 +1,12 @@
 import * as argon2 from 'argon2';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MIN_SEED_PASSWORD_LENGTH, requireSeedPassword, seedOperator } from '../prisma/seed.js';
+import {
+  MIN_SEED_PASSWORD_LENGTH,
+  PH_GRADE_LEVELS,
+  requireSeedPassword,
+  seedGradeLevels,
+  seedOperator,
+} from '../prisma/seed.js';
 import { createHarness, type Harness } from './harness.js';
 
 describe('seedOperator', () => {
@@ -61,5 +67,37 @@ describe('seedOperator', () => {
     } finally {
       delete process.env.ADMIN_SEED_PASSWORD_TEST_SHORT;
     }
+  });
+});
+
+describe('seedGradeLevels', () => {
+  let h: Harness;
+
+  beforeAll(async () => {
+    h = await createHarness();
+  });
+
+  afterAll(async () => {
+    await h.close();
+  });
+
+  it('lists Kindergarten and Grades 1 to 12', () => {
+    expect(PH_GRADE_LEVELS).toHaveLength(13);
+    expect(PH_GRADE_LEVELS[0]).toBe('Kindergarten');
+    expect(PH_GRADE_LEVELS.at(-1)).toBe('Grade 12');
+  });
+
+  it('creates missing levels once and never re-enables a withdrawn one', async () => {
+    const tag = Date.now();
+    const names = [`Seed Level A ${tag}`, `Seed Level B ${tag}`];
+
+    expect(await seedGradeLevels(h.prisma, names)).toBe(2);
+
+    const key = names[0]!.toLowerCase();
+    await h.prisma.gradeLevel.update({ where: { nameKey: key }, data: { enabled: false } });
+
+    expect(await seedGradeLevels(h.prisma, names)).toBe(0);
+    const withdrawn = await h.prisma.gradeLevel.findUniqueOrThrow({ where: { nameKey: key } });
+    expect(withdrawn.enabled).toBe(false);
   });
 });

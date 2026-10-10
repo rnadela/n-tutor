@@ -62,6 +62,39 @@ export async function seedOperator(
   return { email: normalisedEmail, adminUserCount };
 }
 
+/**
+ * The Philippine K to 12 levels (RA 10533): Kindergarten, Grades 1–6
+ * (elementary), 7–10 (junior high) and 11–12 (senior high).
+ */
+export const PH_GRADE_LEVELS: readonly string[] = [
+  'Kindergarten',
+  ...Array.from({ length: 12 }, (_, index) => `Grade ${index + 1}`),
+];
+
+/**
+ * Seeds the standard grade levels. Create-only, keyed on the same
+ * case-insensitive `nameKey` the admin taxonomy uses: a level an operator has
+ * renamed or withdrawn is never recreated or re-enabled by a later run.
+ */
+export async function seedGradeLevels(
+  prisma: Pick<PrismaClient, 'gradeLevel'>,
+  names: readonly string[] = PH_GRADE_LEVELS,
+): Promise<number> {
+  let created = 0;
+  for (const name of names) {
+    const nameKey = name.toLowerCase();
+    const existing = await prisma.gradeLevel.findUnique({
+      where: { nameKey },
+      select: { id: true },
+    });
+    if (!existing) {
+      await prisma.gradeLevel.create({ data: { name, nameKey, enabled: true } });
+      created += 1;
+    }
+  }
+  return created;
+}
+
 async function main(): Promise<void> {
   const email = required('ADMIN_SEED_EMAIL');
   const password = requireSeedPassword('ADMIN_SEED_PASSWORD');
@@ -74,6 +107,8 @@ async function main(): Promise<void> {
     process.stdout.write(
       `Seeded operator ${result.email}; admin_user rows: ${result.adminUserCount}\n`,
     );
+    const gradeLevels = await seedGradeLevels(prisma);
+    process.stdout.write(`Seeded grade levels: ${gradeLevels} created\n`);
   } finally {
     await prisma.$disconnect();
   }

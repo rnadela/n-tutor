@@ -46,8 +46,17 @@ export function nameKey(name: string): string {
  */
 const GRADE_LEVEL_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
+/** A level with no number in it ("Kindergarten") comes before every numbered grade. */
+function unnumberedFirst(name: string): number {
+  return /\d/u.test(name) ? 1 : 0;
+}
+
 function sortGradeLevels<T extends { name: string }>(items: T[]): T[] {
-  return [...items].sort((a, b) => GRADE_LEVEL_COLLATOR.compare(a.name, b.name));
+  return [...items].sort(
+    (a, b) =>
+      unnumberedFirst(a.name) - unnumberedFirst(b.name) ||
+      GRADE_LEVEL_COLLATOR.compare(a.name, b.name),
+  );
 }
 
 const ITEM_FIELDS = { id: true, name: true, enabled: true } as const;
