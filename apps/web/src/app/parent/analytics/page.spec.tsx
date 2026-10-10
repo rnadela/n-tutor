@@ -182,8 +182,11 @@ describe('what the dashboard screen says', () => {
 
 describe('how the dashboard is reached', () => {
   it('is linked from Parent View, client-side like its neighbours', () => {
-    const PARENT = readFileSync(path.resolve(import.meta.dirname, '..', 'page.tsx'), 'utf8');
-    expect(PARENT).toContain('href="/parent/analytics"');
+    const PARENT = readFileSync(
+      path.resolve(import.meta.dirname, '..', '_components', 'ParentSidebarChrome.tsx'),
+      'utf8',
+    );
+    expect(PARENT).toContain("href: '/parent/analytics'");
     expect(PARENT).toContain('parentCopy.parentView.analytics');
     expect(parentCopy.parentView.analytics.length).toBeGreaterThan(0);
   });

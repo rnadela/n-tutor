@@ -54,10 +54,13 @@ describe('what the Data & deletion section says before the parent confirms', () 
 
 describe('how the Settings screen is reached', () => {
   it('is linked from Parent View, client-side like its neighbours', () => {
-    const PARENT = readFileSync(path.resolve(import.meta.dirname, '..', 'page.tsx'), 'utf8');
+    const PARENT = readFileSync(
+      path.resolve(import.meta.dirname, '..', '_components', 'ParentSidebarChrome.tsx'),
+      'utf8',
+    );
     // A screen a parent cannot reach is a screen that did not ship — and this is
     // the only way in to the account deletion.
-    expect(PARENT).toContain('href="/parent/settings"');
+    expect(PARENT).toContain("href: '/parent/settings'");
     expect(PARENT).toContain('parentCopy.parentView.settings');
     expect(parentCopy.parentView.settings.length).toBeGreaterThan(0);
   });

@@ -176,8 +176,11 @@ describe('what the disputes copy says', () => {
 
 describe('the way in from Parent View', () => {
   it('is linked, because a dispute a parent cannot reach did not surface', () => {
-    const parentView = readFileSync(path.resolve(import.meta.dirname, '..', 'page.tsx'), 'utf8');
-    expect(parentView).toContain('href="/parent/grade-disputes"');
+    const parentView = readFileSync(
+      path.resolve(import.meta.dirname, '..', '_components', 'ParentSidebarChrome.tsx'),
+      'utf8',
+    );
+    expect(parentView).toContain("href: '/parent/grade-disputes'");
     expect(parentView).toContain('parentCopy.parentView.gradeDisputes');
   });
 });
