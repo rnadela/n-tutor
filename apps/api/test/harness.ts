@@ -99,7 +99,13 @@ export interface Harness {
 export async function createHarness(): Promise<Harness> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = configureApp(moduleRef.createNestApplication({ logger: false }));
-  await app.init();
+  // Listening once, on the loopback address supertest dials. Left unlistened,
+  // supertest binds a fresh wildcard (`::`) port per request and connects to
+  // 127.0.0.1 — and on macOS another process already bound to 127.0.0.1 on that
+  // same port wins the connection, so a request lands in a stranger's server: a
+  // random 404/401, or a hang when that server never answers. Binding the exact
+  // address cannot share a port with an existing listener.
+  await app.listen(0, '127.0.0.1');
 
   const prisma = moduleRef.get(PrismaService);
   const harness: Harness = {
