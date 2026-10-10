@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createGradeLevelFixture, uniqueParentEmail } from '../fixtures';
+import { createGradeLevelFixture, setParentTierFixture, uniqueParentEmail } from '../fixtures';
 
 const PASSWORD = 'correct-horse-battery-staple';
 const PIN = '4821';
@@ -14,7 +14,7 @@ const PIN = '4821';
 async function signUp(page: Page, email: string): Promise<void> {
   await page.goto('/auth/sign-up');
   await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByLabel(/^Password/).fill(PASSWORD);
   await page.getByLabel('I accept the terms of use.').check();
   await page.getByLabel('I accept the notice on children’s data.').check();
   await page.getByRole('button', { name: 'Create account' }).click();
@@ -119,7 +119,9 @@ test.describe('Student Mode and the handover', () => {
 
   test('asks which child the device is handed to once there is more than one', async ({ page }) => {
     const grade = await createGradeLevelFixture('Grade');
-    await openStudents(page);
+    const email = await openStudents(page);
+    // Two active children need a tier above Free, which allows one.
+    await setParentTierFixture(email, 'Family');
     await addProfile(page, 'Noah', grade.name);
     await addProfile(page, 'Mira', grade.name);
 
@@ -163,7 +165,9 @@ test.describe('Student Mode and the handover', () => {
     page,
   }) => {
     const grade = await createGradeLevelFixture('Grade');
-    await openStudents(page);
+    const email = await openStudents(page);
+    // Two active children need a tier above Free, which allows one.
+    await setParentTierFixture(email, 'Family');
     await addProfile(page, 'Noah', grade.name);
     await addProfile(page, 'Mira', grade.name);
 
@@ -226,7 +230,7 @@ test.describe('Student Mode and the handover', () => {
     const email = uniqueParentEmail('sign-in-sweep');
     await page.goto('/auth/sign-up');
     await page.getByLabel('Email').fill(email);
-    await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByLabel(/^Password/).fill(PASSWORD);
     await page.getByLabel('I accept the terms of use.').check();
     await page.getByLabel('I accept the notice on children’s data.').check();
     await page.getByRole('button', { name: 'Create account' }).click();
@@ -260,7 +264,7 @@ test.describe('Student Mode and the handover', () => {
     expect(await attemptKeyCount()).toBe(1);
 
     await page.getByLabel('Email').fill(email);
-    await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByLabel(/^Password/).fill(PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
 

@@ -11,7 +11,7 @@ const GRADE_LEVEL = 'Grade 4';
 async function signIn(page: Page): Promise<void> {
   await page.goto('/admin/login');
   await page.getByLabel('Email').fill(OPERATOR_EMAIL);
-  await page.getByLabel('Password').fill(OPERATOR_PASSWORD);
+  await page.getByLabel(/^Password/).fill(OPERATOR_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Subjects & Grade Levels' })).toBeVisible();
 }
@@ -63,7 +63,7 @@ test.describe('admin taxonomy', () => {
   }) => {
     await page.goto('/admin/login');
     await page.getByLabel('Email').fill(OPERATOR_EMAIL);
-    await page.getByLabel('Password').fill('not-the-password');
+    await page.getByLabel(/^Password/).fill('not-the-password');
     await page.getByRole('button', { name: 'Sign in' }).click();
     const wrongPassword = await page.getByRole('alert').textContent();
 

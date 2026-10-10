@@ -6,7 +6,7 @@ const PASSWORD = 'correct-horse-battery-staple';
 async function signUp(page: Page, email: string, password = PASSWORD): Promise<void> {
   await page.goto('/auth/sign-up');
   await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
+  await page.getByLabel(/^Password/).fill(password);
   await page.getByLabel('I accept the terms of use.').check();
   await page.getByLabel('I accept the notice on children’s data.').check();
   await page.getByRole('button', { name: 'Create account' }).click();
@@ -55,7 +55,7 @@ test.describe('parent sign-up and sign-in', () => {
     await page.getByRole('button', { name: 'Sign out' }).click();
 
     await page.getByLabel('Email').fill(email);
-    await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByLabel(/^Password/).fill(PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
 
     await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
@@ -106,7 +106,7 @@ test.describe('parent password reset', () => {
 
     await page.goto('/auth/sign-in');
     await page.getByLabel('Email').fill(email);
-    await page.getByLabel('Password').fill('a-brand-new-passphrase');
+    await page.getByLabel(/^Password/).fill('a-brand-new-passphrase');
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect(page.getByRole('heading', { name: 'Signed in' })).toBeVisible();
   });

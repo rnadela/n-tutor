@@ -60,7 +60,7 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
 
   await page.goto('/auth/sign-up');
   await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByLabel(/^Password/).fill(PASSWORD);
   await page.getByLabel('I accept the terms of use.').check();
   await page.getByLabel('I accept the notice on children’s data.').check();
   await page.getByRole('button', { name: 'Create account' }).click();

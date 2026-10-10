@@ -56,7 +56,7 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
 
   await page.goto('/auth/sign-up');
   await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByLabel(/^Password/).fill(PASSWORD);
   await page.getByLabel('I accept the terms of use.').check();
   await page.getByLabel('I accept the notice on children’s data.').check();
   await page.getByRole('button', { name: 'Create account' }).click();
@@ -421,7 +421,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
     // --- The operator still sees the removed explanation -------------------
     await page.goto('/admin/login');
     await page.getByLabel('Email').fill(OPERATOR_EMAIL);
-    await page.getByLabel('Password').fill(OPERATOR_PASSWORD);
+    await page.getByLabel(/^Password/).fill(OPERATOR_PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect(page.getByRole('heading', { name: 'Subjects & Grade Levels' })).toBeVisible();
 

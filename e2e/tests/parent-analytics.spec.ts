@@ -49,7 +49,7 @@ test('a parent reaches the dashboard from Parent View and reads why it is empty'
 
   await page.goto('/auth/sign-up');
   await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByLabel(/^Password/).fill(PASSWORD);
   await page.getByLabel('I accept the terms of use.').check();
   await page.getByLabel('I accept the notice on children’s data.').check();
   await page.getByRole('button', { name: 'Create account' }).click();
@@ -118,7 +118,7 @@ test('a parent opens a weak topic from the table and reads the cost before anyth
 
   await page.goto('/auth/sign-up');
   await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByLabel(/^Password/).fill(PASSWORD);
   await page.getByLabel('I accept the terms of use.').check();
   await page.getByLabel('I accept the notice on children\u2019s data.').check();
   await page.getByRole('button', { name: 'Create account' }).click();
