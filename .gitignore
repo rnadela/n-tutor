@@ -36,3 +36,6 @@ infra/terraform/terraform.tfvars
 infra/terraform/.terraform/
 infra/terraform/*.tfstate*
 infra/terraform/*.tfplan
+
+# --- Local dev (scripts/local-start.sh) ---
+.dev/
