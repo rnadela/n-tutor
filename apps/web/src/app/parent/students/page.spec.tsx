@@ -89,7 +89,8 @@ describe('the live region', () => {
 
 describe('the archive copy', () => {
   it('names what archiving does, and does not read as a delete', () => {
-    const confirmation = parentCopy.students.archiveConfirm('Noah');
+    expect(parentCopy.students.archiveConfirmTitle('Noah')).toBe('Archive Noah?');
+    const confirmation = parentCopy.students.archiveConfirmBody('Noah');
     expect(confirmation).toContain('Noah');
     expect(confirmation).toMatch(/Student Mode/);
     expect(confirmation).toMatch(/history is kept/i);

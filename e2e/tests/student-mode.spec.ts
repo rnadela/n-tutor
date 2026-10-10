@@ -310,8 +310,8 @@ test.describe('Student Mode and the handover', () => {
     await openStudents(page);
     await addProfile(page, 'Noah', grade.name);
 
-    page.on('dialog', (confirmation) => void confirmation.accept());
-    await page.getByRole('button', { name: 'Archive' }).first().click();
+    await page.getByRole('button', { name: 'Archive Noah' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Archive' }).click();
     await expect(page.locator('main').getByRole('status')).toContainText('archived');
 
     // An archived profile is not a Student Mode the device can sit in.

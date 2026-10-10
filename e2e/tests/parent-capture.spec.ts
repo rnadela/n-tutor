@@ -1,4 +1,4 @@
-import { expect, test, type Dialog, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { createGradeLevelFixture, createSubjectFixture, uniqueParentEmail } from '../fixtures';
 
 const PASSWORD = 'correct-horse-battery-staple';
@@ -127,9 +127,12 @@ async function checkThenContinue(page: Page): Promise<void> {
   await commit.click();
 }
 
-/** Accepts the delete confirmation, which states what the delete does. */
-function acceptConfirm(page: Page): void {
-  page.once('dialog', (dialog: Dialog) => void dialog.accept());
+/** Deletes page `ordinal` through its confirmation, which states what the delete does. */
+async function deletePage(page: Page, ordinal: number): Promise<void> {
+  await page.getByRole('button', { name: `Delete page ${ordinal}` }).click();
+  const dialog = page.getByRole('dialog', { name: `Delete page ${ordinal}?` });
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  await expect(dialog).toHaveCount(0);
 }
 
 test.describe('page management before submit', () => {
@@ -194,8 +197,7 @@ test.describe('page management before submit', () => {
     await expect(rows(page).nth(1)).toHaveAttribute('data-page-id', firstId!);
 
     // Down to zero, one page at a time; the survivor renumbers to Page 1.
-    acceptConfirm(page);
-    await page.getByRole('button', { name: 'Delete page 1' }).click();
+    await deletePage(page, 1);
     await expect(liveRegion(page)).toContainText(
       'Page 1 was deleted. The pages after it are renumbered.',
     );
@@ -203,8 +205,7 @@ test.describe('page management before submit', () => {
     await expect(rows(page).nth(0)).toHaveAttribute('data-page-id', firstId!);
     await expect(rows(page).nth(0)).toContainText('Page 1');
 
-    acceptConfirm(page);
-    await page.getByRole('button', { name: 'Delete page 1' }).click();
+    await deletePage(page, 1);
     await expect(rows(page)).toHaveCount(0);
 
     await expect(page.getByRole('button', { name: 'Check pages' })).toBeDisabled();

@@ -13,6 +13,7 @@ import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { PrimaryButton } from '@/components/Button';
+import { ConfirmDestructiveDialog } from '@/components/Dialog';
 import { useAnnounce } from '@/components/LiveRegion';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
@@ -109,6 +110,12 @@ export default function CapturePage() {
   const [subjectsLoading, setSubjectsLoading] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The page a delete confirmation is open for, with the count it was read against. */
+  const [confirmingPageDelete, setConfirmingPageDelete] = useState<{
+    pageId: string;
+    ordinal: number;
+    total: number;
+  } | null>(null);
   // The surface's one polite region, mounted once in `ThemeRegistry`. A second
   // `role="status"` on the screen would make "the region here" ambiguous, for a
   // screen reader as much as for a test.
@@ -572,18 +579,24 @@ export default function CapturePage() {
 
   function deletePage(pageId: string, ordinal: number): void {
     if (!isDraft) return;
-    const total = pages.length;
-    if (!window.confirm(parentCopy.capture.deleteConfirm(ordinal, total))) return;
-    void write(
+    setConfirmingPageDelete({ pageId, ordinal, total: pages.length });
+  }
+
+  /** The dialog stays open, locked, until the write settles. */
+  async function onPageDeleteConfirmed(): Promise<void> {
+    const target = confirmingPageDelete;
+    if (target === null || !isDraft) return;
+    await write(
       'delete',
       async () => {
         // The route answers 204 and stores nothing to return; the strip is
         // re-read so what is on screen is the server's account of it.
-        await parentApi.deleteSourceTestPage(token!, sourceTest!.id, pageId);
+        await parentApi.deleteSourceTestPage(token!, sourceTest!.id, target.pageId);
         return parentApi.sourceTest(token!, sourceTest!.id);
       },
-      () => parentCopy.capture.deleted(ordinal, total),
+      () => parentCopy.capture.deleted(target.ordinal, target.total),
     );
+    setConfirmingPageDelete(null);
   }
 
   /**
@@ -1097,6 +1110,22 @@ export default function CapturePage() {
               </>
             )}
           </>
+        )}
+
+        {confirmingPageDelete !== null && (
+          <ConfirmDestructiveDialog
+            open
+            title={parentCopy.capture.deleteConfirmTitle(confirmingPageDelete.ordinal)}
+            body={parentCopy.capture.deleteConfirmBody(
+              confirmingPageDelete.ordinal,
+              confirmingPageDelete.total,
+            )}
+            busy={pending === 'delete'}
+            onCancel={() => setConfirmingPageDelete(null)}
+            onConfirm={() => {
+              void onPageDeleteConfirmed();
+            }}
+          />
         )}
 
         {/* Client-side, so the provider holding the token stays mounted. */}

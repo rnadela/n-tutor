@@ -316,8 +316,10 @@ export const parentCopy = {
     /** Archiving is visibly not deleting: the copy says what is kept. */
     archiveNote:
       'Archiving hides the profile from Student Mode and keeps its history. Nothing is deleted.',
-    archiveConfirm: (name: string) =>
-      `Archive ${name}? The profile is hidden from Student Mode and its history is kept. Nothing is deleted.`,
+    archiveConfirmTitle: (name: string) => `Archive ${name}?`,
+    archiveConfirmBody: (name: string) =>
+      `${name} is hidden from Student Mode and its history is kept. Nothing is deleted.`,
+    archiveCancel: 'Cancel',
     archived: (name: string) => `${name} is archived and hidden from Student Mode.`,
     restore: 'Restore',
     restoreNote: 'Restoring puts the profile back in Student Mode.',
@@ -642,10 +644,11 @@ export const parentCopy = {
     retakeFor: (ordinal: number) => `Retake page ${ordinal}`,
     delete: 'Delete',
     deleteFor: (ordinal: number) => `Delete page ${ordinal}`,
-    deleteConfirm: (ordinal: number, total: number) =>
+    deleteConfirmTitle: (ordinal: number) => `Delete page ${ordinal}?`,
+    deleteConfirmBody: (ordinal: number, total: number) =>
       ordinal < total
-        ? `Delete page ${ordinal}? The pages after it are renumbered. The photo is removed.`
-        : `Delete page ${ordinal}? The photo is removed.`,
+        ? 'The pages after it are renumbered. The photo is removed.'
+        : 'The photo is removed.',
 
     submit: 'Check pages',
     submitting: 'Checking…',

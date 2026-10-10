@@ -1,4 +1,4 @@
-import { expect, test, type Dialog, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   createGradeLevelFixture,
   disableGradeLevelFixture,
@@ -65,22 +65,17 @@ async function profileId(page: Page, name: string): Promise<string> {
 }
 
 /**
- * Runs `act`, capturing the confirmation it raises. The dialog is returned so
- * the assertion happens in the test body — inside the handler, a dialog that
- * never fires would leave the expectation unrun and the test green.
+ * Opens the archive confirmation for `name`, returns its text, and confirms it.
+ * The text is returned so the assertion happens in the test body.
  */
-async function acceptingDialog(page: Page, act: () => Promise<void>): Promise<Dialog> {
-  let seen: Dialog | null = null;
-  const captured = new Promise<Dialog>((resolve) => {
-    page.once('dialog', (dialog) => {
-      seen = dialog;
-      void dialog.accept().then(() => resolve(dialog));
-    });
-  });
-  await act();
-  await captured;
-  if (seen === null) throw new Error('No confirmation was raised.');
-  return seen;
+async function confirmArchive(page: Page, name: string): Promise<string> {
+  await page.getByRole('button', { name: `Archive ${name}` }).click();
+  const dialog = page.getByRole('dialog', { name: `Archive ${name}?` });
+  await expect(dialog).toBeVisible();
+  const text = (await dialog.textContent()) ?? '';
+  await dialog.getByRole('button', { name: 'Archive' }).click();
+  await expect(dialog).toHaveCount(0);
+  return text;
 }
 
 test.describe('Student Profiles in Parent View', () => {
@@ -131,12 +126,10 @@ test.describe('Student Profiles in Parent View', () => {
     await expect(row(page, 'Noa')).toBeVisible();
 
     // --- Archive ------------------------------------------------------------
-    const dialog = await acceptingDialog(page, async () => {
-      await page.getByRole('button', { name: 'Archive Noa' }).click();
-    });
+    const dialog = await confirmArchive(page, 'Noa');
     // Archiving says plainly that it is not a delete.
-    expect(dialog.message()).toContain('hidden from Student Mode');
-    expect(dialog.message()).toContain('Nothing is deleted.');
+    expect(dialog).toContain('hidden from Student Mode');
+    expect(dialog).toContain('Nothing is deleted.');
 
     // It is still on the screen, plainly marked — nothing was removed.
     await expect(row(page, 'Noa').getByText('Archived')).toBeVisible();
@@ -155,10 +148,8 @@ test.describe('Student Profiles in Parent View', () => {
     expect(restored.id).toBe(created.id);
 
     // --- The same action twice, announced twice -----------------------------
-    const secondArchive = await acceptingDialog(page, async () => {
-      await page.getByRole('button', { name: 'Archive Noa' }).click();
-    });
-    expect(secondArchive.message()).toContain('Nothing is deleted.');
+    const secondArchive = await confirmArchive(page, 'Noa');
+    expect(secondArchive).toContain('Nothing is deleted.');
     // The identical sentence is still a change in the live region, so a repeat
     // is still announced.
     await expect(page.locator('main').getByRole('status')).toContainText('Noa is archived');

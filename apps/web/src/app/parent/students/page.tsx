@@ -17,7 +17,8 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { DestructiveConfirmDialog } from '@/components/Dialog';
+import { PrimaryButton } from '@/components/Button';
+import { AppDialog, DestructiveConfirmDialog } from '@/components/Dialog';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
@@ -146,13 +147,25 @@ export default function StudentsPage() {
   const [gradeLevels, setGradeLevels] = useState<TaxonomyItem[]>([]);
   const [policy, setPolicy] = useState<AuthPolicy | null>(null);
   const [loading, setLoading] = useState(true);
+  /** A write the server refused. Retrying the page load would not change it. */
   const [error, setError] = useState<string | null>(null);
+  /** The page's own read failed; reloading it is the remedy, so it offers one. */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<Announcement>(NOTHING_ANNOUNCED);
   /** Every announcement is a change, repeats included. */
   const announce = useCallback(
     (text: string) => setAnnouncement((previous) => ({ text, seq: previous.seq + 1 })),
     [],
   );
+  /**
+   * A refusal replaces the last success sentence rather than sitting under it:
+   * "Ava was added." above "the Free tier allows 1 profile" reads as both
+   * having happened to the same request.
+   */
+  const refuse = useCallback((text: string) => {
+    setAnnouncement(NOTHING_ANNOUNCED);
+    setError(text);
+  }, []);
 
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [creating, setCreating] = useState(false);
@@ -181,6 +194,8 @@ export default function StudentsPage() {
    * page: the page's own alert sits under the modal backdrop.
    */
   const [deleteRefusal, setDeleteRefusal] = useState<string | null>(null);
+  /** The child an archive confirmation is open for. */
+  const [confirmingArchive, setConfirmingArchive] = useState<StudentProfileView | null>(null);
 
   const token = elevation?.token ?? null;
   const requestId = useRef(0);
@@ -204,6 +219,7 @@ export default function StudentsPage() {
     }
     setLoading(true);
     setError(null);
+    setLoadError(null);
     Promise.all([parentApi.students(token), parentApi.gradeLevels(token), parentApi.policy()]).then(
       applyIfCurrent(
         current.current,
@@ -221,7 +237,7 @@ export default function StudentsPage() {
           return;
         }
         setLoading(false);
-        setError(cause instanceof Error ? cause.message : parentCopy.errors.generic);
+        setLoadError(cause instanceof Error ? cause.message : parentCopy.errors.generic);
       }),
     );
   }, [token, router, leave]);
@@ -249,7 +265,7 @@ export default function StudentsPage() {
   async function write(
     id: string,
     run: () => Promise<string>,
-    showRefusal: (text: string) => void = setError,
+    showRefusal: (text: string) => void = refuse,
   ): Promise<boolean> {
     if (token === null || pendingIds.has(id)) return false;
     setPendingIds((ids) => new Set(ids).add(id));
@@ -310,7 +326,7 @@ export default function StudentsPage() {
         leave();
         return;
       }
-      setError(refusalText(cause, parentCopy.students.deleteFailed));
+      refuse(refusalText(cause, parentCopy.students.deleteFailed));
     } finally {
       setPreviewingId(null);
     }
@@ -349,6 +365,17 @@ export default function StudentsPage() {
     setDeleteRefusal(null);
   }
 
+  /** Archives once confirmed; the dialog closes whether the write lands or not. */
+  async function onArchiveConfirmed(): Promise<void> {
+    const profile = confirmingArchive;
+    if (profile === null || token === null) return;
+    setConfirmingArchive(null);
+    await write(profile.id, async () => {
+      await parentApi.archiveStudent(token, profile.id);
+      return parentCopy.students.archived(profile.displayName);
+    });
+  }
+
   async function onCreate(): Promise<void> {
     if (token === null || creating || !canCreateStudent(draft.displayName, draft.gradeLevelId)) {
       return;
@@ -369,7 +396,7 @@ export default function StudentsPage() {
         leave();
         return;
       }
-      setError(createRefusal(cause));
+      refuse(createRefusal(cause));
     } finally {
       setCreating(false);
     }
@@ -388,13 +415,18 @@ export default function StudentsPage() {
           {announcedText(announcement)}
         </Box>
 
-        {error !== null && (
+        {loadError !== null && (
           <Alert
             severity="error"
             role="alert"
             variant="outlined"
             action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
           >
+            {loadError}
+          </Alert>
+        )}
+        {error !== null && (
+          <Alert severity="error" role="alert" variant="outlined">
             {error}
           </Alert>
         )}
@@ -531,9 +563,11 @@ export default function StudentsPage() {
                               </MenuItem>
                             ))}
                           </TextField>
-                          {/* The stored grade level's current name, always —
-                              including when it is no longer offered. */}
-                          <Typography component="span">{profile.gradeLevelName}</Typography>
+                          {/* The stored grade level's name, only when the select
+                              cannot show it because it is no longer offered. */}
+                          {!gradeLevels.some((level) => level.id === profile.gradeLevelId) && (
+                            <Typography component="span">{profile.gradeLevelName}</Typography>
+                          )}
                         </Box>
                       </TableCell>
                       <TableCell>
@@ -577,21 +611,9 @@ export default function StudentsPage() {
                               aria-label={`${parentCopy.students.archive} ${profile.displayName}`}
                               aria-describedby={archiveNoteId(profile.id)}
                               sx={{ minHeight: density.tapTarget }}
-                              onClick={() => {
-                                // Archiving is not deleting, and the
-                                // confirmation says exactly what it keeps.
-                                if (
-                                  !window.confirm(
-                                    parentCopy.students.archiveConfirm(profile.displayName),
-                                  )
-                                ) {
-                                  return;
-                                }
-                                void write(profile.id, async () => {
-                                  await parentApi.archiveStudent(token!, profile.id);
-                                  return parentCopy.students.archived(profile.displayName);
-                                });
-                              }}
+                              // Archiving is not deleting, and the
+                              // confirmation says exactly what it keeps.
+                              onClick={() => setConfirmingArchive(profile)}
                             >
                               {parentCopy.students.archive}
                             </Button>
@@ -711,6 +733,35 @@ export default function StudentsPage() {
               void onDeleteConfirmed(password);
             }}
           />
+        )}
+
+        {/* Not destructive, so no password and no red control: it says what is
+            kept, and the parent confirms. */}
+        {confirmingArchive !== null && (
+          <AppDialog
+            open
+            title={parentCopy.students.archiveConfirmTitle(confirmingArchive.displayName)}
+            describedBy="student-archive-confirm-body"
+            onClose={() => setConfirmingArchive(null)}
+            actions={
+              <>
+                <Button type="button" onClick={() => setConfirmingArchive(null)}>
+                  {parentCopy.students.archiveCancel}
+                </Button>
+                <PrimaryButton
+                  onClick={() => {
+                    void onArchiveConfirmed();
+                  }}
+                >
+                  {parentCopy.students.archive}
+                </PrimaryButton>
+              </>
+            }
+          >
+            <Typography id="student-archive-confirm-body">
+              {parentCopy.students.archiveConfirmBody(confirmingArchive.displayName)}
+            </Typography>
+          </AppDialog>
         )}
 
         {/* Client-side, so the provider holding the token stays mounted. */}
