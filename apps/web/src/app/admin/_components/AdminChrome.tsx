@@ -95,19 +95,43 @@ function NavList({
           <Button
             component={NextLink}
             href={item.href}
-            variant={current ? 'contained' : 'text'}
+            variant="text"
             aria-current={current ? 'page' : undefined}
             aria-label={collapsed ? item.label : undefined}
             onClick={onNavigate}
             fullWidth
             startIcon={collapsed ? undefined : <Icon size={18} aria-hidden="true" />}
             sx={{
+              position: 'relative',
               justifyContent: collapsed ? 'center' : 'flex-start',
               textAlign: 'left',
-              mb: '4px',
+              mb: '2px',
               minHeight: density.tapTarget,
               minWidth: 0,
-              px: collapsed ? 0 : undefined,
+              px: collapsed ? 0 : `${density.gap * 1.5}px`,
+              py: `${density.gap * 0.75}px`,
+              fontSize: '0.9375rem',
+              lineHeight: 1.3,
+              fontWeight: current ? 700 : 500,
+              color: current ? 'primary.main' : 'text.primary',
+              bgcolor: current ? 'action.selected' : 'transparent',
+              '& .MuiButton-startIcon': { color: current ? 'primary.main' : 'text.secondary' },
+              '&:hover': { bgcolor: current ? 'action.selected' : 'action.hover' },
+              '&:hover .MuiButton-startIcon': { color: 'primary.main' },
+              // The current page's accent bar: a second carrier beside the tint and the
+              // weight, so where you are reads at a glance and not only by colour.
+              '&::before': current
+                ? {
+                    content: '""',
+                    position: 'absolute',
+                    left: 0,
+                    top: `${density.gap}px`,
+                    bottom: `${density.gap}px`,
+                    width: 3,
+                    borderRadius: 2,
+                    bgcolor: 'primary.main',
+                  }
+                : undefined,
             }}
           >
             {collapsed ? <Icon size={20} aria-hidden="true" /> : item.label}
@@ -231,8 +255,11 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
               sx={{
                 fontWeight: 700,
                 fontSize: '0.875rem',
-                mb: `${density.gap}px`,
                 px: `${density.gap}px`,
+                pb: `${density.gap * 1.5}px`,
+                mb: `${density.gap * 1.5}px`,
+                borderBottom: '1px solid',
+                borderColor: 'divider',
                 display: 'flex',
                 alignItems: 'center',
                 gap: `${density.gap}px`,
@@ -269,8 +296,13 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
             sx={{
               fontWeight: 700,
               fontSize: '0.875rem',
-              mb: `${density.gap}px`,
-              px: `${density.gap}px`,
+              px: railCollapsed ? 0 : `${density.gap}px`,
+              pb: `${density.gap * 1.5}px`,
+              mb: `${density.gap * 1.5}px`,
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              display: 'flex',
+              justifyContent: railCollapsed ? 'center' : 'flex-start',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
