@@ -133,6 +133,22 @@ export function TrendSparkline({
             // on every phone narrower than the drawing.
             sx={{ maxWidth: '100%', height: 'auto', overflow: 'visible' }}
           >
+            {/* Faint rails at none-right and all-right, so a run plots against
+                its scale: one run alone is otherwise a dot floating in nothing. */}
+            {[BOX.padding, BOX.height - BOX.padding].map((y) => (
+              <Box
+                component="line"
+                key={y}
+                data-testid="trend-rail"
+                x1={BOX.padding}
+                x2={BOX.width - BOX.padding}
+                y1={y}
+                y2={y}
+                strokeWidth={1}
+                strokeDasharray="2 4"
+                sx={(theme) => ({ stroke: theme.vars.palette.divider })}
+              />
+            ))}
             {geometry.polyline !== '' && (
               <Box
                 component="polyline"
