@@ -11,7 +11,8 @@ import { RichText } from '@/components/RichText';
 import { studentCopy } from '@/copy/student';
 import { explainDecision, flagDecision, flaggedAtOf, type ExplainState } from '@/lib/explain-panel';
 import { CONFLICT_STATUS, ParentApiError, parentApi } from '@/lib/parent-api';
-import { comfortableDensity, typeRoles } from '@/theme/tokens';
+import { comfortableDensity, typeRoles, rounded } from '@/theme/tokens';
+import { Flag, Lightbulb } from 'lucide-react';
 import { deviceIsUnbound } from '../page';
 
 /**
@@ -459,14 +460,35 @@ export function ExplainPanel({
       {open && state.kind !== 'suppressed' && (
         <Box
           id={panelId}
-          sx={{ display: 'grid', gap: `${comfortableDensity.gap / 2}px` }}
+          // A soft card of its own, with an edge in the accent: the answer to the
+          // child's question, set apart from the marking it sits beneath.
+          sx={{
+            display: 'grid',
+            gap: `${comfortableDensity.gap / 2}px`,
+            p: `${comfortableDensity.gap}px`,
+            bgcolor: 'action.hover',
+            borderLeft: '3px solid',
+            borderColor: 'primary.main',
+            borderRadius: `${rounded.control}px`,
+          }}
           data-testid="explain-panel"
           data-state={state.kind}
         >
           {/* `h5`, under the row's own `h4`. An explanation belongs to its Question,
               and a heading at `h4` would make it a sibling of the row it sits inside
               — an outline that lies is worse than no outline. */}
-          <Typography component="h5" sx={{ ...typeRoles.label }} data-testid="explain-heading">
+          <Typography
+            component="h5"
+            sx={{
+              ...typeRoles.label,
+              display: 'flex',
+              alignItems: 'center',
+              gap: `${comfortableDensity.gap / 2}px`,
+              color: 'primary.main',
+            }}
+            data-testid="explain-heading"
+          >
+            <Lightbulb size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
             {studentCopy.results.explain.heading}
           </Typography>
 
@@ -486,7 +508,11 @@ export function ExplainPanel({
             <>
               {/* Displayed as well as announced, from the one string both come from,
                   so what is spoken and what is shown cannot come apart. */}
-              <Typography component="p" sx={{ ...typeRoles.caption }} data-testid="explain-ready">
+              <Typography
+                component="p"
+                sx={{ ...typeRoles.caption, color: 'text.secondary' }}
+                data-testid="explain-ready"
+              >
                 {studentCopy.results.explain.announcement(ordinal)}
               </Typography>
               {/* Only above a replacement, so a child re-reading a question they asked about
@@ -520,7 +546,14 @@ export function ExplainPanel({
                   state, the answer key, the score and every other row are untouched. */}
               <Typography
                 component="p"
-                sx={{ ...typeRoles.caption }}
+                sx={{
+                  ...typeRoles.caption,
+                  color: 'text.secondary',
+                  mt: `${comfortableDensity.gap / 2}px`,
+                  pt: `${comfortableDensity.gap / 2}px`,
+                  borderTop: '1px dashed',
+                  borderColor: 'divider',
+                }}
                 data-testid="explain-flag-note"
               >
                 {studentCopy.results.explain.flagNote}
@@ -528,9 +561,10 @@ export function ExplainPanel({
 
               {state.studentFlaggedAt === null ? (
                 <Button
-                  variant="outlined"
+                  variant="text"
                   onClick={report}
                   disabled={sending}
+                  startIcon={<Flag size={16} aria-hidden="true" />}
                   sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
                   data-testid="explain-flag"
                 >
