@@ -303,10 +303,12 @@ test.describe('a parent removing an explanation from their child, and replacing 
     await expect(review.getByTestId('explanation-body')).toHaveText(prose[0]!);
     // **And there is no un-removal anywhere on the screen**, in any spelling.
     await expect(review.getByTestId('explanation-suppress')).toHaveCount(0);
-    await expect(page.locator('main')).not.toContainText(/restore|undo|bring back|put back/iu);
+    await expect(page.locator('main')).not.toContainText(
+      /\b(?:restore|undo|bring back|put back)\b/iu,
+    );
 
     // --- The child reloads and finds the statement in place of the control --
-    await page.getByRole('link', { name: 'Back to Parent View' }).click();
+    await page.getByRole('link', { name: 'Parent View', exact: true }).click();
     await page.getByRole('button', { name: 'Back to Student Mode' }).click();
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
     await openChildResults(page);
@@ -353,7 +355,14 @@ test.describe('a parent removing an explanation from their child, and replacing 
 
     // --- The parent replaces it, having been told the cost first ------------
     await reenterParentView(page);
-    await page.goto(attemptUrl);
+    // Through the sidebar: a typed URL is a full load, which drops to the PIN gate.
+    await page.getByRole('link', { name: 'Practice tests a student has finished' }).click();
+    await page
+      .locator('[data-testid="parent-attempt-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    await expect(page).toHaveURL(attemptUrl);
     const afterReload = page
       .locator('[data-testid="answer-key-row"]')
       .first()
@@ -397,7 +406,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
     await expect(afterReload.getByTestId('explanation-suppress')).toHaveCount(0);
 
     // --- The child reads the replacement, plainly marked as a new one -------
-    await page.getByRole('link', { name: 'Back to Parent View' }).click();
+    await page.getByRole('link', { name: 'Parent View', exact: true }).click();
     await page.getByRole('button', { name: 'Back to Student Mode' }).click();
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
     await openChildResults(page);

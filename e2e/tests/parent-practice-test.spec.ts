@@ -497,6 +497,8 @@ test.describe('generating practice tests', () => {
     await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
 
     const questions = page.locator('[data-testid="draft-question"]');
+    // `count()` does not wait: the list loads after the heading.
+    await expect(questions.first()).toBeVisible();
     const before = await questions.count();
     expect(before).toBeGreaterThanOrEqual(2);
 
@@ -616,10 +618,14 @@ test.describe('generating practice tests', () => {
     const questions = page.locator('[data-testid="draft-question"]');
     // Down to one, through the screen rather than through the database: what is
     // under test is the confirmation a parent actually reads.
-    while ((await questions.count()) > 1) {
+    await expect(questions.first()).toBeVisible();
+    let remaining = await questions.count();
+    while (remaining > 1) {
       await questions.last().getByTestId('draft-delete-open').click();
       await page.getByTestId('draft-delete-confirm').click();
       await expect(page.getByTestId('draft-notice')).not.toBeEmpty();
+      remaining -= 1;
+      await expect(questions).toHaveCount(remaining);
     }
     await expect(questions).toHaveCount(1);
 

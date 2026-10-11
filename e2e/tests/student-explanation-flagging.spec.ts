@@ -327,8 +327,17 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
       'The explanation for question 2 is decided to be fine. The student is not told.',
     );
 
-    // Both decisions survive a reload, which is the only proof they were written.
+    // Both decisions survive a reload, which is the only proof they were written. A
+    // reload drops Parent View to the PIN gate (elevation is never persisted), so the
+    // way back is the PIN and the same two links.
     await page.reload();
+    await reenterParentView(page);
+    await page.getByRole('link', { name: 'Explanations a student has reported' }).click();
+    await page
+      .locator('[data-testid="parent-flag-row"]')
+      .last()
+      .getByRole('link', { name: 'Read the explanation' })
+      .click();
     const reloaded = page.locator('[data-testid="answer-key-row"]');
     await expect(reloaded.first().getByTestId('explanation-review')).toHaveAttribute(
       'data-student-state',
@@ -340,7 +349,8 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
     );
 
     // --- Both stay listed, each marked with its decision -------------------
-    await page.goto('/parent/explanation-flags');
+    // Through the sidebar: a typed URL is a full load, which drops to the PIN gate.
+    await page.getByRole('link', { name: 'Explanations a student has reported' }).click();
     const decided = page.locator('[data-testid="parent-flag-row"]');
     await expect(decided).toHaveCount(2);
     // A dismissal is not a deletion: it stays listed, marked dismissed.
@@ -348,7 +358,7 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
     await expect(decided.filter({ hasText: 'Sent on for review' })).toHaveCount(1);
 
     // --- The child is served both explanations, unchanged ------------------
-    await page.getByRole('link', { name: 'Back to Parent View' }).click();
+    await page.getByRole('link', { name: 'Parent View', exact: true }).click();
     await page.getByRole('button', { name: 'Back to Student Mode' }).click();
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
     await openChildResults(page);

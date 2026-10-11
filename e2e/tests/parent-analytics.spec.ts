@@ -5,6 +5,7 @@ import {
   createSubjectFixture,
   requestedCountOfNewestJobFor,
   seedGradedTopicFixture,
+  setParentTierFixture,
   uniqueParentEmail,
   weightedTopicOfNewestJobFor,
 } from '../fixtures';
@@ -63,7 +64,9 @@ test('a parent reaches the dashboard from Parent View and reads why it is empty'
   ).toBeVisible();
 
   // Two children, so "the switcher is present" is a claim about a real choice
-  // rather than about a control with one option in it.
+  // rather than about a control with one option in it. Two active children need
+  // a tier above Free, which allows one.
+  await setParentTierFixture(email, 'Family');
   await page.getByRole('link', { name: 'Student Profiles' }).click();
   for (const name of ['Ada', 'Grace']) {
     await page.locator('#student-name').fill(name);

@@ -69,7 +69,13 @@ test.describe('parent password reset', () => {
     await page.goto('/auth/reset');
     await page.getByLabel('Email').fill(email);
     await page.getByRole('button', { name: 'Send the link' }).click();
-    await expect(page.getByRole('status')).toBeVisible();
+    // The live region is always mounted; what matters is that it now says something.
+    await expect(page.getByRole('status')).not.toBeEmpty();
+  }
+
+  /** The announced sentence, without the zero-width mark a repeat carries. */
+  async function announced(page: Page): Promise<string> {
+    return ((await page.getByRole('status').textContent()) ?? '').replace(/\u200B/gu, '');
   }
 
   test('shows the same confirmation for a registered and an unregistered email', async ({
@@ -80,11 +86,11 @@ test.describe('parent password reset', () => {
     await page.getByRole('button', { name: 'Sign out' }).click();
 
     await requestReset(page, registered);
-    const known = await page.getByRole('status').innerText();
+    const known = await announced(page);
 
     const unregistered = uniqueParentEmail('reset-unknown');
     await requestReset(page, unregistered);
-    const unknown = await page.getByRole('status').innerText();
+    const unknown = await announced(page);
 
     expect(unknown).toBe(known);
     // An unregistered request writes nothing at all.

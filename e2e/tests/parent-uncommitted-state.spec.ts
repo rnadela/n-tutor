@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { createGradeLevelFixture, uniqueParentEmail } from '../fixtures';
+import { createGradeLevelFixture, setParentTierFixture, uniqueParentEmail } from '../fixtures';
 
 const PASSWORD = 'correct-horse-battery-staple';
 const PIN = '4821';
@@ -52,9 +52,13 @@ async function chooseGradeLevel(page: Page, selectId: string, name: string): Pro
  * before the browser's clock is replaced: a faked clock stalls the MUI
  * transitions this setup clicks through, and none of it is what is under test.
  */
-async function handOverTheDevice(page: Page, child: string): Promise<{ gradeLevelId: string }> {
+async function handOverTheDevice(
+  page: Page,
+  child: string,
+): Promise<{ gradeLevelId: string; email: string }> {
   const grade = await createGradeLevelFixture('Grade');
-  await signUp(page, uniqueParentEmail('uncommitted'));
+  const email = uniqueParentEmail('uncommitted');
+  await signUp(page, email);
   await page.getByRole('link', { name: 'Enter Parent View' }).click();
   await expect(page.getByRole('heading', { name: 'Set a PIN for Parent View' })).toBeVisible();
   await page.locator('#parent-pin').fill(PIN);
@@ -71,7 +75,7 @@ async function handOverTheDevice(page: Page, child: string): Promise<{ gradeLeve
   // One child is no choice at all: the exit binds the device and goes.
   await page.getByRole('button', { name: 'Back to Student Mode' }).click();
   await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
-  return { gradeLevelId: grade.id };
+  return { gradeLevelId: grade.id, email };
 }
 
 function parentViewHeading(page: Page) {
@@ -254,7 +258,9 @@ test.describe('Uncommitted parent input across an expired Parent View', () => {
   });
 
   test('is keyed to the child it was saved under', async ({ page }) => {
-    const { gradeLevelId } = await handOverTheDevice(page, 'Noah');
+    const { gradeLevelId, email } = await handOverTheDevice(page, 'Noah');
+    // A sibling needs a tier above Free, which allows one active profile.
+    await setParentTierFixture(email, 'Family');
     await enterParentViewOnAFakeClock(page);
 
     const api = page.request;

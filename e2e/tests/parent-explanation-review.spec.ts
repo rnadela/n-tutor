@@ -253,8 +253,17 @@ test.describe('a parent reading and reporting what their child was told', () => 
     );
 
     // A second press is impossible from here — there is no control — and the record
-    // survives a reload, which is the only proof it was written rather than held.
+    // survives a reload, which is the only proof it was written rather than held. A
+    // reload drops Parent View to the PIN gate (elevation is never persisted), so the
+    // way back is the PIN and the same two links.
     await page.reload();
+    await reenterParentView(page);
+    await page.getByRole('link', { name: 'Practice tests a student has finished' }).click();
+    await page
+      .locator('[data-testid="parent-attempt-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
     const afterReload = page
       .locator('[data-testid="answer-key-row"]')
       .first()
