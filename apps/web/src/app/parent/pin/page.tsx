@@ -165,7 +165,9 @@ export default function ParentPinPage() {
               sx={{ display: 'grid', gap: `${density.gap}px` }}
               noValidate
             >
-              <Typography>
+              <Typography
+                sx={{ color: 'text.secondary', textAlign: 'center', mb: `${density.gap}px` }}
+              >
                 {settingFirstPin ? parentCopy.pin.setIntro : parentCopy.pin.enterIntro}
               </Typography>
               <TextField
@@ -177,6 +179,7 @@ export default function ParentPinPage() {
                 autoComplete="off"
                 helperText={parentCopy.pin.pinShape(policy.pinLength)}
                 slotProps={{
+                  formHelperText: { sx: { textAlign: 'center' } },
                   htmlInput: {
                     maxLength: policy.pinLength,
                     // Visually separates the digits so the field reads as a PIN
@@ -194,6 +197,28 @@ export default function ParentPinPage() {
                 disabled={locked}
                 required
               />
+              {/* How many digits are in, against how many the PIN takes. The field
+                  itself is obscured, so this is the only sign of progress — drawn
+                  only, never announced: the helper text already states the shape. */}
+              <Box
+                aria-hidden="true"
+                sx={{ display: 'flex', justifyContent: 'center', gap: `${density.gap}px` }}
+              >
+                {Array.from({ length: policy.pinLength }, (_, slot) => (
+                  <Box
+                    key={slot}
+                    sx={(theme) => ({
+                      width: density.gap * 1.25,
+                      height: density.gap * 1.25,
+                      borderRadius: '50%',
+                      border: '2px solid',
+                      borderColor: slot < pin.length ? 'primary.main' : 'divider',
+                      bgcolor: slot < pin.length ? 'primary.main' : 'transparent',
+                      transition: theme.transitions.create(['background-color', 'border-color']),
+                    })}
+                  />
+                ))}
+              </Box>
               {locked && (
                 <Alert severity="warning" role="alert" variant="outlined">
                   {lockedUntil === null
@@ -206,7 +231,12 @@ export default function ParentPinPage() {
                   {error}
                 </Alert>
               )}
-              <Button type="submit" variant="contained" disabled={busy || locked}>
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={busy || locked}
+                sx={{ minHeight: density.tapTarget }}
+              >
                 {busy
                   ? settingFirstPin
                     ? parentCopy.pin.saving
