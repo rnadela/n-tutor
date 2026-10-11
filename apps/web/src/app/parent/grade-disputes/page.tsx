@@ -13,7 +13,16 @@ import Link from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { Screen } from '@/components/Screen';
+import {
+  ArrowLeft,
+  ArrowRight,
+  CircleCheck,
+  FileQuestion,
+  Hourglass,
+  MessageSquareWarning,
+  Scale,
+  Users,
+} from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import { disputeOutcomeOf } from '@/lib/grade-dispute';
@@ -24,7 +33,7 @@ import {
   type StudentProfileView,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView, readableInstant } from '@/lib/parent-view';
-import { density } from '@/theme/tokens';
+import { density, rounded } from '@/theme/tokens';
 
 /**
  * The Attempt a dispute points at, typed against the app's generated route table rather than
@@ -221,11 +230,18 @@ export default function ParentGradeDisputesPage() {
   }, [token, studentProfileId, attempt, leave]);
 
   return (
-    <Screen>
-      <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
-        {parentCopy.disputes.title}
-      </Typography>
-      <Typography component="p">{parentCopy.disputes.intro}</Typography>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 2}px` }}
+    >
+      <Box component="header" sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>
+        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
+          {parentCopy.disputes.title}
+        </Typography>
+        <Typography component="p" sx={{ color: 'text.secondary' }}>
+          {parentCopy.disputes.intro}
+        </Typography>
+      </Box>
 
       {error !== null && (
         <Alert
@@ -248,15 +264,33 @@ export default function ParentGradeDisputesPage() {
         // failed read leaves behind, and "there is no student profile yet" beside an alert
         // saying the profiles could not be read would be two statements with one untrue.
         profilesLoaded && (
-          <Typography component="p" data-testid="parent-disputes-no-students">
-            {parentCopy.disputes.noStudents}
-          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              justifyItems: 'center',
+              gap: `${density.gap}px`,
+              py: `${density.sectionMargin * 2}px`,
+              px: `${density.cardPadding}px`,
+              border: '1px dashed',
+              borderColor: 'divider',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              textAlign: 'center',
+            }}
+          >
+            <Users size={28} aria-hidden="true" />
+            <Typography component="p" data-testid="parent-disputes-no-students">
+              {parentCopy.disputes.noStudents}
+            </Typography>
+          </Box>
         )
       ) : (
         <TextField
           select
           id="parent-disputes-student"
+          size="small"
           label={parentCopy.disputes.studentLabel}
+          sx={{ width: { xs: 1, sm: 320 } }}
           value={studentProfileId}
           onChange={(event) => setStudentProfileId(event.target.value)}
         >
@@ -269,7 +303,11 @@ export default function ParentGradeDisputesPage() {
       )}
 
       {loading ? (
-        <Typography component="p" data-testid="parent-disputes-loading">
+        <Typography
+          component="p"
+          data-testid="parent-disputes-loading"
+          sx={{ color: 'text.secondary' }}
+        >
           {parentCopy.disputes.loading}
         </Typography>
       ) : (
@@ -277,9 +315,25 @@ export default function ParentGradeDisputesPage() {
         // wrong" is a claim about the child, and a screen whose read failed cannot make it.
         loaded &&
         (disputes.length === 0 ? (
-          <Typography component="p" data-testid="parent-disputes-empty">
-            {parentCopy.disputes.empty}
-          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              justifyItems: 'center',
+              gap: `${density.gap}px`,
+              py: `${density.sectionMargin * 2}px`,
+              px: `${density.cardPadding}px`,
+              border: '1px dashed',
+              borderColor: 'divider',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              textAlign: 'center',
+            }}
+          >
+            <Scale size={28} aria-hidden="true" />
+            <Typography component="p" data-testid="parent-disputes-empty">
+              {parentCopy.disputes.empty}
+            </Typography>
+          </Box>
         ) : (
           <Box
             component="ul"
@@ -299,47 +353,142 @@ export default function ParentGradeDisputesPage() {
                 key={`${entry.attemptId}:${entry.questionId}`}
                 component="li"
                 role="listitem"
-                sx={{ listStyle: 'none' }}
+                sx={{
+                  listStyle: 'none',
+                  transition: (theme) => theme.transitions.create('border-color'),
+                  '&:hover': { borderColor: 'primary.main' },
+                }}
                 data-testid="parent-dispute-row"
                 data-outcome={disputeOutcomeOf(entry)}
               >
-                <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                  {/* The Subject, or a neutral stand-in for a classification that no longer
-                      resolves: the row keeps its place and loses its label. */}
-                  <Typography component="h2" variant="cardTitle">
-                    {entry.subjectName ?? parentCopy.disputes.unknownSubject}
-                  </Typography>
-                  {/* Which run and which question, both the server's figures. */}
-                  <Typography component="p" data-testid="parent-dispute-where">
-                    {whereSentence(entry)}
-                  </Typography>
-                  <Typography component="p" data-testid="parent-dispute-raised">
-                    {raisedSentence(entry.disputedAt)}
-                  </Typography>
+                <CardContent
+                  sx={{
+                    display: 'grid',
+                    gap: `${density.gap * 1.5}px`,
+                    '&:last-child': { pb: `${density.cardPadding + density.gap}px` },
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: `${density.gap}px`,
+                    }}
+                  >
+                    {/* The Subject, or a neutral stand-in for a classification that no longer
+                        resolves: the row keeps its place and loses its label. */}
+                    <Typography component="h2" variant="cardTitle">
+                      {entry.subjectName ?? parentCopy.disputes.unknownSubject}
+                    </Typography>
+                    {/* Awaiting a decision, or that the mark was set and when. Both kinds are
+                        listed: leaving a mark alone is a legitimate answer, not a deletion.
+                        A pill, so the rows still needing the parent stand out on a scan; the
+                        words carry the state and the tone only repeats it. */}
+                    <Typography
+                      component="p"
+                      data-testid="parent-dispute-outcome"
+                      sx={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: `${density.gap / 2}px`,
+                        px: `${density.gap * 1.25}px`,
+                        py: '2px',
+                        borderRadius: 999,
+                        border: '1px solid',
+                        fontSize: '0.8125rem',
+                        fontWeight: 600,
+                        ...(disputeOutcomeOf(entry) === 'awaiting'
+                          ? { color: 'warning.main', borderColor: 'warning.main' }
+                          : { color: 'text.secondary', borderColor: 'divider' }),
+                      }}
+                    >
+                      {disputeOutcomeOf(entry) === 'awaiting' ? (
+                        <Hourglass size={14} aria-hidden="true" />
+                      ) : (
+                        <CircleCheck size={14} aria-hidden="true" />
+                      )}
+                      {outcomeSentence(entry)}
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      columnGap: `${density.gap * 2}px`,
+                      rowGap: `${density.gap / 2}px`,
+                      color: 'text.secondary',
+                      '& > p': {
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: `${density.gap / 2}px`,
+                        fontSize: '0.9375rem',
+                      },
+                    }}
+                  >
+                    {/* Which run and which question, both the server's figures. */}
+                    <Typography component="p" data-testid="parent-dispute-where">
+                      <FileQuestion size={16} aria-hidden="true" />
+                      {whereSentence(entry)}
+                    </Typography>
+                    <Typography component="p" data-testid="parent-dispute-raised">
+                      <MessageSquareWarning size={16} aria-hidden="true" />
+                      {raisedSentence(entry.disputedAt)}
+                    </Typography>
+                  </Box>
                   {/* What the marking recorded, which an adjustment does not erase — and what
                       the mark counts as now. Both stated, even when they agree, so nothing is
-                      implied by an omission. */}
-                  <Typography component="p" data-testid="parent-dispute-recorded">
-                    {parentCopy.disputes.recorded(parentCopy.disputes.grade[entry.recordedState])}
-                  </Typography>
-                  <Typography component="p" data-testid="parent-dispute-effective">
-                    {parentCopy.disputes.effective(parentCopy.disputes.grade[entry.effectiveState])}
-                  </Typography>
-                  {/* Awaiting a decision, or that the mark was set and when. Both kinds are
-                      listed: leaving a mark alone is a legitimate answer, not a deletion. */}
-                  <Typography component="p" data-testid="parent-dispute-outcome">
-                    {outcomeSentence(entry)}
-                  </Typography>
+                      implied by an omission; the arrow is the order they happened in. */}
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      gap: `${density.gap}px`,
+                      px: `${density.cardPadding}px`,
+                      py: `${density.gap}px`,
+                      bgcolor: 'action.hover',
+                      borderRadius: `${rounded.control}px`,
+                    }}
+                  >
+                    <Typography component="p" data-testid="parent-dispute-recorded">
+                      {parentCopy.disputes.recorded(parentCopy.disputes.grade[entry.recordedState])}
+                    </Typography>
+                    <Box component="span" sx={{ display: 'inline-flex', color: 'text.secondary' }}>
+                      <ArrowRight size={16} aria-hidden="true" />
+                    </Box>
+                    <Typography
+                      component="p"
+                      data-testid="parent-dispute-effective"
+                      sx={{ fontWeight: 600 }}
+                    >
+                      {parentCopy.disputes.effective(
+                        parentCopy.disputes.grade[entry.effectiveState],
+                      )}
+                    </Typography>
+                  </Box>
                   {/* The way through to the question itself, where the reason is read and the
                       mark is set. Client-side, so the provider holding the elevation bearer
                       stays mounted across the navigation. */}
-                  <Link
+                  <Button
                     component={AttemptLink}
                     href={attemptHref(entry.attemptId)}
-                    sx={{ minHeight: density.tapTarget }}
+                    variant={disputeOutcomeOf(entry) === 'awaiting' ? 'contained' : 'outlined'}
+                    endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                    sx={{
+                      minHeight: density.tapTarget,
+                      justifySelf: 'end',
+                      '& .MuiButton-endIcon': {
+                        transition: (theme) => theme.transitions.create('transform'),
+                      },
+                      '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
+                        transform: 'translateX(2px)',
+                      },
+                    }}
                   >
                     {parentCopy.disputes.open}
-                  </Link>
+                  </Button>
                 </CardContent>
               </Card>
             ))}
@@ -347,9 +496,14 @@ export default function ParentGradeDisputesPage() {
         ))
       )}
 
-      <Link component={NextLink} href="/parent">
+      <Link
+        component={NextLink}
+        href="/parent"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
         {parentCopy.disputes.backToParentView}
       </Link>
-    </Screen>
+    </Box>
   );
 }
