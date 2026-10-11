@@ -13,11 +13,15 @@ import { density, measure } from '@/theme/tokens';
  */
 export function Screen({
   children,
-  component = 'main',
+  component = 'section',
   measured = false,
 }: {
   children: React.ReactNode;
-  /** The landmark this column is. `main` unless the caller is nesting. */
+  /**
+   * The element this column is. `section`, because every surface's layout
+   * already owns the one `main` landmark and a second nested inside it is two
+   * "main content" regions on one screen.
+   */
   component?: React.ElementType;
   /**
    * Caps the column at the 34rem measure. Off by default: the cap belongs to

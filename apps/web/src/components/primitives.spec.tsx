@@ -110,8 +110,10 @@ describe('every primitive renders a real control', () => {
     expect(markup).toContain('id="email"');
   });
 
-  it('draws the screen as a landmark, not an anonymous box', () => {
-    expect(render(<Screen>body</Screen>)).toContain('<main');
+  it('draws the screen as a section, leaving the one main landmark to the layout', () => {
+    const markup = render(<Screen>body</Screen>);
+    expect(markup).toContain('<section');
+    expect(markup).not.toContain('<main');
   });
 
   it('never hangs an action, a state, or aria-expanded on a div or a span', () => {

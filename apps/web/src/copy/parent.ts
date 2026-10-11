@@ -1405,7 +1405,7 @@ export const parentCopy = {
      * The irreversibility is last, because it is the one that decides whether to press.
      */
     suppressBody:
-      'This explanation stops being shown to this student, and the student is told that a parent removed it. It is not deleted: it stays here for you to read, and it is still visible to the people reviewing reported explanations. The question, the attempt, its score and Mastery are all unchanged, and no other student is affected. This cannot be undone.',
+      'This explanation stops being shown to this student, and the student is told that a parent removed it. It is not deleted: it stays here for you to read, and it is still visible to the people reviewing reported explanations. The question, the attempt, its score and the student’s progress are all unchanged, and no other student is affected. This cannot be undone.',
     /** The confirm control inside the dialog. The act, named again. */
     suppressConfirm: 'Remove it',
     /** Once removed. The state, named rather than the act that produced it. */

@@ -10,6 +10,7 @@ import CardContent from '@mui/material/CardContent';
 import Link from '@mui/material/Link';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { useAnnounce } from '@/components/LiveRegion';
 import { parentCopy } from '@/copy/parent';
 import { parentApi, type AuthPolicy } from '@/lib/parent-api';
 import { density } from '@/theme/tokens';
@@ -21,6 +22,9 @@ function ConfirmPasswordResetForm() {
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The surface's one polite region; a second `role="status"` here would make
+  // "the region on this screen" ambiguous (see LiveRegion).
+  const { announce } = useAnnounce();
 
   useEffect(() => {
     // Best effort: the minimum is stated when it is known, and its absence
@@ -41,6 +45,7 @@ function ConfirmPasswordResetForm() {
     try {
       await parentApi.confirmPasswordReset(token, password);
       setDone(true);
+      announce(parentCopy.resetConfirm.done);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : parentCopy.resetConfirm.failed);
     } finally {
@@ -60,7 +65,7 @@ function ConfirmPasswordResetForm() {
             {parentCopy.resetConfirm.missingToken}
           </Alert>
         ) : done ? (
-          <Alert severity="success" role="status" variant="outlined">
+          <Alert severity="success" role="none" variant="outlined">
             {parentCopy.resetConfirm.done}
           </Alert>
         ) : (

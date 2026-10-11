@@ -9,6 +9,7 @@ import CardContent from '@mui/material/CardContent';
 import Link from '@mui/material/Link';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { useAnnounce } from '@/components/LiveRegion';
 import { parentCopy } from '@/copy/parent';
 import { parentApi } from '@/lib/parent-api';
 import { density } from '@/theme/tokens';
@@ -18,6 +19,9 @@ export default function RequestPasswordResetPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The surface's one polite region; a second `role="status"` here would make
+  // "the region on this screen" ambiguous (see LiveRegion).
+  const { announce } = useAnnounce();
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -28,6 +32,7 @@ export default function RequestPasswordResetPage() {
       // Confirmed only on a successful response. Confirming in a `finally`
       // would claim a link was sent when the request never landed.
       setSent(true);
+      announce(parentCopy.reset.sent);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : parentCopy.errors.generic);
     } finally {
@@ -44,7 +49,7 @@ export default function RequestPasswordResetPage() {
         <Typography sx={{ mb: `${density.gap}px` }}>{parentCopy.reset.intro}</Typography>
         {sent ? (
           // The same confirmation whether or not the email is registered.
-          <Alert severity="success" role="status" variant="outlined">
+          <Alert severity="success" role="none" variant="outlined">
             {parentCopy.reset.sent}
           </Alert>
         ) : (
