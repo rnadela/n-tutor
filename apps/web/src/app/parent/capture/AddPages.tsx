@@ -4,11 +4,29 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
+import { Camera, ImagePlus } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { ACCEPTED_IMAGE_TYPES, splitSelection } from '@/lib/library-selection';
-import { density } from '@/theme/tokens';
+import { density, focusRing } from '@/theme/tokens';
 import { CameraViewfinder } from './CameraViewfinder';
 import { controlSx } from './PageStrip';
+
+/**
+ * Off screen but still in the page: focusable, labelled by its `<label>`, and
+ * reachable by `setInputFiles`. `display: none` would take it out of the tab
+ * order, and the visible label is what a parent clicks.
+ */
+const visuallyHiddenSx = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  p: 0,
+  m: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+} as const;
 
 /**
  * Where the camera stands for this screen.
@@ -350,6 +368,7 @@ export function AddPages({
             disabled={busy || !addable}
             onClick={() => void openCamera()}
             data-testid="use-camera"
+            startIcon={<Camera size={18} aria-hidden="true" />}
             sx={controlSx}
           >
             {camera.useCamera}
@@ -365,9 +384,6 @@ export function AddPages({
           An `aria-label` carrying the same words would override it with a second
           copy of itself and be announced twice.
         */}
-        <Typography component="label" htmlFor="capture-add-page">
-          {camera.libraryLabel}
-        </Typography>
         <Box
           component="input"
           id="capture-add-page"
@@ -375,7 +391,7 @@ export function AddPages({
           multiple
           accept={ACCEPTED_IMAGE_TYPES}
           disabled={busy || !addable}
-          sx={controlSx}
+          sx={visuallyHiddenSx}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
             const chosen = Array.from(event.target.files ?? []);
             // Cleared before anything is posted, so re-picking the same photo
@@ -384,6 +400,39 @@ export function AddPages({
             if (chosen.length > 0) chooseFromLibrary(chosen);
           }}
         />
+        {/* After the input, so its focus and disabled states can style this
+            label — the only part of the control a parent sees. */}
+        <Typography
+          component="label"
+          htmlFor="capture-add-page"
+          sx={(theme) => ({
+            ...controlSx,
+            ...theme.typography.button,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: `${density.gap}px`,
+            px: 2,
+            border: '1px solid',
+            borderColor: 'primary.main',
+            color: 'primary.main',
+            cursor: 'pointer',
+            transition: theme.transitions.create(['background-color']),
+            '&:hover': { bgcolor: 'action.hover' },
+            'input:focus-visible + &': {
+              outline: `${focusRing.width}px solid`,
+              outlineOffset: `${focusRing.offset}px`,
+            },
+            'input:disabled + &': {
+              borderColor: 'action.disabled',
+              color: 'text.disabled',
+              cursor: 'default',
+              bgcolor: 'transparent',
+            },
+          })}
+        >
+          <ImagePlus size={18} aria-hidden="true" />
+          {camera.libraryLabel}
+        </Typography>
       </Box>
 
       {/* "This upload is full" stops being true once a page is deleted. */}

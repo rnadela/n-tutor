@@ -12,6 +12,7 @@ import Link from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { ArrowLeft, FileImage, Info, Lock } from 'lucide-react';
 import { PrimaryButton } from '@/components/Button';
 import { ConfirmDestructiveDialog } from '@/components/Dialog';
 import { useAnnounce } from '@/components/LiveRegion';
@@ -34,7 +35,7 @@ import {
   type TaxonomyItem,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView, refusalText } from '@/lib/parent-view';
-import { density } from '@/theme/tokens';
+import { density, rounded } from '@/theme/tokens';
 import { AddPages } from './AddPages';
 import { ORDER_HEADING_ID, PageStrip } from './PageStrip';
 import { ThinExtractionWarning } from './ThinExtractionWarning';
@@ -715,206 +716,282 @@ export default function CapturePage() {
   }
 
   return (
-    <Card component="section" sx={{ maxWidth: 840, mx: 'auto' }}>
-      <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
-          {parentCopy.capture.title}
-        </Typography>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 2}px` }}
+    >
+      <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
+        {parentCopy.capture.title}
+      </Typography>
 
-        {error !== null && (
-          <Alert
-            severity="error"
-            role="alert"
-            variant="outlined"
-            action={<Button onClick={retry}>{parentCopy.errors.retry}</Button>}
-          >
-            {error}
-          </Alert>
-        )}
+      {error !== null && (
+        <Alert
+          severity="error"
+          role="alert"
+          variant="outlined"
+          action={<Button onClick={retry}>{parentCopy.errors.retry}</Button>}
+        >
+          {error}
+        </Alert>
+      )}
 
-        {loading ? (
-          <Alert severity="info" role="status" variant="outlined">
-            {parentCopy.capture.loading}
-          </Alert>
-        ) : profiles.length === 0 ? (
-          <Typography component="p">{parentCopy.capture.noProfiles}</Typography>
-        ) : (
-          <>
-            <TextField
-              id="capture-student"
-              select
-              size="small"
-              disabled={busy}
-              label={parentCopy.capture.childLabel}
-              value={studentProfileId}
-              onChange={(event) => setStudentProfileId(event.target.value)}
-            >
-              {profiles.map((profile) => (
-                <MenuItem key={profile.id} value={profile.id}>
-                  {profile.displayName}
-                </MenuItem>
-              ))}
-            </TextField>
-
-            {ready && isDraft && (
-              <Box
-                component="section"
-                aria-labelledby={CLASSIFICATION_HEADING_ID}
-                sx={{ display: 'grid', gap: `${density.gap}px` }}
+      {loading ? (
+        <Alert severity="info" role="status" variant="outlined">
+          {parentCopy.capture.loading}
+        </Alert>
+      ) : profiles.length === 0 ? (
+        <Typography component="p">{parentCopy.capture.noProfiles}</Typography>
+      ) : (
+        <>
+          {/* Who the test is for, and what it is. */}
+          <Card>
+            <CardContent sx={{ display: 'grid', gap: `${density.gap * 2}px` }}>
+              <TextField
+                id="capture-student"
+                select
+                fullWidth
+                size="small"
+                disabled={busy}
+                label={parentCopy.capture.childLabel}
+                value={studentProfileId}
+                onChange={(event) => setStudentProfileId(event.target.value)}
               >
-                <Typography
-                  id={CLASSIFICATION_HEADING_ID}
-                  component="h2"
-                  sx={{ fontSize: 18, fontWeight: 700 }}
+                {profiles.map((profile) => (
+                  <MenuItem key={profile.id} value={profile.id}>
+                    {profile.displayName}
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              {ready && isDraft && (
+                <Box
+                  component="section"
+                  aria-labelledby={CLASSIFICATION_HEADING_ID}
+                  sx={{ display: 'grid', gap: `${density.gap}px` }}
                 >
-                  {parentCopy.capture.classification.heading}
-                </Typography>
-                {/* Says plainly what changing the grade level here does *not*
+                  <Typography id={CLASSIFICATION_HEADING_ID} component="h2" variant="cardTitle">
+                    {parentCopy.capture.classification.heading}
+                  </Typography>
+                  {/* Says plainly what changing the grade level here does *not*
                     touch, because the default came from the child's profile. */}
-                <Typography component="p">{parentCopy.capture.classification.intro}</Typography>
-
-                {gradeLevelsLoading ? (
-                  <Typography component="p" data-testid="grade-levels-loading">
-                    {parentCopy.capture.classification.loadingGradeLevels}
-                  </Typography>
-                ) : gradeLevelOptions.length === 0 ? (
-                  <Typography component="p" data-testid="no-grade-levels">
-                    {parentCopy.capture.classification.noGradeLevels}
-                  </Typography>
-                ) : (
-                  <TextField
-                    id="capture-grade-level"
-                    select
-                    size="small"
-                    disabled={busy}
-                    label={parentCopy.capture.classification.gradeLevelLabel}
-                    value={
-                      gradeLevelOptions.some((item) => item.id === sourceTest.gradeLevelId)
-                        ? sourceTest.gradeLevelId!
-                        : ''
-                    }
-                    onChange={(event) => classify({ gradeLevelId: event.target.value })}
-                  >
-                    {gradeLevelOptions.map((gradeLevel) => (
-                      <MenuItem
-                        key={gradeLevel.id}
-                        value={gradeLevel.id}
-                        disabled={!gradeLevel.enabled}
-                      >
-                        {gradeLevel.name}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                )}
-
-                {/* The Subject list is a function of the Grade Level, so each
-                    state of that function says which one it is in. */}
-                {sourceTest.gradeLevelId === null ? (
-                  <Typography component="p" data-testid="choose-grade-level-first">
-                    {parentCopy.capture.classification.chooseGradeLevelFirst}
-                  </Typography>
-                ) : subjectsLoading ? (
-                  <Typography component="p" data-testid="subjects-loading">
-                    {parentCopy.capture.classification.loadingSubjects}
-                  </Typography>
-                ) : subjectOptions.length === 0 ? (
-                  <Typography component="p" data-testid="no-subjects">
-                    {parentCopy.capture.classification.noSubjects}
-                  </Typography>
-                ) : (
-                  <TextField
-                    id="capture-subject"
-                    select
-                    size="small"
-                    disabled={busy}
-                    label={parentCopy.capture.classification.subjectLabel}
-                    value={
-                      subjectOptions.some((item) => item.id === sourceTest.subjectId)
-                        ? sourceTest.subjectId!
-                        : ''
-                    }
-                    onChange={(event) => classify({ subjectId: event.target.value })}
-                  >
-                    {subjectOptions.map((subject) => (
-                      <MenuItem key={subject.id} value={subject.id} disabled={!subject.enabled}>
-                        {subject.name}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                )}
-
-                {pending === 'classify' && (
-                  <Typography component="span" data-testid="classifying">
-                    {parentCopy.capture.classification.saving}
-                  </Typography>
-                )}
-              </Box>
-            )}
-
-            <Typography id={ORDER_HEADING_ID} component="h2" sx={{ fontSize: 18, fontWeight: 700 }}>
-              {parentCopy.capture.orderLabel}
-            </Typography>
-
-            {!ready ? (
-              <Alert severity="info" role="status" variant="outlined">
-                {parentCopy.capture.loading}
-              </Alert>
-            ) : (
-              <>
-                <Typography component="p" data-testid="page-count">
-                  {parentCopy.capture.countLine(pages.length, maxPages)}
-                </Typography>
-
-                {/* A submitted Source Test is shown, not hidden — the parent's
-                    work did not vanish — but nothing on it is editable. */}
-                {!isDraft && (
-                  <Typography component="p" data-testid="submitted-note">
-                    {parentCopy.capture.submittedNote}
-                  </Typography>
-                )}
-
-                {pages.length === 0 ? (
                   <Typography component="p" sx={{ color: 'text.secondary' }}>
-                    {parentCopy.capture.empty}
+                    {parentCopy.capture.classification.intro}
                   </Typography>
-                ) : (
-                  <PageStrip
-                    pages={pages}
-                    editable={isDraft}
-                    busy={busy}
-                    onMove={move}
-                    onRetake={retakePage}
-                    onDelete={deletePage}
-                  />
-                )}
 
-                {isDraft && (
-                  <>
-                    {/* The camera, the photo library, and the guidance when the
-                        camera cannot be used. One call back per parent action,
-                        with the files in the order they were added. */}
-                    <AddPages
-                      pageCount={pages.length}
-                      maxPages={maxPages}
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gap: `${density.gap * 1.5}px`,
+                      gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+                      alignItems: 'start',
+                    }}
+                  >
+                    {gradeLevelsLoading ? (
+                      <Typography
+                        component="p"
+                        data-testid="grade-levels-loading"
+                        sx={{ color: 'text.secondary' }}
+                      >
+                        {parentCopy.capture.classification.loadingGradeLevels}
+                      </Typography>
+                    ) : gradeLevelOptions.length === 0 ? (
+                      <Typography
+                        component="p"
+                        data-testid="no-grade-levels"
+                        sx={{ color: 'text.secondary' }}
+                      >
+                        {parentCopy.capture.classification.noGradeLevels}
+                      </Typography>
+                    ) : (
+                      <TextField
+                        id="capture-grade-level"
+                        select
+                        fullWidth
+                        size="small"
+                        disabled={busy}
+                        label={parentCopy.capture.classification.gradeLevelLabel}
+                        value={
+                          gradeLevelOptions.some((item) => item.id === sourceTest.gradeLevelId)
+                            ? sourceTest.gradeLevelId!
+                            : ''
+                        }
+                        onChange={(event) => classify({ gradeLevelId: event.target.value })}
+                      >
+                        {gradeLevelOptions.map((gradeLevel) => (
+                          <MenuItem
+                            key={gradeLevel.id}
+                            value={gradeLevel.id}
+                            disabled={!gradeLevel.enabled}
+                          >
+                            {gradeLevel.name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    )}
+
+                    {/* The Subject list is a function of the Grade Level, so each
+                    state of that function says which one it is in. */}
+                    {sourceTest.gradeLevelId === null ? (
+                      <Typography
+                        component="p"
+                        data-testid="choose-grade-level-first"
+                        sx={{ color: 'text.secondary' }}
+                      >
+                        {parentCopy.capture.classification.chooseGradeLevelFirst}
+                      </Typography>
+                    ) : subjectsLoading ? (
+                      <Typography
+                        component="p"
+                        data-testid="subjects-loading"
+                        sx={{ color: 'text.secondary' }}
+                      >
+                        {parentCopy.capture.classification.loadingSubjects}
+                      </Typography>
+                    ) : subjectOptions.length === 0 ? (
+                      <Typography
+                        component="p"
+                        data-testid="no-subjects"
+                        sx={{ color: 'text.secondary' }}
+                      >
+                        {parentCopy.capture.classification.noSubjects}
+                      </Typography>
+                    ) : (
+                      <TextField
+                        id="capture-subject"
+                        select
+                        fullWidth
+                        size="small"
+                        disabled={busy}
+                        label={parentCopy.capture.classification.subjectLabel}
+                        value={
+                          subjectOptions.some((item) => item.id === sourceTest.subjectId)
+                            ? sourceTest.subjectId!
+                            : ''
+                        }
+                        onChange={(event) => classify({ subjectId: event.target.value })}
+                      >
+                        {subjectOptions.map((subject) => (
+                          <MenuItem key={subject.id} value={subject.id} disabled={!subject.enabled}>
+                            {subject.name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    )}
+                  </Box>
+
+                  {pending === 'classify' && (
+                    <Typography component="span" data-testid="classifying">
+                      {parentCopy.capture.classification.saving}
+                    </Typography>
+                  )}
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
+              <Typography id={ORDER_HEADING_ID} component="h2" variant="cardTitle">
+                {parentCopy.capture.orderLabel}
+              </Typography>
+
+              {!ready ? (
+                <Alert severity="info" role="status" variant="outlined">
+                  {parentCopy.capture.loading}
+                </Alert>
+              ) : (
+                <>
+                  <Typography
+                    component="p"
+                    data-testid="page-count"
+                    sx={{ color: 'text.secondary' }}
+                  >
+                    {parentCopy.capture.countLine(pages.length, maxPages)}
+                  </Typography>
+
+                  {/* A submitted Source Test is shown, not hidden — the parent's
+                    work did not vanish — but nothing on it is editable. */}
+                  {!isDraft && (
+                    <Typography
+                      component="p"
+                      data-testid="submitted-note"
+                      sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}
+                    >
+                      <Lock size={16} aria-hidden="true" />
+                      {parentCopy.capture.submittedNote}
+                    </Typography>
+                  )}
+
+                  {pages.length === 0 ? (
+                    <Box
+                      sx={{
+                        display: 'grid',
+                        justifyItems: 'center',
+                        gap: `${density.gap}px`,
+                        py: `${density.sectionMargin * 1.5}px`,
+                        px: `${density.cardPadding}px`,
+                        border: '1px dashed',
+                        borderColor: 'divider',
+                        borderRadius: `${rounded.control}px`,
+                        color: 'text.secondary',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <FileImage size={28} aria-hidden="true" />
+                      <Typography component="p">{parentCopy.capture.empty}</Typography>
+                    </Box>
+                  ) : (
+                    <PageStrip
+                      pages={pages}
                       editable={isDraft}
                       busy={busy}
-                      onAdd={addPages}
-                      onAnnounce={announce}
+                      onMove={move}
+                      onRetake={retakePage}
+                      onDelete={deletePage}
                     />
-                    {/* Ingest re-encodes before each row leaves `Uploading`,
+                  )}
+
+                  {isDraft && (
+                    <>
+                      {/* The camera, the photo library, and the guidance when the
+                        camera cannot be used. One call back per parent action,
+                        with the files in the order they were added. */}
+                      <AddPages
+                        pageCount={pages.length}
+                        maxPages={maxPages}
+                        editable={isDraft}
+                        busy={busy}
+                        onAdd={addPages}
+                        onAnnounce={announce}
+                      />
+                      {/* Ingest re-encodes before each row leaves `Uploading`,
                         which is long enough that silence reads as a dead
                         control. */}
-                    {pending === 'add' && (
-                      <Typography component="span" data-testid="adding">
-                        {parentCopy.capture.adding}
-                      </Typography>
-                    )}
-                    {!addable && (
-                      <Typography component="p">
-                        {parentCopy.capture.limitReached(maxPages)}
-                      </Typography>
-                    )}
+                      {pending === 'add' && (
+                        <Typography component="span" data-testid="adding">
+                          {parentCopy.capture.adding}
+                        </Typography>
+                      )}
+                      {!addable && (
+                        <Typography component="p">
+                          {parentCopy.capture.limitReached(maxPages)}
+                        </Typography>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
 
+          {/* The check and, past submit, the generate step: the screen's one
+                way forward, in a card of its own so it never reads as part of
+                the page list above it. */}
+          {ready && (
+            <Card>
+              <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
+                {isDraft && (
+                  <>
                     {/* The check, not the commit. It runs once over the whole
                         page set, in the foreground, and it charges nothing. */}
                     {!checked && (
@@ -938,7 +1015,21 @@ export default function CapturePage() {
                             refused for it. The disabled button alone states
                             nothing a parent can act on. */}
                         {!checkable && (
-                          <Typography component="p" data-testid="submit-blocked">
+                          <Typography
+                            component="p"
+                            data-testid="submit-blocked"
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: `${density.gap}px`,
+                              color: 'text.secondary',
+                            }}
+                          >
+                            <Info
+                              size={18}
+                              aria-hidden="true"
+                              style={{ flexShrink: 0, marginTop: 3 }}
+                            />
                             {/* The check reason is left out here: this control
                                 *is* the check, so telling a parent to run it
                                 is telling them to press the button they are
@@ -963,11 +1054,7 @@ export default function CapturePage() {
                         data-testid="legibility-result"
                         sx={{ display: 'grid', gap: `${density.gap}px` }}
                       >
-                        <Typography
-                          id={LEGIBILITY_HEADING_ID}
-                          component="h2"
-                          sx={{ fontSize: 18, fontWeight: 700 }}
-                        >
+                        <Typography id={LEGIBILITY_HEADING_ID} component="h2" variant="cardTitle">
                           {parentCopy.capture.legibility.heading}
                         </Typography>
 
@@ -1052,11 +1139,7 @@ export default function CapturePage() {
                     aria-labelledby={GENERATE_HEADING_ID}
                     sx={{ display: 'grid', gap: `${density.gap}px` }}
                   >
-                    <Typography
-                      id={GENERATE_HEADING_ID}
-                      component="h2"
-                      sx={{ fontSize: 18, fontWeight: 700 }}
-                    >
+                    <Typography id={GENERATE_HEADING_ID} component="h2" variant="cardTitle">
                       {parentCopy.capture.generate.heading}
                     </Typography>
 
@@ -1107,32 +1190,37 @@ export default function CapturePage() {
                     )}
                   </Box>
                 )}
-              </>
-            )}
-          </>
-        )}
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
 
-        {confirmingPageDelete !== null && (
-          <ConfirmDestructiveDialog
-            open
-            title={parentCopy.capture.deleteConfirmTitle(confirmingPageDelete.ordinal)}
-            body={parentCopy.capture.deleteConfirmBody(
-              confirmingPageDelete.ordinal,
-              confirmingPageDelete.total,
-            )}
-            busy={pending === 'delete'}
-            onCancel={() => setConfirmingPageDelete(null)}
-            onConfirm={() => {
-              void onPageDeleteConfirmed();
-            }}
-          />
-        )}
+      {confirmingPageDelete !== null && (
+        <ConfirmDestructiveDialog
+          open
+          title={parentCopy.capture.deleteConfirmTitle(confirmingPageDelete.ordinal)}
+          body={parentCopy.capture.deleteConfirmBody(
+            confirmingPageDelete.ordinal,
+            confirmingPageDelete.total,
+          )}
+          busy={pending === 'delete'}
+          onCancel={() => setConfirmingPageDelete(null)}
+          onConfirm={() => {
+            void onPageDeleteConfirmed();
+          }}
+        />
+      )}
 
-        {/* Client-side, so the provider holding the token stays mounted. */}
-        <Link component={NextLink} href="/parent">
-          {parentCopy.capture.back}
-        </Link>
-      </CardContent>
-    </Card>
+      {/* Client-side, so the provider holding the token stays mounted. */}
+      <Link
+        component={NextLink}
+        href="/parent"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
+        {parentCopy.capture.back}
+      </Link>
+    </Box>
   );
 }
