@@ -813,7 +813,7 @@ export default function GeneratePage() {
       {sourceTest !== null && pages.length > 0 && (
         <Card>
           <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-            <Typography id={ORDER_HEADING_ID} component="h2" sx={{ fontSize: 18, fontWeight: 700 }}>
+            <Typography id={ORDER_HEADING_ID} component="h2" variant="cardTitle">
               {parentCopy.capture.title}
             </Typography>
 

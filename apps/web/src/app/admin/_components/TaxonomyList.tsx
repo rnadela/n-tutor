@@ -13,10 +13,10 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { Eye, EyeOff, Pencil } from 'lucide-react';
+import { Eye, EyeOff, Inbox, Pencil } from 'lucide-react';
 import { adminCopy } from '@/copy/admin';
 import type { TaxonomyItem } from '@/lib/admin-api';
-import { density } from '@/theme/tokens';
+import { density, rounded } from '@/theme/tokens';
 
 export interface TaxonomyListProps {
   heading: string;
@@ -113,9 +113,23 @@ export function TaxonomyList(props: TaxonomyListProps) {
         </Box>
 
         {items.length === 0 ? (
-          <Typography component="p" sx={{ color: 'text.secondary' }}>
-            {props.emptyLabel}
-          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              justifyItems: 'center',
+              gap: `${density.gap}px`,
+              py: `${density.sectionMargin * 1.5}px`,
+              px: `${density.cardPadding}px`,
+              border: '1px dashed',
+              borderColor: 'divider',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              textAlign: 'center',
+            }}
+          >
+            <Inbox size={28} aria-hidden="true" />
+            <Typography component="p">{props.emptyLabel}</Typography>
+          </Box>
         ) : (
           // A long list scrolls inside its own card, header pinned, so a short
           // one beside it does not leave the page with a column of dead space.

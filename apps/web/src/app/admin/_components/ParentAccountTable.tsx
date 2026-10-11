@@ -12,7 +12,7 @@ import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Users } from 'lucide-react';
 import { adminCopy } from '@/copy/admin';
 import type { AccountConsumption, AccountTier, ParentAccountSummary } from '@/lib/admin-api';
 import { dateOnly, inZone, limitLabel } from '@/lib/consumption-format';
@@ -141,9 +141,23 @@ export function ParentAccountTable(props: ParentAccountTableProps) {
           <Typography id="accounts-heading" component="h2" variant="cardTitle">
             {adminCopy.accounts.title}
           </Typography>
-          <Typography component="p" sx={{ color: 'text.secondary' }}>
-            {adminCopy.accounts.empty}
-          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              justifyItems: 'center',
+              gap: `${density.gap}px`,
+              py: `${density.sectionMargin * 1.5}px`,
+              px: `${density.cardPadding}px`,
+              border: '1px dashed',
+              borderColor: 'divider',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              textAlign: 'center',
+            }}
+          >
+            <Users size={28} aria-hidden="true" />
+            <Typography component="p">{adminCopy.accounts.empty}</Typography>
+          </Box>
         </CardContent>
       </Card>
     );

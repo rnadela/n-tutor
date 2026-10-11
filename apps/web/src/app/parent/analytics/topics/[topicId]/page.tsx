@@ -34,7 +34,7 @@ import {
   targetSentence,
 } from '@/lib/topic-drill-down';
 import { density, rounded, typeRoles } from '@/theme/tokens';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Sprout } from 'lucide-react';
 
 /** The query parameter the selected student arrives in, from the Mastery table's link. */
 const STUDENT_PARAM = 'student';
@@ -448,9 +448,25 @@ function TopicDrillDown() {
                     </Box>
 
                     {!hasEvidence(view) ? (
-                      <Typography component="p" data-testid="topic-drill-down-empty">
-                        {parentCopy.topicDrillDown.empty(address.Name)}
-                      </Typography>
+                      <Box
+                        sx={{
+                          display: 'grid',
+                          justifyItems: 'center',
+                          gap: `${density.gap}px`,
+                          py: `${density.sectionMargin * 1.5}px`,
+                          px: `${density.cardPadding}px`,
+                          border: '1px dashed',
+                          borderColor: 'divider',
+                          borderRadius: `${rounded.control}px`,
+                          color: 'text.secondary',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Sprout size={28} aria-hidden="true" />
+                        <Typography component="p" data-testid="topic-drill-down-empty">
+                          {parentCopy.topicDrillDown.empty(address.Name)}
+                        </Typography>
+                      </Box>
                     ) : (
                       <>
                         {/* The stored figure, always with the count it is over and

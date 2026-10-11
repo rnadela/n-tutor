@@ -14,7 +14,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { Check, GitMerge, Pencil, TriangleAlert } from 'lucide-react';
+import { Check, CircleCheck, GitMerge, Pencil, TriangleAlert } from 'lucide-react';
 import { adminCopy } from '@/copy/admin';
 import type { CanonicalTopic, ProvisionalTopic } from '@/lib/admin-api';
 import { density, rounded } from '@/theme/tokens';
@@ -155,9 +155,25 @@ export function TopicCurationList(props: TopicCurationListProps) {
 
   if (topics.length === 0) {
     return (
-      <Typography component="p" data-testid="topics-empty" sx={{ color: 'text.secondary' }}>
-        {adminCopy.topics.empty}
-      </Typography>
+      <Box
+        sx={{
+          display: 'grid',
+          justifyItems: 'center',
+          gap: `${density.gap}px`,
+          py: `${density.sectionMargin * 1.5}px`,
+          px: `${density.cardPadding}px`,
+          border: '1px dashed',
+          borderColor: 'divider',
+          borderRadius: `${rounded.control}px`,
+          color: 'text.secondary',
+          textAlign: 'center',
+        }}
+      >
+        <CircleCheck size={28} aria-hidden="true" />
+        <Typography component="p" data-testid="topics-empty">
+          {adminCopy.topics.empty}
+        </Typography>
+      </Box>
     );
   }
 
