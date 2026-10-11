@@ -7,8 +7,10 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import InputAdornment from '@mui/material/InputAdornment';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { Lock, Mail, ShieldCheck } from 'lucide-react';
 import { adminCopy } from '@/copy/admin';
 import { readToken, signIn, writeToken } from '@/lib/admin-api';
 import { density } from '@/theme/tokens';
@@ -41,45 +43,90 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <Card sx={{ maxWidth: 420, mx: 'auto' }}>
-      <CardContent>
-        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700, mb: `${density.gap}px` }}>
-          {adminCopy.signIn.title}
+    <Box sx={{ maxWidth: 420, mx: 'auto' }}>
+      {/* The console's name before the form, as every auth screen states its
+          product first. Decorative: the `<h1>` below is what a scan finds. */}
+      <Box
+        aria-hidden="true"
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: `${density.gap}px`,
+          mb: `${density.gap}px`,
+        }}
+      >
+        <ShieldCheck size={20} />
+        <Typography component="p" sx={{ fontSize: '0.875rem', fontWeight: 700 }}>
+          {adminCopy.appName}
         </Typography>
-        <Box
-          component="form"
-          onSubmit={onSubmit}
-          sx={{ display: 'grid', gap: `${density.gap}px` }}
-          noValidate
-        >
-          <TextField
-            id="admin-email"
-            label={adminCopy.signIn.emailLabel}
-            type="email"
-            autoComplete="username"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-          <TextField
-            id="admin-password"
-            label={adminCopy.signIn.passwordLabel}
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-          {error && (
-            <Alert severity="error" role="alert" variant="outlined">
-              {error}
-            </Alert>
-          )}
-          <Button type="submit" variant="contained" disabled={busy}>
-            {busy ? adminCopy.signIn.submitting : adminCopy.signIn.submit}
-          </Button>
-        </Box>
-      </CardContent>
-    </Card>
+      </Box>
+      <Card>
+        <CardContent>
+          <Typography
+            component="h1"
+            sx={{ fontSize: 20, fontWeight: 700, textAlign: 'center', mb: `${density.gap}px` }}
+          >
+            {adminCopy.signIn.title}
+          </Typography>
+          <Box
+            component="form"
+            onSubmit={onSubmit}
+            sx={{ display: 'grid', gap: `${density.gap}px` }}
+            noValidate
+          >
+            <TextField
+              id="admin-email"
+              label={adminCopy.signIn.emailLabel}
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Mail size={18} aria-hidden="true" />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+              required
+            />
+            <TextField
+              id="admin-password"
+              label={adminCopy.signIn.passwordLabel}
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Lock size={18} aria-hidden="true" />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+              required
+            />
+            {error && (
+              <Alert severity="error" role="alert" variant="outlined">
+                {error}
+              </Alert>
+            )}
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={busy}
+              sx={{ minHeight: density.tapTarget }}
+            >
+              {busy ? adminCopy.signIn.submitting : adminCopy.signIn.submit}
+            </Button>
+          </Box>
+        </CardContent>
+      </Card>
+    </Box>
   );
 }
