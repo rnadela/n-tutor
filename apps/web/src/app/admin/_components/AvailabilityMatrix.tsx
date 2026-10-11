@@ -7,6 +7,7 @@ import Checkbox from '@mui/material/Checkbox';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
+import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
@@ -66,56 +67,58 @@ export function AvailabilityMatrix(props: AvailabilityMatrixProps) {
             {adminCopy.taxonomy.availabilityNeedsBoth}
           </Typography>
         ) : (
-          <Table size="small" aria-labelledby="availability-heading">
-            <TableHead>
-              <TableRow>
-                <TableCell component="th" scope="col">
-                  {adminCopy.taxonomy.subjectsHeading}
-                </TableCell>
-                {gradeLevels.map((gradeLevel) => (
-                  <TableCell key={gradeLevel.id} component="th" scope="col" align="center">
-                    {gradeLevel.name}
+          <TableContainer>
+            <Table size="small" aria-labelledby="availability-heading">
+              <TableHead>
+                <TableRow>
+                  <TableCell component="th" scope="col">
+                    {adminCopy.taxonomy.subjectsHeading}
                   </TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {subjects.map((subject) => (
-                <TableRow key={subject.id} sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
-                  <TableCell
-                    component="th"
-                    scope="row"
-                    sx={{ borderRight: '1px solid', borderColor: 'divider' }}
-                  >
-                    {subject.name}
-                  </TableCell>
-                  {gradeLevels.map((gradeLevel) => {
-                    const key = `${subject.id}:${gradeLevel.id}`;
-                    const checked = enabledPairs.has(key);
-                    return (
-                      <TableCell key={gradeLevel.id} align="center">
-                        <Checkbox
-                          checked={checked}
-                          disabled={pendingPairs.has(key)}
-                          onChange={(event) =>
-                            toggle(key, subject, gradeLevel, event.target.checked)
-                          }
-                          slotProps={{
-                            input: {
-                              'aria-label': adminCopy.availabilityCheckboxLabel(
-                                subject.name,
-                                gradeLevel.name,
-                              ),
-                            },
-                          }}
-                        />
-                      </TableCell>
-                    );
-                  })}
+                  {gradeLevels.map((gradeLevel) => (
+                    <TableCell key={gradeLevel.id} component="th" scope="col" align="center">
+                      {gradeLevel.name}
+                    </TableCell>
+                  ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {subjects.map((subject) => (
+                  <TableRow key={subject.id} sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
+                    <TableCell
+                      component="th"
+                      scope="row"
+                      sx={{ borderRight: '1px solid', borderColor: 'divider' }}
+                    >
+                      {subject.name}
+                    </TableCell>
+                    {gradeLevels.map((gradeLevel) => {
+                      const key = `${subject.id}:${gradeLevel.id}`;
+                      const checked = enabledPairs.has(key);
+                      return (
+                        <TableCell key={gradeLevel.id} align="center">
+                          <Checkbox
+                            checked={checked}
+                            disabled={pendingPairs.has(key)}
+                            onChange={(event) =>
+                              toggle(key, subject, gradeLevel, event.target.checked)
+                            }
+                            slotProps={{
+                              input: {
+                                'aria-label': adminCopy.availabilityCheckboxLabel(
+                                  subject.name,
+                                  gradeLevel.name,
+                                ),
+                              },
+                            }}
+                          />
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         )}
       </CardContent>
     </Card>
