@@ -162,7 +162,7 @@ Stated explicitly because it is subtle enough to be implemented wrongly by defau
 
 Behavioral. Visual specs live in `DESIGN.md`. Four reference mocks are linked from the rows and states they illustrate; the spines win wherever a mock disagrees.
 
-Five components carry rules too heavy for a table cell and are specified beneath the table: **Practice Test card**, **Timer**, **Explanation panel**, **Mastery table**, **Trend sparkline**.
+Six components carry rules too heavy for a table cell and are specified beneath the table: **Practice Test card**, **Timer**, **Explanation panel**, **Mastery table**, **Trend sparkline**, **Install Banner**.
 
 | Component | Use | Behavioral rules |
 |---|---|---|
@@ -272,6 +272,27 @@ Five components carry rules too heavy for a table cell and are specified beneath
 - Because *qualifying* excludes retakes, 5 qualifying Attempts may span considerably more than 5 sittings, so the sparkline **must never be labeled as a record of everything the student did**.
 
 **Rejected alternatives.** Including retakes was rejected: the line would draw exactly the number SM-C3 warns against optimizing, and would rise on memorization. Per-Topic trend lines were rejected: per-Topic trend over a rolling 5-Attempt window is noise, and drawing it would imply precision the data does not support. A second, longer window for the trend was rejected: the sparkline and the Mastery table sit on the same screen, and two *lengths* of "recent" would let a parent compare a 5-Attempt Mastery figure against a longer-window trend and reach a conclusion neither figure supports, with no way to see that the windows differ. Matching the count does not make the two figures interchangeable — the scopes still differ, which is why the scope difference is stated with the chart rather than left to be inferred.
+
+### Install Banner
+
+One compact strip at the top of the content area, below the surface header. Text + one action + a dismiss button. It does not overlay content or shift it after first paint (rendered from the first client render, or reserved space). Student palette in Student Mode, Parent palette in Parent View; density follows the surface.
+
+| Context | Shown? | Action |
+|---|---|---|
+| Browser offers install (`beforeinstallprompt`) | Yes | "Install" button opens the browser's install dialog |
+| iOS / iPadOS Safari | Yes | Instruction text: Share → Add to Home Screen; notes one more sign-in |
+| No install path | No | — |
+| Running installed | No | — |
+| Student Mode other than Home (Take Test, Results) | No | — |
+| Camera capture | No | — |
+| Dismissed this session | No | Returns next session |
+
+*Why not on Take Test:* the child is mid-Attempt; nothing that isn't the Question competes for attention, and installing from Safari mid-Attempt would strand answers in the Safari storage jar (iOS partition).
+
+**Draft copy (Voice and Tone — calm, no exclamation, no urgency):**
+- Parent View: "Add n-tutor to your home screen to open it in one tap." — [Install] [Not now]
+- Student Mode Home: "Put your practice tests one tap away on this device." — [Install] [Not now]
+- iOS line: "Tap Share, then Add to Home Screen. You'll sign in once more after adding it."
 
 ## State Patterns
 
@@ -508,6 +529,8 @@ Journey names mirror PRD §2.3 verbatim.
 **Density is split by surface; breakpoint is independent.** `DESIGN.md` owns the rule: components read `{spacing.density.comfortable}` or `{spacing.density.compact}` by surface, never by breakpoint.
 
 Desktop is supported but not optimized. The fluid layouts must not break there; no desktop-specific work is in v0.
+
+**Installable.** The app is installable as a PWA (FR-41) on every surface; installed, it opens standalone with the surface's own theme color. Installing changes nothing about layout, density, or offline behavior.
 
 ## Open Questions
 

@@ -152,6 +152,7 @@ Every FR in this document and the §4 feature it belongs to. FR numbers are stab
 | FR-32 | Automatic Page Image expiry | §4.9 Data Retention and Deletion |
 | FR-33 | Parent-initiated deletion | §4.9 |
 | FR-31 | Account Tier enforcement | §4.10 Account Tiers and Allowance Enforcement |
+| FR-41 | Installable app and install nudge | §4.11 Installable App |
 
 ## 4. Features
 
@@ -867,6 +868,16 @@ The system assigns every Parent Account an Account Tier and enforces its Student
 - A parent can see all three counters — usage against limit and the reset date in the account's own timezone — on the Parent View Allowances surface (§6.3), without entering an at-cap state to find out where they stand. The Explanation Allowance counter additionally appears on the Analytics dashboard (FR-28).
 - Admin can view per-account consumption against allowances (FR-30a).
 
+### 4.11 Installable App
+
+#### FR-41: Installable app and install nudge
+
+The web app is installable to a device's home screen with its own name, icon, and standalone window on browsers that support installation. When the app is running in a browser tab (not installed) on a browser that supports installing it, a dismissible banner invites the person to install it — with a one-tap install action where the browser provides one, or brief add-to-home-screen instructions where it does not (iOS/iPadOS Safari). Dismissing hides the banner for the rest of that browser session. In Student Mode the banner appears on the Home screen only; in Parent View it appears on every screen except the camera capture view. It never appears once the app is running installed, and never on a browser that cannot install the app. Installing does not change any capability, permission, or offline behavior: FR-36 remains the only offline behavior.
+
+**Notes:**
+- Added 2026-10-11 via Sprint Change Proposal (`sprint-change-proposal-2026-10-11.md`). Installed name is `n-tutor`.
+- On iOS/iPadOS the installed app has storage separate from Safari: the family signs in once more inside it, and an Attempt in progress in Safari does not carry over. Keeping the banner off every Student Mode screen but Home prevents installing mid-Attempt.
+
 ## 5. Constraints and Guardrails
 
 ### 5.1 Safety
@@ -913,7 +924,7 @@ The Explanation Allowance counts **newly generated** Explanations only. What is 
 
 ### 6.1 Platform
 
-Mobile-first responsive web application. Single codebase, no app store, camera access via the browser. Must be usable on a phone held one-handed in a kitchen and on a family tablet. Desktop is supported but not optimized. Native apps are explicitly v2+.
+Mobile-first responsive web application. Single codebase, no app store, camera access via the browser. Must be usable on a phone held one-handed in a kitchen and on a family tablet. Desktop is supported but not optimized. **The web app is installable to the home screen as a Progressive Web App (FR-41), so a family reaches it in one tap; installing changes how the app is opened, not what it does.** Native apps are explicitly v2+.
 
 **Dark mode ships in v0**, on both Student Mode and Parent View. Every design token has a dark counterpart, and every contrast pair required by §10.1 is verified in both modes rather than in light only. This is scope, not polish: the study session this product exists for happens in the evening, often on a tablet in a dim room, and a light-only app is the wrong tool at the hour it is most used.
 
@@ -997,12 +1008,12 @@ One line per capability, each naming the requirements that define it. This is an
 Everything here is **deferred past MVP**, not refused — each is expected to become buildable later, and several carry a revisit condition. Permanent refusals live in §8 and are not repeated here.
 
 - **Notifications** of any kind — no push, no email on student completion. Deferred to v1. The Analytics dashboard's activity summary (FR-28) is the v0 answer to "did my child do it", and it requires the parent to open the app. `[NOTE FOR PM: still the most likely first post-launch request; email infrastructure already exists for password reset (FR-1), so the incremental cost of adding it later is small.]`
-- **Native mobile apps** — v2+.
+- **Native mobile apps** — v2+. *(The installable web app in FR-41 is not a native app: same codebase, no app store, no device capability beyond what the browser already grants.)*
 - **PDF or scanned-document upload** — photos only.
 - **Handwriting recognition of the student's own written answers on the Source Test** — the app reads the questions, not the child's marks.
 - **Monetization, billing, payment** — v0 has no revenue. Account Tiers exist and are enforced, but carry no price and no self-serve upgrade; an Admin assigns them by hand.
 - **AI provider abstraction** — v0 depends directly on OpenAI with no swappable provider interface, reusing the client configuration already proven in the sibling `n-electric` project (see `addendum.md`). `[NOTE FOR PM: a deliberate speed-over-insurance trade, made cheaper by the fact that a working configuration already exists to copy. A provider price change, terms change, or sustained outage means a real refactor across Extraction, generation, grading, and Explanations — the four most load-bearing paths in the product. Revisit if the AI spend becomes material.]`
-- **Offline test-taking** — network required, with one carve-out (FR-36). Inside an already-started Attempt, answering Questions and navigating between them work offline. **Submission requires the network** and is never retried silently — the student is told, the Attempt stays open with every answer intact, and they submit again themselves. **A timer that expires while offline auto-submits on reconnect and is graded against the moment of expiry, not the moment of reconnect**, so losing signal neither buys the student extra time nor costs them work. Everything else — the Practice Test list, generation, grading, and Explanations — requires a connection.
+- **Offline test-taking** — network required, with one carve-out (FR-36). *Installing the app (FR-41) does not add offline capability; an installed app opened without a connection behaves like the browser tab does.* Inside an already-started Attempt, answering Questions and navigating between them work offline. **Submission requires the network** and is never retried silently — the student is told, the Attempt stays open with every answer intact, and they submit again themselves. **A timer that expires while offline auto-submits on reconnect and is graded against the moment of expiry, not the moment of reconnect**, so losing signal neither buys the student extra time nor costs them work. Everything else — the Practice Test list, generation, grading, and Explanations — requires a connection.
 - **Localization** — English only.
 - **Recall of a released Practice Test** (FR-14) — parent discards and regenerates instead.
 - **Parent-authored questions from scratch** without a Source Test.

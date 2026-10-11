@@ -417,6 +417,13 @@ One NestJS application; `api` and `worker` are the same image with different ent
   - **Invitation-only registration at launch.** Registration is closed by default and opened only by an invitation code checked **at the signup endpoint, not in the UI**. The code set is operator-managed through `admin`. This is the only thing between the AD-23 global spend ceiling and the open internet.
   - **Provider no-training terms:** the account and API configuration used for every call must have training-on-submitted-data disabled. This is a **deployment precondition**, not a code concern — recorded as a launch checklist item with a named owner, and a change to provider terms is a revisit trigger.
 
+### AD-35 — The service worker exists for installability only and never touches requests
+
+- **Decision:** `web` ships a single static service worker at `/sw.js`, scope `/`, with install/activate handlers only. It has **no `fetch` handler**, uses **no Cache Storage**, and registers **no push subscription**. The manifest is the Next.js `app/manifest.ts` metadata route; icons use the `icon` / `apple-icon` file conventions.
+- **Why:** installability is the only goal. A caching worker would put Parent-View and child data at risk of being served across sessions or after a Parent View expiry (FR-34), could serve stale JS after a deploy, and would create a second offline mechanism beside AD-26, which is the only sanctioned client-side persistence.
+- **Binds:** `apps/web/public/sw.js`, its registration component, `next.config.ts` `headers()` for `/sw.js` (`no-cache`), `app/manifest.ts`, icon files.
+- **Revisit if:** push notifications (PRD §9.2, deferred to v1) are taken up — that is a new decision, not an extension of this one.
+
 ## Upstream Supersessions
 
 Declared so a builder working from the upstream documents does not walk into a superseded instruction.

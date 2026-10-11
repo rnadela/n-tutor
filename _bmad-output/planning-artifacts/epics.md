@@ -105,6 +105,8 @@ FR-33: A parent can delete a Source Test's Page Images ahead of expiry, delete a
 
 FR-31: The system assigns every Parent Account an Account Tier (Free/Plus/Family/Internal, Admin-assigned, Free by default, no self-serve upgrade) and enforces its Student Profile limit and its Upload/Generation/Explanation Allowances per the §5.3 tier table. The three counters are tracked separately and enforced independently; each allowance is consumed only on successful production of the artifact, never on request or failed attempt; an FR-39 regeneration never consumes an Explanation Allowance unit at any tier. All three reset atomically on the calendar-month boundary in the Parent Account's own stored timezone. Reaching an allowance hard-blocks the operation with a message naming the tier, usage, and reset date; AI grading is never blocked by any allowance; Explanation generation is capped per the tier table while reading an already-generated Explanation is never capped. A parent can see all three counters (usage, limit, reset date) on the Allowances surface without hitting the cap; the Explanation counter additionally appears on the Analytics dashboard.
 
+FR-41: The web app is installable to a device's home screen with its own name, icon, and standalone window on browsers that support installation. When the app is running in a browser tab (not installed) on a browser that supports installing it, a dismissible banner invites the person to install it — with a one-tap install action where the browser provides one, or brief add-to-home-screen instructions where it does not (iOS/iPadOS Safari). Dismissing hides the banner for the rest of that browser session. In Student Mode the banner appears on the Home screen only; in Parent View it appears on every screen except the camera capture view. It never appears once the app is running installed, and never on a browser that cannot install the app. Installing does not change any capability, permission, or offline behavior: FR-36 remains the only offline behavior.
+
 ### NonFunctional Requirements
 
 NFR1: Performance — Student Mode interactions (question navigation, submission, results render) feel instant on a mid-range tablet over home wifi.
@@ -241,6 +243,8 @@ UX-DR39: Implement test navigation as linear (Back/Next as the primary path) plu
 
 UX-DR41: Implement the seven binding copy constraints from Voice and Tone: an Explanation failure is never framed as the student's fault; the Explanation at-cap message blames the plan, never the child, with no exclamation marks or upsell language; generation-progress copy never claims work will be lost if the parent leaves; Explanation language adapts per Grade Level sourced from the Practice Test (not the Student Profile); Generation Allowance copy is always denominated in Practice Tests; a wrong answer is reported, never punished; suppressed-Explanation copy names the Explanation as the thing that fell short, never the student, with no blame, correction, instruction, or exclamation mark.
 
+UX-DR42: Implement the Install Banner: a single, compact, dismissible banner at the top of the content area, using the active surface's density and tokens (Student palette in Student Mode, Parent palette in Parent View). It never overlays content, never blocks interaction, never animates in a way that pulls focus, and is reachable and dismissible by keyboard and screen reader (`role="region"` with an accessible name; dismiss is a real button). In Student Mode, rendered on Home only (never Take Test or Results); in Parent View, not rendered on the camera capture view; not rendered when running installed (standalone display mode), or on browsers without an install path. Copy is plain and calm, no exclamation marks, no urgency.
+
 ### FR Coverage Map
 
 FR-1: Epic 1 - Parent Account sign-up/sign-in
@@ -287,6 +291,7 @@ FR-29: Epic 7 - Drill Topic → missed Questions → weighted regen
 FR-32: Epic 8 - Page Image 90-day expiry
 FR-33: Epic 8 - Parent-initiated deletion (image/profile/account)
 FR-31: Epic 9 - Account Tier + three-allowance enforcement
+FR-41: Epic 10 - Installable app (PWA) + install banner
 
 ## Epic List
 
@@ -325,6 +330,10 @@ Page Images expire automatically 90 days after upload, and a parent can delete i
 ### Epic 9: Account Tiers & Allowance Enforcement
 Every Parent Account's Upload, Generation, and Explanation Allowances are tracked and enforced against its Account Tier, resetting atomically on the account's own monthly boundary.
 **FRs covered:** FR-31
+
+### Epic 10: Installable App (PWA)
+A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can.
+**FRs covered:** FR-41
 
 ## Epic 1: Parent Accounts, PINs & Student Profiles
 
@@ -1323,3 +1332,75 @@ So that I can plan ahead of hitting a cap.
 
 **Given** the Analytics dashboard (Story 7.4)
 **Then** the Explanation counter additionally appears there
+
+## Epic 10: Installable App (PWA)
+
+A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can.
+
+**FRs covered:** FR-41
+**Relevant UX-DRs:** UX-DR42, UX-DR5 (self-hosted assets, no runtime CDN)
+
+### Story 10.1: Web App Manifest, Icons & Minimal Service Worker
+
+As a parent,
+I want the app to be installable with its own icon,
+So that the family can open it from the home screen like any other app.
+
+**Acceptance Criteria:**
+
+**Given** the web app is served over HTTPS
+**When** a supporting browser (Chrome/Edge on Android, desktop Chrome/Edge) evaluates it
+**Then** it is installable: a manifest is served from the Next.js `app/manifest.ts` metadata route with `name: "n-tutor"`, `short_name: "n-tutor"`, `start_url: "/"`, `scope: "/"`, `display: "standalone"`, `theme_color` and `background_color` taken from design tokens, and 192×192, 512×512, and 512×512 maskable PNG icons
+
+**Given** iOS/iPadOS Safari
+**When** the person adds the app to the home screen
+**Then** it uses an `apple-icon` (180×180) and opens standalone with the correct app name
+
+**Given** the root layout
+**When** any page renders
+**Then** `viewport.themeColor` is set for light and dark color schemes from design tokens
+
+**Given** the service worker at `/sw.js`
+**When** it is registered on load
+**Then** it registers at scope `/`, has no `fetch` handler, caches nothing, registers no push subscription, and calls `skipWaiting`/`clients.claim` so a new version takes over on next load
+**And** `/sw.js` is served with `Cache-Control: no-cache, no-store, must-revalidate` and `Content-Type: application/javascript`
+
+**Given** the app is opened installed without a network connection
+**When** any screen loads
+**Then** behavior is identical to the browser tab offline (FR-36 unchanged; no cached pages)
+
+**Given** all icon and manifest assets
+**Then** they are bundled/self-hosted (no runtime CDN fetch)
+
+### Story 10.2: Install Banner
+
+As a parent or student,
+I want the app to tell me I can install it,
+So that getting back into it next time is one tap.
+
+**Acceptance Criteria:**
+
+**Given** a browser that fires `beforeinstallprompt` and the app is not running installed
+**When** the Student Mode Home screen or any Parent View screen (except camera capture) renders
+**Then** the Install Banner shows with an "Install" action that calls the deferred prompt
+**And** on accept, the banner disappears and does not return; on cancel, the banner remains until dismissed
+
+**Given** iOS/iPadOS Safari, not running installed
+**When** the same screens render
+**Then** the banner shows brief instructions (tap Share, then "Add to Home Screen") instead of an Install button, plus a line that the person will sign in once more inside the installed app
+
+**Given** a browser with no install path (no `beforeinstallprompt`, not iOS Safari)
+**Then** the banner never renders
+
+**Given** the app is running installed (`display-mode: standalone`, or `navigator.standalone` on iOS)
+**Then** the banner never renders
+
+**Given** the banner is showing
+**When** the person dismisses it
+**Then** it is hidden for the remainder of the browser session (sessionStorage) and returns in a new session
+
+**Given** any Student Mode screen other than Home (Take Test, Results) or the Parent View camera capture view
+**Then** the banner never renders
+
+**Given** the banner
+**Then** it meets UX-DR42 and the Accessibility Floor in light and dark mode, its copy lives in the `copy/` modules, and it is covered by a unit test (visibility rules) and a Playwright E2E (Chromium: shown → dismissed → hidden → new context shown again; standalone emulated → hidden)
