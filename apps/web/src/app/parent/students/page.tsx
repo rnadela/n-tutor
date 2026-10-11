@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
@@ -118,7 +118,7 @@ export const deleteNoteId = (profileId: string) => `student-delete-note-${profil
  */
 export function StudentRowNotes({ profileId, archived }: { profileId: string; archived: boolean }) {
   return (
-    <Box sx={{ display: 'grid', gap: `${density.gap / 2}px`, mt: 1 }}>
+    <Box sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>
       {/* Only while archiving is the action on offer: a restored-from-archive
           row's control is Restore, and its own note describes that. */}
       {!archived && (
@@ -497,201 +497,221 @@ export default function StudentsPage() {
                   </TableHead>
                   <TableBody>
                     {profiles.map((profile) => (
-                      <TableRow
-                        key={profile.id}
-                        data-testid="student-row"
-                        data-profile-id={profile.id}
-                        data-name={profile.displayName}
-                      >
-                        <TableCell>
-                          {renamingId === profile.id ? (
-                            <Box
-                              component="form"
-                              sx={{ display: 'flex', gap: `${density.gap}px` }}
-                              onSubmit={async (event) => {
-                                event.preventDefault();
-                                const name = renameDraft.trim();
-                                if (!name) return;
-                                const saved = await write(profile.id, async () => {
-                                  const after = await parentApi.updateStudent(token!, profile.id, {
-                                    displayName: name,
+                      <Fragment key={profile.id}>
+                        <TableRow
+                          // The notes row below closes this one off, so no rule between them.
+                          sx={{ '& > td': { borderBottom: 0 } }}
+                          data-testid="student-row"
+                          data-profile-id={profile.id}
+                          data-name={profile.displayName}
+                        >
+                          <TableCell>
+                            {renamingId === profile.id ? (
+                              <Box
+                                component="form"
+                                sx={{ display: 'flex', gap: `${density.gap}px` }}
+                                onSubmit={async (event) => {
+                                  event.preventDefault();
+                                  const name = renameDraft.trim();
+                                  if (!name) return;
+                                  const saved = await write(profile.id, async () => {
+                                    const after = await parentApi.updateStudent(
+                                      token!,
+                                      profile.id,
+                                      {
+                                        displayName: name,
+                                      },
+                                    );
+                                    return parentCopy.students.renamed(after.displayName);
                                   });
-                                  return parentCopy.students.renamed(after.displayName);
-                                });
-                                if (saved) setRenamingId(null);
-                              }}
-                            >
+                                  if (saved) setRenamingId(null);
+                                }}
+                              >
+                                <TextField
+                                  id={`student-rename-${profile.id}`}
+                                  label={parentCopy.students.renameLabel}
+                                  value={renameDraft}
+                                  onChange={(event) => setRenameDraft(event.target.value)}
+                                  required
+                                  size="small"
+                                  slotProps={{
+                                    htmlInput: policy
+                                      ? { maxLength: policy.studentNameMaxLength }
+                                      : undefined,
+                                  }}
+                                  helperText={
+                                    policy
+                                      ? parentCopy.students.nameMaximum(policy.studentNameMaxLength)
+                                      : undefined
+                                  }
+                                />
+                                <Button
+                                  type="submit"
+                                  variant="contained"
+                                  disabled={isPending(profile.id)}
+                                  sx={{ minHeight: density.tapTarget }}
+                                >
+                                  {parentCopy.students.saveName}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  onClick={() => setRenamingId(null)}
+                                  sx={{ minHeight: density.tapTarget }}
+                                >
+                                  {parentCopy.students.cancel}
+                                </Button>
+                              </Box>
+                            ) : (
+                              <Typography component="span" sx={{ fontWeight: 600 }}>
+                                {profile.displayName}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'grid', gap: `${density.gap}px` }}>
                               <TextField
-                                id={`student-rename-${profile.id}`}
-                                label={parentCopy.students.renameLabel}
-                                value={renameDraft}
-                                onChange={(event) => setRenameDraft(event.target.value)}
-                                required
+                                id={`student-grade-level-${profile.id}`}
+                                select
                                 size="small"
-                                slotProps={{
-                                  htmlInput: policy
-                                    ? { maxLength: policy.studentNameMaxLength }
-                                    : undefined,
+                                // Names the child, so a row's select is telling
+                                // apart from every other row's by its name alone.
+                                label={parentCopy.students.changeGradeLevelFor(profile.displayName)}
+                                value={
+                                  gradeLevels.some((level) => level.id === profile.gradeLevelId)
+                                    ? profile.gradeLevelId
+                                    : ''
+                                }
+                                disabled={isPending(profile.id)}
+                                onChange={(event) => {
+                                  const gradeLevelId = event.target.value;
+                                  if (!gradeLevelId || gradeLevelId === profile.gradeLevelId)
+                                    return;
+                                  void write(profile.id, async () => {
+                                    const after = await parentApi.updateStudent(
+                                      token!,
+                                      profile.id,
+                                      {
+                                        gradeLevelId,
+                                      },
+                                    );
+                                    return parentCopy.students.gradeLevelChanged(
+                                      after.displayName,
+                                      after.gradeLevelName,
+                                    );
+                                  });
                                 }}
                                 helperText={
-                                  policy
-                                    ? parentCopy.students.nameMaximum(policy.studentNameMaxLength)
-                                    : undefined
+                                  profile.gradeLevelEnabled
+                                    ? parentCopy.students.gradeLevelNote
+                                    : parentCopy.students.gradeLevelWithdrawn
                                 }
-                              />
-                              <Button
-                                type="submit"
-                                variant="contained"
-                                disabled={isPending(profile.id)}
-                                sx={{ minHeight: density.tapTarget }}
                               >
-                                {parentCopy.students.saveName}
-                              </Button>
-                              <Button
-                                type="button"
-                                onClick={() => setRenamingId(null)}
-                                sx={{ minHeight: density.tapTarget }}
-                              >
-                                {parentCopy.students.cancel}
-                              </Button>
-                            </Box>
-                          ) : (
-                            <Typography component="span" sx={{ fontWeight: 600 }}>
-                              {profile.displayName}
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                            <TextField
-                              id={`student-grade-level-${profile.id}`}
-                              select
-                              size="small"
-                              // Names the child, so a row's select is telling
-                              // apart from every other row's by its name alone.
-                              label={parentCopy.students.changeGradeLevelFor(profile.displayName)}
-                              value={
-                                gradeLevels.some((level) => level.id === profile.gradeLevelId)
-                                  ? profile.gradeLevelId
-                                  : ''
-                              }
-                              disabled={isPending(profile.id)}
-                              onChange={(event) => {
-                                const gradeLevelId = event.target.value;
-                                if (!gradeLevelId || gradeLevelId === profile.gradeLevelId) return;
-                                void write(profile.id, async () => {
-                                  const after = await parentApi.updateStudent(token!, profile.id, {
-                                    gradeLevelId,
-                                  });
-                                  return parentCopy.students.gradeLevelChanged(
-                                    after.displayName,
-                                    after.gradeLevelName,
-                                  );
-                                });
-                              }}
-                              helperText={
-                                profile.gradeLevelEnabled
-                                  ? parentCopy.students.gradeLevelNote
-                                  : parentCopy.students.gradeLevelWithdrawn
-                              }
-                            >
-                              {gradeLevels.map((level) => (
-                                <MenuItem key={level.id} value={level.id}>
-                                  {level.name}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                            {/* The stored grade level's name, only when the select
+                                {gradeLevels.map((level) => (
+                                  <MenuItem key={level.id} value={level.id}>
+                                    {level.name}
+                                  </MenuItem>
+                                ))}
+                              </TextField>
+                              {/* The stored grade level's name, only when the select
                               cannot show it because it is no longer offered. */}
-                            {!gradeLevels.some((level) => level.id === profile.gradeLevelId) && (
-                              <Typography component="span">{profile.gradeLevelName}</Typography>
-                            )}
-                          </Box>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            variant="outlined"
-                            color={profile.archived ? 'default' : 'success'}
-                            label={
-                              profile.archived
-                                ? parentCopy.students.archivedStatus
-                                : parentCopy.students.active
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', gap: `${density.gap}px`, flexWrap: 'wrap' }}>
-                            <Button
-                              type="button"
-                              onClick={() => {
-                                setRenamingId(profile.id);
-                                setRenameDraft(profile.displayName);
-                              }}
-                              aria-label={`${parentCopy.students.rename} ${profile.displayName}`}
-                              startIcon={<Pencil size={16} aria-hidden="true" />}
-                              sx={{ minHeight: density.tapTarget }}
+                              {!gradeLevels.some((level) => level.id === profile.gradeLevelId) && (
+                                <Typography component="span">{profile.gradeLevelName}</Typography>
+                              )}
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              color={profile.archived ? 'default' : 'success'}
+                              label={
+                                profile.archived
+                                  ? parentCopy.students.archivedStatus
+                                  : parentCopy.students.active
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Box
+                              sx={{ display: 'flex', gap: `${density.gap}px`, flexWrap: 'wrap' }}
                             >
-                              {parentCopy.students.rename}
-                            </Button>
-                            {profile.archived ? (
                               <Button
                                 type="button"
-                                disabled={isPending(profile.id)}
-                                title={parentCopy.students.restoreNote}
-                                aria-label={`${parentCopy.students.restore} ${profile.displayName}`}
-                                startIcon={<ArchiveRestore size={16} aria-hidden="true" />}
+                                onClick={() => {
+                                  setRenamingId(profile.id);
+                                  setRenameDraft(profile.displayName);
+                                }}
+                                aria-label={`${parentCopy.students.rename} ${profile.displayName}`}
+                                startIcon={<Pencil size={16} aria-hidden="true" />}
                                 sx={{ minHeight: density.tapTarget }}
-                                onClick={() =>
-                                  write(profile.id, async () => {
-                                    await parentApi.restoreStudent(token!, profile.id);
-                                    return parentCopy.students.restored(profile.displayName);
-                                  })
-                                }
                               >
-                                {parentCopy.students.restore}
+                                {parentCopy.students.rename}
                               </Button>
-                            ) : (
-                              <Button
-                                type="button"
-                                disabled={isPending(profile.id)}
-                                aria-label={`${parentCopy.students.archive} ${profile.displayName}`}
-                                aria-describedby={archiveNoteId(profile.id)}
-                                startIcon={<Archive size={16} aria-hidden="true" />}
-                                sx={{ minHeight: density.tapTarget }}
-                                // Archiving is not deleting, and the
-                                // confirmation says exactly what it keeps.
-                                onClick={() => setConfirmingArchive(profile)}
-                              >
-                                {parentCopy.students.archive}
-                              </Button>
-                            )}
-                            {/* Beside archiving, and visibly a different action:
+                              {profile.archived ? (
+                                <Button
+                                  type="button"
+                                  disabled={isPending(profile.id)}
+                                  title={parentCopy.students.restoreNote}
+                                  aria-label={`${parentCopy.students.restore} ${profile.displayName}`}
+                                  startIcon={<ArchiveRestore size={16} aria-hidden="true" />}
+                                  sx={{ minHeight: density.tapTarget }}
+                                  onClick={() =>
+                                    write(profile.id, async () => {
+                                      await parentApi.restoreStudent(token!, profile.id);
+                                      return parentCopy.students.restored(profile.displayName);
+                                    })
+                                  }
+                                >
+                                  {parentCopy.students.restore}
+                                </Button>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  disabled={isPending(profile.id)}
+                                  aria-label={`${parentCopy.students.archive} ${profile.displayName}`}
+                                  aria-describedby={archiveNoteId(profile.id)}
+                                  startIcon={<Archive size={16} aria-hidden="true" />}
+                                  sx={{ minHeight: density.tapTarget }}
+                                  // Archiving is not deleting, and the
+                                  // confirmation says exactly what it keeps.
+                                  onClick={() => setConfirmingArchive(profile)}
+                                >
+                                  {parentCopy.students.archive}
+                                </Button>
+                              )}
+                              {/* Beside archiving, and visibly a different action:
                               its own label, its own note saying what it does
                               *not* keep, and a password-gated confirmation
                               rather than a browser prompt. */}
-                            <Button
-                              type="button"
-                              color="error"
-                              disabled={
-                                isPending(profile.id) ||
-                                previewingId !== null ||
-                                confirmingDelete !== null
-                              }
-                              aria-label={`${parentCopy.students.delete} ${profile.displayName}`}
-                              aria-describedby={deleteNoteId(profile.id)}
-                              startIcon={<Trash2 size={16} aria-hidden="true" />}
-                              sx={{ minHeight: density.tapTarget }}
-                              onClick={() => {
-                                void onDeleteRequested(profile);
-                              }}
-                            >
-                              {parentCopy.students.delete}
-                            </Button>
-                          </Box>
-                          <StudentRowNotes profileId={profile.id} archived={profile.archived} />
-                        </TableCell>
-                      </TableRow>
+                              <Button
+                                type="button"
+                                color="error"
+                                disabled={
+                                  isPending(profile.id) ||
+                                  previewingId !== null ||
+                                  confirmingDelete !== null
+                                }
+                                aria-label={`${parentCopy.students.delete} ${profile.displayName}`}
+                                aria-describedby={deleteNoteId(profile.id)}
+                                startIcon={<Trash2 size={16} aria-hidden="true" />}
+                                sx={{ minHeight: density.tapTarget }}
+                                onClick={() => {
+                                  void onDeleteRequested(profile);
+                                }}
+                              >
+                                {parentCopy.students.delete}
+                              </Button>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                        {/* The notes span the row, so they read as sentences rather
+                        than a column of three words a line beside the buttons. */}
+                        <TableRow sx={{ '&& > td': { pt: 0 } }}>
+                          <TableCell colSpan={4}>
+                            <StudentRowNotes profileId={profile.id} archived={profile.archived} />
+                          </TableCell>
+                        </TableRow>
+                      </Fragment>
                     ))}
                   </TableBody>
                 </Table>
