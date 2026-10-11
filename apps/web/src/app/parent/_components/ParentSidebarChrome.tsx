@@ -12,6 +12,7 @@ import { useTheme } from '@mui/material/styles';
 import {
   BarChart3,
   CheckCircle2,
+  ChevronRight,
   Clock,
   Flag,
   GraduationCap,
@@ -104,6 +105,30 @@ const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
  * today, but a screen reached by drill-down is not impossible). */
 function pageTitle(pathname: string): string {
   return NAV_ITEMS.find((item) => item.href === pathname)?.label ?? parentCopy.appName;
+}
+
+/**
+ * Where the current screen sits: its group and the destination it belongs to.
+ *
+ * Matched on the longest destination the path starts with, so a drill-down such
+ * as one draft or one finished run is placed under the list it was opened from
+ * rather than falling back to the app's name. The header states this instead of
+ * repeating the page's own `<h1>` word for word.
+ */
+function locate(pathname: string): { group?: string; label: string } {
+  let best: { group?: string; item: NavItem } | null = null;
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      const matches =
+        pathname === item.href || (item.href !== '/parent' && pathname.startsWith(`${item.href}/`));
+      if (matches && (best === null || item.href.length > best.item.href.length)) {
+        best = { group: group.label, item };
+      }
+    }
+  }
+  return best === null
+    ? { label: pageTitle(pathname) }
+    : { group: best.group, label: best.item.label };
 }
 
 /**
@@ -299,6 +324,7 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
   }
 
   const railCollapsed = collapsed && !isNarrow;
+  const place = locate(pathname);
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -347,6 +373,12 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
           sx={{
             width: railCollapsed ? RAIL_WIDTH : SIDEBAR_WIDTH,
             flexShrink: 0,
+            // Pinned to the viewport, so the brand, every destination and the rail
+            // toggle stay in view down a long page; its own list scrolls if it has to.
+            position: 'sticky',
+            top: 0,
+            height: '100vh',
+            alignSelf: 'flex-start',
             display: 'flex',
             flexDirection: 'column',
             borderRight: '1px solid',
@@ -357,7 +389,8 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             transition: theme.transitions.create('width', {
               duration: theme.transitions.duration.shortest,
             }),
-            overflow: 'hidden',
+            overflowX: 'hidden',
+            overflowY: 'auto',
           }}
         >
           <Typography
@@ -432,6 +465,11 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
         <Box
           component="header"
           sx={{
+            // Pinned, so the way out of Parent View at its right-hand end stays
+            // reachable however far down a long screen the parent has read.
+            position: 'sticky',
+            top: 0,
+            zIndex: theme.zIndex.appBar,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -456,13 +494,42 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             <Typography
               component="p"
               sx={{
-                fontWeight: 700,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
+                display: 'flex',
+                alignItems: 'center',
+                gap: `${density.gap / 2}px`,
+                minWidth: 0,
                 whiteSpace: 'nowrap',
               }}
             >
-              {pageTitle(pathname)}
+              {place.group !== undefined && (
+                <>
+                  <Box
+                    component="span"
+                    sx={{
+                      color: 'text.secondary',
+                      display: { xs: 'none', sm: 'inline' },
+                    }}
+                  >
+                    {place.group}
+                  </Box>
+                  <Box
+                    component="span"
+                    aria-hidden="true"
+                    sx={{
+                      color: 'text.secondary',
+                      display: { xs: 'none', sm: 'inline-flex' },
+                    }}
+                  >
+                    <ChevronRight size={16} />
+                  </Box>
+                </>
+              )}
+              <Box
+                component="span"
+                sx={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}
+              >
+                {place.label}
+              </Box>
             </Typography>
           </Box>
           {/* The toggle out of Parent View, at the header's top-right corner
