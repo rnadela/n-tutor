@@ -51,9 +51,10 @@ const UNKNOWN_UUID = '11111111-2222-4333-8444-555555555555';
  * upload-extract-generate-release-sit-hand-in flow per case would spend the setup's
  * provider calls in the middle of counting this story's.
  *
- * **The fake provider is deterministic per ordinal**, so a regenerated body is
- * byte-identical to the one it replaced. "A different Explanation" is therefore asserted
- * as a **new row and a second provider call**, never as different prose.
+ * **The fake provider varies by generation**, as a real model told not to repeat the
+ * removed explanation would, so "a different Explanation" is asserted as a new row, a
+ * second provider call **and different prose** — and the post-hoc pass refuses a
+ * replacement that says the removed one again.
  */
 describe('Explanation suppression and free regeneration: removed once, replaced for nothing', () => {
   let h: Harness;
@@ -620,10 +621,10 @@ describe('Explanation suppression and free regeneration: removed once, replaced 
     expect(response.body[1].suppressedAt).toBeNull();
     // Nothing is recorded against the replacement yet, so it cannot be removed either.
     expect(response.body[1].canSuppress).toBe(false);
-    // A different Explanation is a **new row and a second provider call**, never different
-    // prose: the fake provider is deterministic per ordinal.
+    // A different Explanation: a new row, a second provider call and different prose.
     expect(providerCalls()).toBe(1);
     expect(await h.prisma.explanation.count()).toBe(2);
+    expect(JSON.stringify(response.body[1].body)).not.toBe(JSON.stringify(response.body[0].body));
     // The row is free, and the count that measures the allowance did not move.
     const written = await h.prisma.explanation.findFirstOrThrow({
       where: { attemptId: account.attemptId, questionId: account.questionIds[0]!, generation: 2 },

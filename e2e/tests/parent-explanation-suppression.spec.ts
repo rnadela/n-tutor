@@ -23,10 +23,10 @@ import { createGradeLevelFixture, createSubjectFixture, uniqueParentEmail } from
  * Explanation is a child asking for one, and there is no shortcut to that which does not
  * also skip it.
  *
- * **The fake provider is deterministic per ordinal**, so the replacement's prose is
- * byte-identical to the one it replaced. "A different explanation" is therefore asserted as
- * a second entry the parent can see and the child's own "this is a new explanation" line —
- * never as different words.
+ * **The fake provider varies by generation**, as a real model told not to repeat the
+ * removed explanation would. "A different explanation" is therefore asserted as a second
+ * entry the parent can see, the child's own "this is a new explanation" line, **and
+ * different words** on both sides.
  */
 
 const PASSWORD = 'correct-horse-battery-staple';
@@ -382,8 +382,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
 
     await afterReload.getByTestId('explanation-regenerate').click();
     // Two entries where there was one: the removed explanation and its replacement, each
-    // labelled. The fake provider is deterministic per ordinal, so "a different explanation"
-    // is this second entry and not different words.
+    // labelled — and the replacement says something else.
     await expect(afterReload.locator('[data-testid="explanation-generation"]')).toHaveCount(2, {
       timeout: 60_000,
     });
@@ -400,6 +399,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
     await expect(generations.nth(1).getByTestId('explanation-generation-label')).toHaveText(
       'Explanation 2',
     );
+    await expect(generations.nth(1).getByTestId('explanation-body')).not.toHaveText(prose[0]!);
     // And the replacement has nothing recorded against it, so it cannot be removed: a
     // concern has to be raised first, on every generation, with no carry-over.
     await expect(afterReload).toHaveAttribute('data-suppression-state', 'locked');
@@ -419,6 +419,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
     await expect(replaced.getByTestId('explain-replacement')).toHaveText(
       'This is a new explanation of this question.',
     );
+    await expect(replaced.getByTestId('explain-body')).not.toHaveText(prose[0]!);
     // And still nothing about who asked for it, why, or what it replaced.
     await expect(page.getByTestId('attempt-results')).not.toContainText(
       /parent removed|operator|queue|allowance|tier/iu,

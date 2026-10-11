@@ -57,13 +57,23 @@ export const EXPLANATION_SCHEMA_NAME = 'question_explanation';
 export function fakeExplanationPayload(context: {
   ordinal: number;
   failure: AiFakeFailure;
+  /**
+   * Which generation is being written, 1 for a first Explanation. A replacement says
+   * something else, as a real model told not to repeat the removed one would — so the
+   * difference check is exercised rather than tripped by the stub.
+   */
+  generation?: number;
 }): ExplanationPayload {
   if (context.failure === 'unusable') return { body: [] };
+  const generation = context.generation ?? 1;
   return {
     body: [
       {
         kind: 'text',
-        value: `Here is why question ${context.ordinal} works the way it does. Start from what the question gives you, then take one step at a time until you reach the answer.`,
+        value:
+          generation === 1
+            ? `Here is why question ${context.ordinal} works the way it does. Start from what the question gives you, then take one step at a time until you reach the answer.`
+            : `Another way to see question ${context.ordinal} (explanation ${generation}): look first at what the answer has to be, then check each part of the question against it.`,
       },
     ],
   };

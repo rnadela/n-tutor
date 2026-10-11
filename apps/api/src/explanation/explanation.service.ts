@@ -9,7 +9,7 @@ import { AiInputError, AiRejectedError, AiService, AiUpstreamError } from '../ai
 import { explanationAllowanceExhausted } from '../allowance/allowance-policy.js';
 import { AllowanceService } from '../allowance/allowance.service.js';
 import { limitsFor } from '../allowance/tiers.js';
-import type { RichText } from '../extraction/rich-text.js';
+import { isRichText, plainTextOf, type RichText } from '../extraction/rich-text.js';
 import { ParentAccountService } from '../identity/parent-account.service.js';
 import {
   PracticeTestService,
@@ -1277,11 +1277,14 @@ export class ExplanationService {
       attemptId,
     );
 
-    const latest = await this.prisma.explanation.findFirst({
+    // Every earlier generation, newest first: the latest decides whether there is
+    // anything to replace, and the removed ones are what the replacement must not repeat.
+    const earlier = await this.prisma.explanation.findMany({
       where: { attemptId, questionId, studentProfileId },
       orderBy: { generation: 'desc' },
-      select: { generation: true, suppressedAt: true },
+      select: { generation: true, suppressedAt: true, body: true },
     });
+    const latest = earlier[0] ?? null;
     // The same sentence a foreign Attempt gets, under its own name: there is nothing here to
     // put a replacement in place of, which is a different reason from there being nothing to
     // stop serving.
@@ -1312,7 +1315,16 @@ export class ExplanationService {
       throw new ExplanationUnavailable();
     }
 
-    const body = await this.write(scope.parentAccountId, input, attemptId, questionId);
+    // Oldest first, as the prompt quotes them. Only removed ones: a live generation is
+    // never behind a suppressed latest, but the filter says what is meant.
+    const removed = earlier
+      .filter((row) => row.suppressedAt !== null)
+      .reverse()
+      .flatMap((row) => (isRichText(row.body) ? [plainTextOf(row.body as RichText)] : []));
+    const body = await this.write(scope.parentAccountId, input, attemptId, questionId, {
+      removed,
+      generation: latest.generation + 1,
+    });
 
     try {
       await this.prisma.explanation.create({
@@ -1545,7 +1557,13 @@ export class ExplanationService {
     input: ExplanationInput,
     attemptId: string,
     questionId: string,
+    /**
+     * Set for a replacement only: the removed generations' plain text, which the prompt
+     * quotes and the post-hoc pass refuses to see again, and the generation being written.
+     */
+    replacing?: { removed: readonly string[]; generation: number },
   ): Promise<RichText> {
+    const removed = replacing?.removed ?? [];
     const asked = {
       ordinal: input.ordinal,
       format: input.format,
@@ -1553,6 +1571,7 @@ export class ExplanationService {
       studentAnswer: input.studentAnswer,
       correctAnswer: input.correctAnswer,
       gradeLevelName: input.gradeLevelName,
+      removed,
     };
     const maxAttempts = this.ai.config.maxAttempts;
 
@@ -1572,7 +1591,12 @@ export class ExplanationService {
           prompt: buildExplanationPrompt(asked),
           schema: ExplanationPayload,
           schemaName: EXPLANATION_SCHEMA_NAME,
-          fakePayload: ({ failure }) => fakeExplanationPayload({ ordinal: asked.ordinal, failure }),
+          fakePayload: ({ failure }) =>
+            fakeExplanationPayload({
+              ordinal: asked.ordinal,
+              failure,
+              generation: replacing?.generation ?? 1,
+            }),
         }));
       } catch (cause) {
         // The three fault classes, and all of them end here. The Attempt, the
@@ -1591,7 +1615,7 @@ export class ExplanationService {
       }
 
       try {
-        return validateExplanationPayload(payload);
+        return validateExplanationPayload(payload, removed);
       } catch (cause) {
         // Only a post-hoc rejection is worth asking again for. Anything else is
         // this module's own fault and is not made better by repetition.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EXPLANATION_EMPTY,
+  EXPLANATION_REPEATS_REMOVED,
   EXPLANATION_TOO_LONG,
   ExplanationPayloadInvalid,
   validateExplanationPayload,
@@ -80,11 +81,49 @@ describe('what a payload has to be before it is stored', () => {
   });
 });
 
+describe('a replacement for an explanation a parent removed', () => {
+  const removed = ['Halve six: six split into two equal groups is three.'];
+
+  it('is refused when it says the removed one again, however it is cased or spaced', () => {
+    for (const value of [
+      'Halve six: six split into two equal groups is three.',
+      '  halve SIX — six split into two equal groups, is three ',
+    ]) {
+      const attempt = () =>
+        validateExplanationPayload({ body: [{ kind: 'text', value }] }, removed);
+      expect(attempt).toThrow(ExplanationPayloadInvalid);
+      expect(attempt).toThrow(EXPLANATION_REPEATS_REMOVED);
+    }
+  });
+
+  it('is accepted when it says something else', () => {
+    const body = [
+      { kind: 'text' as const, value: 'Three twos make six, so half of six is three.' },
+    ];
+    expect(validateExplanationPayload({ body }, removed)).toEqual(body);
+  });
+
+  it('is never compared against anything for a first explanation', () => {
+    const body = [{ kind: 'text' as const, value: removed[0]! }];
+    expect(validateExplanationPayload({ body })).toEqual(body);
+  });
+});
+
 describe('what the fake transport answers with', () => {
   it('writes a usable explanation that names the question it is about', () => {
     const payload = fakeExplanationPayload({ ordinal: 7, failure: 'none' });
     expect(validateExplanationPayload(payload)).toBe(payload.body);
     expect(JSON.stringify(payload.body)).toContain('question 7');
+  });
+
+  it('writes a replacement that the post-hoc pass accepts over the first one', () => {
+    const first = fakeExplanationPayload({ ordinal: 7, failure: 'none' });
+    const second = fakeExplanationPayload({ ordinal: 7, failure: 'none', generation: 2 });
+    const firstText = first.body
+      .map((segment) => ('value' in segment ? segment.value : ''))
+      .join('');
+    expect(validateExplanationPayload(second, [firstText])).toBe(second.body);
+    expect(JSON.stringify(second.body)).toContain('question 7');
   });
 
   it('keeps producing the `unusable` fault at this seam, as an empty body', () => {

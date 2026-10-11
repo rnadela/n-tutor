@@ -38,6 +38,9 @@ export const EXPLANATION_EMPTY = 'The payload holds no explanation.';
 /** The body is longer than a child is ever going to be handed. */
 export const EXPLANATION_TOO_LONG = 'The payload holds more prose than an explanation may carry.';
 
+/** A replacement that says again what a parent removed. */
+export const EXPLANATION_REPEATS_REMOVED = 'The payload repeats an explanation a parent removed.';
+
 /**
  * The stored segments, or a rejection.
  *
@@ -51,12 +54,31 @@ export const EXPLANATION_TOO_LONG = 'The payload holds more prose than an explan
  * is one idea however many keys carry it, and counting the encoding would make
  * the ceiling depend on how the prose happened to be segmented.
  */
-export function validateExplanationPayload(payload: ExplanationPayload): RichText {
+export function validateExplanationPayload(
+  payload: ExplanationPayload,
+  removed: readonly string[] = [],
+): RichText {
   // The shape parsed; whether it says anything is this pass's question.
   if (!isRichText(payload.body)) throw new ExplanationPayloadInvalid(EXPLANATION_EMPTY);
   const body = payload.body as RichText;
-  if (plainTextOf(body).length > MAX_EXPLANATION_LENGTH) {
+  const text = plainTextOf(body);
+  if (text.length > MAX_EXPLANATION_LENGTH) {
     throw new ExplanationPayloadInvalid(EXPLANATION_TOO_LONG);
   }
+  // A replacement exists because the earlier one was judged bad. The same prose back
+  // — differing only in case, spacing or punctuation — is not a replacement, so it is
+  // asked for again like any other payload that broke a rule.
+  const said = comparable(text);
+  if (removed.some((earlier) => comparable(earlier) === said)) {
+    throw new ExplanationPayloadInvalid(EXPLANATION_REPEATS_REMOVED);
+  }
   return body;
+}
+
+/** Prose reduced to its words, for "is this the same explanation" and nothing else. */
+function comparable(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
