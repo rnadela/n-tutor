@@ -82,7 +82,9 @@ function TopicLink(props: LinkProps<`/parent/analytics/topics/${string}`>) {
  *
  * Every property is written at both widths rather than only at `xs`: MUI merges
  * breakpoint objects, so a value set only for the narrow case would still be in
- * force at `sm` and the cell would stay collapsed.
+ * force at `sm` and the cell would stay collapsed. That includes the border and
+ * the padding — an `sm` of `undefined` restores nothing, and left the wide cells
+ * with no row rule and no inset. Both are restated here from the theme's own cell.
  */
 const phoneVisuallyHidden = {
   position: { xs: visuallyHidden.position, sm: 'static' },
@@ -92,8 +94,9 @@ const phoneVisuallyHidden = {
   clip: { xs: visuallyHidden.clip, sm: 'auto' },
   clipPath: { xs: visuallyHidden.clipPath, sm: 'none' },
   whiteSpace: { xs: visuallyHidden.whiteSpace, sm: 'normal' },
-  border: { xs: visuallyHidden.border, sm: undefined },
-  padding: { xs: visuallyHidden.padding, sm: undefined },
+  borderWidth: { xs: 0, sm: '0 0 1px 0' },
+  paddingBlock: { xs: 0, sm: 0 },
+  paddingInline: { xs: 0, sm: `${density.cardPadding}px` },
   margin: { xs: visuallyHidden.margin, sm: 0 },
 } as const;
 
