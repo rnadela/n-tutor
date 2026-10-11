@@ -6,6 +6,7 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
+import { ArrowLeft, ArrowRight, CircleCheck, LayoutGrid, Send } from 'lucide-react';
 import { AppDialog } from '@/components/Dialog';
 import { RichText } from '@/components/RichText';
 import { Screen } from '@/components/Screen';
@@ -909,8 +910,16 @@ export default function TakeTestPage() {
           tabIndex={-1}
           ref={handedInHeading}
           data-testid="take-test-handed-in-heading"
-          sx={{ ...typeRoles.cardTitle }}
+          sx={{
+            ...typeRoles.cardTitle,
+            display: 'flex',
+            alignItems: 'center',
+            gap: `${comfortableDensity.gap / 2}px`,
+          }}
         >
+          <Box component="span" sx={{ display: 'inline-flex', color: 'success.main' }}>
+            <CircleCheck size={24} aria-hidden="true" />
+          </Box>
           {studentCopy.takeTest.handedInHeading}
         </Typography>
         <Alert
@@ -1090,12 +1099,31 @@ export default function TakeTestPage() {
           </Typography>
         )}
 
-        <Typography data-testid="take-test-counter" sx={{ ...typeRoles.label }}>
-          {studentCopy.takeTest.counter(question.ordinal, total)}
-        </Typography>
-        <Typography data-testid="take-test-format" sx={{ ...typeRoles.caption }}>
-          {studentCopy.takeTest.format[question.format]}
-        </Typography>
+        {/* Where the child is and what kind of answer this one wants, read as one
+            line above the paper rather than two stacked labels. */}
+        <Box
+          sx={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: `${comfortableDensity.gap / 2}px`,
+          }}
+        >
+          <Typography data-testid="take-test-counter" sx={{ ...typeRoles.label }}>
+            {studentCopy.takeTest.counter(question.ordinal, total)}
+          </Typography>
+          <Typography
+            data-testid="take-test-format"
+            sx={{
+              ...typeRoles.caption,
+              px: `${comfortableDensity.gap / 2}px`,
+              borderRadius: `${rounded.control}px`,
+              bgcolor: 'action.selected',
+            }}
+          >
+            {studentCopy.takeTest.format[question.format]}
+          </Typography>
+        </Box>
 
         {/* The paper role: near-square radius, the generated-content type role,
             and the 34rem measure the column already carries (UX-DR12/15). */}
@@ -1127,6 +1155,7 @@ export default function TakeTestPage() {
           <Button
             variant="outlined"
             data-testid="take-test-back"
+            startIcon={<ArrowLeft size={18} aria-hidden="true" />}
             disabled={index === 0}
             onClick={() => jumpTo(index - 1)}
             sx={{ minHeight: comfortableDensity.tapTarget }}
@@ -1136,6 +1165,7 @@ export default function TakeTestPage() {
           <Button
             variant="outlined"
             data-testid="take-test-next"
+            endIcon={<ArrowRight size={18} aria-hidden="true" />}
             disabled={index >= questions.length - 1}
             onClick={() => jumpTo(index + 1)}
             sx={{ minHeight: comfortableDensity.tapTarget }}
@@ -1148,6 +1178,7 @@ export default function TakeTestPage() {
           <Button
             variant="outlined"
             data-testid="take-test-map-open"
+            startIcon={<LayoutGrid size={18} aria-hidden="true" />}
             onClick={() => setMapOpen(true)}
             sx={{
               minHeight: comfortableDensity.tapTarget,
@@ -1159,12 +1190,16 @@ export default function TakeTestPage() {
           {/* Disabled only while a request is actually out. Offline it stays live
               on purpose: the refusal is a sentence the child can act on by pressing
               again, and a dead control would leave them nothing to do. */}
+          {/* At the far end of the row from Back and Next: moving between
+              Questions and handing the whole test in are different kinds of
+              press, and should not sit shoulder to shoulder. */}
           <Button
             variant="contained"
             data-testid="take-test-hand-in"
+            startIcon={<Send size={18} aria-hidden="true" />}
             disabled={submitState === 'sending' || attempt === null}
             onClick={handIn}
-            sx={{ minHeight: comfortableDensity.tapTarget }}
+            sx={{ minHeight: comfortableDensity.tapTarget, ml: { sm: 'auto' } }}
           >
             {submitState === 'sending'
               ? studentCopy.takeTest.handingIn
@@ -1182,6 +1217,9 @@ export default function TakeTestPage() {
         component="aside"
         sx={{
           display: { xs: 'none', md: 'block' },
+          // Stays in view down a long Question, so the map is never a scroll away.
+          position: 'sticky',
+          top: 0,
           paddingBlock: `${comfortableDensity.sectionMargin}px`,
           paddingInline: `${comfortableDensity.cardPadding}px`,
         }}
