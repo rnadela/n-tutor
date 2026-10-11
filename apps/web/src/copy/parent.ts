@@ -429,11 +429,9 @@ export const parentCopy = {
     /** Practice Tests, and never a credit or an abstract unit. */
     generationUnit: 'practice tests',
     explanationUnit: 'explanations',
-    allowanceUsed: (used: number, limit: string, unit: string) =>
-      `${used} of ${limit} ${unit} used this period.`,
+    allowanceUsed: (used: number, limit: string, unit: string) => `${used} of ${limit} ${unit}`,
     /** No ceiling. Said in words, never as a number and never as "0 left". */
-    allowanceUnlimited: (used: number, unit: string) =>
-      `${used} ${unit} used this period. There is no limit.`,
+    allowanceUnlimited: (used: number, unit: string) => `${used} ${unit}, no limit`,
     /**
      * The tier's ceiling, not a count: "on this account" read as how many profiles
      * exist, and a parent with two showed "1".

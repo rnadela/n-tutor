@@ -17,7 +17,7 @@ import type { AccountConsumption } from '@/lib/consumption-format';
 import { useElevation } from '@/lib/elevation';
 import { parentApi, type AccountDeletionPreview } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView, refusalText } from '@/lib/parent-view';
-import { density } from '@/theme/tokens';
+import { density, typeRoles } from '@/theme/tokens';
 import { AllowancesPanel } from './AllowancesPanel';
 
 /**
@@ -41,11 +41,7 @@ export const deleteAccountNoteId = 'account-delete-note';
  */
 export function DataAndDeletionNote() {
   return (
-    <Typography
-      id={deleteAccountNoteId}
-      component="p"
-      sx={{ fontSize: 13, color: 'text.secondary' }}
-    >
+    <Typography id={deleteAccountNoteId} component="p" sx={{ ...typeRoles.dashboardBody }}>
       {parentCopy.settings.deleteAccountNote}
     </Typography>
   );
