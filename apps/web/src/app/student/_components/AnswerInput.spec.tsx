@@ -21,7 +21,7 @@ function question(over: Partial<StudentQuestionView>): StudentQuestionView {
   };
 }
 
-function render(view: StudentQuestionView, value = ''): string {
+function render(view: StudentQuestionView, value = '', disabled = false): string {
   return renderToStaticMarkup(
     createElement(
       ThemeProvider,
@@ -31,6 +31,7 @@ function render(view: StudentQuestionView, value = ''): string {
         value,
         onChange: () => {},
         labelledBy: PROMPT_ID,
+        disabled,
       }),
     ),
   );
@@ -160,6 +161,30 @@ describe('what no Format renders', () => {
       ]) {
         expect(markup).not.toMatch(forbidden);
       }
+    }
+  });
+});
+
+describe('once the time limit has passed', () => {
+  it('locks every Format, so nothing after the deadline can be entered', () => {
+    const radios = render(MULTIPLE_CHOICE, '2', true).match(/<input[^>]*type="radio"[^>]*>/gu);
+    expect(radios).toHaveLength(MULTIPLE_CHOICE.choices.length);
+    for (const radio of radios!) expect(radio).toMatch(/\sdisabled/u);
+    expect(render(question({ format: 'FillInTheBlank' }), '3/4', true)).toMatch(
+      /data-testid="answer-fraction-input"[^>]*disabled|disabled[^>]*data-testid="answer-fraction-input"/u,
+    );
+    expect(render(question({ format: 'ShortAnswer' }), 'six', true)).toMatch(
+      /<textarea[^>]*disabled/u,
+    );
+  });
+
+  it('keeps every Format live before it', () => {
+    for (const view of [
+      MULTIPLE_CHOICE,
+      question({ format: 'FillInTheBlank' }),
+      question({ format: 'ShortAnswer' }),
+    ]) {
+      expect(render(view).replace(/<style[\s\S]*?<\/style>/gu, '')).not.toMatch(/\sdisabled/u);
     }
   });
 });

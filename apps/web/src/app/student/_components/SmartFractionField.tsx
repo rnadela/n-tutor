@@ -32,12 +32,15 @@ export function SmartFractionField({
   value,
   onChange,
   describedBy,
+  disabled = false,
 }: {
   /** The raw typed string. The sole accessible and submitted value. */
   value: string;
   onChange(next: string): void;
   /** Ids of anything that describes this field beyond its own label. */
   describedBy?: string;
+  /** The answer can no longer change — the time limit has passed. */
+  disabled?: boolean;
 }) {
   const inputId = useId();
   const helpId = useId();
@@ -74,6 +77,7 @@ export function SmartFractionField({
           spellCheck={false}
           aria-describedby={describedBy === undefined ? helpId : `${describedBy} ${helpId}`}
           data-testid="answer-fraction-input"
+          disabled={disabled}
           value={value}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
           sx={{

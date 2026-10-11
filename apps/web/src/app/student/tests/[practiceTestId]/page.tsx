@@ -1015,8 +1015,14 @@ export default function TakeTestPage() {
 
   const promptId = `question-prompt-${question.id}`;
   const answer = answers[question.id] ?? '';
-  const setAnswer = (next: string) =>
+  // A timed Attempt whose deadline has passed is graded as it stood at the
+  // deadline. Online it is already on its way up; offline the hand-in waits for
+  // a connection, and nothing typed in that wait may ride along with it.
+  const timeUp = attempt !== null && attempt.expiresAt !== null && remaining === 0;
+  const setAnswer = (next: string) => {
+    if (timeUp) return;
     setAnswers((previous) => ({ ...previous, [question.id]: next }));
+  };
 
   return (
     <Box
@@ -1113,6 +1119,7 @@ export default function TakeTestPage() {
             value={answer}
             onChange={setAnswer}
             labelledBy={promptId}
+            disabled={timeUp}
           />
         </Box>
 

@@ -31,6 +31,7 @@ export function AnswerInput({
   value,
   onChange,
   labelledBy,
+  disabled = false,
 }: {
   question: StudentQuestionView;
   /** The raw answer: a chosen option's ordinal as a string, or typed text. */
@@ -38,6 +39,12 @@ export function AnswerInput({
   onChange(next: string): void;
   /** The prompt's own id — a choice group is named by the Question it answers. */
   labelledBy: string;
+  /**
+   * The answer can no longer change. Set once a timed Attempt's deadline has
+   * passed: what was entered before it is what is graded, so nothing after it
+   * may be (FR-15) — including while the hand-in waits for a connection.
+   */
+  disabled?: boolean;
 }) {
   if (question.format === 'MultipleChoice') {
     return (
@@ -56,6 +63,7 @@ export function AnswerInput({
               key={choice.ordinal}
               value={String(choice.ordinal)}
               control={<Radio />}
+              disabled={disabled}
               data-testid="answer-choice"
               label={<RichText segments={choice.body} />}
               sx={{ minHeight: `${comfortableDensity.tapTarget}px` }}
@@ -67,7 +75,14 @@ export function AnswerInput({
   }
 
   if (question.format === 'FillInTheBlank') {
-    return <SmartFractionField value={value} onChange={onChange} describedBy={labelledBy} />;
+    return (
+      <SmartFractionField
+        value={value}
+        onChange={onChange}
+        describedBy={labelledBy}
+        disabled={disabled}
+      />
+    );
   }
 
   if (question.format === 'ShortAnswer') {
@@ -75,6 +90,7 @@ export function AnswerInput({
       <TextField
         multiline
         minRows={4}
+        disabled={disabled}
         label={studentCopy.takeTest.answerLabel}
         // The raw string, held as it was typed. Nothing here reformats it.
         value={value}
