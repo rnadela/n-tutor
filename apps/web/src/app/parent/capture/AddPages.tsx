@@ -88,6 +88,12 @@ export function AddPages({
   const camera = parentCopy.capture.camera;
   const [status, setStatus] = useState<CameraStatus>('unknown');
   const [open, setOpen] = useState(false);
+  /**
+   * How many photos the last library selection turned away. The announcement
+   * reaches a screen reader once; this keeps the same sentence on screen for a
+   * sighted parent, until the next selection replaces it.
+   */
+  const [trimmed, setTrimmed] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   /**
    * The live stream, in a ref rather than state: stopping it is a cleanup, and
@@ -311,6 +317,7 @@ export function AddPages({
    */
   function chooseFromLibrary(chosen: readonly File[]): void {
     const { accepted, rejectedCount } = splitSelection(chosen, pageCount, maxPages);
+    setTrimmed(rejectedCount);
     // Nothing fits: nothing is posted, so no answer is coming from the server and
     // this is the only chance to say anything at all.
     if (accepted.length === 0) {
@@ -379,8 +386,24 @@ export function AddPages({
         />
       </Box>
 
+      {/* "This upload is full" stops being true once a page is deleted. */}
+      <LibraryTrimNotice rejectedCount={pageCount >= maxPages ? trimmed : 0} />
       <CameraGuidance status={status} />
     </Box>
+  );
+}
+
+/**
+ * The visible half of a trimmed library selection. The live region already
+ * said it; this is for the parent who reads the screen rather than hears it.
+ * Not itself live, so a screen reader does not hear it twice.
+ */
+export function LibraryTrimNotice({ rejectedCount }: { rejectedCount: number }) {
+  if (rejectedCount <= 0) return null;
+  return (
+    <Typography component="p" data-testid="library-trimmed">
+      {parentCopy.capture.rejectedCount(rejectedCount)}
+    </Typography>
   );
 }
 

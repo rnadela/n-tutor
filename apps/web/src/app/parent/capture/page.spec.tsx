@@ -10,7 +10,7 @@ import { ParentApiError, type PageImageView } from '@/lib/parent-api';
 import { endsParentView } from '@/lib/parent-view';
 import { parentTheme } from '@/theme/theme';
 import { colorTokens, density } from '@/theme/tokens';
-import { CameraGuidance, type CameraStatus } from './AddPages';
+import { CameraGuidance, LibraryTrimNotice, type CameraStatus } from './AddPages';
 import { CameraViewfinder, type CameraViewfinderProps } from './CameraViewfinder';
 import { PageStrip, type PageStripProps } from './PageStrip';
 import { ThinExtractionWarning, type ThinExtractionWarningProps } from './ThinExtractionWarning';
@@ -990,6 +990,30 @@ describe('what the viewfinder says and offers', () => {
     ]) {
       expect(code).toContain(marker);
     }
+  });
+});
+
+describe('a library selection larger than the slots left', () => {
+  function renderTrim(rejectedCount: number): string {
+    return renderToStaticMarkup(
+      createElement(
+        ThemeProvider,
+        { theme: parentTheme },
+        createElement(LibraryTrimNotice, { rejectedCount }),
+      ),
+    );
+  }
+
+  it('says nothing when every photo was added', () => {
+    expect(renderTrim(0)).not.toContain('library-trimmed');
+  });
+
+  it('shows how many photos were turned away, on screen and not only announced', () => {
+    const markup = renderTrim(2);
+    expect(markup).toContain('library-trimmed');
+    expect(markup).toContain(parentCopy.capture.rejectedCount(2));
+    // The live region already announced it; the visible copy is not live too.
+    expect(markup).not.toContain('aria-live');
   });
 });
 
