@@ -120,6 +120,14 @@ describe('what the Allowances section states', () => {
     expect(markup).not.toMatch(/credits?/iu);
   });
 
+  it('states the Student Profile limit as the tier allows it, never as a count', () => {
+    const markup = render(consumptionWith({ studentProfileLimit: 3 }));
+
+    expect(markup).toContain(`${parentCopy.settings.studentProfileLimitLabel}: 3`);
+    // A ceiling, said as one: "on this account" read as how many profiles exist.
+    expect(parentCopy.settings.studentProfileLimitLabel).toMatch(/allows/iu);
+  });
+
   it('says an unlimited allowance in words, and invents no number for it', () => {
     const markup = render(
       consumptionWith({

@@ -432,7 +432,11 @@ export const parentCopy = {
     /** No ceiling. Said in words, never as a number and never as "0 left". */
     allowanceUnlimited: (used: number, unit: string) =>
       `${used} ${unit} used this period. There is no limit.`,
-    studentProfileLimitLabel: 'Student profiles on this account',
+    /**
+     * The tier's ceiling, not a count: "on this account" read as how many profiles
+     * exist, and a parent with two showed "1".
+     */
+    studentProfileLimitLabel: 'Active student profiles this tier allows',
     /** One date for all three counters, because they start again together. */
     allowanceResets: (date: string) => `All three counts start again on ${date}.`,
 
