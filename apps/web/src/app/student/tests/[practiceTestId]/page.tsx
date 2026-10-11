@@ -1036,10 +1036,16 @@ export default function TakeTestPage() {
   return (
     <Box
       sx={{
-        display: 'flex',
-        alignItems: 'flex-start',
+        // One centred unit: the Question column at its measure and the map beside
+        // it, rather than the two pushed to opposite edges of a wide screen.
+        display: 'grid',
+        gridTemplateColumns: {
+          xs: 'minmax(0, 1fr)',
+          md: `minmax(0, ${measure.questionMaxWidth}) minmax(0, 18rem)`,
+        },
         justifyContent: 'center',
-        gap: `${comfortableDensity.gap}px`,
+        alignItems: 'start',
+        columnGap: `${comfortableDensity.sectionMargin}px`,
       }}
     >
       <Screen component="section" measured>
@@ -1224,7 +1230,17 @@ export default function TakeTestPage() {
           paddingInline: `${comfortableDensity.cardPadding}px`,
         }}
       >
-        <QuestionMap progress={progress} currentIndex={index} onJump={jumpTo} />
+        <Box
+          sx={{
+            p: `${comfortableDensity.cardPadding}px`,
+            bgcolor: 'background.paper',
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: `${rounded.control}px`,
+          }}
+        >
+          <QuestionMap progress={progress} currentIndex={index} onJump={jumpTo} />
+        </Box>
       </Box>
 
       {/* The overlay form of the map, opened by its own control and by nothing else.

@@ -9,7 +9,7 @@ import { TextField } from '@/components/TextField';
 import { studentCopy } from '@/copy/student';
 import { MAX_ANSWER_LENGTH } from '@/lib/answers';
 import type { StudentQuestionView } from '@/lib/parent-api';
-import { comfortableDensity } from '@/theme/tokens';
+import { comfortableDensity, rounded } from '@/theme/tokens';
 import { SmartFractionField } from './SmartFractionField';
 
 /**
@@ -57,6 +57,7 @@ export function AnswerInput({
           name={`question-${question.id}`}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          sx={{ gap: `${comfortableDensity.gap / 2}px` }}
         >
           {question.choices.map((choice) => (
             <FormControlLabel
@@ -66,7 +67,23 @@ export function AnswerInput({
               disabled={disabled}
               data-testid="answer-choice"
               label={<RichText segments={choice.body} />}
-              sx={{ minHeight: `${comfortableDensity.tapTarget}px` }}
+              // Each option is a whole tile, not a dot and a word: the full row
+              // is the target a child's finger lands on, and the chosen one is
+              // marked by its border and tint as well as by the filled radio.
+              sx={(theme) => {
+                const chosen = value === String(choice.ordinal);
+                return {
+                  m: 0,
+                  minHeight: `${comfortableDensity.tapTarget}px`,
+                  pr: `${comfortableDensity.cardPadding}px`,
+                  border: '1px solid',
+                  borderColor: chosen ? 'primary.main' : 'divider',
+                  borderRadius: `${rounded.control}px`,
+                  bgcolor: chosen ? 'action.selected' : 'transparent',
+                  transition: theme.transitions.create(['border-color', 'background-color']),
+                  '&:hover': { bgcolor: chosen ? 'action.selected' : 'action.hover' },
+                };
+              }}
             />
           ))}
         </RadioGroup>
