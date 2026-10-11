@@ -121,6 +121,43 @@ describe('window resolution against a timezone history', () => {
     expect(window.timezone).toBe('UTC');
   });
 
+  it('cuts an account’s first period in its sign-up zone, not UTC', () => {
+    // Signed up in Manila mid-month: no entry is in force at the month's start, and
+    // the sign-up zone is the only zone the account has ever had.
+    const signedUp = history([['Asia/Manila', '2026-10-10T13:35:09.174Z']]);
+    const first = resolveWindow(new Date('2026-10-11T05:00:00.000Z'), signedUp);
+
+    expect(first.timezone).toBe('Asia/Manila');
+    expect(localOf(first.start, 'Asia/Manila')).toBe('2026-10-01T00:00:00');
+    expect(localOf(first.end, 'Asia/Manila')).toBe('2026-11-01T00:00:00');
+    expect(first.end.toISOString()).toBe('2026-10-31T16:00:00.000Z');
+  });
+
+  it('does the same west of UTC, where the local month starts later', () => {
+    const signedUp = history([['America/New_York', '2026-10-20T15:00:00.000Z']]);
+    // 23:00 on 31 October in New York is already November in UTC.
+    const late = resolveWindow(new Date('2026-11-01T03:00:00.000Z'), signedUp);
+
+    expect(late.timezone).toBe('America/New_York');
+    expect(localOf(late.start, 'America/New_York')).toBe('2026-10-01T00:00:00');
+    expect(late.end.toISOString()).toBe('2026-11-01T04:00:00.000Z');
+  });
+
+  it('keeps the sign-up zone for the first period when a change waits for the next one', () => {
+    const entries = history([
+      ['Asia/Manila', '2026-10-10T13:35:09.174Z'],
+      ['Pacific/Auckland', '2026-10-20T00:00:00.000Z'],
+    ]);
+
+    // After the change took effect, inside the first period: still the sign-up zone.
+    const first = resolveWindow(new Date('2026-10-25T00:00:00.000Z'), entries);
+    expect(first.timezone).toBe('Asia/Manila');
+
+    const next = resolveWindow(new Date('2026-11-05T00:00:00.000Z'), entries);
+    expect(next.timezone).toBe('Pacific/Auckland');
+    expect(localOf(next.start, 'Pacific/Auckland')).toBe('2026-11-01T00:00:00');
+  });
+
   it('uses the zone in effect at the period start, not the one in effect now', () => {
     // UTC from account creation, Auckland effective mid-period: the running
     // period must still be the UTC one.

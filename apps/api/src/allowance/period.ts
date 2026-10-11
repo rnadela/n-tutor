@@ -126,14 +126,41 @@ const MAX_RESOLUTION_PASSES = 3;
  * by at most a zone offset, so a real history settles in one or two.
  */
 export function resolveWindow(instant: Date, history: readonly TimezoneEntry[]): PeriodWindow {
-  let zone = zoneInEffectAt(history, instant) ?? DEFAULT_TIMEZONE;
+  const inForce = zoneInEffectAt(history, instant);
+  let zone = inForce ?? DEFAULT_TIMEZONE;
   let window = monthWindowFor(instant, zone);
+  // The account's first period starts before its sign-up entry does, so no entry is in
+  // force at that start. The sign-up zone is the account's zone from the beginning —
+  // there was no other one to change *from* — so it is what such a start resolves to,
+  // not UTC. Only once the account exists at `instant`: a moment before sign-up still
+  // resolves to UTC, as an account with no history does.
+  const beforeHistory =
+    inForce === null ? DEFAULT_TIMEZONE : (initialZone(history) ?? DEFAULT_TIMEZONE);
 
   for (let pass = 0; pass < MAX_RESOLUTION_PASSES; pass += 1) {
-    const fromStart = zoneInEffectAt(history, window.start) ?? DEFAULT_TIMEZONE;
+    const fromStart = zoneInEffectAt(history, window.start) ?? beforeHistory;
     if (fromStart === zone) return window; // Fixpoint: start and zone agree.
     zone = fromStart;
     window = monthWindowFor(instant, zone);
   }
   return window;
+}
+
+/**
+ * The zone the account signed up in: its earliest usable entry, ties broken as
+ * `zoneInEffectAt` breaks them so the answer never depends on row order. `null` for
+ * an account with no usable entry.
+ */
+function initialZone(history: readonly TimezoneEntry[]): string | null {
+  let first: TimezoneEntry | null = null;
+  for (const entry of history) {
+    if (!isSupportedTimeZone(entry.timezone)) continue;
+    if (first === null) {
+      first = entry;
+      continue;
+    }
+    const delta = entry.effectiveFrom.getTime() - first.effectiveFrom.getTime();
+    if (delta < 0 || (delta === 0 && entry.timezone > first.timezone)) first = entry;
+  }
+  return first?.timezone ?? null;
 }
