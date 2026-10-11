@@ -343,17 +343,21 @@ export default function ParentAnalyticsPage() {
                             sx={{ ...typeRoles.dashboardBody }}
                             data-testid="analytics-activity"
                           >
-                            {parentCopy.analytics.activity(address.Name, analytics.activity)}
+                            {analytics.activity.released === 0
+                              ? parentCopy.analytics.activityNone(address.Name)
+                              : parentCopy.analytics.activity(address.Name, analytics.activity)}
                           </Typography>
                         )}
                       </Addressed>
-                      <Typography
-                        component="p"
-                        data-testid="analytics-activity-breakdown"
-                        sx={{ color: 'text.secondary' }}
-                      >
-                        {parentCopy.analytics.activityBreakdown(analytics.activity)}
-                      </Typography>
+                      {analytics.activity.released > 0 && (
+                        <Typography
+                          component="p"
+                          data-testid="analytics-activity-breakdown"
+                          sx={{ color: 'text.secondary' }}
+                        >
+                          {parentCopy.analytics.activityBreakdown(analytics.activity)}
+                        </Typography>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -381,124 +385,141 @@ export default function ParentAnalyticsPage() {
                       <Typography component="h2" variant="cardTitle">
                         {parentCopy.analytics.digestTitle}
                       </Typography>
-                      <Box
-                        sx={{
-                          display: 'grid',
-                          gap: `${density.gap / 2}px`,
-                          p: `${density.cardPadding}px`,
-                          borderRadius: `${rounded.control}px`,
-                          border: '1px solid',
-                          borderColor:
-                            analytics.digest.disputesAwaiting === 0 ? 'divider' : 'warning.main',
-                        }}
-                      >
+                      {analytics.digest.disputesAwaiting === 0 &&
+                      analytics.digest.explanationFlagsAwaiting === 0 ? (
                         <Typography
                           component="p"
-                          data-testid="analytics-digest-disputes"
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: `${density.gap}px`,
-                          }}
+                          data-testid="analytics-digest-none"
+                          sx={{ color: 'text.secondary' }}
                         >
+                          {parentCopy.analytics.digestNone}
+                        </Typography>
+                      ) : (
+                        <>
                           <Box
-                            component="span"
                             sx={{
-                              display: 'inline-flex',
-                              pt: '3px',
-                              color:
+                              display: 'grid',
+                              gap: `${density.gap / 2}px`,
+                              p: `${density.cardPadding}px`,
+                              borderRadius: `${rounded.control}px`,
+                              border: '1px solid',
+                              borderColor:
                                 analytics.digest.disputesAwaiting === 0
-                                  ? 'text.secondary'
+                                  ? 'divider'
                                   : 'warning.main',
                             }}
                           >
-                            <Scale size={16} aria-hidden="true" />
+                            <Typography
+                              component="p"
+                              data-testid="analytics-digest-disputes"
+                              sx={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: `${density.gap}px`,
+                              }}
+                            >
+                              <Box
+                                component="span"
+                                sx={{
+                                  display: 'inline-flex',
+                                  pt: '3px',
+                                  color:
+                                    analytics.digest.disputesAwaiting === 0
+                                      ? 'text.secondary'
+                                      : 'warning.main',
+                                }}
+                              >
+                                <Scale size={16} aria-hidden="true" />
+                              </Box>
+                              {analytics.digest.disputesAwaiting === 0
+                                ? parentCopy.analytics.disputesNone
+                                : parentCopy.analytics.disputes(analytics.digest.disputesAwaiting)}
+                            </Typography>
+                            {/* Client-side, so the provider holding the elevation bearer
+                            stays mounted across the navigation. */}
+                            <Button
+                              component={NextLink}
+                              href="/parent/grade-disputes"
+                              size="small"
+                              endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                              sx={{
+                                justifySelf: 'start',
+                                minHeight: density.tapTarget,
+                                '& .MuiButton-endIcon': {
+                                  transition: (theme) => theme.transitions.create('transform'),
+                                },
+                                '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
+                                  transform: 'translateX(2px)',
+                                },
+                              }}
+                            >
+                              {parentCopy.analytics.openDisputes}
+                            </Button>
                           </Box>
-                          {analytics.digest.disputesAwaiting === 0
-                            ? parentCopy.analytics.disputesNone
-                            : parentCopy.analytics.disputes(analytics.digest.disputesAwaiting)}
-                        </Typography>
-                        {/* Client-side, so the provider holding the elevation bearer
-                        stays mounted across the navigation. */}
-                        <Button
-                          component={NextLink}
-                          href="/parent/grade-disputes"
-                          size="small"
-                          endIcon={<ArrowRight size={16} aria-hidden="true" />}
-                          sx={{
-                            justifySelf: 'start',
-                            minHeight: density.tapTarget,
-                            '& .MuiButton-endIcon': {
-                              transition: (theme) => theme.transitions.create('transform'),
-                            },
-                            '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
-                              transform: 'translateX(2px)',
-                            },
-                          }}
-                        >
-                          {parentCopy.analytics.openDisputes}
-                        </Button>
-                      </Box>
-                      <Box
-                        sx={{
-                          display: 'grid',
-                          gap: `${density.gap / 2}px`,
-                          p: `${density.cardPadding}px`,
-                          borderRadius: `${rounded.control}px`,
-                          border: '1px solid',
-                          borderColor:
-                            analytics.digest.explanationFlagsAwaiting === 0
-                              ? 'divider'
-                              : 'warning.main',
-                        }}
-                      >
-                        <Typography
-                          component="p"
-                          data-testid="analytics-digest-flags"
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: `${density.gap}px`,
-                          }}
-                        >
                           <Box
-                            component="span"
                             sx={{
-                              display: 'inline-flex',
-                              pt: '3px',
-                              color:
+                              display: 'grid',
+                              gap: `${density.gap / 2}px`,
+                              p: `${density.cardPadding}px`,
+                              borderRadius: `${rounded.control}px`,
+                              border: '1px solid',
+                              borderColor:
                                 analytics.digest.explanationFlagsAwaiting === 0
-                                  ? 'text.secondary'
+                                  ? 'divider'
                                   : 'warning.main',
                             }}
                           >
-                            <Flag size={16} aria-hidden="true" />
+                            <Typography
+                              component="p"
+                              data-testid="analytics-digest-flags"
+                              sx={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: `${density.gap}px`,
+                              }}
+                            >
+                              <Box
+                                component="span"
+                                sx={{
+                                  display: 'inline-flex',
+                                  pt: '3px',
+                                  color:
+                                    analytics.digest.explanationFlagsAwaiting === 0
+                                      ? 'text.secondary'
+                                      : 'warning.main',
+                                }}
+                              >
+                                <Flag size={16} aria-hidden="true" />
+                              </Box>
+                              {analytics.digest.explanationFlagsAwaiting === 0
+                                ? parentCopy.analytics.flagsNone
+                                : parentCopy.analytics.flags(
+                                    analytics.digest.explanationFlagsAwaiting,
+                                  )}
+                            </Typography>
+                            {/* Client-side, so the provider holding the elevation bearer
+                            stays mounted across the navigation. */}
+                            <Button
+                              component={NextLink}
+                              href="/parent/explanation-flags"
+                              size="small"
+                              endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                              sx={{
+                                justifySelf: 'start',
+                                minHeight: density.tapTarget,
+                                '& .MuiButton-endIcon': {
+                                  transition: (theme) => theme.transitions.create('transform'),
+                                },
+                                '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
+                                  transform: 'translateX(2px)',
+                                },
+                              }}
+                            >
+                              {parentCopy.analytics.openFlags}
+                            </Button>
                           </Box>
-                          {analytics.digest.explanationFlagsAwaiting === 0
-                            ? parentCopy.analytics.flagsNone
-                            : parentCopy.analytics.flags(analytics.digest.explanationFlagsAwaiting)}
-                        </Typography>
-                        {/* Client-side, so the provider holding the elevation bearer
-                        stays mounted across the navigation. */}
-                        <Button
-                          component={NextLink}
-                          href="/parent/explanation-flags"
-                          size="small"
-                          endIcon={<ArrowRight size={16} aria-hidden="true" />}
-                          sx={{
-                            justifySelf: 'start',
-                            minHeight: density.tapTarget,
-                            '& .MuiButton-endIcon': {
-                              transition: (theme) => theme.transitions.create('transform'),
-                            },
-                            '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
-                              transform: 'translateX(2px)',
-                            },
-                          }}
-                        >
-                          {parentCopy.analytics.openFlags}
-                        </Button>
-                      </Box>
+                        </>
+                      )}
                     </CardContent>
                   </Card>
 

@@ -1763,6 +1763,8 @@ export const parentCopy = {
     activityTitle: 'Practice tests',
     activity: (name: string, counts: { released: number; completed: number }) =>
       `${name} has ${counts.released} practice test${counts.released === 1 ? '' : 's'}, ${counts.completed} of them finished.`,
+    /** No released test at all: one plain sentence instead of a row of zeros. */
+    activityNone: (name: string) => `${name} has no practice tests yet.`,
     activityBreakdown: (counts: { unstarted: number; inProgress: number }) =>
       `${counts.unstarted} not started, ${counts.inProgress} in progress.`,
 
@@ -1864,6 +1866,8 @@ export const parentCopy = {
         : `${count} reported explanations are waiting for you.`,
     flagsNone: 'No reported explanations are waiting for a decision.',
     openFlags: 'Read the reports',
+    /** Neither kind waiting: one quiet line, and no way through to an empty list. */
+    digestNone: 'Nothing is waiting for a decision.',
 
     /**
      * The Explanation counter. **Stated as the account's**, because it is: it is
