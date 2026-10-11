@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Clock,
   Flag,
+  GraduationCap,
   Home,
   KeyRound,
   Menu,
@@ -154,19 +155,45 @@ function NavList({
                 <Button
                   component={NextLink}
                   href={item.href}
-                  variant={current ? 'contained' : 'text'}
+                  variant="text"
                   aria-current={current ? 'page' : undefined}
                   aria-label={collapsed ? item.label : undefined}
                   onClick={onNavigate}
                   fullWidth
                   startIcon={collapsed ? undefined : <Icon size={18} aria-hidden="true" />}
                   sx={{
+                    position: 'relative',
                     justifyContent: collapsed ? 'center' : 'flex-start',
                     textAlign: 'left',
-                    mb: '4px',
+                    mb: '2px',
                     minHeight: density.tapTarget,
                     minWidth: 0,
-                    px: collapsed ? 0 : undefined,
+                    px: collapsed ? 0 : `${density.gap * 1.5}px`,
+                    py: `${density.gap * 0.75}px`,
+                    fontSize: '0.9375rem',
+                    lineHeight: 1.3,
+                    fontWeight: current ? 700 : 500,
+                    color: current ? 'primary.main' : 'text.primary',
+                    bgcolor: current ? 'action.selected' : 'transparent',
+                    '& .MuiButton-startIcon': {
+                      color: current ? 'primary.main' : 'text.secondary',
+                    },
+                    '&:hover': { bgcolor: current ? 'action.selected' : 'action.hover' },
+                    '&:hover .MuiButton-startIcon': { color: 'primary.main' },
+                    // The current page's accent bar: a second carrier beside the tint and the
+                    // weight, so where you are reads at a glance and not only by colour.
+                    '&::before': current
+                      ? {
+                          content: '""',
+                          position: 'absolute',
+                          left: 0,
+                          top: `${density.gap}px`,
+                          bottom: `${density.gap}px`,
+                          width: 3,
+                          borderRadius: 2,
+                          bgcolor: 'primary.main',
+                        }
+                      : undefined,
                   }}
                 >
                   {collapsed ? <Icon size={20} aria-hidden="true" /> : item.label}
@@ -294,8 +321,20 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
           >
             <Typography
               component="p"
-              sx={{ fontWeight: 700, mb: `${density.gap}px`, px: `${density.gap}px` }}
+              sx={{
+                fontWeight: 700,
+                fontSize: '0.9375rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: `${density.gap}px`,
+                px: `${density.gap}px`,
+                pb: `${density.gap * 1.5}px`,
+                mb: `${density.gap * 1.5}px`,
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+              }}
             >
+              <GraduationCap size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
               {parentCopy.appName}
             </Typography>
             <NavList pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
@@ -325,14 +364,31 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             component="p"
             sx={{
               fontWeight: 700,
-              mb: `${density.gap}px`,
-              px: `${density.gap}px`,
+              fontSize: '0.9375rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: railCollapsed ? 'center' : 'flex-start',
+              gap: `${density.gap}px`,
+              px: railCollapsed ? 0 : `${density.gap}px`,
+              pb: `${density.gap * 1.5}px`,
+              mb: `${density.gap * 1.5}px`,
+              borderBottom: '1px solid',
+              borderColor: 'divider',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
             }}
           >
-            {railCollapsed ? parentCopy.appName.slice(0, 1) : parentCopy.appName}
+            <GraduationCap
+              size={railCollapsed ? 20 : 18}
+              aria-label={railCollapsed ? parentCopy.appName : undefined}
+              aria-hidden={railCollapsed ? undefined : true}
+              style={{ flexShrink: 0 }}
+            />
+            {railCollapsed ? null : (
+              <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {parentCopy.appName}
+              </Box>
+            )}
           </Typography>
           <Box sx={{ flexGrow: 1 }}>
             <NavList pathname={pathname} collapsed={railCollapsed} />
