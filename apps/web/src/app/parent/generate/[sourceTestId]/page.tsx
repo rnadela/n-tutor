@@ -19,7 +19,6 @@ import { ORDER_HEADING_ID, PageStrip } from '@/app/parent/capture/PageStrip';
 import { PrimaryButton } from '@/components/Button';
 import { AppDialog, ConfirmDestructiveDialog } from '@/components/Dialog';
 import { useAnnounce } from '@/components/LiveRegion';
-import { Screen } from '@/components/Screen';
 import { parentCopy } from '@/copy/parent';
 import { limitLabel } from '@/lib/consumption-format';
 import { useElevation } from '@/lib/elevation';
@@ -40,7 +39,8 @@ import {
   remainingAfter,
 } from '@/lib/practice-test-count';
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
-import { density } from '@/theme/tokens';
+import { density, rounded } from '@/theme/tokens';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 
 /** The count fieldset's own label, named once and pointed at by the group. */
 const COUNT_LEGEND_ID = 'generate-count-legend';
@@ -513,8 +513,11 @@ export default function GeneratePage() {
   const running = job !== null && !isSettled(job.status);
 
   return (
-    <Screen measured>
-      <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
+    <Box
+      component="section"
+      sx={{ maxWidth: 560, mx: 'auto', display: 'grid', gap: `${density.gap * 1.5}px` }}
+    >
+      <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
         {parentCopy.generate.title}
       </Typography>
 
@@ -544,10 +547,18 @@ export default function GeneratePage() {
             {running || (job !== null && isSettled(job.status)) ? (
               <Box
                 component="section"
-                sx={{ display: 'grid', gap: `${density.gap}px` }}
+                // A panel of its own, so where the last run got to reads apart from
+                // the choice of another one below it.
+                sx={{
+                  display: 'grid',
+                  gap: `${density.gap}px`,
+                  p: `${density.cardPadding}px`,
+                  bgcolor: 'action.hover',
+                  borderRadius: `${rounded.control}px`,
+                }}
                 data-testid="generate-progress"
               >
-                <Typography component="h2" sx={{ fontSize: 18, fontWeight: 700 }}>
+                <Typography component="h2" variant="cardTitle">
                   {parentCopy.generate.progressHeading}
                 </Typography>
                 {/* The figures are the job's own, read from the server. */}
@@ -583,13 +594,16 @@ export default function GeneratePage() {
                     provider holding the elevation bearer stays mounted. */}
                 {(job!.status === 'Succeeded' || job!.status === 'PartiallyComplete') &&
                   job!.producedCount > 0 && (
-                    <Link
+                    <Button
                       component={NextLink}
                       href="/parent/drafts"
+                      variant="outlined"
+                      endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                      sx={{ justifySelf: 'start', minHeight: density.tapTarget }}
                       data-testid="generate-to-drafts"
                     >
                       {parentCopy.generate.toDrafts}
-                    </Link>
+                    </Button>
                   )}
               </Box>
             ) : null}
@@ -597,20 +611,42 @@ export default function GeneratePage() {
             {picking && allowance !== null && (
               <Box
                 component="section"
-                sx={{ display: 'grid', gap: `${density.gap}px` }}
+                sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}
                 data-testid="generate-picker"
               >
                 <Typography component="p">{parentCopy.generate.intro}</Typography>
-                <Typography component="p" data-testid="generate-usage">
+                <Typography
+                  component="p"
+                  data-testid="generate-usage"
+                  sx={{
+                    justifySelf: 'start',
+                    px: `${density.gap * 1.25}px`,
+                    py: '2px',
+                    borderRadius: 999,
+                    bgcolor: 'action.selected',
+                    fontSize: '0.875rem',
+                    fontWeight: 600,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
                   {parentCopy.generate.usage(allowance.used, limitLabel(allowance.limit))}
                 </Typography>
 
                 <FormControl>
-                  <FormLabel id={COUNT_LEGEND_ID}>{parentCopy.generate.countLegend}</FormLabel>
+                  <FormLabel id={COUNT_LEGEND_ID} sx={{ mb: `${density.gap}px` }}>
+                    {parentCopy.generate.countLegend}
+                  </FormLabel>
+                  {/* A grid of tiles rather than a column of rows: the five counts
+                      are one choice, and reading them side by side is faster. */}
                   <RadioGroup
                     aria-labelledby={COUNT_LEGEND_ID}
                     value={count === null ? '' : String(count)}
                     onChange={(event) => setCount(Number(event.target.value))}
+                    sx={{
+                      display: 'grid',
+                      gap: `${density.gap}px`,
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                    }}
                   >
                     {options.map((option) => (
                       <Box
@@ -638,7 +674,23 @@ export default function GeneratePage() {
                           // group says why it cannot be chosen.
                           disabled={!option.available || starting || refreshingAllowance}
                           label={parentCopy.generate.countOption(option.count)}
-                          sx={{ minHeight: density.tapTarget }}
+                          sx={(theme) => {
+                            const chosen = count === option.count;
+                            return {
+                              m: 0,
+                              width: 1,
+                              minHeight: density.tapTarget,
+                              pr: `${density.gap}px`,
+                              border: '1px solid',
+                              borderColor: chosen ? 'primary.main' : 'divider',
+                              borderRadius: `${rounded.control}px`,
+                              bgcolor: chosen ? 'action.selected' : 'transparent',
+                              transition: theme.transitions.create([
+                                'border-color',
+                                'background-color',
+                              ]),
+                            };
+                          }}
                         />
                       </Box>
                     ))}
@@ -651,7 +703,7 @@ export default function GeneratePage() {
                       component="p"
                       id={COUNT_REASON_ID}
                       data-testid="generate-count-reason"
-                      sx={{ fontSize: 13 }}
+                      sx={{ fontSize: 13, color: 'text.secondary', mt: `${density.gap}px` }}
                     >
                       {/* The API's own sentence when the allowance is spent —
                           it names the Account Tier, the usage against the limit
@@ -721,7 +773,17 @@ export default function GeneratePage() {
                 {costSentence !== null && (
                   // The cost is on screen before the confirm control is ever
                   // reachable, denominated in practice tests.
-                  <Typography component="p" data-testid="generate-cost">
+                  <Typography
+                    component="p"
+                    data-testid="generate-cost"
+                    sx={{
+                      p: `${density.cardPadding}px`,
+                      bgcolor: 'action.hover',
+                      borderRadius: `${rounded.control}px`,
+                      borderLeft: '3px solid',
+                      borderColor: 'primary.main',
+                    }}
+                  >
                     {costSentence}
                   </Typography>
                 )}
@@ -824,9 +886,14 @@ export default function GeneratePage() {
       {/* A client-side link, not a reload: the elevation bearer lives in this
           browser's memory alone (AD-18), so a full navigation would land the
           parent back on the PIN gate rather than on the upload. */}
-      <Link component={NextLink} href="/parent/capture">
+      <Link
+        component={NextLink}
+        href="/parent/capture"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
         {parentCopy.generate.back}
       </Link>
-    </Screen>
+    </Box>
   );
 }

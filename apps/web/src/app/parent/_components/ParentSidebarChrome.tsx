@@ -115,7 +115,17 @@ function pageTitle(pathname: string): string {
  * rather than falling back to the app's name. The header states this instead of
  * repeating the page's own `<h1>` word for word.
  */
+/**
+ * Screens reached from a destination rather than from the sidebar, placed under
+ * the destination they belong to — generating continues an upload.
+ */
+const DRILL_DOWN_PARENTS: ReadonlyArray<[prefix: string, href: string]> = [
+  ['/parent/generate/', '/parent/capture'],
+];
+
 function locate(pathname: string): { group?: string; label: string } {
+  const parent = DRILL_DOWN_PARENTS.find(([prefix]) => pathname.startsWith(prefix));
+  if (parent !== undefined) pathname = parent[1];
   let best: { group?: string; item: NavItem } | null = null;
   for (const group of NAV_GROUPS) {
     for (const item of group.items) {
