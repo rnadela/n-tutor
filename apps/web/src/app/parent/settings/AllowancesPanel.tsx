@@ -118,6 +118,14 @@ export function AllowancesPanel({ consumption }: { consumption: AccountConsumpti
                 p: `${density.cardPadding}px`,
                 bgcolor: 'action.hover',
                 borderRadius: `${rounded.control}px`,
+                // An allowance with nothing left gets an edge in the warning tone.
+                // The sentence below already says "N of N used"; the edge only makes
+                // the spent one findable at a glance, and never stands in for it.
+                borderLeft: '3px solid',
+                borderColor:
+                  reading.limit !== null && reading.used >= reading.limit
+                    ? 'warning.main'
+                    : 'transparent',
               }}
             >
               <Typography component="dt" sx={{ ...typeRoles.label, color: 'text.secondary' }}>

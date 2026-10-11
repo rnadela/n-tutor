@@ -903,9 +903,10 @@ export function ExplanationReview({
                       </Typography>
                     ) : (
                       <Button
-                        variant="outlined"
+                        variant="text"
                         onClick={flag}
                         disabled={flagging}
+                        startIcon={<Flag size={16} aria-hidden="true" />}
                         sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
                         data-testid="explanation-flag"
                       >
