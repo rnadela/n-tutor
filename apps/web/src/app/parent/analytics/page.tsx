@@ -320,344 +320,355 @@ export default function ParentAnalyticsPage() {
         analytics !== null &&
         chosen !== null && (
           <AddressProvider surface="parent" subject={chosen.displayName}>
-            <Box
-              sx={{
-                display: 'grid',
-                gap: `${density.gap * 2}px`,
-                gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 2fr) minmax(0, 1fr)' },
-                alignItems: 'start',
-              }}
-            >
-              <Box sx={{ display: 'grid', gap: `${density.gap * 2}px`, minWidth: 0 }}>
-                {/* What is waiting and what is done, across every released test. */}
-                <Card component="section">
-                  <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                    <Typography component="h2" variant="cardTitle">
-                      {parentCopy.analytics.activityTitle}
-                    </Typography>
-                    <Addressed>
-                      {(address) => (
+            <Box sx={{ display: 'grid', gap: `${density.gap * 2}px` }}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gap: `${density.gap * 2}px`,
+                  gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 2fr) minmax(0, 1fr)' },
+                  alignItems: 'start',
+                }}
+              >
+                <Box sx={{ display: 'grid', gap: `${density.gap * 2}px`, minWidth: 0 }}>
+                  {/* What is waiting and what is done, across every released test. */}
+                  <Card component="section">
+                    <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
+                      <Typography component="h2" variant="cardTitle">
+                        {parentCopy.analytics.activityTitle}
+                      </Typography>
+                      <Addressed>
+                        {(address) => (
+                          <Typography
+                            component="p"
+                            sx={{ ...typeRoles.dashboardBody }}
+                            data-testid="analytics-activity"
+                          >
+                            {parentCopy.analytics.activity(address.Name, analytics.activity)}
+                          </Typography>
+                        )}
+                      </Addressed>
+                      <Typography
+                        component="p"
+                        data-testid="analytics-activity-breakdown"
+                        sx={{ color: 'text.secondary' }}
+                      >
+                        {parentCopy.analytics.activityBreakdown(analytics.activity)}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+
+                  {/* The one trend on the page, stating its own window and scope. */}
+                  <Card>
+                    <CardContent>
+                      <Addressed>
+                        {(address) => (
+                          <TrendSparkline
+                            points={analytics.trend.points}
+                            windowSize={analytics.trend.windowSize}
+                            name={address.name}
+                          />
+                        )}
+                      </Addressed>
+                    </CardContent>
+                  </Card>
+                </Box>
+
+                <Box sx={{ display: 'grid', gap: `${density.gap * 2}px`, minWidth: 0 }}>
+                  {/* The digest: what is waiting for the parent, each with the screen
+                    that already owns the decision. Nothing is decided here. */}
+                  <Card component="section" data-testid="analytics-digest">
+                    <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
+                      <Typography component="h2" variant="cardTitle">
+                        {parentCopy.analytics.digestTitle}
+                      </Typography>
+                      <Box
+                        sx={{
+                          display: 'grid',
+                          gap: `${density.gap / 2}px`,
+                          p: `${density.cardPadding}px`,
+                          borderRadius: `${rounded.control}px`,
+                          border: '1px solid',
+                          borderColor:
+                            analytics.digest.disputesAwaiting === 0 ? 'divider' : 'warning.main',
+                        }}
+                      >
                         <Typography
                           component="p"
-                          sx={{ ...typeRoles.dashboardBody }}
-                          data-testid="analytics-activity"
-                        >
-                          {parentCopy.analytics.activity(address.Name, analytics.activity)}
-                        </Typography>
-                      )}
-                    </Addressed>
-                    <Typography
-                      component="p"
-                      data-testid="analytics-activity-breakdown"
-                      sx={{ color: 'text.secondary' }}
-                    >
-                      {parentCopy.analytics.activityBreakdown(analytics.activity)}
-                    </Typography>
-                  </CardContent>
-                </Card>
-
-                {/* The one trend on the page, stating its own window and scope. */}
-                <Card>
-                  <CardContent>
-                    <Addressed>
-                      {(address) => (
-                        <TrendSparkline
-                          points={analytics.trend.points}
-                          windowSize={analytics.trend.windowSize}
-                          name={address.name}
-                        />
-                      )}
-                    </Addressed>
-                  </CardContent>
-                </Card>
-
-                {/* The ranked table, or the empty state that says what makes one
-                    appear. */}
-                <Card component="section">
-                  <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
-                    {analytics.topics.length === 0 ? (
-                      <Addressed>
-                        {(address) => {
-                          // From the **activity summary**, not from the topics: this
-                          // branch only runs when there are no topic rows, so a signal
-                          // read off them would be a constant — the progress sentence
-                          // would be unreachable and a student who has finished work
-                          // would be told they have finished none.
-                          const progress = emptyStateProgress(
-                            analytics.activity,
-                            analytics.weakArea.answeredFloor,
-                          );
-                          return (
-                            <Box
-                              sx={{ display: 'grid', gap: `${density.gap}px` }}
-                              data-testid="analytics-empty"
-                            >
-                              <Box sx={{ color: 'text.secondary', display: 'inline-flex' }}>
-                                <Sprout size={28} aria-hidden="true" />
-                              </Box>
-                              <Typography component="h2" variant="cardTitle">
-                                {parentCopy.analytics.emptyTitle}
-                              </Typography>
-                              {/* The mechanism, with the figure the API resolved. */}
-                              <Typography component="p" sx={{ ...typeRoles.dashboardBody }}>
-                                {parentCopy.analytics.empty(address.Name, progress.answeredFloor)}
-                              </Typography>
-                              {/* And how far along it is. "Nothing started yet" reads
-                              as a beginning; telling a parent who has finished two
-                              tests the same thing reads as a broken product. */}
-                              <Typography
-                                component="p"
-                                data-testid="analytics-empty-progress"
-                                sx={{ color: 'text.secondary' }}
-                              >
-                                {progress.hasWork
-                                  ? parentCopy.analytics.emptyProgress(progress)
-                                  : parentCopy.analytics.emptyNoWork}
-                              </Typography>
-                            </Box>
-                          );
-                        }}
-                      </Addressed>
-                    ) : (
-                      <>
-                        <Box
+                          data-testid="analytics-digest-disputes"
                           sx={{
                             display: 'flex',
-                            flexWrap: 'wrap',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
                             gap: `${density.gap}px`,
                           }}
                         >
-                          <Typography
-                            component="h2"
-                            variant="cardTitle"
-                            data-testid="analytics-topics"
+                          <Box
+                            component="span"
+                            sx={{
+                              display: 'inline-flex',
+                              pt: '3px',
+                              color:
+                                analytics.digest.disputesAwaiting === 0
+                                  ? 'text.secondary'
+                                  : 'warning.main',
+                            }}
                           >
-                            {narrowedTo === null
-                              ? parentCopy.analytics.masteryTitle
-                              : parentCopy.analytics.subjectHeading(narrowedTo)}
-                          </Typography>
-                          {/* Only the subjects actually present: offering one the student
-                        has no topic in would empty the table and say nothing. */}
-                          {options.length > 1 && (
-                            <TextField
-                              select
-                              id="parent-analytics-subject"
-                              size="small"
-                              label={parentCopy.analytics.subjectLabel}
-                              sx={{ width: { xs: 1, sm: 240 } }}
-                              value={subjectChoice}
-                              onChange={(event) => setSubjectChoice(event.target.value)}
-                            >
-                              <MenuItem value={EVERY_SUBJECT}>
-                                {parentCopy.analytics.allSubjects}
-                              </MenuItem>
-                              {options.map((option) => (
-                                <MenuItem
-                                  key={option.subjectId ?? NO_SUBJECT}
-                                  value={option.subjectId ?? NO_SUBJECT}
-                                >
-                                  {option.subjectName ?? parentCopy.analytics.unknownSubject}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                          )}
-                        </Box>
-                        <Addressed>
-                          {(address) => (
-                            <MasteryTable
-                              topics={visibleTopics}
-                              heading={
-                                narrowedTo === null
-                                  ? parentCopy.analytics.masteryTitle
-                                  : parentCopy.analytics.subjectHeading(narrowedTo)
-                              }
-                              windowSize={analytics.trend.windowSize}
-                              name={address.name}
-                              // The drill-down is about **one** child, so the selected
-                              // student travels in the query string rather than being
-                              // guessed from whatever the next screen happens to read
-                              // first. Composed here because this is the screen that
-                              // knows who is selected.
-                              hrefFor={hrefForTopic}
-                            />
-                          )}
-                        </Addressed>
-                      </>
-                    )}
-                  </CardContent>
-                </Card>
-              </Box>
-
-              <Box sx={{ display: 'grid', gap: `${density.gap * 2}px`, minWidth: 0 }}>
-                {/* The digest: what is waiting for the parent, each with the screen
-                    that already owns the decision. Nothing is decided here. */}
-                <Card component="section" data-testid="analytics-digest">
-                  <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
-                    <Typography component="h2" variant="cardTitle">
-                      {parentCopy.analytics.digestTitle}
-                    </Typography>
-                    <Box
-                      sx={{
-                        display: 'grid',
-                        gap: `${density.gap / 2}px`,
-                        p: `${density.cardPadding}px`,
-                        borderRadius: `${rounded.control}px`,
-                        border: '1px solid',
-                        borderColor:
-                          analytics.digest.disputesAwaiting === 0 ? 'divider' : 'warning.main',
-                      }}
-                    >
-                      <Typography
-                        component="p"
-                        data-testid="analytics-digest-disputes"
-                        sx={{ display: 'flex', alignItems: 'flex-start', gap: `${density.gap}px` }}
-                      >
-                        <Box
-                          component="span"
+                            <Scale size={16} aria-hidden="true" />
+                          </Box>
+                          {analytics.digest.disputesAwaiting === 0
+                            ? parentCopy.analytics.disputesNone
+                            : parentCopy.analytics.disputes(analytics.digest.disputesAwaiting)}
+                        </Typography>
+                        {/* Client-side, so the provider holding the elevation bearer
+                        stays mounted across the navigation. */}
+                        <Button
+                          component={NextLink}
+                          href="/parent/grade-disputes"
+                          size="small"
+                          endIcon={<ArrowRight size={16} aria-hidden="true" />}
                           sx={{
-                            display: 'inline-flex',
-                            pt: '3px',
-                            color:
-                              analytics.digest.disputesAwaiting === 0
-                                ? 'text.secondary'
-                                : 'warning.main',
+                            justifySelf: 'start',
+                            minHeight: density.tapTarget,
+                            '& .MuiButton-endIcon': {
+                              transition: (theme) => theme.transitions.create('transform'),
+                            },
+                            '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
+                              transform: 'translateX(2px)',
+                            },
                           }}
                         >
-                          <Scale size={16} aria-hidden="true" />
-                        </Box>
-                        {analytics.digest.disputesAwaiting === 0
-                          ? parentCopy.analytics.disputesNone
-                          : parentCopy.analytics.disputes(analytics.digest.disputesAwaiting)}
-                      </Typography>
-                      {/* Client-side, so the provider holding the elevation bearer
-                        stays mounted across the navigation. */}
-                      <Button
-                        component={NextLink}
-                        href="/parent/grade-disputes"
-                        size="small"
-                        endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                          {parentCopy.analytics.openDisputes}
+                        </Button>
+                      </Box>
+                      <Box
                         sx={{
-                          justifySelf: 'start',
-                          minHeight: density.tapTarget,
-                          '& .MuiButton-endIcon': {
-                            transition: (theme) => theme.transitions.create('transform'),
-                          },
-                          '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
-                            transform: 'translateX(2px)',
-                          },
+                          display: 'grid',
+                          gap: `${density.gap / 2}px`,
+                          p: `${density.cardPadding}px`,
+                          borderRadius: `${rounded.control}px`,
+                          border: '1px solid',
+                          borderColor:
+                            analytics.digest.explanationFlagsAwaiting === 0
+                              ? 'divider'
+                              : 'warning.main',
                         }}
                       >
-                        {parentCopy.analytics.openDisputes}
-                      </Button>
-                    </Box>
-                    <Box
-                      sx={{
-                        display: 'grid',
-                        gap: `${density.gap / 2}px`,
-                        p: `${density.cardPadding}px`,
-                        borderRadius: `${rounded.control}px`,
-                        border: '1px solid',
-                        borderColor:
-                          analytics.digest.explanationFlagsAwaiting === 0
-                            ? 'divider'
-                            : 'warning.main',
-                      }}
-                    >
-                      <Typography
-                        component="p"
-                        data-testid="analytics-digest-flags"
-                        sx={{ display: 'flex', alignItems: 'flex-start', gap: `${density.gap}px` }}
-                      >
-                        <Box
-                          component="span"
+                        <Typography
+                          component="p"
+                          data-testid="analytics-digest-flags"
                           sx={{
-                            display: 'inline-flex',
-                            pt: '3px',
-                            color:
-                              analytics.digest.explanationFlagsAwaiting === 0
-                                ? 'text.secondary'
-                                : 'warning.main',
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: `${density.gap}px`,
                           }}
                         >
-                          <Flag size={16} aria-hidden="true" />
-                        </Box>
-                        {analytics.digest.explanationFlagsAwaiting === 0
-                          ? parentCopy.analytics.flagsNone
-                          : parentCopy.analytics.flags(analytics.digest.explanationFlagsAwaiting)}
-                      </Typography>
-                      {/* Client-side, so the provider holding the elevation bearer
+                          <Box
+                            component="span"
+                            sx={{
+                              display: 'inline-flex',
+                              pt: '3px',
+                              color:
+                                analytics.digest.explanationFlagsAwaiting === 0
+                                  ? 'text.secondary'
+                                  : 'warning.main',
+                            }}
+                          >
+                            <Flag size={16} aria-hidden="true" />
+                          </Box>
+                          {analytics.digest.explanationFlagsAwaiting === 0
+                            ? parentCopy.analytics.flagsNone
+                            : parentCopy.analytics.flags(analytics.digest.explanationFlagsAwaiting)}
+                        </Typography>
+                        {/* Client-side, so the provider holding the elevation bearer
                         stays mounted across the navigation. */}
-                      <Button
-                        component={NextLink}
-                        href="/parent/explanation-flags"
-                        size="small"
-                        endIcon={<ArrowRight size={16} aria-hidden="true" />}
-                        sx={{
-                          justifySelf: 'start',
-                          minHeight: density.tapTarget,
-                          '& .MuiButton-endIcon': {
-                            transition: (theme) => theme.transitions.create('transform'),
-                          },
-                          '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
-                            transform: 'translateX(2px)',
-                          },
-                        }}
-                      >
-                        {parentCopy.analytics.openFlags}
-                      </Button>
-                    </Box>
-                  </CardContent>
-                </Card>
+                        <Button
+                          component={NextLink}
+                          href="/parent/explanation-flags"
+                          size="small"
+                          endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                          sx={{
+                            justifySelf: 'start',
+                            minHeight: density.tapTarget,
+                            '& .MuiButton-endIcon': {
+                              transition: (theme) => theme.transitions.create('transform'),
+                            },
+                            '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
+                              transform: 'translateX(2px)',
+                            },
+                          }}
+                        >
+                          {parentCopy.analytics.openFlags}
+                        </Button>
+                      </Box>
+                    </CardContent>
+                  </Card>
 
-                <Card component="section">
-                  <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                    {/* The Explanation counter, stated as the account's — it is
+                  <Card component="section">
+                    <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
+                      {/* The Explanation counter, stated as the account's — it is
                       shared by every student on it and is not this one's budget.
                       Formatted in the account's own zone, never the device's. */}
-                    <Typography
-                      component="h2"
-                      sx={{
-                        ...typeRoles.label,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: `${density.gap}px`,
-                        color: 'text.secondary',
-                      }}
-                    >
-                      <Sparkles size={16} aria-hidden="true" />
-                      {parentCopy.analytics.allowanceTitle}
-                    </Typography>
-                    <Typography
-                      component="p"
-                      data-testid="analytics-allowance"
-                      sx={{ fontWeight: 600 }}
-                    >
-                      {analytics.explanationAllowance.limit === null
-                        ? parentCopy.analytics.allowanceUnlimited(
-                            analytics.explanationAllowance.used,
-                          )
-                        : parentCopy.analytics.allowanceUsed(
-                            analytics.explanationAllowance.used,
-                            limitLabel(analytics.explanationAllowance.limit),
-                          )}
-                    </Typography>
-                    <Typography
-                      component="p"
-                      data-testid="analytics-allowance-resets"
-                      sx={{ color: 'text.secondary', fontSize: '0.9375rem' }}
-                    >
-                      {parentCopy.analytics.allowanceResets(
-                        dateOnly(
-                          analytics.explanationAllowance.resetAt,
-                          analytics.explanationAllowance.timezone,
-                        ),
-                      )}
-                    </Typography>
-                  </CardContent>
-                </Card>
+                      <Typography
+                        component="h2"
+                        sx={{
+                          ...typeRoles.label,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: `${density.gap}px`,
+                          color: 'text.secondary',
+                        }}
+                      >
+                        <Sparkles size={16} aria-hidden="true" />
+                        {parentCopy.analytics.allowanceTitle}
+                      </Typography>
+                      <Typography
+                        component="p"
+                        data-testid="analytics-allowance"
+                        sx={{ fontWeight: 600 }}
+                      >
+                        {analytics.explanationAllowance.limit === null
+                          ? parentCopy.analytics.allowanceUnlimited(
+                              analytics.explanationAllowance.used,
+                            )
+                          : parentCopy.analytics.allowanceUsed(
+                              analytics.explanationAllowance.used,
+                              limitLabel(analytics.explanationAllowance.limit),
+                            )}
+                      </Typography>
+                      <Typography
+                        component="p"
+                        data-testid="analytics-allowance-resets"
+                        sx={{ color: 'text.secondary', fontSize: '0.9375rem' }}
+                      >
+                        {parentCopy.analytics.allowanceResets(
+                          dateOnly(
+                            analytics.explanationAllowance.resetAt,
+                            analytics.explanationAllowance.timezone,
+                          ),
+                        )}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Box>
               </Box>
+              {/* The ranked table, or the empty state that says what makes one —
+              across the full width, because a six-column table squeezed into the
+              left column wraps every header and every figure.
+                appear. */}
+              <Card component="section">
+                <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
+                  {analytics.topics.length === 0 ? (
+                    <Addressed>
+                      {(address) => {
+                        // From the **activity summary**, not from the topics: this
+                        // branch only runs when there are no topic rows, so a signal
+                        // read off them would be a constant — the progress sentence
+                        // would be unreachable and a student who has finished work
+                        // would be told they have finished none.
+                        const progress = emptyStateProgress(
+                          analytics.activity,
+                          analytics.weakArea.answeredFloor,
+                        );
+                        return (
+                          <Box
+                            sx={{ display: 'grid', gap: `${density.gap}px` }}
+                            data-testid="analytics-empty"
+                          >
+                            <Box sx={{ color: 'text.secondary', display: 'inline-flex' }}>
+                              <Sprout size={28} aria-hidden="true" />
+                            </Box>
+                            <Typography component="h2" variant="cardTitle">
+                              {parentCopy.analytics.emptyTitle}
+                            </Typography>
+                            {/* The mechanism, with the figure the API resolved. */}
+                            <Typography component="p" sx={{ ...typeRoles.dashboardBody }}>
+                              {parentCopy.analytics.empty(address.Name, progress.answeredFloor)}
+                            </Typography>
+                            {/* And how far along it is. "Nothing started yet" reads
+                          as a beginning; telling a parent who has finished two
+                          tests the same thing reads as a broken product. */}
+                            <Typography
+                              component="p"
+                              data-testid="analytics-empty-progress"
+                              sx={{ color: 'text.secondary' }}
+                            >
+                              {progress.hasWork
+                                ? parentCopy.analytics.emptyProgress(progress)
+                                : parentCopy.analytics.emptyNoWork}
+                            </Typography>
+                          </Box>
+                        );
+                      }}
+                    </Addressed>
+                  ) : (
+                    <>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: `${density.gap}px`,
+                        }}
+                      >
+                        <Typography
+                          component="h2"
+                          variant="cardTitle"
+                          data-testid="analytics-topics"
+                        >
+                          {narrowedTo === null
+                            ? parentCopy.analytics.masteryTitle
+                            : parentCopy.analytics.subjectHeading(narrowedTo)}
+                        </Typography>
+                        {/* Only the subjects actually present: offering one the student
+                    has no topic in would empty the table and say nothing. */}
+                        {options.length > 1 && (
+                          <TextField
+                            select
+                            id="parent-analytics-subject"
+                            size="small"
+                            label={parentCopy.analytics.subjectLabel}
+                            sx={{ width: { xs: 1, sm: 240 } }}
+                            value={subjectChoice}
+                            onChange={(event) => setSubjectChoice(event.target.value)}
+                          >
+                            <MenuItem value={EVERY_SUBJECT}>
+                              {parentCopy.analytics.allSubjects}
+                            </MenuItem>
+                            {options.map((option) => (
+                              <MenuItem
+                                key={option.subjectId ?? NO_SUBJECT}
+                                value={option.subjectId ?? NO_SUBJECT}
+                              >
+                                {option.subjectName ?? parentCopy.analytics.unknownSubject}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        )}
+                      </Box>
+                      <Addressed>
+                        {(address) => (
+                          <MasteryTable
+                            topics={visibleTopics}
+                            heading={
+                              narrowedTo === null
+                                ? parentCopy.analytics.masteryTitle
+                                : parentCopy.analytics.subjectHeading(narrowedTo)
+                            }
+                            windowSize={analytics.trend.windowSize}
+                            name={address.name}
+                            // The drill-down is about **one** child, so the selected
+                            // student travels in the query string rather than being
+                            // guessed from whatever the next screen happens to read
+                            // first. Composed here because this is the screen that
+                            // knows who is selected.
+                            hrefFor={hrefForTopic}
+                          />
+                        )}
+                      </Addressed>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
             </Box>
           </AddressProvider>
         )
