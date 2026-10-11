@@ -13,6 +13,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { Eye, EyeOff, Pencil } from 'lucide-react';
 import { adminCopy } from '@/copy/admin';
 import type { TaxonomyItem } from '@/lib/admin-api';
 import { density } from '@/theme/tokens';
@@ -59,13 +60,26 @@ export function TaxonomyList(props: TaxonomyListProps) {
   return (
     <Card component="section" aria-labelledby={`${idPrefix}-heading`}>
       <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-        <Typography
-          id={`${idPrefix}-heading`}
-          component="h2"
-          sx={{ fontSize: 18, fontWeight: 700 }}
-        >
-          {heading}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}>
+          <Typography id={`${idPrefix}-heading`} component="h2" variant="cardTitle">
+            {heading}
+          </Typography>
+          {/* How many there are, at a glance. Decorative: the table states each one. */}
+          <Box
+            component="span"
+            aria-hidden="true"
+            sx={{
+              px: `${density.gap}px`,
+              borderRadius: 999,
+              bgcolor: 'action.selected',
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {items.length}
+          </Box>
+        </Box>
 
         <Box
           component="form"
@@ -103,8 +117,24 @@ export function TaxonomyList(props: TaxonomyListProps) {
             {props.emptyLabel}
           </Typography>
         ) : (
-          <TableContainer>
-            <Table size="small" aria-labelledby={`${idPrefix}-heading`}>
+          // A long list scrolls inside its own card, header pinned, so a short
+          // one beside it does not leave the page with a column of dead space.
+          <TableContainer sx={{ maxHeight: 440 }}>
+            <Table
+              size="small"
+              stickyHeader
+              aria-labelledby={`${idPrefix}-heading`}
+              sx={{
+                '& thead th': {
+                  fontSize: '0.6875rem',
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: 'text.secondary',
+                  bgcolor: 'background.paper',
+                },
+              }}
+            >
               <TableHead>
                 <TableRow>
                   <TableCell component="th" scope="col">
@@ -176,7 +206,7 @@ export function TaxonomyList(props: TaxonomyListProps) {
                       </Box>
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', gap: `${density.gap}px` }}>
+                      <Box sx={{ display: 'flex', gap: `${density.gap / 2}px` }}>
                         <Button
                           type="button"
                           onClick={() => {
@@ -184,12 +214,24 @@ export function TaxonomyList(props: TaxonomyListProps) {
                             setRenameDraft(item.name);
                           }}
                           aria-label={`${adminCopy.taxonomy.rename} ${item.name}`}
+                          size="small"
+                          variant="text"
+                          startIcon={<Pencil size={14} aria-hidden="true" />}
                         >
                           {adminCopy.taxonomy.rename}
                         </Button>
                         <Button
                           type="button"
                           color={item.enabled ? 'error' : 'success'}
+                          size="small"
+                          variant="text"
+                          startIcon={
+                            item.enabled ? (
+                              <EyeOff size={14} aria-hidden="true" />
+                            ) : (
+                              <Eye size={14} aria-hidden="true" />
+                            )
+                          }
                           disabled={isPending(item.id)}
                           onClick={() =>
                             withPending(item.id, () => props.onSetEnabled(item, !item.enabled))

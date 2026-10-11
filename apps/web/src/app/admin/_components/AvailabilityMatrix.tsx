@@ -55,7 +55,7 @@ export function AvailabilityMatrix(props: AvailabilityMatrixProps) {
   return (
     <Card component="section" aria-labelledby="availability-heading">
       <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-        <Typography id="availability-heading" component="h2" sx={{ fontSize: 18, fontWeight: 700 }}>
+        <Typography id="availability-heading" component="h2" variant="cardTitle">
           {adminCopy.taxonomy.availabilityHeading}
         </Typography>
         <Typography component="p" sx={{ color: 'text.secondary' }}>
@@ -67,11 +67,35 @@ export function AvailabilityMatrix(props: AvailabilityMatrixProps) {
             {adminCopy.taxonomy.availabilityNeedsBoth}
           </Typography>
         ) : (
-          <TableContainer>
-            <Table size="small" aria-labelledby="availability-heading">
+          // Wider than the card once there are a dozen Grade Levels: it scrolls
+          // sideways with the Subject column pinned, so every tick still says
+          // which Subject it belongs to.
+          <TableContainer sx={{ overflowX: 'auto' }}>
+            <Table
+              size="small"
+              aria-labelledby="availability-heading"
+              sx={{
+                '& thead th': {
+                  color: 'text.secondary',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                },
+              }}
+            >
               <TableHead>
                 <TableRow>
-                  <TableCell component="th" scope="col">
+                  <TableCell
+                    component="th"
+                    scope="col"
+                    sx={{
+                      position: 'sticky',
+                      left: 0,
+                      zIndex: 1,
+                      bgcolor: 'background.paper',
+                      borderRight: '1px solid',
+                      borderColor: 'divider',
+                    }}
+                  >
                     {adminCopy.taxonomy.subjectsHeading}
                   </TableCell>
                   {gradeLevels.map((gradeLevel) => (
@@ -87,7 +111,18 @@ export function AvailabilityMatrix(props: AvailabilityMatrixProps) {
                     <TableCell
                       component="th"
                       scope="row"
-                      sx={{ borderRight: '1px solid', borderColor: 'divider' }}
+                      sx={{
+                        ...{
+                          position: 'sticky',
+                          left: 0,
+                          zIndex: 1,
+                          bgcolor: 'background.paper',
+                          borderRight: '1px solid',
+                          borderColor: 'divider',
+                        },
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                      }}
                     >
                       {subject.name}
                     </TableCell>
