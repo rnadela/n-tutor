@@ -249,9 +249,15 @@ export interface PracticeTestDraftSummary {
   id: string;
   sourceTestId: string;
   studentProfileId: string;
-  /** Its place within the job that produced it, 1-based — "draft 2 of 5". */
+  /** Its place within the job that produced it, 1-based. Stable for life. */
   ordinal: number;
-  /** How many drafts of the same job are still drafts. The "of 5". */
+  /**
+   * Its place among the drafts its job is still holding, 1-based — the "2" of
+   * "draft 2 of 3". Not `ordinal`: once a sibling is released or discarded the
+   * stored slot can exceed the count, and "draft 5 of 4" reads as a fault.
+   */
+  position: number;
+  /** How many drafts of the same job are still drafts. The "of 3". */
   siblingCount: number;
   questionCount: number;
   createdAt: string;
@@ -804,6 +810,8 @@ export interface PracticeTestDraftView {
   studentProfileId: string;
   status: PracticeTestStatus;
   ordinal: number;
+  /** Its place among its job's remaining drafts — see `PracticeTestDraftSummary`. */
+  position: number;
   siblingCount: number;
   questionCount: number;
   createdAt: string;
@@ -1096,7 +1104,7 @@ export class PracticeTestService {
    * because the browser has no way to check it.
    */
   async draftsFor(parentAccountId: string): Promise<PracticeTestDraftSummary[]> {
-    const { drafts, countByJob } = await this.prisma.withTransaction(async (tx) => {
+    const { drafts, countByJob, siblings } = await this.prisma.withTransaction(async (tx) => {
       const rows = await tx.practiceTest.findMany({
         where: { parentAccountId, status: 'Draft' },
         // `id` breaks a tie on `createdAt`: two drafts of one job can land
@@ -1113,23 +1121,29 @@ export class PracticeTestService {
           createdAt: true,
         },
       });
-      if (rows.length === 0) return { drafts: rows, countByJob: new Map<string, number>() };
+      if (rows.length === 0) {
+        return { drafts: rows, countByJob: new Map<string, number>(), siblings: [] };
+      }
 
-      // "Draft 2 of 3" is a fact about the job, counted here in one grouped
-      // read rather than by the browser fetching each job's whole draft set to
-      // render a heading.
-      const siblings = await tx.practiceTest.groupBy({
-        by: ['generationJobId'],
+      // "Draft 2 of 3" is a fact about the job, read here once — each sibling's
+      // job and slot, enough for both figures — rather than by the browser
+      // fetching each job's whole draft set to render a heading.
+      const siblings = await tx.practiceTest.findMany({
         where: {
           parentAccountId,
           status: 'Draft',
           generationJobId: { in: [...new Set(rows.map((draft) => draft.generationJobId))] },
         },
-        _count: { _all: true },
+        select: { generationJobId: true, ordinal: true },
       });
       return {
         drafts: rows,
-        countByJob: new Map(siblings.map((row) => [row.generationJobId, row._count._all])),
+        countByJob: siblings.reduce(
+          (counts, row) =>
+            counts.set(row.generationJobId, (counts.get(row.generationJobId) ?? 0) + 1),
+          new Map<string, number>(),
+        ),
+        siblings,
       };
     });
 
@@ -1138,7 +1152,12 @@ export class PracticeTestService {
       sourceTestId: draft.sourceTestId,
       studentProfileId: draft.studentProfileId,
       ordinal: draft.ordinal,
-      // The draft is its own sibling, so the grouped count always holds it and
+      // Read from the same snapshot as the count, so the two never disagree.
+      position:
+        siblings.filter(
+          (row) => row.generationJobId === draft.generationJobId && row.ordinal < draft.ordinal,
+        ).length + 1,
+      // The draft is its own sibling, so the count always holds it and
       // the fallback is never reached — it exists so the view carries a real
       // figure rather than a `?? 0` that would read as "of 0".
       siblingCount: countByJob.get(draft.generationJobId) ?? 1,
@@ -2791,10 +2810,7 @@ export class PracticeTestService {
     // read path — reads and writes nothing there is anything to roll back.
     if (draft === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
 
-    const siblingCount = await tx.practiceTest.count({
-      where: { parentAccountId, generationJobId: draft.generationJobId, status: 'Draft' },
-    });
-    return draftViewOf(draft, siblingCount);
+    return draftViewOf(draft, await draftStanding(tx, parentAccountId, draft));
   }
 
   /**
@@ -3000,12 +3016,7 @@ export class PracticeTestService {
       // read back: the module's one sentence, not Prisma's own missing-row fault.
       if (row === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
       return {
-        view: draftViewOf(
-          row,
-          await tx.practiceTest.count({
-            where: { parentAccountId, generationJobId: row.generationJobId, status: 'Draft' },
-          }),
-        ),
+        view: draftViewOf(row, await draftStanding(tx, parentAccountId, row)),
         discarded: true,
       };
     });
@@ -3147,12 +3158,7 @@ export class PracticeTestService {
       // The row this same transaction just moved, gone by the time it is read
       // back: the module's one sentence, not Prisma's own missing-row fault.
       if (row === null) throw new NotFoundException(PRACTICE_TEST_NOT_FOUND);
-      return draftViewOf(
-        row,
-        await tx.practiceTest.count({
-          where: { parentAccountId, generationJobId: row.generationJobId, status: 'Draft' },
-        }),
-      );
+      return draftViewOf(row, await draftStanding(tx, parentAccountId, row));
     });
 
     // After the commit, never inside it: a log line written in the transaction
@@ -3899,6 +3905,28 @@ const DRAFT_SELECT = {
 
 type DraftRow = Prisma.PracticeTestGetPayload<{ select: typeof DRAFT_SELECT }>;
 
+/** Where a row stands among the drafts its job is still holding. */
+interface DraftStanding {
+  position: number;
+  siblingCount: number;
+}
+
+/**
+ * "Draft N of M", both figures counted over the job's rows still in `Draft`,
+ * inside the caller's transaction. The row itself need not be a draft any more
+ * — a just-discarded row's view still states where it stood.
+ */
+async function draftStanding(
+  tx: TransactionClient,
+  parentAccountId: string,
+  row: Pick<DraftRow, 'generationJobId' | 'ordinal'>,
+): Promise<DraftStanding> {
+  const where = { parentAccountId, generationJobId: row.generationJobId, status: 'Draft' as const };
+  const siblingCount = await tx.practiceTest.count({ where });
+  const before = await tx.practiceTest.count({ where: { ...where, ordinal: { lt: row.ordinal } } });
+  return { position: before + 1, siblingCount };
+}
+
 /**
  * The stored draft as the screen reads it.
  *
@@ -3907,13 +3935,17 @@ type DraftRow = Prisma.PracticeTestGetPayload<{ select: typeof DRAFT_SELECT }>;
  * inverse — and re-parsing on the way out would be a second chance for the two
  * readings to disagree about a row neither of them wrote.
  */
-function draftViewOf(draft: DraftRow, siblingCount: number): PracticeTestDraftView {
+function draftViewOf(
+  draft: DraftRow,
+  { position, siblingCount }: DraftStanding,
+): PracticeTestDraftView {
   return {
     id: draft.id,
     sourceTestId: draft.sourceTestId,
     studentProfileId: draft.studentProfileId,
     status: draft.status,
     ordinal: draft.ordinal,
+    position,
     siblingCount,
     questionCount: draft.questionCount,
     timerMinutes: draft.timerMinutes,

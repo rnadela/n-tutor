@@ -94,7 +94,7 @@ describe('the draft review screen', () => {
 
   it('states "draft N of M" from the server figures', () => {
     // The browser holds one draft and could not count its siblings.
-    expect(PAGE_SOURCE).toContain('parentCopy.drafts.position(draft.ordinal, draft.siblingCount)');
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.position(draft.position, draft.siblingCount)');
   });
 
   it('stores no review position at all — the URL is the position', () => {

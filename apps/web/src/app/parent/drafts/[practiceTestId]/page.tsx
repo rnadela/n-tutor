@@ -844,7 +844,7 @@ export default function DraftReviewPage() {
             {/* Both figures are the server's: this browser holds one draft and
                 could not count the others its job landed. */}
             <Typography component="p" data-testid="draft-position" sx={{ fontWeight: 700 }}>
-              {parentCopy.drafts.position(draft.ordinal, draft.siblingCount)}
+              {parentCopy.drafts.position(draft.position, draft.siblingCount)}
             </Typography>
             {/* Counted from the questions actually rendered, not from the
                 stored `questionCount` column. The heading and the list would

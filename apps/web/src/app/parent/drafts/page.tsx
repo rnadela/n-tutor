@@ -257,7 +257,7 @@ export default function PendingDraftsPage() {
                       {/* Both figures are the server's. The browser holds one
                           draft and could not count its siblings. */}
                       <Typography component="p" data-testid="draft-position">
-                        {parentCopy.drafts.position(draft.ordinal, draft.siblingCount)}
+                        {parentCopy.drafts.position(draft.position, draft.siblingCount)}
                       </Typography>
                       {/* The stored column, and rightly so here: this screen
                           renders no questions, so it has nothing to count. */}

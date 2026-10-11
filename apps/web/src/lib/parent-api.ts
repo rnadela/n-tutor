@@ -297,8 +297,10 @@ export interface PracticeTestDraftSummary {
   id: string;
   sourceTestId: string;
   studentProfileId: string;
-  /** Its place within the job that produced it, 1-based — the "2" of "2 of 3". */
+  /** Its place within the job that produced it, 1-based. Stable for life. */
   ordinal: number;
+  /** Its place among the drafts its job is still holding — the "2" of "2 of 3". */
+  position: number;
   /** How many drafts its job is still holding — the "3". Counted server-side. */
   siblingCount: number;
   questionCount: number;
@@ -1062,6 +1064,8 @@ export interface PracticeTestDraftView {
   studentProfileId: string;
   status: 'Draft' | 'Released' | 'Discarded';
   ordinal: number;
+  /** Its place among its job's remaining drafts — see `PracticeTestDraftSummary`. */
+  position: number;
   siblingCount: number;
   questionCount: number;
   createdAt: string;

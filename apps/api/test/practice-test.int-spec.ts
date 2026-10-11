@@ -2019,6 +2019,7 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       expect(response.body.id).toBe(stored.id);
       expect(response.body.status).toBe('Draft');
       expect(response.body.ordinal).toBe(1);
+      expect(response.body.position).toBe(1);
       expect(response.body.siblingCount).toBe(1);
       expect(response.body.questionCount).toBe(stored.questionCount);
       // Every Question, never a page of them.
@@ -3108,6 +3109,9 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       // "of 2" was true while both were drafts. The remaining draft's figure
       // reflects the smaller set rather than the job's original size.
       expect(list.body[0].siblingCount).toBe(1);
+      // And so does its place in it: "draft 1 of 1", never "draft 2 of 1".
+      expect(list.body[0].ordinal).toBe(2);
+      expect(list.body[0].position).toBe(1);
     });
 
     it('takes a discarded row out of Pending drafts too, and the sibling count with it', async () => {
@@ -3124,6 +3128,11 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       expect(list.body).toHaveLength(1);
       expect(list.body[0].id).toBe(second);
       expect(list.body[0].siblingCount).toBe(1);
+      expect(list.body[0].position).toBe(1);
+
+      const read = await readDraft(ready.token, second!).expect(200);
+      expect(read.body.position).toBe(1);
+      expect(read.body.siblingCount).toBe(1);
     });
 
     it('refuses either transition on another account’s draft as though it were not there', async () => {

@@ -299,6 +299,7 @@ describe('the draft reads', () => {
     const fetchMock = respondWith(200, {
       id: ID,
       ordinal: 2,
+      position: 1,
       siblingCount: 3,
       questionCount: 1,
       questions: [
@@ -320,6 +321,7 @@ describe('the draft reads', () => {
 
     const draft = await parentApi.practiceTestDraft('token', ID);
     expect(draft.ordinal).toBe(2);
+    expect(draft.position).toBe(1);
     expect(draft.siblingCount).toBe(3);
     expect(draft.questions[0]!.prompt[1]).toEqual({
       kind: 'fraction',

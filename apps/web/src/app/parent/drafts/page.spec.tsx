@@ -60,7 +60,7 @@ describe('the pending drafts list', () => {
   it('states "draft N of M" from the server figures rather than counting rows', () => {
     // The browser holds this page of drafts, not the job. Counting here would
     // be a different number the moment a sibling is discarded.
-    expect(PAGE_SOURCE).toContain('parentCopy.drafts.position(draft.ordinal, draft.siblingCount)');
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.position(draft.position, draft.siblingCount)');
     expect(PAGE_SOURCE).not.toContain('drafts.length,');
   });
 
