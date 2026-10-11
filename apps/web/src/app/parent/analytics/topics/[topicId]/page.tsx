@@ -12,7 +12,6 @@ import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { AnswerKeyRow, type AnswerKeyRowLabels } from '@/components/AnswerKeyRow';
 import { Addressed, AddressProvider } from '@/components/Address';
-import { Screen } from '@/components/Screen';
 import { WeakAreaMarker } from '@/components/WeakAreaMarker';
 import { parentCopy } from '@/copy/parent';
 import { masteryPercent } from '@/lib/analytics-view';
@@ -34,7 +33,8 @@ import {
   hasEvidence,
   targetSentence,
 } from '@/lib/topic-drill-down';
-import { density, typeRoles } from '@/theme/tokens';
+import { density, rounded, typeRoles } from '@/theme/tokens';
+import { ArrowLeft } from 'lucide-react';
 
 /** The query parameter the selected student arrives in, from the Mastery table's link. */
 const STUDENT_PARAM = 'student';
@@ -428,16 +428,20 @@ function TopicDrillDown() {
                 const percent = masteryPercent(view.mastery?.value ?? null);
                 return (
                   <Box sx={{ display: 'grid', gap: `${density.sectionMargin}px` }}>
-                    <Box component="section" sx={{ display: 'grid', gap: `${density.gap}px` }}>
+                    <Box component="section" sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>
                       <Typography
                         component="h1"
-                        sx={{ fontSize: 24, fontWeight: 700 }}
+                        sx={{ fontSize: 20, fontWeight: 700 }}
                         data-testid="topic-drill-down-title"
                       >
                         {parentCopy.topicDrillDown.title(address.Name, topicName)}
                       </Typography>
                       {view.subjectName !== null && (
-                        <Typography component="p" data-testid="topic-drill-down-subject">
+                        <Typography
+                          component="p"
+                          sx={{ ...typeRoles.label, color: 'text.secondary' }}
+                          data-testid="topic-drill-down-subject"
+                        >
                           {parentCopy.topicDrillDown.subject(view.subjectName)}
                         </Typography>
                       )}
@@ -453,12 +457,25 @@ function TopicDrillDown() {
                             always with the blanks beside it. */}
                         <Box
                           component="section"
-                          sx={{ display: 'grid', gap: `${density.gap}px` }}
+                          // The figure this screen exists to state, on a panel of its own
+                          // with everything that qualifies it directly beneath.
+                          sx={{
+                            display: 'grid',
+                            gap: `${density.gap}px`,
+                            p: `${density.cardPadding + density.gap}px`,
+                            bgcolor: 'action.hover',
+                            borderRadius: `${rounded.control}px`,
+                          }}
                           data-testid="topic-drill-down-mastery"
                         >
                           <Typography
                             component="p"
-                            sx={{ ...typeRoles.dashboardBody, fontVariantNumeric: 'tabular-nums' }}
+                            sx={{
+                              fontSize: '1.75rem',
+                              fontWeight: 700,
+                              lineHeight: 1.25,
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
                             data-testid="topic-drill-down-figure"
                           >
                             {percent === null
@@ -468,13 +485,21 @@ function TopicDrillDown() {
                           {/* The verdict the API resolved. This screen compares no
                               figure against anything and knows no threshold. */}
                           {view.mastery!.isWeakArea && <WeakAreaMarker />}
-                          <Typography component="p" data-testid="topic-drill-down-scope">
+                          <Typography
+                            component="p"
+                            sx={{ color: 'text.secondary' }}
+                            data-testid="topic-drill-down-scope"
+                          >
                             {parentCopy.topicDrillDown.scope(
                               address.name,
                               view.mastery!.attemptsCounted,
                             )}
                           </Typography>
-                          <Typography component="p" data-testid="topic-drill-down-blanks">
+                          <Typography
+                            component="p"
+                            sx={{ fontWeight: 600 }}
+                            data-testid="topic-drill-down-blanks"
+                          >
                             {view.mastery!.unanswered === 0
                               ? parentCopy.topicDrillDown.blanksNone
                               : parentCopy.topicDrillDown.blanks(view.mastery!.unanswered)}
@@ -483,7 +508,7 @@ function TopicDrillDown() {
                               a blank at all only because the timer had not run out. */}
                           <Typography
                             component="p"
-                            sx={{ ...typeRoles.caption }}
+                            sx={{ ...typeRoles.caption, color: 'text.secondary' }}
                             data-testid="topic-drill-down-blanks-explained"
                           >
                             {parentCopy.topicDrillDown.blanksExplained(address.name)}
@@ -645,13 +670,21 @@ function TopicDrillDown() {
  */
 export default function ParentTopicDrillDownPage() {
   return (
-    <Screen>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.sectionMargin}px` }}
+    >
       <Suspense fallback={null}>
         <TopicDrillDown />
       </Suspense>
-      <Link component={NextLink} href="/parent/analytics">
+      <Link
+        component={NextLink}
+        href="/parent/analytics"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
         {parentCopy.topicDrillDown.back}
       </Link>
-    </Screen>
+    </Box>
   );
 }
