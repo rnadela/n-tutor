@@ -849,8 +849,9 @@ describe('the viewfinder is the one inverted surface', () => {
 
   it('never reaches for the light parent primary, which fails on this ground', () => {
     const markup = withoutGlobalStyles(renderViewfinder());
-    // ~2.5:1 on #10202E. The duplication in `tokens.ts` is what keeps a change
-    // to the parent palette out of the camera (UX-DR4).
+    // 1.87:1 on #1B2620 — below the 3:1 non-text floor. The duplication in
+    // `tokens.ts` is what keeps a change to the parent palette out of the
+    // camera (UX-DR4).
     expect(markup).not.toContain(colorTokens.primaryParent.light);
     expect(markup).not.toContain(colorTokens.divider.light);
   });
@@ -876,6 +877,11 @@ describe('the viewfinder is the one inverted surface', () => {
       path.resolve(DIR, 'CameraViewfinder.tsx'),
       // This spec states the rule, so it necessarily names the tokens.
       path.resolve(DIR, 'page.spec.tsx'),
+      // So do the palette specs: one computes every token-pair's WCAG contrast
+      // (including the inverted trio), the other asserts the token key set.
+      // Both state rules about these tokens; neither paints a surface with them.
+      path.resolve(WEB_SRC, 'theme/contrast.spec.ts'),
+      path.resolve(WEB_SRC, 'theme/tokens.spec.ts'),
     ]);
     const offenders: string[] = [];
     for (const file of sourceFilesUnder(WEB_SRC)) {

@@ -16,10 +16,11 @@ import { controlSx } from './PageStrip';
  * Every colour here is taken from the `…Inverted` / `…OnInverted` pairs and from
  * nothing else: they are identical in light and dark because a viewfinder is
  * dark in both schemes — the photograph is the content, and the chrome around it
- * must not compete with it. The light parent primary measures about 2.5:1 on
- * this ground, so reaching for `primary.main` here would be a contrast failure
- * rather than a consistency win. `light` is read off the pair for the same
- * reason the values are duplicated: the surface does not track the scheme.
+ * must not compete with it. The light parent primary measures 1.87:1 on this
+ * ground — below the 3:1 non-text floor — so reaching for `primary.main` here
+ * would be a contrast failure rather than a consistency win. `light` is read off
+ * the pair for the same reason the values are duplicated: the surface does not
+ * track the scheme.
  */
 const INVERTED = {
   ground: colorTokens.backgroundInverted.light,

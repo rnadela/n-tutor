@@ -2565,3 +2565,19 @@ source_spec: `spec-10-2-install-banner.md`
 severity: low
 reason: `install()` in `apps/web/src/components/InstallBanner.tsx:182-199` calls `void promptToInstall().then((accepted) => { prompting.current = false; if (accepted) dismiss(); })` with no cleanup/mounted-ref check around the `setDismissed`/`rememberInstallBannerDismissed` calls inside `dismiss()`. React 18 no longer warns on a post-unmount `setState`, and the extra `sessionStorage` write is harmless, so the practical risk is low — but it is a real gap in the cleanup discipline the rest of the module otherwise follows.
 status: open
+
+### DW-322: Nothing mechanically compares `colorTokens` against DESIGN.md's `colors:` and `state:` frontmatter, so the token module and its normative source can drift apart with the whole suite green.
+origin: spec-deferred 2d19d2908eea
+location: apps/web/src/theme/contrast.spec.ts
+source_spec: `spec-10-3-brand-palette.md`
+severity: medium
+reason: The new specs read only `colorTokens` and `tokens.ts`'s own bytes, and `contrast.spec.ts` recomputes ratios *from the tokens* — so a value and the document drifting together, or the document moving alone, breaks nothing. Transcription was verified by hand for this story (every key matched byte for byte), which is exactly the check that will not repeat itself next time. Mechanising it would couple the web package's unit suite to `_bmad-output/planning-artifacts`, which is a decision worth taking deliberately rather than inside a palette swap.
+status: open
+
+### DW-323: The source-read specs' comment strippers are string-unaware, so they can both hide a hex they should catch and eat live code.
+origin: spec-deferred 73b311febc40
+location: apps/web/src/theme/tokens.spec.ts:63
+source_spec: `spec-10-3-brand-palette.md`
+severity: low
+reason: `withoutComments` in `tokens.spec.ts` truncates a line at any `//`, so a hex after a protocol-bearing string on the same line is never swept, and its block-comment regex can consume real code containing `*/`. The same line-based idiom is pasted into `page.spec.tsx` and the other source-read specs — a pre-existing convention in this codebase, already recorded as a deferral on Story 10.2 from the opposite direction (it fails to strip the body lines of a multi-line comment). One shared, tokenizer-based helper would close both.
+status: open

@@ -14,24 +14,45 @@ export interface TokenPair {
 }
 
 export const colorTokens = {
-  /** Base (Student View) accent. */
-  primaryStudent: { light: '#0F6E78', dark: '#71C3CE' },
-  /** Parent View accent — the Admin console's only palette override. */
-  primaryParent: { light: '#0B5FA5', dark: '#7FB6E8' },
-  onPrimary: { light: '#FFFFFF', dark: '#0E1620' },
-  secondary: { light: '#4A6072', dark: '#9DB2C4' },
-  success: { light: '#0F6B4F', dark: '#6FD1AC' },
+  /**
+   * Base (Student View) accent — forest green, drawn from the app icon's forest
+   * family. It is not the icon's own ink: that is `brandInk` `#173D30`, a
+   * different green, and the two are never interchanged.
+   *
+   * This and `primaryParent` are the two-rooms hue split: the accent is the one
+   * role that differs between Student Mode and Parent View, and it differs by
+   * hue (forest vs ink navy) rather than by lightness, so the two surfaces read
+   * as two rooms in the same house. Every other token is byte-identical across
+   * Student Mode, Parent View and Admin.
+   */
+  primaryStudent: { light: '#1E5A45', dark: '#7FC4A4' },
+  /** Parent View accent — ink navy; the Admin console's only palette override. */
+  primaryParent: { light: '#2C4F7C', dark: '#8FB3E0' },
+  onPrimary: { light: '#FFFFFF', dark: '#101713' },
+  secondary: { light: '#56634F', dark: '#A9B8A2' },
+  /**
+   * Correct is teal, not green, and that is the point.
+   *
+   * The accent means *interactive*; a green `success` beside a forest accent
+   * would paint "this is a button" and "this answer was right" the same colour.
+   * `success` therefore takes the retired Student accent — a hue no interactive
+   * control uses. Teal sits close to `info` in lightness and separates from it
+   * by hue alone, which is survivable only because every grade state already
+   * carries frame, border, glyph, rule texture and a literal word
+   * (`GradeStateMarker.spec.tsx` proves it with colour stripped).
+   */
+  success: { light: '#0F6E78', dark: '#71C3CE' },
   error: { light: '#B3261E', dark: '#F19B94' },
   warning: { light: '#8A5A00', dark: '#E3B457' },
   info: { light: '#2E6E9E', dark: '#8CC0E4' },
-  backgroundDefault: { light: '#F6F8FA', dark: '#0E1620' },
-  backgroundPaper: { light: '#FFFFFF', dark: '#16202C' },
-  textPrimary: { light: '#10202E', dark: '#E7EEF5' },
-  textSecondary: { light: '#4E6070', dark: '#A3B3C2' },
+  backgroundDefault: { light: '#F4EFE4', dark: '#101713' },
+  backgroundPaper: { light: '#FDFAF3', dark: '#17201B' },
+  textPrimary: { light: '#1B2620', dark: '#E6EDE8' },
+  textSecondary: { light: '#545F58', dark: '#A4B2AA' },
   /** The sole boundary of every control — one divider tier, no second. */
-  divider: { light: '#7C8894', dark: '#6A747E' },
-  tintHover: { light: '#EEF3F5', dark: '#1C2836' },
-  tintSelected: { light: '#E8F1F2', dark: '#0D2A33' },
+  divider: { light: '#7E857C', dark: '#6C766F' },
+  tintHover: { light: '#EFE9DC', dark: '#1F2A24' },
+  tintSelected: { light: '#E7EEE5', dark: '#142B23' },
 
   /*
    * Camera chrome: the one inverted surface in the product (UX-DR4).
@@ -41,18 +62,20 @@ export const colorTokens = {
    * around it must not compete with it. There is deliberately no fifth token
    * that tracks the scheme.
    *
-   * DELIBERATE DUPLICATE. `backgroundInverted` repeats light `textPrimary`,
-   * `primaryOnInverted` repeats dark `primaryParent`, `dividerOnInverted`
-   * repeats dark `divider`, and `textOnInverted` repeats light `onPrimary`.
-   * Never alias, collapse or "tidy" any of them into the token they happen to
-   * equal: the light parent primary measures ~2.5:1 on this ground and white
-   * measures 16.56:1, so a future change to the parent palette must not reach
-   * the camera, and "correcting" the duplication is a contrast regression
-   * rather than a cleanup.
+   * DELIBERATE DUPLICATE. `backgroundInverted` repeats light `textPrimary`
+   * (#1B2620), `primaryOnInverted` repeats dark `primaryParent` (#8FB3E0),
+   * `dividerOnInverted` repeats dark `divider` (#6C766F), and `textOnInverted`
+   * repeats light `onPrimary` (#FFFFFF). Never alias, collapse or "tidy" any of
+   * them into the token they happen to equal: on this ground the light parent
+   * primary measures 1.87:1 — below the 3:1 non-text floor — while the
+   * on-inverted accent measures 7.21:1, the on-inverted divider 3.32:1 and
+   * white 15.62:1. A future change to the parent palette must not reach the
+   * camera, so "correcting" the duplication is a contrast regression rather
+   * than a cleanup.
    */
-  backgroundInverted: { light: '#10202E', dark: '#10202E' },
-  primaryOnInverted: { light: '#7FB6E8', dark: '#7FB6E8' },
-  dividerOnInverted: { light: '#6A747E', dark: '#6A747E' },
+  backgroundInverted: { light: '#1B2620', dark: '#1B2620' },
+  primaryOnInverted: { light: '#8FB3E0', dark: '#8FB3E0' },
+  dividerOnInverted: { light: '#6C766F', dark: '#6C766F' },
   textOnInverted: { light: '#FFFFFF', dark: '#FFFFFF' },
 
   /*
@@ -61,6 +84,19 @@ export const colorTokens = {
    * and splash have to match the icon the family tapped, not the page beneath.
    * Identical in both schemes for the same reason: the icon does not change
    * with the device's preference.
+   *
+   * DELIBERATE DUPLICATE. Since the Reading Room swap `brandGround` `#FDFAF3`
+   * is byte-identical to light `backgroundPaper`. Never alias, collapse or
+   * dedupe the two: the icon must not change when the palette does, and
+   * aliasing them would make the next palette move repaint the installed
+   * splash and the browser chrome — exactly the mismatch this palette exists
+   * to fix.
+   *
+   * Not every equality in this module is one of those. `onPrimary.dark`
+   * `#101713` also happens to equal `backgroundDefault.dark`, but that is
+   * incidental arithmetic rather than a stated rule, and it carries no marker:
+   * DELIBERATE DUPLICATE means "a tidying pass must not touch this", so it is
+   * spent only where the duplication is load-bearing.
    */
   brandGround: { light: '#FDFAF3', dark: '#FDFAF3' },
   brandInk: { light: '#173D30', dark: '#173D30' },
