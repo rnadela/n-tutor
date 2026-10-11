@@ -72,7 +72,7 @@ describe('buildGradingPrompt', () => {
     expect(prompt).toContain('Never leave a rationale empty.');
     expect(prompt).toContain('one or two plain sentences');
     // The tolerance the equivalent-but-differently-written case rests on.
-    expect(prompt).toMatch(/spelling, casing, whitespace, notation and phrasing/u);
+    expect(prompt).toMatch(/spelling, casing, punctuation, whitespace, notation and phrasing/u);
     // And judging inside the question's own subject matter.
     expect(prompt).toContain('Judge only within the question’s own subject matter.');
   });
