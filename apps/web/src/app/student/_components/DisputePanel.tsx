@@ -9,7 +9,8 @@ import { useAnnounce } from '@/components/LiveRegion';
 import { studentCopy } from '@/copy/student';
 import { disputeDecision } from '@/lib/grade-dispute';
 import { ParentApiError, parentApi, type AttemptResultsView } from '@/lib/parent-api';
-import { comfortableDensity, typeRoles } from '@/theme/tokens';
+import { comfortableDensity, typeRoles, rounded } from '@/theme/tokens';
+import { Hourglass, MessageCircleQuestion } from 'lucide-react';
 import { deviceIsUnbound } from '../page';
 
 /**
@@ -152,9 +153,22 @@ export function DisputePanel({
           component="p"
           ref={reportedSentence}
           tabIndex={-1}
-          sx={{ ...typeRoles.caption }}
+          // A small marker, so a row a child has already asked about is recognisable
+          // at a glance. The words carry the state; the tint only repeats it.
+          sx={{
+            ...typeRoles.caption,
+            justifySelf: 'start',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: `${comfortableDensity.gap / 4}px`,
+            px: `${comfortableDensity.gap / 2}px`,
+            py: '2px',
+            borderRadius: `${rounded.control}px`,
+            bgcolor: 'action.selected',
+          }}
           data-testid="dispute-reported"
         >
+          <Hourglass size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
           {studentCopy.results.dispute.reported}
         </Typography>
       ) : (
@@ -165,6 +179,7 @@ export function DisputePanel({
             onClick={send}
             disabled={sending}
             data-testid="dispute-control"
+            startIcon={<MessageCircleQuestion size={16} aria-hidden="true" />}
             sx={{ justifySelf: 'start', minHeight: comfortableDensity.tapTarget }}
           >
             {studentCopy.results.dispute.control}
@@ -172,7 +187,15 @@ export function DisputePanel({
           {/* What the press does, said *before* it is pressed: a grown-up will look, and
               nothing here changes until they do. A child who pressed and watched the mark
               stay put would otherwise think it had not worked. */}
-          <Typography component="p" sx={{ ...typeRoles.caption }} data-testid="dispute-note">
+          <Typography
+            component="p"
+            sx={{
+              ...typeRoles.caption,
+              color: 'text.secondary',
+              mt: `-${comfortableDensity.gap / 2}px`,
+            }}
+            data-testid="dispute-note"
+          >
             {studentCopy.results.dispute.note}
           </Typography>
         </>
