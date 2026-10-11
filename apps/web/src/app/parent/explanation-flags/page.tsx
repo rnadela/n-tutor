@@ -13,7 +13,15 @@ import Link from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { Screen } from '@/components/Screen';
+import {
+  ArrowLeft,
+  ArrowRight,
+  CircleCheck,
+  FileQuestion,
+  Flag,
+  Hourglass,
+  Users,
+} from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
@@ -23,7 +31,7 @@ import {
   type StudentProfileView,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView, readableInstant } from '@/lib/parent-view';
-import { density } from '@/theme/tokens';
+import { density, rounded } from '@/theme/tokens';
 
 /**
  * The Attempt a report points at, typed against the app's generated route table rather
@@ -221,11 +229,18 @@ export default function ParentExplanationFlagsPage() {
   }, [token, studentProfileId, attempt, leave]);
 
   return (
-    <Screen>
-      <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
-        {parentCopy.flags.title}
-      </Typography>
-      <Typography component="p">{parentCopy.flags.intro}</Typography>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 2}px` }}
+    >
+      <Box component="header" sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>
+        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
+          {parentCopy.flags.title}
+        </Typography>
+        <Typography component="p" sx={{ color: 'text.secondary' }}>
+          {parentCopy.flags.intro}
+        </Typography>
+      </Box>
 
       {error !== null && (
         <Alert
@@ -249,15 +264,33 @@ export default function ParentExplanationFlagsPage() {
         // an alert saying the profiles could not be read would be two statements with one
         // of them untrue.
         profilesLoaded && (
-          <Typography component="p" data-testid="parent-flags-no-students">
-            {parentCopy.flags.noStudents}
-          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              justifyItems: 'center',
+              gap: `${density.gap}px`,
+              py: `${density.sectionMargin * 2}px`,
+              px: `${density.cardPadding}px`,
+              border: '1px dashed',
+              borderColor: 'divider',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              textAlign: 'center',
+            }}
+          >
+            <Users size={28} aria-hidden="true" />
+            <Typography component="p" data-testid="parent-flags-no-students">
+              {parentCopy.flags.noStudents}
+            </Typography>
+          </Box>
         )
       ) : (
         <TextField
           select
           id="parent-flags-student"
+          size="small"
           label={parentCopy.flags.studentLabel}
+          sx={{ width: { xs: '100%', sm: 320 } }}
           value={studentProfileId}
           onChange={(event) => setStudentProfileId(event.target.value)}
         >
@@ -270,7 +303,11 @@ export default function ParentExplanationFlagsPage() {
       )}
 
       {loading ? (
-        <Typography component="p" data-testid="parent-flags-loading">
+        <Typography
+          component="p"
+          data-testid="parent-flags-loading"
+          sx={{ color: 'text.secondary' }}
+        >
           {parentCopy.flags.loading}
         </Typography>
       ) : (
@@ -278,9 +315,25 @@ export default function ParentExplanationFlagsPage() {
         // claim about the child, and a screen whose read failed cannot make it.
         loaded &&
         (flags.length === 0 ? (
-          <Typography component="p" data-testid="parent-flags-empty">
-            {parentCopy.flags.empty}
-          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              justifyItems: 'center',
+              gap: `${density.gap}px`,
+              py: `${density.sectionMargin * 2}px`,
+              px: `${density.cardPadding}px`,
+              border: '1px dashed',
+              borderColor: 'divider',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              textAlign: 'center',
+            }}
+          >
+            <Flag size={28} aria-hidden="true" />
+            <Typography component="p" data-testid="parent-flags-empty">
+              {parentCopy.flags.empty}
+            </Typography>
+          </Box>
         ) : (
           <Box
             component="ul"
@@ -301,39 +354,122 @@ export default function ParentExplanationFlagsPage() {
                 key={`${entry.attemptId}:${entry.questionId}:${entry.generation}`}
                 component="li"
                 role="listitem"
-                sx={{ listStyle: 'none' }}
+                sx={{
+                  listStyle: 'none',
+                  transition: (theme) => theme.transitions.create('border-color'),
+                  '&:hover': { borderColor: 'primary.main' },
+                }}
                 data-testid="parent-flag-row"
                 data-disposition={entry.disposition ?? 'awaiting'}
               >
-                <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                  {/* The Subject, or a neutral stand-in for a classification that no
-                      longer resolves: the row keeps its place and loses its label. */}
-                  <Typography component="h2" variant="cardTitle">
-                    {entry.subjectName ?? parentCopy.flags.unknownSubject}
-                  </Typography>
-                  {/* Which run and which question, both the server's figures. */}
-                  <Typography component="p" data-testid="parent-flag-where">
-                    {whereSentence(entry)}
-                  </Typography>
-                  <Typography component="p" data-testid="parent-flag-reported">
-                    {reportedSentence(entry.flaggedAt)}
-                  </Typography>
-                  {/* Awaiting a decision, or which one was made and when. Both kinds are
-                      listed: a dismissal is not a deletion. */}
-                  <Typography component="p" data-testid="parent-flag-decision">
-                    {decisionSentence(entry)}
-                  </Typography>
-                  {/* The way through to the explanation itself, which is read beside the
-                      Question it is about — and where the decision is made. Client-side,
-                      so the provider holding the elevation bearer stays mounted across
-                      the navigation. */}
-                  <Link
-                    component={AttemptLink}
-                    href={attemptHref(entry.attemptId)}
-                    sx={{ minHeight: density.tapTarget }}
+                <CardContent
+                  sx={{
+                    display: 'grid',
+                    gap: `${density.gap}px`,
+                    '&:last-child': { pb: `${density.cardPadding + density.gap}px` },
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: `${density.gap}px`,
+                    }}
                   >
-                    {parentCopy.flags.open}
-                  </Link>
+                    {/* The Subject, or a neutral stand-in for a classification that no
+                        longer resolves: the row keeps its place and loses its label. */}
+                    <Typography component="h2" variant="cardTitle">
+                      {entry.subjectName ?? parentCopy.flags.unknownSubject}
+                    </Typography>
+                    {/* Awaiting a decision, or which one was made and when. Both kinds are
+                        listed: a dismissal is not a deletion. Drawn as a pill so the rows
+                        still needing the parent stand out on a scan; the words carry the
+                        state, the tone only repeats it. */}
+                    <Typography
+                      component="p"
+                      data-testid="parent-flag-decision"
+                      sx={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: `${density.gap / 2}px`,
+                        px: `${density.gap * 1.25}px`,
+                        py: '2px',
+                        borderRadius: 999,
+                        border: '1px solid',
+                        fontSize: '0.8125rem',
+                        fontWeight: 600,
+                        ...(entry.disposition === null
+                          ? { color: 'warning.main', borderColor: 'warning.main' }
+                          : { color: 'text.secondary', borderColor: 'divider' }),
+                      }}
+                    >
+                      {entry.disposition === null ? (
+                        <Hourglass size={14} aria-hidden="true" />
+                      ) : (
+                        <CircleCheck size={14} aria-hidden="true" />
+                      )}
+                      {decisionSentence(entry)}
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: `${density.gap * 1.5}px`,
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        columnGap: `${density.gap * 2}px`,
+                        rowGap: `${density.gap / 2}px`,
+                        color: 'text.secondary',
+                        '& > p': {
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: `${density.gap / 2}px`,
+                          fontSize: '0.9375rem',
+                        },
+                      }}
+                    >
+                      {/* Which run and which question, both the server's figures. */}
+                      <Typography component="p" data-testid="parent-flag-where">
+                        <FileQuestion size={16} aria-hidden="true" />
+                        {whereSentence(entry)}
+                      </Typography>
+                      <Typography component="p" data-testid="parent-flag-reported">
+                        <Flag size={16} aria-hidden="true" />
+                        {reportedSentence(entry.flaggedAt)}
+                      </Typography>
+                    </Box>
+                    {/* The way through to the explanation itself, which is read beside the
+                        Question it is about — and where the decision is made. Client-side,
+                        so the provider holding the elevation bearer stays mounted across
+                        the navigation. */}
+                    <Button
+                      component={AttemptLink}
+                      href={attemptHref(entry.attemptId)}
+                      variant={entry.disposition === null ? 'contained' : 'outlined'}
+                      endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                      sx={{
+                        minHeight: density.tapTarget,
+                        flexShrink: 0,
+                        '& .MuiButton-endIcon': {
+                          transition: (theme) => theme.transitions.create('transform'),
+                        },
+                        '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
+                          transform: 'translateX(2px)',
+                        },
+                      }}
+                    >
+                      {parentCopy.flags.open}
+                    </Button>
+                  </Box>
                 </CardContent>
               </Card>
             ))}
@@ -341,9 +477,14 @@ export default function ParentExplanationFlagsPage() {
         ))
       )}
 
-      <Link component={NextLink} href="/parent">
+      <Link
+        component={NextLink}
+        href="/parent"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
         {parentCopy.flags.backToParentView}
       </Link>
-    </Screen>
+    </Box>
   );
 }
