@@ -8,8 +8,8 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
+import { ArrowLeft } from 'lucide-react';
 import { AnswerKeyRow, type AnswerKeyRowLabels } from '@/components/AnswerKeyRow';
-import { Screen } from '@/components/Screen';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import { explanationsByQuestion } from '@/lib/explanation-review';
@@ -30,6 +30,7 @@ import {
 } from '@/lib/parent-view';
 import { ExplanationReview } from '../../_components/ExplanationReview';
 import { GradeReview } from '../../_components/GradeReview';
+import { density, typeRoles } from '@/theme/tokens';
 
 /**
  * The words a parent reads on every answer-key row.
@@ -328,8 +329,11 @@ export default function ParentAttemptDetailPage() {
   const scoreChange = results === null ? null : scoreChangeOf(results.score, results.originalScore);
 
   return (
-    <Screen>
-      <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 1.5}px` }}
+    >
+      <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
         {parentCopy.attempts.detailTitle}
       </Typography>
 
@@ -367,7 +371,11 @@ export default function ParentAttemptDetailPage() {
       ) : (
         results !== null && (
           <>
-            <Typography component="h2" variant="cardTitle" data-testid="parent-attempt-subject">
+            <Typography
+              component="h2"
+              sx={{ ...typeRoles.label, color: 'text.secondary', mt: `-${density.gap}px` }}
+              data-testid="parent-attempt-subject"
+            >
               {results.subjectName ?? parentCopy.attempts.unknownSubject}
             </Typography>
             {/* The server's two figures, over exactly the rows below. The browser
@@ -379,7 +387,11 @@ export default function ParentAttemptDetailPage() {
                 read the first time. Both counts and the one denominator are the server's,
                 and `scoreChangeOf` is the single place that decides whether there is a change
                 to state at all. */}
-            <Typography component="p" data-testid="parent-attempt-score">
+            <Typography
+              component="p"
+              sx={{ fontSize: '1.5rem', fontWeight: 700, lineHeight: 1.3 }}
+              data-testid="parent-attempt-score"
+            >
               {scoreChange === null
                 ? parentCopy.attempts.score(results.score.correct, results.score.denominator)
                 : parentCopy.attempts.override.scoreChanged(
@@ -389,7 +401,11 @@ export default function ParentAttemptDetailPage() {
                   )}
             </Typography>
             {results.score.excludedUngraded > 0 && (
-              <Typography component="p" data-testid="parent-attempt-excluded">
+              <Typography
+                component="p"
+                sx={{ color: 'text.secondary' }}
+                data-testid="parent-attempt-excluded"
+              >
                 {parentCopy.attempts.excluded(results.score.excludedUngraded)}
               </Typography>
             )}
@@ -416,7 +432,14 @@ export default function ParentAttemptDetailPage() {
 
             <Typography
               component="h3"
-              sx={{ fontSize: 16, fontWeight: 700 }}
+              sx={{
+                fontSize: '0.6875rem',
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'text.secondary',
+                mt: `${density.gap}px`,
+              }}
               data-testid="parent-attempt-questions"
             >
               {parentCopy.attempts.questionsHeading}
@@ -498,9 +521,14 @@ export default function ParentAttemptDetailPage() {
         )
       )}
 
-      <Link component={NextLink} href="/parent/attempts">
+      <Link
+        component={NextLink}
+        href="/parent/attempts"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
         {parentCopy.attempts.backToList}
       </Link>
-    </Screen>
+    </Box>
   );
 }

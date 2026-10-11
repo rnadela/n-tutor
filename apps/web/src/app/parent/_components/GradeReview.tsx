@@ -325,6 +325,7 @@ export function GradeReview({
         aria-expanded={reasonOpen}
         aria-controls={reasonId}
         data-testid="grade-review-reason-control"
+        sx={{ justifySelf: 'start' }}
       >
         {parentCopy.attempts.override.reasonControl}
       </Button>
@@ -406,6 +407,7 @@ export function GradeReview({
               variant="outlined"
               onClick={() => pick(flip)}
               data-testid="grade-review-control"
+              sx={{ justifySelf: 'start' }}
             >
               {parentCopy.attempts.override.control(parentCopy.attempts.override.grade[flip])}
             </Button>
@@ -424,6 +426,7 @@ export function GradeReview({
                 onClick={save}
                 disabled={saving}
                 data-testid="grade-review-save"
+                sx={{ justifySelf: 'start' }}
               >
                 {saving ? parentCopy.attempts.override.saving : parentCopy.attempts.override.save}
               </Button>
@@ -437,6 +440,7 @@ export function GradeReview({
                 onClick={unpick}
                 disabled={saving}
                 data-testid="grade-review-cancel"
+                sx={{ justifySelf: 'start' }}
               >
                 {parentCopy.attempts.override.cancel}
               </Button>
