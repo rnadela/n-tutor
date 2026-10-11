@@ -61,15 +61,21 @@ echo "==> Syncing prod Caddyfile..."
 scp -i "$SSH_KEY" "$ROOT_DIR/infra/docker/Caddyfile" "$SSH_HOST:/opt/ntutor/Caddyfile"
 
 echo "==> Deploying to droplet..."
-ssh -i "$SSH_KEY" "$SSH_HOST" bash -s "$API_IMAGE:$TAG" "$WEB_IMAGE:$TAG" <<'REMOTE'
+# The remote script arrives on stdin (`bash -s`), so every remote command that can
+# read stdin gets `< /dev/null`: one that doesn't swallows the rest of the script,
+# bash hits EOF and exits 0 — and the health check below silently never runs.
+# The sentinel check after the heredoc catches any command that slips through.
+REMOTE_LOG="$(mktemp)"
+trap 'rm -f "$REMOTE_LOG"' EXIT
+ssh -i "$SSH_KEY" "$SSH_HOST" bash -s "$API_IMAGE:$TAG" "$WEB_IMAGE:$TAG" <<'REMOTE' | tee "$REMOTE_LOG"
 set -euo pipefail
 API_TAG="$1"
 WEB_TAG="$2"
 cd /opt/ntutor
 
 echo "Pulling new images..."
-docker pull "$API_TAG"
-docker pull "$WEB_TAG"
+docker pull "$API_TAG" < /dev/null
+docker pull "$WEB_TAG" < /dev/null
 
 echo "Updating .env..."
 sed -i "s|API_IMAGE=.*|API_IMAGE=$API_TAG|" .env
@@ -79,11 +85,11 @@ echo "Running migrations..."
 docker compose run --rm -T api sh -c "cd /app/apps/api && npx prisma@7 migrate deploy" < /dev/null
 
 echo "Deploying..."
-docker compose up -d --remove-orphans
+docker compose up -d --remove-orphans < /dev/null
 
 echo "Reloading Caddy (in case Caddyfile changed)..."
-docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>&1 || \
-  docker compose restart caddy
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile < /dev/null 2>&1 || \
+  docker compose restart caddy < /dev/null
 
 echo "Cleaning up..."
 docker image prune -a -f
@@ -93,11 +99,11 @@ deadline=$((SECONDS + 90))
 api_ok=0
 web_ok=0
 while [ $SECONDS -lt $deadline ]; do
-  if [ $api_ok -eq 0 ] && docker compose exec -T api wget -qO- http://localhost:3001/api/health > /dev/null 2>&1; then
+  if [ $api_ok -eq 0 ] && docker compose exec -T api wget -qO- http://localhost:3001/api/health < /dev/null > /dev/null 2>&1; then
     echo "  API: OK"
     api_ok=1
   fi
-  if [ $web_ok -eq 0 ] && docker compose exec -T web wget -qO- http://localhost:3000 > /dev/null 2>&1; then
+  if [ $web_ok -eq 0 ] && docker compose exec -T web wget -qO- http://localhost:3000 < /dev/null > /dev/null 2>&1; then
     echo "  Web: OK"
     web_ok=1
   fi
@@ -111,3 +117,8 @@ fi
 
 echo "Deploy complete!"
 REMOTE
+
+if ! grep -q '^Deploy complete!$' "$REMOTE_LOG"; then
+  echo "==> Remote deploy script ended before its health check completed — treating as FAILED." >&2
+  exit 1
+fi
