@@ -60,6 +60,22 @@ export function QuestionMap({
       <Typography data-testid="question-map-summary" sx={{ ...typeRoles.caption }}>
         {studentCopy.takeTest.mapSummary(answered, notAnswered)}
       </Typography>
+      {/* The same two counts, drawn: one segment per state, sized by the counts
+          themselves rather than by a percentage. Hidden from assistive technology,
+          because the sentence above already says it. */}
+      <Box
+        aria-hidden="true"
+        sx={{
+          display: 'flex',
+          height: comfortableDensity.gap / 2,
+          borderRadius: `${rounded.control}px`,
+          overflow: 'hidden',
+          bgcolor: 'action.hover',
+        }}
+      >
+        <Box sx={{ flexGrow: answered, bgcolor: 'primary.main' }} />
+        <Box sx={{ flexGrow: notAnswered }} />
+      </Box>
       <Box
         component="ul"
         // `listStyle: 'none'` strips list semantics in Safari/VoiceOver, and the
@@ -67,8 +83,8 @@ export function QuestionMap({
         // left needs announced. Put back by hand, as Student Home does.
         role="list"
         sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
+          display: 'grid',
+          gridTemplateColumns: `repeat(auto-fill, minmax(${comfortableDensity.tapTarget}px, 1fr))`,
           gap: `${comfortableDensity.gap / 2}px`,
           listStyle: 'none',
           p: 0,
@@ -77,6 +93,7 @@ export function QuestionMap({
       >
         {progress.map((question, index) => {
           const current = index === currentIndex;
+          const done = question.state === 'answered';
           return (
             <Box component="li" role="listitem" key={question.id} sx={{ listStyle: 'none' }}>
               <Box
@@ -92,13 +109,20 @@ export function QuestionMap({
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  width: '100%',
                   minWidth: `${comfortableDensity.tapTarget}px`,
                   minHeight: `${comfortableDensity.tapTarget}px`,
                   gap: '2px',
                   cursor: 'pointer',
                   color: 'inherit',
-                  backgroundColor: current ? theme.vars.palette.action.selected : 'transparent',
-                  border: `1px solid ${theme.vars.palette.divider}`,
+                  backgroundColor: current
+                    ? theme.vars.palette.action.selected
+                    : done
+                      ? theme.vars.palette.action.hover
+                      : 'transparent',
+                  border: `1px solid ${
+                    current ? theme.vars.palette.primary.main : theme.vars.palette.divider
+                  }`,
                   // The current cell is heavier as well as tinted: a tint alone
                   // is a colour claim, and colour alone never carries a state here.
                   borderWidth: current ? 2 : 1,
@@ -116,7 +140,12 @@ export function QuestionMap({
                 <Box component="span" aria-hidden="true">
                   {question.ordinal}
                 </Box>
-                <Box component="span" aria-hidden="true" data-testid="question-map-glyph">
+                <Box
+                  component="span"
+                  aria-hidden="true"
+                  data-testid="question-map-glyph"
+                  sx={{ color: done ? 'primary.main' : 'text.secondary', lineHeight: 1 }}
+                >
                   {GLYPH[question.state]}
                 </Box>
                 <Box component="span" sx={visuallyHidden}>
@@ -138,7 +167,7 @@ export function QuestionMap({
         sx={{ display: 'flex', flexWrap: 'wrap', gap: `${comfortableDensity.gap}px` }}
       >
         <Typography sx={{ ...typeRoles.caption }}>
-          <Box component="span" aria-hidden="true">
+          <Box component="span" aria-hidden="true" sx={{ color: 'primary.main' }}>
             {GLYPH.answered}{' '}
           </Box>
           {studentCopy.takeTest.legendAnswered}
