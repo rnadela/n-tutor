@@ -9,13 +9,14 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
 import Collapse from '@mui/material/Collapse';
+import Divider from '@mui/material/Divider';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
 import Link from '@mui/material/Link';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { ChevronDown, ChevronUp, Eye, EyeOff, Lock, Mail } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, EyeOff, FileText, Lock, Mail } from 'lucide-react';
 import { AuthBrand } from '../_components/AuthBrand';
 import { parentCopy } from '@/copy/parent';
 import { deviceTimeZone, parentApi, type AuthPolicy } from '@/lib/parent-api';
@@ -96,7 +97,9 @@ export default function SignUpPage() {
           >
             {parentCopy.signUp.title}
           </Typography>
-          <Typography sx={{ mb: `${density.gap}px`, color: 'text.secondary' }}>
+          <Typography
+            sx={{ mb: `${density.gap * 2}px`, color: 'text.secondary', textAlign: 'center' }}
+          >
             {parentCopy.signUp.intro}
           </Typography>
 
@@ -174,90 +177,43 @@ export default function SignUpPage() {
               required
             />
 
-            <Box
-              sx={{
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: `${rounded.control}px`,
-              }}
-            >
-              <Button
-                type="button"
-                fullWidth
-                onClick={() => setShowTerms((shown) => !shown)}
-                endIcon={
-                  showTerms ? (
-                    <ChevronUp size={16} aria-hidden="true" />
-                  ) : (
-                    <ChevronDown size={16} aria-hidden="true" />
-                  )
-                }
-                sx={{ justifyContent: 'space-between', border: 'none' }}
-              >
-                {showTerms ? parentCopy.signUp.hideTerms : parentCopy.signUp.showTerms}
-              </Button>
-              <Collapse in={showTerms && policy !== null}>
-                {policy && (
-                  <Typography
-                    sx={{ p: `${density.cardPadding}px`, pt: 0, color: 'text.secondary' }}
-                  >
-                    {policy.termsText}
-                  </Typography>
-                )}
-              </Collapse>
-            </Box>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  id="accept-terms"
-                  checked={acceptedTerms}
-                  onChange={(event) => setAcceptedTerms(event.target.checked)}
+            <ConsentBlock
+              open={showTerms}
+              onToggle={() => setShowTerms((shown) => !shown)}
+              toggleLabel={showTerms ? parentCopy.signUp.hideTerms : parentCopy.signUp.showTerms}
+              text={policy?.termsText ?? null}
+              accepted={acceptedTerms}
+              checkbox={
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      id="accept-terms"
+                      checked={acceptedTerms}
+                      onChange={(event) => setAcceptedTerms(event.target.checked)}
+                    />
+                  }
+                  label={parentCopy.signUp.termsLabel}
                 />
               }
-              label={parentCopy.signUp.termsLabel}
             />
-
-            <Box
-              sx={{
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: `${rounded.control}px`,
-              }}
-            >
-              <Button
-                type="button"
-                fullWidth
-                onClick={() => setShowNotice((shown) => !shown)}
-                endIcon={
-                  showNotice ? (
-                    <ChevronUp size={16} aria-hidden="true" />
-                  ) : (
-                    <ChevronDown size={16} aria-hidden="true" />
-                  )
-                }
-                sx={{ justifyContent: 'space-between', border: 'none' }}
-              >
-                {showNotice ? parentCopy.signUp.hideNotice : parentCopy.signUp.showNotice}
-              </Button>
-              <Collapse in={showNotice && policy !== null}>
-                {policy && (
-                  <Typography
-                    sx={{ p: `${density.cardPadding}px`, pt: 0, color: 'text.secondary' }}
-                  >
-                    {policy.noticeText}
-                  </Typography>
-                )}
-              </Collapse>
-            </Box>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  id="accept-notice"
-                  checked={acceptedNotice}
-                  onChange={(event) => setAcceptedNotice(event.target.checked)}
+            <ConsentBlock
+              open={showNotice}
+              onToggle={() => setShowNotice((shown) => !shown)}
+              toggleLabel={showNotice ? parentCopy.signUp.hideNotice : parentCopy.signUp.showNotice}
+              text={policy?.noticeText ?? null}
+              accepted={acceptedNotice}
+              checkbox={
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      id="accept-notice"
+                      checked={acceptedNotice}
+                      onChange={(event) => setAcceptedNotice(event.target.checked)}
+                    />
+                  }
+                  label={parentCopy.signUp.noticeLabel}
                 />
               }
-              label={parentCopy.signUp.noticeLabel}
             />
 
             {error && (
@@ -265,15 +221,100 @@ export default function SignUpPage() {
                 {error}
               </Alert>
             )}
-            <Button type="submit" variant="contained" disabled={busy || !ready}>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={busy || !ready}
+              sx={{ minHeight: density.tapTarget }}
+            >
               {busy ? parentCopy.signUp.submitting : parentCopy.signUp.submit}
             </Button>
+            <Divider />
             <Link href="/auth/sign-in" sx={{ textAlign: 'center' }}>
               {parentCopy.signUp.haveAccount}
             </Link>
           </Box>
         </CardContent>
       </Card>
+    </Box>
+  );
+}
+
+/**
+ * One consent as one unit: the way to read it, the text itself, and the box that
+ * accepts it, inside a single border — so what is being accepted sits directly
+ * above the control that accepts it. The border takes the accent once accepted.
+ */
+function ConsentBlock({
+  open,
+  onToggle,
+  toggleLabel,
+  text,
+  accepted,
+  checkbox,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  toggleLabel: string;
+  text: string | null;
+  accepted: boolean;
+  checkbox: React.ReactNode;
+}) {
+  return (
+    <Box
+      sx={(theme) => ({
+        border: '1px solid',
+        borderColor: accepted ? 'primary.main' : 'divider',
+        borderRadius: `${rounded.control}px`,
+        transition: theme.transitions.create('border-color'),
+      })}
+    >
+      <Button
+        type="button"
+        fullWidth
+        onClick={onToggle}
+        endIcon={
+          open ? (
+            <ChevronUp size={16} aria-hidden="true" />
+          ) : (
+            <ChevronDown size={16} aria-hidden="true" />
+          )
+        }
+        sx={{
+          justifyContent: 'space-between',
+          border: 'none',
+          bgcolor: 'transparent',
+          minHeight: density.tapTarget,
+          px: `${density.cardPadding}px`,
+        }}
+      >
+        <Box
+          component="span"
+          sx={{ display: 'inline-flex', alignItems: 'center', gap: `${density.gap}px` }}
+        >
+          <FileText size={16} aria-hidden="true" />
+          {toggleLabel}
+        </Box>
+      </Button>
+      <Collapse in={open && text !== null}>
+        {text !== null && (
+          <Typography
+            sx={{
+              mx: `${density.cardPadding}px`,
+              p: `${density.cardPadding}px`,
+              maxHeight: 240,
+              overflowY: 'auto',
+              bgcolor: 'action.hover',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              fontSize: '0.9375rem',
+            }}
+          >
+            {text}
+          </Typography>
+        )}
+      </Collapse>
+      <Box sx={{ px: `${density.cardPadding}px`, py: `${density.gap / 2}px` }}>{checkbox}</Box>
     </Box>
   );
 }
