@@ -1,7 +1,10 @@
 'use client';
 
 import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
+import { CalendarClock, Users } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import {
   dateOnly,
@@ -10,7 +13,7 @@ import {
   type AccountConsumption,
   type AllowanceReading,
 } from '@/lib/consumption-format';
-import { density } from '@/theme/tokens';
+import { density, rounded, typeRoles } from '@/theme/tokens';
 
 /** Usage numbers align on tabular figures, as the Admin consumption panel does. */
 const tabular = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -59,45 +62,104 @@ export function AllowancesPanel({ consumption }: { consumption: AccountConsumpti
   ];
 
   return (
-    <Box
-      component="section"
-      aria-labelledby={allowancesHeadingId}
-      sx={{ display: 'grid', gap: `${density.gap}px` }}
-    >
-      <Typography id={allowancesHeadingId} component="h2" sx={{ fontSize: 18, fontWeight: 700 }}>
-        {parentCopy.settings.allowancesHeading}
-      </Typography>
-      <Typography sx={{ color: 'text.secondary' }}>
-        {parentCopy.settings.allowancesIntro}
-      </Typography>
+    <Card component="section" aria-labelledby={allowancesHeadingId}>
+      <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
+        <Box
+          sx={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: `${density.gap}px`,
+          }}
+        >
+          <Typography id={allowancesHeadingId} component="h2" variant="cardTitle">
+            {parentCopy.settings.allowancesHeading}
+          </Typography>
+          <Typography
+            component="p"
+            data-testid="account-tier"
+            sx={{
+              px: `${density.gap * 1.25}px`,
+              py: '2px',
+              borderRadius: 999,
+              border: '1px solid',
+              borderColor: 'primary.main',
+              color: 'primary.main',
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+            }}
+          >
+            {parentCopy.settings.tierLine(tierLabel(consumption.tier))}
+          </Typography>
+        </Box>
+        <Typography sx={{ color: 'text.secondary' }}>
+          {parentCopy.settings.allowancesIntro}
+        </Typography>
 
-      <Typography component="p" data-testid="account-tier">
-        {parentCopy.settings.tierLine(tierLabel(consumption.tier))}
-      </Typography>
+        <Box
+          component="dl"
+          sx={{
+            display: 'grid',
+            gap: `${density.gap}px`,
+            m: 0,
+            gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' },
+          }}
+        >
+          {rows.map(([label, reading, unit]) => (
+            <Box
+              key={label}
+              data-testid="allowance-row"
+              data-allowance={label}
+              sx={{
+                display: 'grid',
+                gap: `${density.gap / 2}px`,
+                alignContent: 'start',
+                p: `${density.cardPadding}px`,
+                bgcolor: 'action.hover',
+                borderRadius: `${rounded.control}px`,
+              }}
+            >
+              <Typography component="dt" sx={{ ...typeRoles.label, color: 'text.secondary' }}>
+                {label}
+              </Typography>
+              <Typography component="dd" sx={{ ...tabular, m: 0, fontWeight: 600 }}>
+                {reading.limit === null
+                  ? parentCopy.settings.allowanceUnlimited(reading.used, unit)
+                  : parentCopy.settings.allowanceUsed(
+                      reading.used,
+                      limitLabel(reading.limit),
+                      unit,
+                    )}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
 
-      <Box component="dl" sx={{ display: 'grid', gap: `${density.gap / 2}px`, m: 0 }}>
-        {rows.map(([label, reading, unit]) => (
-          <Box key={label} data-testid="allowance-row" data-allowance={label}>
-            <Typography component="dt" sx={{ fontWeight: 700 }}>
-              {label}
-            </Typography>
-            <Typography component="dd" sx={{ ...tabular, m: 0 }}>
-              {reading.limit === null
-                ? parentCopy.settings.allowanceUnlimited(reading.used, unit)
-                : parentCopy.settings.allowanceUsed(reading.used, limitLabel(reading.limit), unit)}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-
-      <Typography component="p" sx={tabular}>
-        {`${parentCopy.settings.studentProfileLimitLabel}: ${limitLabel(
-          consumption.studentProfileLimit,
-        )}`}
-      </Typography>
-      <Typography component="p" sx={tabular} data-testid="allowances-reset">
-        {parentCopy.settings.allowanceResets(dateOnly(consumption.resetAt, consumption.timezone))}
-      </Typography>
-    </Box>
+        <Typography
+          component="p"
+          sx={{ ...tabular, display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}
+        >
+          <Users size={16} aria-hidden="true" />
+          {`${parentCopy.settings.studentProfileLimitLabel}: ${limitLabel(
+            consumption.studentProfileLimit,
+          )}`}
+        </Typography>
+        <Typography
+          component="p"
+          sx={{
+            ...tabular,
+            display: 'flex',
+            alignItems: 'center',
+            gap: `${density.gap}px`,
+            color: 'text.secondary',
+          }}
+          data-testid="allowances-reset"
+        >
+          <CalendarClock size={16} aria-hidden="true" />
+          {parentCopy.settings.allowanceResets(dateOnly(consumption.resetAt, consumption.timezone))}
+        </Typography>
+      </CardContent>
+    </Card>
   );
 }

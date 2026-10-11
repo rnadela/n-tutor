@@ -10,6 +10,7 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
+import { ArrowLeft, ShieldAlert, Trash2 } from 'lucide-react';
 import { DestructiveConfirmDialog } from '@/components/Dialog';
 import { parentCopy } from '@/copy/parent';
 import type { AccountConsumption } from '@/lib/consumption-format';
@@ -240,46 +241,53 @@ export default function SettingsPage() {
   }
 
   return (
-    <Card component="section" sx={{ maxWidth: 840, mx: 'auto' }}>
-      <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 2}px` }}
+    >
+      <Box component="header" sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>
         <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
           {parentCopy.settings.title}
         </Typography>
-        <Typography>{parentCopy.settings.intro}</Typography>
+        <Typography sx={{ color: 'text.secondary' }}>{parentCopy.settings.intro}</Typography>
+      </Box>
 
-        {error !== null && (
-          <Alert
-            severity="error"
-            role="alert"
-            variant="outlined"
-            action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
-          >
-            {error}
-          </Alert>
-        )}
+      {error !== null && (
+        <Alert
+          severity="error"
+          role="alert"
+          variant="outlined"
+          action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
+        >
+          {error}
+        </Alert>
+      )}
 
-        {/* Allowances first: reading a limit is the routine visit, and ending
+      {/* Allowances first: reading a limit is the routine visit, and ending
             the account is not. It renders whatever the deletion preview did,
             and its own failure is reported here rather than in the page alert
             above, so a lost allowance read leaves Data & deletion working. */}
-        {consumption !== null && <AllowancesPanel consumption={consumption} />}
-        {consumption === null && allowancesLoading && (
-          <Typography role="status" component="p" sx={{ color: 'text.secondary' }}>
-            {parentCopy.settings.allowancesLoading}
-          </Typography>
-        )}
-        {allowancesError !== null && (
-          <Alert
-            severity="error"
-            role="alert"
-            variant="outlined"
-            action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
-          >
-            {allowancesError}
-          </Alert>
-        )}
+      {consumption !== null && <AllowancesPanel consumption={consumption} />}
+      {consumption === null && allowancesLoading && (
+        <Typography role="status" component="p" sx={{ color: 'text.secondary' }}>
+          {parentCopy.settings.allowancesLoading}
+        </Typography>
+      )}
+      {allowancesError !== null && (
+        <Alert
+          severity="error"
+          role="alert"
+          variant="outlined"
+          action={<Button onClick={load}>{parentCopy.errors.retry}</Button>}
+        >
+          {allowancesError}
+        </Alert>
+      )}
 
-        <Box
+      {/* Set apart in the error tone: the one irreversible thing on this screen,
+            and it should never be mistaken for one more setting. */}
+      <Card sx={{ borderColor: 'error.main' }}>
+        <CardContent
           component="section"
           aria-labelledby="data-and-deletion-heading"
           sx={{ display: 'grid', gap: `${density.gap}px` }}
@@ -287,8 +295,10 @@ export default function SettingsPage() {
           <Typography
             id="data-and-deletion-heading"
             component="h2"
-            sx={{ fontSize: 18, fontWeight: 700 }}
+            variant="cardTitle"
+            sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}
           >
+            <ShieldAlert size={20} aria-hidden="true" />
             {parentCopy.settings.dataAndDeletion}
           </Typography>
           <DataAndDeletionNote />
@@ -308,6 +318,8 @@ export default function SettingsPage() {
           <Button
             type="button"
             color="error"
+            variant="outlined"
+            startIcon={<Trash2 size={16} aria-hidden="true" />}
             disabled={loading || previewing || deleting || confirming !== null || token === null}
             aria-describedby={deleteAccountNoteId}
             sx={{ minHeight: density.tapTarget, justifySelf: 'start' }}
@@ -317,29 +329,34 @@ export default function SettingsPage() {
           >
             {parentCopy.settings.deleteAccount}
           </Button>
-        </Box>
+        </CardContent>
+      </Card>
 
-        {/* The account password, never the Parent PIN, and a body that names
+      {/* The account password, never the Parent PIN, and a body that names
             every count and kind rather than "everything on this account". */}
-        {confirming !== null && (
-          <DestructiveConfirmDialog
-            open
-            subject={parentCopy.settings.deleteAccountSubject}
-            body={parentCopy.settings.deleteAccountBody(confirming)}
-            refusal={refusal}
-            busy={deleting}
-            onCancel={onDeleteCancelled}
-            onConfirm={(password) => {
-              void onDeleteConfirmed(password);
-            }}
-          />
-        )}
+      {confirming !== null && (
+        <DestructiveConfirmDialog
+          open
+          subject={parentCopy.settings.deleteAccountSubject}
+          body={parentCopy.settings.deleteAccountBody(confirming)}
+          refusal={refusal}
+          busy={deleting}
+          onCancel={onDeleteCancelled}
+          onConfirm={(password) => {
+            void onDeleteConfirmed(password);
+          }}
+        />
+      )}
 
-        {/* Client-side, so the provider holding the token stays mounted. */}
-        <Link component={NextLink} href="/parent">
-          {parentCopy.settings.back}
-        </Link>
-      </CardContent>
-    </Card>
+      {/* Client-side, so the provider holding the token stays mounted. */}
+      <Link
+        component={NextLink}
+        href="/parent"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
+        {parentCopy.settings.back}
+      </Link>
+    </Box>
   );
 }
