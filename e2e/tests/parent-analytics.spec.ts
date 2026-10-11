@@ -67,7 +67,10 @@ test('a parent reaches the dashboard from Parent View and reads why it is empty'
   // rather than about a control with one option in it. Two active children need
   // a tier above Free, which allows one.
   await setParentTierFixture(email, 'Family');
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   for (const name of ['Ada', 'Grace']) {
     await page.locator('#student-name').fill(name);
     await page.locator('[role="combobox"]#student-grade-level').click();
@@ -80,7 +83,10 @@ test('a parent reaches the dashboard from Parent View and reads why it is empty'
 
   // The way in, and the only way in there is: a dashboard a parent cannot reach
   // is a dashboard that did not ship.
-  await page.getByRole('link', { name: 'Where a student is strong and weak' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Where a student is strong and weak' })
+    .click();
   await expect(
     page.getByRole('heading', { name: 'Where a student is strong and weak', level: 1 }),
   ).toBeVisible();
@@ -134,7 +140,10 @@ test('a parent opens a weak topic from the table and reads the cost before anyth
     page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
   ).toBeVisible();
 
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await page.locator('#student-name').fill('Ada');
   await page.locator('[role="combobox"]#student-grade-level').click();
   await page.getByRole('option', { name: gradeLevel.name }).click();
@@ -151,7 +160,10 @@ test('a parent opens a weak topic from the table and reads the cost before anyth
   });
 
   await page.getByRole('link', { name: 'Back to Parent View' }).click();
-  await page.getByRole('link', { name: 'Where a student is strong and weak' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Where a student is strong and weak' })
+    .click();
   await expect(
     page.getByRole('heading', { name: 'Where a student is strong and weak', level: 1 }),
   ).toBeVisible();

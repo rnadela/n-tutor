@@ -58,7 +58,10 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
     page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
   ).toBeVisible();
 
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await page.locator('#student-name').fill('Ada');
   await page.locator('[role="combobox"]#student-grade-level').click();
   await page.getByRole('option', { name: gradeLevel.name }).click();
@@ -67,7 +70,10 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
   await expect(page.locator('[data-testid="student-row"][data-name="Ada"]')).toBeVisible();
 
   await page.getByRole('link', { name: 'Back to Parent View' }).click();
-  await page.getByRole('link', { name: 'Upload a test' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Upload a test' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
 
   await page.locator('[role="combobox"]#capture-subject').click();
@@ -187,7 +193,10 @@ test.describe('a parent reading and reporting what their child was told', () => 
 
     // --- The parent comes back in and finds the run -------------------------
     await reenterParentView(page);
-    await page.getByRole('link', { name: 'Practice tests a student has finished' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Practice tests a student has finished' })
+      .click();
     await expect(
       page.getByRole('heading', { name: 'Finished practice tests', level: 1 }),
     ).toBeVisible();
@@ -258,7 +267,10 @@ test.describe('a parent reading and reporting what their child was told', () => 
     // way back is the PIN and the same two links.
     await page.reload();
     await reenterParentView(page);
-    await page.getByRole('link', { name: 'Practice tests a student has finished' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Practice tests a student has finished' })
+      .click();
     await page
       .locator('[data-testid="parent-attempt-row"]')
       .first()

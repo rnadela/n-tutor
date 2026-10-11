@@ -73,7 +73,10 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
     page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
   ).toBeVisible();
 
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await page.locator('#student-name').fill('Ada');
   await page.locator('[role="combobox"]#student-grade-level').click();
   await page.getByRole('option', { name: gradeLevel.name }).click();
@@ -82,7 +85,10 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
   await expect(page.locator('[data-testid="student-row"][data-name="Ada"]')).toBeVisible();
 
   await page.getByRole('link', { name: 'Back to Parent View' }).click();
-  await page.getByRole('link', { name: 'Upload a test' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Upload a test' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
 
   await page.locator('[role="combobox"]#capture-subject').click();
@@ -207,7 +213,10 @@ async function enterParentViewOnAFakeClock(page: Page): Promise<void> {
 
 /** Parent View → the disputes list → the run one dispute points at. */
 async function openTheDisputedRun(page: Page): Promise<void> {
-  await page.getByRole('link', { name: 'Marks a student says are wrong' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Marks a student says are wrong' })
+    .click();
   await expect(
     page.getByRole('heading', { name: 'Marks a student says are wrong', level: 1 }),
   ).toBeVisible();
@@ -301,7 +310,10 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     // On a fake clock from here, because the retained-pick round trip below drives the real
     // idle expiry and the timer that ends Parent View is scheduled when the provider mounts.
     await enterParentViewOnAFakeClock(page);
-    await page.getByRole('link', { name: 'Marks a student says are wrong' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Marks a student says are wrong' })
+      .click();
     await expect(
       page.getByRole('heading', { name: 'Marks a student says are wrong', level: 1 }),
     ).toBeVisible();
@@ -447,7 +459,10 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     await page.getByRole('link', { name: 'Back to the finished practice tests' }).click();
     await page.getByRole('link', { name: 'Back to Parent View' }).click();
     await expect(parentViewHeading(page)).toBeVisible();
-    await page.getByRole('link', { name: 'Marks a student says are wrong' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Marks a student says are wrong' })
+      .click();
     const resolved = page.locator('[data-testid="parent-dispute-row"]');
     await expect(resolved).toHaveCount(1);
     // Still listed: a resolved objection is not a deleted one.

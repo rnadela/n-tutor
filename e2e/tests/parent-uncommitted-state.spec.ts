@@ -65,7 +65,10 @@ async function handOverTheDevice(
   await page.getByRole('button', { name: 'Save the PIN' }).click();
   await expect(parentViewHeading(page)).toBeVisible();
 
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Student Profiles', level: 1 })).toBeVisible();
   await page.locator('#student-name').fill(child);
   await chooseGradeLevel(page, 'student-grade-level', grade.name);

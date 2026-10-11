@@ -148,7 +148,10 @@ test.describe('the Parent View PIN gate', () => {
     page,
   }) => {
     await signUpAndSetPin(page);
-    await page.getByRole('link', { name: 'Change PIN' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Change PIN' })
+      .click();
     await expect(page.getByRole('heading', { name: 'Change your PIN' })).toBeVisible();
 
     await page.locator('#parent-new-pin').fill(NEW_PIN);
@@ -175,7 +178,10 @@ test.describe('the Parent View PIN gate', () => {
     page,
   }) => {
     await signUpAndSetPin(page);
-    await page.getByRole('link', { name: 'Change PIN' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Change PIN' })
+      .click();
     await expect(page.getByRole('heading', { name: 'Change your PIN' })).toBeVisible();
 
     await page.locator('#parent-new-pin').fill(NEW_PIN);

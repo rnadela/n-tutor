@@ -63,7 +63,10 @@ async function handOverTheDevice(page: Page, child: string): Promise<void> {
   await page.getByRole('button', { name: 'Save the PIN' }).click();
   await expect(parentViewHeading(page)).toBeVisible();
 
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Student Profiles', level: 1 })).toBeVisible();
   await page.locator('#student-name').fill(child);
   await chooseGradeLevel(page, 'student-grade-level', grade.name);
@@ -229,7 +232,10 @@ test.describe('Parent View’s idle window', () => {
     await enterParentViewOnAFakeClock(page);
 
     // The clock is mounted in the layout, so this is not `/parent`'s behaviour.
-    await page.getByRole('link', { name: 'Student Profiles' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Student Profiles' })
+      .click();
     await expect(page.getByRole('heading', { name: 'Student Profiles', level: 1 })).toBeVisible();
 
     await page.clock.fastForward(PAST_THE_WINDOW);
@@ -243,7 +249,10 @@ test.describe('Parent View’s idle window', () => {
 
     // The Students screen fetches on its own. Reloading its data is a request,
     // not a parent — so the window lapses on schedule anyway.
-    await page.getByRole('link', { name: 'Student Profiles' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Student Profiles' })
+      .click();
     await expect(page.getByRole('heading', { name: 'Student Profiles', level: 1 })).toBeVisible();
     await page.clock.fastForward(HALF_THE_WINDOW);
     await expect(page.getByRole('heading', { name: 'Student Profiles', level: 1 })).toBeVisible();

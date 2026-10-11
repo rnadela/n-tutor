@@ -69,7 +69,10 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
     page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
   ).toBeVisible();
 
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await page.locator('#student-name').fill('Ada');
   await page.locator('[role="combobox"]#student-grade-level').click();
   await page.getByRole('option', { name: gradeLevel.name }).click();
@@ -78,7 +81,10 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
   await expect(page.locator('[data-testid="student-row"][data-name="Ada"]')).toBeVisible();
 
   await page.getByRole('link', { name: 'Back to Parent View' }).click();
-  await page.getByRole('link', { name: 'Upload a test' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Upload a test' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
 
   await page.locator('[role="combobox"]#capture-subject').click();
@@ -223,7 +229,10 @@ test.describe('a parent removing an explanation from their child, and replacing 
 
     // --- The parent reads it, and is offered nothing until they agree -------
     await reenterParentView(page);
-    await page.getByRole('link', { name: 'Explanations a student has reported' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Explanations a student has reported' })
+      .click();
     const flagRows = page.locator('[data-testid="parent-flag-row"]');
     await expect(flagRows).toHaveCount(1);
     await flagRows.first().getByRole('link', { name: 'Read the explanation' }).click();
@@ -356,7 +365,10 @@ test.describe('a parent removing an explanation from their child, and replacing 
     // --- The parent replaces it, having been told the cost first ------------
     await reenterParentView(page);
     // Through the sidebar: a typed URL is a full load, which drops to the PIN gate.
-    await page.getByRole('link', { name: 'Practice tests a student has finished' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Practice tests a student has finished' })
+      .click();
     await page
       .locator('[data-testid="parent-attempt-row"]')
       .first()

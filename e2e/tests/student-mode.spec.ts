@@ -32,7 +32,10 @@ async function openStudents(page: Page): Promise<string> {
   await expect(
     page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Student Profiles', level: 1 })).toBeVisible();
   return email;
 }

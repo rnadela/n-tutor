@@ -63,7 +63,10 @@ async function uploadAndRead(page: Page, email: string): Promise<{ subjectName: 
     page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
   ).toBeVisible();
 
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await page.locator('#student-name').fill('Noah');
   await page.locator('[role="combobox"]#student-grade-level').click();
   await page.getByRole('option', { name: gradeLevel.name }).click();
@@ -72,7 +75,10 @@ async function uploadAndRead(page: Page, email: string): Promise<{ subjectName: 
   await expect(page.locator('[data-testid="student-row"][data-name="Noah"]')).toBeVisible();
 
   await page.getByRole('link', { name: 'Back to Parent View' }).click();
-  await page.getByRole('link', { name: 'Upload a test' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Upload a test' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
 
   await page.locator('[role="combobox"]#capture-subject').click();
@@ -733,7 +739,10 @@ test.describe('generating practice tests', () => {
     await expect(
       page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
     ).toBeVisible();
-    await page.getByRole('link', { name: 'Pending practice tests' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Pending practice tests' })
+      .click();
     await page
       .locator('[data-testid="draft-row"]')
       .first()
@@ -818,7 +827,10 @@ test.describe('generating practice tests', () => {
     ).toBeVisible();
     // Client-side, because the elevation bearer is in memory: a `page.goto` would
     // reload the app, destroy it, and send the parent straight back to the PIN.
-    await page.getByRole('link', { name: 'Pending practice tests' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Pending practice tests' })
+      .click();
     const remaining = page.locator('[data-testid="draft-row"]');
     await expect(remaining).toHaveCount(1);
     await remaining.first().getByRole('link', { name: 'Read it' }).click();

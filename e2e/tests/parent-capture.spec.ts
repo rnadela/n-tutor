@@ -64,7 +64,10 @@ async function openCapture(page: Page): Promise<{ gradeLevelName: string; subjec
     page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
   ).toBeVisible();
 
-  await page.getByRole('link', { name: 'Student Profiles' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Student Profiles' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Student Profiles', level: 1 })).toBeVisible();
   await page.locator('#student-name').fill('Noah');
   // A MUI select is a listbox, not a `<select>`: open the combobox, then pick.
@@ -75,7 +78,10 @@ async function openCapture(page: Page): Promise<{ gradeLevelName: string; subjec
   await expect(page.locator('[data-testid="student-row"][data-name="Noah"]')).toBeVisible();
 
   await page.getByRole('link', { name: 'Back to Parent View' }).click();
-  await page.getByRole('link', { name: 'Upload a test' }).click();
+  await page
+    .getByRole('navigation', { name: 'Parent View' })
+    .getByRole('link', { name: 'Upload a test' })
+    .click();
   await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
   return { gradeLevelName: gradeLevel.name, subjectName: subject.name };
 }
@@ -191,7 +197,10 @@ test.describe('page management before submit', () => {
     // re-reads it from the API. A full reload would not do — the elevation
     // bearer lives in memory alone (AD-18), so a reload lands on the PIN gate.
     await page.getByRole('link', { name: 'Back to Parent View' }).click();
-    await page.getByRole('link', { name: 'Upload a test' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Upload a test' })
+      .click();
     await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
     await expect(rows(page).nth(0)).toHaveAttribute('data-page-id', secondId!);
     await expect(rows(page).nth(1)).toHaveAttribute('data-page-id', firstId!);
@@ -392,7 +401,10 @@ test.describe('page management before submit', () => {
     await page.getByRole('link', { name: 'Enter Parent View' }).click();
     await page.locator('#parent-pin').fill(PIN);
     await page.getByRole('button', { name: 'Save the PIN' }).click();
-    await page.getByRole('link', { name: 'Student Profiles' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Student Profiles' })
+      .click();
     await page.locator('#student-name').fill('Noah');
     await page.locator('[role="combobox"]#student-grade-level').click();
     await page.getByRole('option', { name: gradeLevel.name }).click();
@@ -425,7 +437,10 @@ test.describe('page management before submit', () => {
       await route.continue();
     });
 
-    await page.getByRole('link', { name: 'Upload a test' }).click();
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Upload a test' })
+      .click();
     await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
 
     const retry = page.getByRole('button', { name: 'Try again' });

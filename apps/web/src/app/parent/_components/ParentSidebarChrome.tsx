@@ -39,13 +39,13 @@ const RAIL_WIDTH = 72;
  * to Parent View alone, not shared with any other collapsible chrome. */
 const COLLAPSE_STORAGE_KEY = 'n-tutor:parent-sidebar-collapsed';
 
-interface NavItem {
+export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
 }
 
-interface NavGroup {
+export interface NavGroup {
   /** Omitted for the single top-level destination, which needs no heading
    * above it. */
   label?: string;
@@ -58,7 +58,7 @@ interface NavGroup {
  * `<Link>` per screen, so the sidebar and any future "what's in Parent View"
  * surface read from the same data instead of drifting apart.
  */
-const NAV_GROUPS: NavGroup[] = [
+export const NAV_GROUPS: NavGroup[] = [
   { items: [{ href: '/parent', label: parentCopy.parentView.title, icon: Home }] },
   {
     label: parentCopy.parentView.navGroups.students,

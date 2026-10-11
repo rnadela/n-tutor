@@ -177,6 +177,8 @@ export const parentCopy = {
     emailLabel: 'Signed in as',
     expiresLabel: 'Parent View stays open until',
     ceilingLabel: 'The PIN is required again after',
+    /** The home screen's heading above every destination it links to. */
+    destinationsTitle: 'Go to',
     changePin: 'Change PIN',
     students: 'Student Profiles',
     /** The way in to page management; the surface itself is titled "Pages". */
