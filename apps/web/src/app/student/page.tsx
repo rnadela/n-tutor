@@ -9,6 +9,7 @@ import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
 import { BookOpen, GraduationCap, Lock } from 'lucide-react';
+import { InstallBanner } from '@/components/InstallBanner';
 import { studentCopy } from '@/copy/student';
 import { PracticeTestList } from './_components/PracticeTestList';
 import {
@@ -212,6 +213,10 @@ export default function StudentModePage() {
       >
         {studentCopy.title}
       </Typography>
+      {/* Outside the loading and error branches on purpose: the offer has
+          nothing to do with the three reads, and inside one it would flicker
+          in and out as they settle. */}
+      <InstallBanner surface="student" />
       {loading || session === null ? (
         error === null ? (
           <Alert severity="info" role="status" variant="outlined">

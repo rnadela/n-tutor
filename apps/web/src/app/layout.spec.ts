@@ -59,6 +59,15 @@ describe('where the service worker is registered', () => {
     expect(CODE).toContain("from './_components/ServiceWorkerRegistration'");
   });
 
+  it('catches the install event here too, exactly once', () => {
+    // The event fires once per page load, before any screen-level component
+    // can be guaranteed mounted — so the root layout is the only mount point
+    // early enough, and a second one would hold the same event twice.
+    const mounts = CODE.match(/<InstallPromptCapture\s*\/>/gu) ?? [];
+    expect(mounts).toHaveLength(1);
+    expect(CODE).toContain("from './_components/InstallPromptCapture'");
+  });
+
   it('keeps the colour-scheme script and the theme providers in their order', () => {
     // The registration renders nothing, so it must not have been threaded
     // between the pieces whose order decides what the first paint looks like.

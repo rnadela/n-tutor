@@ -30,7 +30,9 @@ import {
 import NextLink from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BackToStudentMode } from './BackToStudentMode';
+import { InstallBanner } from '@/components/InstallBanner';
 import { parentCopy } from '@/copy/parent';
+import { installBannerSurface } from '@/lib/install-banner';
 import { density } from '@/theme/tokens';
 
 const SIDEBAR_WIDTH = 240;
@@ -314,6 +316,15 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
   // is entered (AD-18's gate would otherwise be decoration).
   const onGate = pathname === '/parent/pin';
 
+  // Whether this *route* may carry the banner — not whether this device can
+  // install anything, which is `installBannerMode`'s answer inside the banner
+  // itself. Asked rather than re-decided, so `/parent/capture` is excluded by
+  // the shared rule and this shell never holds a second opinion.
+  const routeCarriesInstallBanner = installBannerSurface(pathname) === 'parent';
+  // One element, rendered by both branches below: the gate returns early, and
+  // two copies of this line are two places to keep in step.
+  const installBanner = routeCarriesInstallBanner ? <InstallBanner surface="parent" /> : null;
+
   if (onGate) {
     return (
       <Box
@@ -328,7 +339,10 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
           paddingInline: `${density.cardPadding}px`,
         }}
       >
-        <Box sx={{ width: '100%' }}>{children}</Box>
+        <Box sx={{ width: '100%' }}>
+          {installBanner}
+          {children}
+        </Box>
       </Box>
     );
   }
@@ -554,6 +568,7 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             paddingInline: `${density.cardPadding}px`,
           }}
         >
+          {installBanner}
           {children}
         </Box>
       </Box>

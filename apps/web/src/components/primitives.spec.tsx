@@ -37,8 +37,16 @@ const DIR = import.meta.dirname;
  * express a repeating gradient's stops. Their own specs assert what they must instead
  * — that each of the four states stays distinguishable with every colour, class and
  * inline style stripped.
+ *
+ * `InstallBanner.tsx` joins them for the same reason and one more: the install
+ * offer is a per-surface placement with per-surface words — a parent is told
+ * about "this device", a child about "your home screen" — so it is handed the
+ * surface as a prop, which is precisely what the sweep below forbids a
+ * primitive to know. Its figures still come from the mounted theme's density,
+ * and its own spec asserts that it states no colour, spacing or tap target of
+ * its own.
  */
-const NOT_PRIMITIVES = new Set(['AnswerKeyRow.tsx', 'GradeStateMarker.tsx']);
+const NOT_PRIMITIVES = new Set(['AnswerKeyRow.tsx', 'GradeStateMarker.tsx', 'InstallBanner.tsx']);
 
 /** Every primitive's source, keyed by file name. */
 const SOURCES = Object.fromEntries(

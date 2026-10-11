@@ -186,6 +186,31 @@ describe('what the page does with each outcome', () => {
   });
 });
 
+describe('where Student Mode Home mounts the install banner', () => {
+  it('mounts it exactly once, on the student surface', () => {
+    // Home and nowhere else in Student Mode: `student/layout.tsx` wraps Take
+    // Test and Results too, and a child mid-test is the last person to
+    // interrupt with an offer.
+    const mounts = CODE.match(/<InstallBanner\s+surface="student"\s*\/>/gu) ?? [];
+    expect(mounts).toHaveLength(1);
+    expect(CODE).toContain("from '@/components/InstallBanner'");
+    expect(CODE).not.toContain('surface="parent"');
+  });
+
+  it('puts it directly under the page’s own eyebrow heading', () => {
+    expect(CODE).toMatch(/<\/Typography>[\s{}]*<InstallBanner surface="student" \/>/u);
+  });
+
+  it('keeps it outside the loading and error branches', () => {
+    // Inside one it would flicker in and out as the three reads settle, and
+    // the offer has nothing to do with any of them.
+    const mounted = CODE.indexOf('<InstallBanner');
+    const branch = CODE.indexOf('loading || session === null');
+    expect(mounted).toBeGreaterThan(-1);
+    expect(branch).toBeGreaterThan(mounted);
+  });
+});
+
 describe('Student Mode’s copy', () => {
   it('greets the bound child by name, in the second person', () => {
     const greeting = studentCopy.greeting('Ada');

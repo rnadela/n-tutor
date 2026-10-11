@@ -6,6 +6,7 @@ import type { Metadata, Viewport } from 'next';
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v16-appRouter';
 import InitColorSchemeScript from '@mui/material/InitColorSchemeScript';
 import { ThemeRegistry } from '@/theme/ThemeRegistry';
+import { InstallPromptCapture } from './_components/InstallPromptCapture';
 import { ServiceWorkerRegistration } from './_components/ServiceWorkerRegistration';
 import { adminCopy } from '@/copy/admin';
 import { commonCopy } from '@/copy/common';
@@ -63,6 +64,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           markup to style and no reason to re-render when the theme changes.
         */}
         <ServiceWorkerRegistration />
+        {/*
+          Here for the same reason, and for one more: the install event fires
+          once per page load, so the listener has to be attached by the one
+          component every surface mounts.
+        */}
+        <InstallPromptCapture />
         <AppRouterCacheProvider options={{ enableCssLayer: true }}>
           <ThemeRegistry>{children}</ThemeRegistry>
         </AppRouterCacheProvider>

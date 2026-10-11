@@ -2549,3 +2549,19 @@ source_spec: `spec-10-1-web-app-manifest-icons-minimal-service-worker.md`
 severity: low
 reason: `manifest.ts` omits `id`. Browsers fall back to `start_url` for identity; once families have installed, the identity cannot be changed compatibly. Nothing in the story asks for it, and `start_url` is `/` with no reason to move, so it is a future-proofing item rather than a defect in this change.
 status: open
+
+### DW-320: The source-read specs each carry their own line-based comment stripper, which does not remove the body lines of a multi-line comment.
+origin: spec-deferred 80d5352b22aa
+location: apps/web/src/app/parent/_components/ParentSidebarChrome.spec.tsx:18, apps/web/src/app/layout.spec.ts
+source_spec: `spec-10-2-install-banner.md`
+severity: low
+reason: `const CODE = SOURCE.split('\n').filter((line) => !/^\s*(\*|\/\/|\/\*|\{\/\*)/u.test(line))` drops only lines whose first token opens a comment, so the second and later lines of a `{/* … */}` JSX block stay in `CODE`. A positive assertion can therefore be satisfied by prose, and a negative one can fail on it. The same helper is now pasted into three spec files with the stripping rule restated each time. Latent brittleness in the test harness, not a product defect, and the pattern predates this story (`layout.spec.ts` set it).
+status: open
+
+### DW-321: The install action's resolved-promise callback updates component state and writes session storage with no unmount guard, so navigating away while the browser's own install dialog is still open runs
+origin: spec-deferred 9237ae87228d
+location: apps/web/src/components/InstallBanner.tsx:182-199
+source_spec: `spec-10-2-install-banner.md`
+severity: low
+reason: `install()` in `apps/web/src/components/InstallBanner.tsx:182-199` calls `void promptToInstall().then((accepted) => { prompting.current = false; if (accepted) dismiss(); })` with no cleanup/mounted-ref check around the `setDismissed`/`rememberInstallBannerDismissed` calls inside `dismiss()`. React 18 no longer warns on a post-unmount `setState`, and the extra `sessionStorage` write is harmless, so the practical risk is low — but it is a real gap in the cleanup discipline the rest of the module otherwise follows.
+status: open
