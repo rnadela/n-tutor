@@ -25,7 +25,8 @@ import {
   type ParentExplanationView,
 } from '@/lib/parent-api';
 import { readableInstant } from '@/lib/parent-view';
-import { comfortableDensity, typeRoles } from '@/theme/tokens';
+import { comfortableDensity, rounded, typeRoles } from '@/theme/tokens';
+import { Flag } from 'lucide-react';
 
 /**
  * What the child was told about one Question, and what a parent can do about it.
@@ -572,7 +573,17 @@ export function ExplanationReview({
               a heading at `h4` would make it a sibling of the row it sits inside — an
               outline that lies is worse than no outline. Rendered only here, where there
               is prose for it to head. */}
-          <Typography component="h5" sx={{ ...typeRoles.label }} data-testid="explanation-heading">
+          <Typography
+            component="h5"
+            sx={{
+              ...typeRoles.label,
+              mt: `${comfortableDensity.gap / 2}px`,
+              pt: `${comfortableDensity.gap}px`,
+              borderTop: '1px dashed',
+              borderColor: 'divider',
+            }}
+            data-testid="explanation-heading"
+          >
             {parentCopy.attempts.explanationHeading}
           </Typography>
 
@@ -677,7 +688,16 @@ export function ExplanationReview({
                     about it stays able to read what they decided about. */}
                 <Typography
                   component="p"
-                  sx={{ ...typeRoles.explanationBody }}
+                  // The paper role: the prose a child was shown, on its own sheet so it
+                  // reads as the thing under review rather than as more of the page.
+                  sx={{
+                    ...typeRoles.explanationBody,
+                    p: `${comfortableDensity.gap}px`,
+                    bgcolor: 'background.default',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: `${rounded.paper}px`,
+                  }}
                   data-testid="explanation-body"
                 >
                   <RichText segments={entry.body} />
@@ -719,14 +739,32 @@ export function ExplanationReview({
                     one. */}
                 {entryStudentState !== 'none' && (
                   <Box
-                    sx={{ display: 'grid', gap: `${comfortableDensity.gap / 2}px` }}
+                    // Set apart with an edge in the warning tone: this is the one thing on
+                    // the row that may be waiting on the parent. The words carry the state;
+                    // the edge only draws the eye to them.
+                    sx={{
+                      display: 'grid',
+                      gap: `${comfortableDensity.gap / 2}px`,
+                      p: `${comfortableDensity.gap}px`,
+                      bgcolor: 'action.hover',
+                      borderLeft: '3px solid',
+                      borderColor: entryStudentState === 'awaiting' ? 'warning.main' : 'divider',
+                      borderRadius: `${rounded.control}px`,
+                    }}
                     data-testid="explanation-student-flag"
                   >
                     <Typography
                       component="p"
-                      sx={{ ...typeRoles.caption }}
+                      sx={{
+                        ...typeRoles.caption,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: `${comfortableDensity.gap / 2}px`,
+                        fontWeight: 600,
+                      }}
                       data-testid="explanation-student-flagged"
                     >
+                      <Flag size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
                       {entryFlaggedAt === null
                         ? parentCopy.attempts.studentFlaggedUndated
                         : parentCopy.attempts.studentFlagged(entryFlaggedAt)}
