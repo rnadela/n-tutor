@@ -280,8 +280,8 @@ test.describe('page management before submit', () => {
     await expect(liveRegion(page)).toContainText(
       `The grade level is ${other.name}. That grade level does not offer the subject that was chosen, so the subject was cleared.`,
     );
-    await expect(page.getByTestId('submit-blocked')).toContainText(
-      'Choose a subject and a grade level before submitting.',
+    await expect(page.getByTestId('submit-blocked')).toHaveText(
+      'Before submitting, add at least one page and choose a subject and grade level.',
     );
 
     // And the Subject list is the new Grade Level's, re-read rather than
