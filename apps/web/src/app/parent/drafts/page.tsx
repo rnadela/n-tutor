@@ -11,7 +11,7 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
-import { Screen } from '@/components/Screen';
+import { ArrowLeft, ArrowRight, CalendarClock, Inbox, Layers, ListChecks } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
@@ -21,7 +21,7 @@ import {
   type StudentProfileView,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
-import { density } from '@/theme/tokens';
+import { density, rounded } from '@/theme/tokens';
 
 /**
  * A draft's own address, which is the whole of its review position.
@@ -189,8 +189,11 @@ export default function PendingDraftsPage() {
     parentCopy.drafts.unknownStudent;
 
   return (
-    <Screen>
-      <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 2}px` }}
+    >
+      <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
         {parentCopy.drafts.listTitle}
       </Typography>
 
@@ -215,7 +218,7 @@ export default function PendingDraftsPage() {
       )}
 
       {loading ? (
-        <Typography component="p" data-testid="drafts-loading">
+        <Typography component="p" data-testid="drafts-loading" sx={{ color: 'text.secondary' }}>
           {parentCopy.drafts.loading}
         </Typography>
       ) : (
@@ -224,13 +227,31 @@ export default function PendingDraftsPage() {
         // position to make it.
         loaded && (
           <>
-            <Typography component="p">{parentCopy.drafts.listIntro}</Typography>
+            <Typography component="p" sx={{ color: 'text.secondary', mt: `-${density.gap}px` }}>
+              {parentCopy.drafts.listIntro}
+            </Typography>
             {drafts.length === 0 ? (
               // Nothing waiting is a state, said as a plain sentence. The way
               // back is below, and is the same one every other case gets.
-              <Typography component="p" data-testid="drafts-empty">
-                {parentCopy.drafts.empty}
-              </Typography>
+              <Box
+                sx={{
+                  display: 'grid',
+                  justifyItems: 'center',
+                  gap: `${density.gap}px`,
+                  py: `${density.sectionMargin * 2}px`,
+                  px: `${density.cardPadding}px`,
+                  border: '1px dashed',
+                  borderColor: 'divider',
+                  borderRadius: `${rounded.control}px`,
+                  color: 'text.secondary',
+                  textAlign: 'center',
+                }}
+              >
+                <Inbox size={28} aria-hidden="true" />
+                <Typography component="p" data-testid="drafts-empty">
+                  {parentCopy.drafts.empty}
+                </Typography>
+              </Box>
             ) : (
               <Box
                 component="ul"
@@ -246,36 +267,86 @@ export default function PendingDraftsPage() {
                     key={draft.id}
                     component="li"
                     role="listitem"
-                    sx={{ listStyle: 'none' }}
+                    sx={{
+                      listStyle: 'none',
+                      transition: (theme) => theme.transitions.create('border-color'),
+                      '&:hover': { borderColor: 'primary.main' },
+                    }}
                     data-testid="draft-row"
                     data-draft-id={draft.id}
                   >
-                    <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                      <Typography component="h2" variant="cardTitle">
-                        {parentCopy.drafts.forStudent(studentName(draft.studentProfileId))}
-                      </Typography>
-                      {/* Both figures are the server's. The browser holds one
-                          draft and could not count its siblings. */}
-                      <Typography component="p" data-testid="draft-position">
-                        {parentCopy.drafts.position(draft.position, draft.siblingCount)}
-                      </Typography>
-                      {/* The stored column, and rightly so here: this screen
-                          renders no questions, so it has nothing to count. */}
-                      <Typography component="p" data-testid="draft-question-total">
-                        {parentCopy.drafts.questionTotal(draft.questionCount)}
-                      </Typography>
-                      <Typography component="p">
-                        {parentCopy.drafts.made(new Date(draft.createdAt).toLocaleString())}
-                      </Typography>
+                    <CardContent
+                      sx={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: `${density.gap * 1.5}px`,
+                        '&:last-child': { pb: `${density.cardPadding + density.gap}px` },
+                      }}
+                    >
+                      <Box sx={{ display: 'grid', gap: `${density.gap / 2}px`, minWidth: 0 }}>
+                        <Typography component="h2" variant="cardTitle">
+                          {parentCopy.drafts.forStudent(studentName(draft.studentProfileId))}
+                        </Typography>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            columnGap: `${density.gap * 2}px`,
+                            rowGap: `${density.gap / 2}px`,
+                            color: 'text.secondary',
+                            '& > p': {
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: `${density.gap / 2}px`,
+                              fontSize: '0.9375rem',
+                            },
+                          }}
+                        >
+                          {/* Both figures are the server's. The browser holds one
+                              draft and could not count its siblings. */}
+                          <Typography component="p" data-testid="draft-position">
+                            <Layers size={16} aria-hidden="true" />
+                            {parentCopy.drafts.position(draft.position, draft.siblingCount)}
+                          </Typography>
+                          {/* The stored column, and rightly so here: this screen
+                              renders no questions, so it has nothing to count. */}
+                          <Typography component="p" data-testid="draft-question-total">
+                            <ListChecks size={16} aria-hidden="true" />
+                            {parentCopy.drafts.questionTotal(draft.questionCount)}
+                          </Typography>
+                          <Typography component="p">
+                            <CalendarClock size={16} aria-hidden="true" />
+                            {parentCopy.drafts.made(
+                              new Date(draft.createdAt).toLocaleString(undefined, {
+                                dateStyle: 'medium',
+                                timeStyle: 'short',
+                              }),
+                            )}
+                          </Typography>
+                        </Box>
+                      </Box>
                       {/* Client-side, so the provider holding the elevation
                           bearer stays mounted across the navigation. */}
-                      <Link
+                      <Button
                         component={DraftLink}
                         href={draftHref(draft.id)}
-                        sx={{ minHeight: density.tapTarget }}
+                        variant="outlined"
+                        endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                        sx={{
+                          minHeight: density.tapTarget,
+                          flexShrink: 0,
+                          '& .MuiButton-endIcon': {
+                            transition: (theme) => theme.transitions.create('transform'),
+                          },
+                          '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
+                            transform: 'translateX(2px)',
+                          },
+                        }}
                       >
                         {parentCopy.drafts.open}
-                      </Link>
+                      </Button>
                     </CardContent>
                   </Card>
                 ))}
@@ -285,9 +356,14 @@ export default function PendingDraftsPage() {
         )
       )}
 
-      <Link component={NextLink} href="/parent">
+      <Link
+        component={NextLink}
+        href="/parent"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
         {parentCopy.drafts.backToParentView}
       </Link>
-    </Screen>
+    </Box>
   );
 }
