@@ -54,6 +54,16 @@ export const colorTokens = {
   primaryOnInverted: { light: '#7FB6E8', dark: '#7FB6E8' },
   dividerOnInverted: { light: '#6A747E', dark: '#6A747E' },
   textOnInverted: { light: '#FFFFFF', dark: '#FFFFFF' },
+
+  /*
+   * The app icon's own two colours, read by the manifest and the browser's
+   * `theme-color` — never by the in-app palette. The installed window's chrome
+   * and splash have to match the icon the family tapped, not the page beneath.
+   * Identical in both schemes for the same reason: the icon does not change
+   * with the device's preference.
+   */
+  brandGround: { light: '#FDFAF3', dark: '#FDFAF3' },
+  brandInk: { light: '#173D30', dark: '#173D30' },
 } as const satisfies Record<string, TokenPair>;
 
 export type ColorTokenName = keyof typeof colorTokens;

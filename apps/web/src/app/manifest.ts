@@ -24,19 +24,21 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/',
     scope: '/',
     display: 'standalone',
-    // Student teal and the app background, light values: a manifest carries one
-    // colour each, and the browser paints the splash and window chrome before
-    // any CSS — and so before `prefers-color-scheme` can be consulted. The
-    // per-scheme pair lives in the root layout's `viewport.themeColor`.
-    theme_color: colorTokens.primaryStudent.light,
-    background_color: colorTokens.backgroundDefault.light,
+    // The icon's own ink and ground, light values: the splash and window chrome
+    // frame the icon the family tapped, so they take its colours rather than
+    // the in-app palette. A manifest carries one colour each, and the browser
+    // paints both before any CSS — and so before `prefers-color-scheme` can be
+    // consulted. The per-scheme pair lives in the root layout's
+    // `viewport.themeColor`.
+    theme_color: colorTokens.brandInk.light,
+    background_color: colorTokens.brandGround.light,
     icons: [
       { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
       { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
       // Separate from the 512 above rather than a second `purpose` on it: a
       // maskable icon is cropped to the platform's shape, so it is different
-      // art — the glyph is inset into the safe zone — and an installer that
-      // masked the un-inset one would clip the monogram.
+      // art — the artwork is inset into the safe zone — and an installer that
+      // masked the un-inset one would clip the pencil and the leaves.
       {
         src: '/icons/icon-512-maskable.png',
         sizes: '512x512',

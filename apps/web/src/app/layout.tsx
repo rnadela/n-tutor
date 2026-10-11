@@ -39,18 +39,19 @@ export const metadata: Metadata = {
  * The colour the browser paints its own chrome — an address bar, or the status
  * bar above an installed window.
  *
- * One entry per colour scheme, both from the design tokens, because this is the
- * one piece of theming CSS cannot do: the browser picks a `theme-color` from
- * the media queries in the head before any stylesheet applies. A single value
- * would leave a dark-mode device wearing the light accent.
+ * The icon's ink colour (`brandInk`), so the installed window's chrome matches
+ * the icon the family tapped. Kept as one entry per colour scheme, both from
+ * the design tokens: the browser picks a `theme-color` from the media queries
+ * in the head before any stylesheet applies, and the token's dark value is the
+ * one to change if the chrome ever needs to follow the device's preference.
  *
- * The manifest carries only the light value — a manifest has room for one
+ * The manifest carries the same light value — a manifest has room for one
  * colour and is read before the device's preference is known.
  */
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: colorTokens.primaryStudent.light },
-    { media: '(prefers-color-scheme: dark)', color: colorTokens.primaryStudent.dark },
+    { media: '(prefers-color-scheme: light)', color: colorTokens.brandInk.light },
+    { media: '(prefers-color-scheme: dark)', color: colorTokens.brandInk.dark },
   ],
 };
 

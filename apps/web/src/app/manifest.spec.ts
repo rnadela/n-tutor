@@ -23,10 +23,10 @@ describe('manifest', () => {
     expect(result.display).toBe('standalone');
   });
 
-  it('takes both colours from the design tokens rather than from literals', () => {
+  it("takes both colours from the icon's brand tokens rather than from literals", () => {
     const result = manifest();
-    expect(result.theme_color).toBe(colorTokens.primaryStudent.light);
-    expect(result.background_color).toBe(colorTokens.backgroundDefault.light);
+    expect(result.theme_color).toBe(colorTokens.brandInk.light);
+    expect(result.background_color).toBe(colorTokens.brandGround.light);
   });
 
   it('offers 192, 512 and a maskable 512, all self-hosted', () => {

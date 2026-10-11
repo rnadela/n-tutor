@@ -22,14 +22,14 @@ describe('the colour the browser paints its own chrome', () => {
     // and this is the one piece of theming CSS cannot reach: the browser picks
     // a `theme-color` from the head before any stylesheet applies.
     expect(viewport.themeColor).toEqual([
-      { media: '(prefers-color-scheme: light)', color: colorTokens.primaryStudent.light },
-      { media: '(prefers-color-scheme: dark)', color: colorTokens.primaryStudent.dark },
+      { media: '(prefers-color-scheme: light)', color: colorTokens.brandInk.light },
+      { media: '(prefers-color-scheme: dark)', color: colorTokens.brandInk.dark },
     ]);
   });
 
   it('hardcodes neither value', () => {
-    expect(CODE).not.toContain(colorTokens.primaryStudent.light);
-    expect(CODE).not.toContain(colorTokens.primaryStudent.dark);
+    expect(CODE).not.toContain(colorTokens.brandInk.light);
+    expect(CODE).not.toContain(colorTokens.brandInk.dark);
   });
 });
 

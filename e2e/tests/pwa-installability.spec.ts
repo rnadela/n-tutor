@@ -77,8 +77,8 @@ test.describe('the web app manifest', () => {
     expect(manifest.start_url).toBe('/');
     expect(manifest.scope).toBe('/');
     expect(manifest.display).toBe('standalone');
-    expect(manifest.theme_color).toBe(colorToken('primaryStudent', 'light'));
-    expect(manifest.background_color).toBe(colorToken('backgroundDefault', 'light'));
+    expect(manifest.theme_color).toBe(colorToken('brandInk', 'light'));
+    expect(manifest.background_color).toBe(colorToken('brandGround', 'light'));
   });
 
   test('offers 192, 512 and a maskable 512, every one of them downloadable', async ({
@@ -139,8 +139,8 @@ test.describe('what a loaded page carries', () => {
       })),
     );
     expect(themeColors).toEqual([
-      { media: '(prefers-color-scheme: light)', content: colorToken('primaryStudent', 'light') },
-      { media: '(prefers-color-scheme: dark)', content: colorToken('primaryStudent', 'dark') },
+      { media: '(prefers-color-scheme: light)', content: colorToken('brandInk', 'light') },
+      { media: '(prefers-color-scheme: dark)', content: colorToken('brandInk', 'dark') },
     ]);
   });
 

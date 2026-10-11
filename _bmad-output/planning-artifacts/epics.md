@@ -1350,7 +1350,7 @@ So that the family can open it from the home screen like any other app.
 
 **Given** the web app is served over HTTPS
 **When** a supporting browser (Chrome/Edge on Android, desktop Chrome/Edge) evaluates it
-**Then** it is installable: a manifest is served from the Next.js `app/manifest.ts` metadata route with `name: "n-tutor"`, `short_name: "n-tutor"`, `start_url: "/"`, `scope: "/"`, `display: "standalone"`, `theme_color` and `background_color` taken from design tokens, and 192×192, 512×512, and 512×512 maskable PNG icons
+**Then** it is installable: a manifest is served from the Next.js `app/manifest.ts` metadata route with `name: "n-tutor"`, `short_name: "n-tutor"`, `start_url: "/"`, `scope: "/"`, `display: "standalone"`, `theme_color` (`brandInk` `#173D30`) and `background_color` (`brandGround` `#FDFAF3`) taken from the icon's brand design tokens, and 192×192, 512×512, and 512×512 maskable PNG icons
 
 **Given** iOS/iPadOS Safari
 **When** the person adds the app to the home screen
@@ -1371,6 +1371,9 @@ So that the family can open it from the home screen like any other app.
 
 **Given** all icon and manifest assets
 **Then** they are bundled/self-hosted (no runtime CDN fetch)
+
+**Given** the app icon art (books-and-pencil "N" on ivory, supplied 2026-10-11, replacing the generated placeholder monogram)
+**Then** `app/favicon.ico` (16/32/48, RGBA PNG entries — Next cannot decode RGB entries and fails every page), `app/icon.png`, `app/apple-icon.png`, and `public/icons/` 192, 512, and inset maskable 512 are committed raster exports; no SVG icon ships (the only vector is an auto-trace with artifacts, which Chrome would prefer over the PNGs)
 
 ### Story 10.2: Install Banner
 

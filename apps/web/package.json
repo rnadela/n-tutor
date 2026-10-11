@@ -8,8 +8,7 @@
     "start": "next start -p 3000",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "icons:generate": "node scripts/generate-pwa-icons.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
     "@emotion/cache": "11.14.0",
