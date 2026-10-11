@@ -3,6 +3,7 @@
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
+import { ArrowDown, ArrowUp, Camera, Trash2 } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { isPageReadable } from '@/lib/legibility';
 import { canMoveDown, canMoveUp, type MoveDirection } from '@/lib/page-order';
@@ -14,6 +15,19 @@ import { density, focusRing, rounded } from '@/theme/tokens';
  * visible focus ring. Both figures come from the theme; neither is written as a
  * number here (UX-DR9, UX-DR10).
  */
+/** Off screen but in the tab order and reachable by `setInputFiles`. */
+const VISUALLY_HIDDEN_INPUT = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  p: 0,
+  m: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+} as const;
+
 export const controlSx = {
   minHeight: density.tapTarget,
   minWidth: density.tapTarget,
@@ -116,7 +130,7 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
         >
           {/* The ordinal in text, as the UX requires — not only in the
               controls' accessible names. */}
-          <Typography component="span" sx={{ fontWeight: 700 }}>
+          <Typography component="span" sx={{ fontWeight: 700, minWidth: 64 }}>
             {parentCopy.capture.pageLabel(page.ordinal)}
           </Typography>
 
@@ -149,7 +163,19 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
             <Typography
               component="span"
               data-testid={`legibility-badge-${page.ordinal}`}
-              sx={{ color: isPageReadable(page) ? 'text.primary' : 'error.main' }}
+              // A pill, so the verdict reads as a state of the row. The glyph and the
+              // word still carry it; the tint only repeats them.
+              sx={{
+                px: `${density.gap}px`,
+                py: '2px',
+                borderRadius: 999,
+                border: '1px solid',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                ...(isPageReadable(page)
+                  ? { color: 'success.main', borderColor: 'success.main' }
+                  : { color: 'error.main', borderColor: 'error.main' }),
+              }}
             >
               <Box component="span" aria-hidden="true">
                 {isPageReadable(page) ? '\u2713 ' : '\u0021 '}
@@ -164,9 +190,20 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
           )}
 
           {editable && page.state !== 'Deleted' && (
-            <>
+            // The row's controls as one group at its far end, apart from what the
+            // row says about the page.
+            <Box
+              sx={{
+                ml: 'auto',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: `${density.gap / 2}px`,
+              }}
+            >
               <Button
                 type="button"
+                startIcon={<ArrowUp size={16} aria-hidden="true" />}
                 disabled={busy || !canMoveUp(index)}
                 aria-label={parentCopy.capture.moveUpFor(page.ordinal)}
                 sx={controlSx}
@@ -176,6 +213,7 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
               </Button>
               <Button
                 type="button"
+                startIcon={<ArrowDown size={16} aria-hidden="true" />}
                 disabled={busy || !canMoveDown(index, pages.length)}
                 aria-label={parentCopy.capture.moveDownFor(page.ordinal)}
                 sx={controlSx}
@@ -188,10 +226,10 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
                   control is, scoped to this page alone. Its visible label reads
                   "Retake"; its accessible name names the page, which is what
                   the strip's rule asks for. */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}>
-                <Typography component="label" htmlFor={`capture-retake-${page.id}`}>
-                  {parentCopy.capture.retake}
-                </Typography>
+              <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                {/* Off screen but still focusable and still named by its own
+                    `aria-label`; the label after it is the part a parent sees and
+                    presses, and it shows the input's focus and disabled states. */}
                 <Box
                   component="input"
                   id={`capture-retake-${page.id}`}
@@ -199,7 +237,7 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
                   accept="image/*"
                   disabled={busy}
                   aria-label={parentCopy.capture.retakeFor(page.ordinal)}
-                  sx={controlSx}
+                  sx={VISUALLY_HIDDEN_INPUT}
                   onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
                     const file = event.target.files?.[0];
                     // Cleared so retaking the same photo twice still fires a
@@ -208,12 +246,36 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
                     if (file) onRetake(page.id, file);
                   }}
                 />
+                <Typography
+                  component="label"
+                  htmlFor={`capture-retake-${page.id}`}
+                  sx={(theme) => ({
+                    ...controlSx,
+                    ...theme.typography.button,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: `${density.gap / 2}px`,
+                    px: `${density.gap * 1.5}px`,
+                    color: 'primary.main',
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    'input:focus-visible + &': {
+                      outline: `${focusRing.width}px solid`,
+                      outlineOffset: `${focusRing.offset}px`,
+                    },
+                    'input:disabled + &': { color: 'text.disabled', cursor: 'default' },
+                  })}
+                >
+                  <Camera size={16} aria-hidden="true" />
+                  {parentCopy.capture.retake}
+                </Typography>
               </Box>
 
               <Button
                 type="button"
-                variant="outlined"
+                variant="text"
                 color="error"
+                startIcon={<Trash2 size={16} aria-hidden="true" />}
                 disabled={busy}
                 aria-label={parentCopy.capture.deleteFor(page.ordinal)}
                 sx={controlSx}
@@ -221,7 +283,7 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
               >
                 {parentCopy.capture.delete}
               </Button>
-            </>
+            </Box>
           )}
         </Box>
       ))}
