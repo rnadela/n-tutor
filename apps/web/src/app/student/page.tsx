@@ -6,9 +6,9 @@ import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
+import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
+import { BookOpen, GraduationCap, Lock } from 'lucide-react';
 import { studentCopy } from '@/copy/student';
 import { PracticeTestList } from './_components/PracticeTestList';
 import {
@@ -20,7 +20,7 @@ import {
 } from '@/lib/parent-api';
 import { attemptStorage, clearAll, retainOnly } from '@/lib/attempt-store';
 import { runsById } from '@/lib/practice-test-runs';
-import { comfortableDensity } from '@/theme/tokens';
+import { comfortableDensity, rounded, typeRoles } from '@/theme/tokens';
 
 /**
  * Whether a failure means this device is not set up for a child at all, as
@@ -191,92 +191,147 @@ export default function StudentModePage() {
   }, [load]);
 
   return (
-    <Card sx={{ maxWidth: 560, mx: 'auto' }}>
-      <CardContent sx={{ padding: `${comfortableDensity.cardPadding}px` }}>
-        <Typography
-          component="h1"
-          sx={{ fontSize: 24, fontWeight: 700, mb: `${comfortableDensity.gap}px` }}
-        >
-          {studentCopy.title}
-        </Typography>
-        {loading || session === null ? (
-          error === null ? (
-            <Alert severity="info" role="status" variant="outlined">
-              {studentCopy.loading}
-            </Alert>
-          ) : (
+    <Box
+      sx={{
+        maxWidth: 640,
+        mx: 'auto',
+        display: 'grid',
+        gap: `${comfortableDensity.gap}px`,
+      }}
+    >
+      {/* The page's name, as a small eyebrow: the greeting below is what a
+            child reads first, and it is the larger of the two on purpose. */}
+      <Typography
+        component="h1"
+        sx={{
+          ...typeRoles.label,
+          color: 'primary.main',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+        }}
+      >
+        {studentCopy.title}
+      </Typography>
+      {loading || session === null ? (
+        error === null ? (
+          <Alert severity="info" role="status" variant="outlined">
+            {studentCopy.loading}
+          </Alert>
+        ) : (
+          <Alert
+            severity="error"
+            role="alert"
+            variant="outlined"
+            action={
+              <Button onClick={load} sx={{ minHeight: comfortableDensity.tapTarget }}>
+                {studentCopy.retry}
+              </Button>
+            }
+          >
+            {error}
+          </Alert>
+        )
+      ) : (
+        <Box sx={{ display: 'grid', gap: `${comfortableDensity.gap}px` }}>
+          <Box
+            sx={{ display: 'grid', gap: `${comfortableDensity.gap / 2}px`, justifyItems: 'start' }}
+          >
+            <Typography sx={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.2 }}>
+              {studentCopy.greeting(session.profile.displayName)}
+            </Typography>
+            <Typography
+              sx={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: `${comfortableDensity.gap / 2}px`,
+                px: `${comfortableDensity.gap * 0.75}px`,
+                py: '4px',
+                borderRadius: 999,
+                bgcolor: 'action.selected',
+                fontWeight: 600,
+              }}
+            >
+              <GraduationCap size={18} aria-hidden="true" />
+              {studentCopy.gradeLevel(session.profile.gradeLevelName)}
+            </Typography>
+          </Box>
+
+          {/* The list's own failure, beside a greeting that came back perfectly
+                well. Retryable, and it never routes the child away. */}
+          {testsError !== null && (
             <Alert
               severity="error"
               role="alert"
               variant="outlined"
+              data-testid="student-tests-error"
               action={
                 <Button onClick={load} sx={{ minHeight: comfortableDensity.tapTarget }}>
                   {studentCopy.retry}
                 </Button>
               }
             >
-              {error}
+              {testsError}
             </Alert>
-          )
-        ) : (
-          <Box sx={{ display: 'grid', gap: `${comfortableDensity.gap}px` }}>
-            <Typography>{studentCopy.greeting(session.profile.displayName)}</Typography>
-            <Typography>{studentCopy.gradeLevel(session.profile.gradeLevelName)}</Typography>
+          )}
 
-            {/* The list's own failure, beside a greeting that came back perfectly
-                well. Retryable, and it never routes the child away. */}
-            {testsError !== null && (
-              <Alert
-                severity="error"
-                role="alert"
-                variant="outlined"
-                data-testid="student-tests-error"
-                action={
-                  <Button onClick={load} sx={{ minHeight: comfortableDensity.tapTarget }}>
-                    {studentCopy.retry}
-                  </Button>
-                }
-              >
-                {testsError}
-              </Alert>
-            )}
-
-            {/* Only once the list has actually answered. "There is nothing to
+          {/* Only once the list has actually answered. "There is nothing to
                 practise yet" is a claim about this child's practice tests, and a
                 read that never came back is in no position to make it. */}
-            {tests !== null &&
-              (tests.length === 0 ? (
+          {tests !== null &&
+            (tests.length === 0 ? (
+              <Box
+                sx={{
+                  display: 'grid',
+                  justifyItems: 'center',
+                  gap: `${comfortableDensity.gap}px`,
+                  py: `${comfortableDensity.sectionMargin * 1.5}px`,
+                  px: `${comfortableDensity.cardPadding}px`,
+                  border: '2px dashed',
+                  borderColor: 'divider',
+                  borderRadius: `${rounded.control}px`,
+                  color: 'text.secondary',
+                  textAlign: 'center',
+                }}
+              >
+                <BookOpen size={36} aria-hidden="true" />
                 <Typography data-testid="student-empty">{studentCopy.empty}</Typography>
-              ) : (
-                <>
-                  <Typography component="h2" sx={{ fontWeight: 700 }}>
-                    {studentCopy.practiceTestsTitle}
-                  </Typography>
-                  {/* Handed over exactly as it arrived. The server owns the
+              </Box>
+            ) : (
+              <>
+                <Typography
+                  component="h2"
+                  variant="cardTitle"
+                  sx={{ mt: `${comfortableDensity.gap}px` }}
+                >
+                  {studentCopy.practiceTestsTitle}
+                </Typography>
+                {/* Handed over exactly as it arrived. The server owns the
                       order — what there is to do first, then what is finished
                       — and this page neither sorts it, filters it nor groups it
                       by Subject. */}
-                  <PracticeTestList tests={tests} runs={runs ?? undefined} />
-                </>
-              ))}
-            {/* A client-side link on purpose: leaving Student Mode means
+                <PracticeTestList tests={tests} runs={runs ?? undefined} />
+              </>
+            ))}
+          {/* A client-side link on purpose: leaving Student Mode means
                 reaching the PIN gate, never anything past it. */}
-            <Button
-              component={NextLink}
-              href="/parent/pin"
-              variant="outlined"
-              // Crossing into the parent surface is the other mode-gate crossing AD-26
-              // clears the client-held answers on. Done on the way out rather than on
-              // the way in, because the parent side has no profile to key a sweep by —
-              // and `clearAll`, for the same reason: past this gate nobody is a child.
-              onClick={() => clearAll(attemptStorage())}
-              sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
-            >
-              {studentCopy.parent}
-            </Button>
-          </Box>
-        )}
-      </CardContent>
-    </Card>
+          <Divider sx={{ mt: `${comfortableDensity.gap}px` }} />
+          <Button
+            startIcon={<Lock size={18} aria-hidden="true" />}
+            color="inherit"
+            component={NextLink}
+            href="/parent/pin"
+            variant="text"
+            // Crossing into the parent surface is the other mode-gate crossing AD-26
+            // clears the client-held answers on. Done on the way out rather than on
+            // the way in, because the parent side has no profile to key a sweep by —
+            // and `clearAll`, for the same reason: past this gate nobody is a child.
+            onClick={() => clearAll(attemptStorage())}
+            sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
+          >
+            {studentCopy.parent}
+          </Button>
+        </Box>
+      )}
+    </Box>
   );
 }

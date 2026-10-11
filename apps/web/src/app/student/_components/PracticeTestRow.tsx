@@ -2,9 +2,10 @@
 
 import NextLink from 'next/link';
 import type { Route } from 'next';
-import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
+import { CircleCheck, Hourglass, Play } from 'lucide-react';
 import { studentCopy } from '@/copy/student';
 import type { PracticeTestRunsView, StudentPracticeTestSummary } from '@/lib/parent-api';
 import { runLineOf } from '@/lib/practice-test-runs';
@@ -57,20 +58,31 @@ export function PracticeTestRow({ test, runs }: PracticeTestRowProps) {
   // rule with its own spec rather than a branch in a render.
   const line = runs === undefined ? null : runLineOf(runs);
   return (
-    <Box
+    <Card
       component="li"
       // `listStyle: 'none'` strips list semantics in Safari/VoiceOver along
       // with the item count, which is the one thing a child scanning what is
       // waiting needs announced. Put back by hand, as `PageStrip.tsx` does.
       role="listitem"
-      sx={{ listStyle: 'none', display: 'grid', gap: `${comfortableDensity.gap / 2}px` }}
+      sx={(theme) => ({
+        listStyle: 'none',
+        position: 'relative',
+        display: 'grid',
+        gap: `${comfortableDensity.gap / 2}px`,
+        p: `${comfortableDensity.cardPadding}px`,
+        transition: theme.transitions.create('border-color'),
+        '&:hover, &:focus-within': { borderColor: 'primary.main' },
+      })}
       data-testid="student-practice-test"
     >
       {/* Guarded on trimmed content rather than on `!= null`, so an empty or
           whitespace-only label renders no line at all instead of an empty
           styled one. */}
       {test.subjectName?.trim() ? (
-        <Typography sx={{ fontWeight: 700 }} data-testid="student-practice-test-subject">
+        <Typography
+          sx={{ ...typeRoles.label, color: 'text.secondary' }}
+          data-testid="student-practice-test-subject"
+        >
           {test.subjectName}
         </Typography>
       ) : null}
@@ -79,15 +91,43 @@ export function PracticeTestRow({ test, runs }: PracticeTestRowProps) {
           one thing that tells them apart, and would replace the visible words
           for anyone speaking them (WCAG 2.5.3). A client-side navigation,
           because Take Test is inside Student Mode rather than past it. */}
+      {/* Stretched over the whole card, so the card is one big target for a
+          child's tap — while the sentence stays the link's only name. */}
       <Link
         component={NextLink}
         href={`/student/tests/${test.id}` as Route}
-        sx={{ minHeight: comfortableDensity.tapTarget }}
+        underline="hover"
+        sx={{
+          minHeight: comfortableDensity.tapTarget,
+          display: 'flex',
+          alignItems: 'center',
+          fontSize: '1.25rem',
+          fontWeight: 600,
+          '&::after': { content: '""', position: 'absolute', inset: 0 },
+        }}
       >
         {studentCopy.practiceTest(test.questionCount)}
       </Link>
       {state === null ? null : (
-        <Typography data-testid="student-practice-test-state">{state}</Typography>
+        <Typography
+          data-testid="student-practice-test-state"
+          sx={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifySelf: 'start',
+            gap: `${comfortableDensity.gap / 4}px`,
+            px: `${comfortableDensity.gap * 0.75}px`,
+            py: '2px',
+            borderRadius: 999,
+            border: '1px solid',
+            fontWeight: 600,
+            fontSize: '0.9375rem',
+            ...STATE_TONE[test.state],
+          }}
+        >
+          <StateIcon state={test.state} />
+          {state}
+        </Typography>
       )}
       {/* Beneath the state label, and absent entirely without an entry. */}
       {line !== null && (
@@ -103,6 +143,22 @@ export function PracticeTestRow({ test, runs }: PracticeTestRowProps) {
           {line.note}
         </Typography>
       )}
-    </Box>
+    </Card>
   );
+}
+
+/**
+ * The tone repeats the word; it never replaces it. Strip every colour and the
+ * three states still read apart, because the word is what tells them apart.
+ */
+const STATE_TONE: Record<string, { color: string; borderColor: string }> = {
+  NotStarted: { color: 'primary.main', borderColor: 'primary.main' },
+  InProgress: { color: 'warning.main', borderColor: 'warning.main' },
+  Completed: { color: 'success.main', borderColor: 'success.main' },
+};
+
+function StateIcon({ state }: { state: string }) {
+  if (state === 'Completed') return <CircleCheck size={16} aria-hidden="true" />;
+  if (state === 'InProgress') return <Hourglass size={16} aria-hidden="true" />;
+  return <Play size={16} aria-hidden="true" />;
 }
