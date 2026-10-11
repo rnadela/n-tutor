@@ -7,6 +7,7 @@ import type { Route } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import { ArrowLeft, CircleCheck, Pencil, Send, Trash2 } from 'lucide-react';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
@@ -20,7 +21,6 @@ import Typography from '@mui/material/Typography';
 import { PrimaryButton, DestructiveButton } from '@/components/Button';
 import { AppDialog } from '@/components/Dialog';
 import { RichText } from '@/components/RichText';
-import { Screen } from '@/components/Screen';
 import { TextField } from '@/components/TextField';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
@@ -33,7 +33,7 @@ import {
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
 import { canSaveField, plainTextOf } from '@/lib/rich-text';
-import { density } from '@/theme/tokens';
+import { density, rounded, typeRoles } from '@/theme/tokens';
 
 /**
  * How long a parent stops typing before the uncommitted edit is written to its
@@ -792,8 +792,11 @@ export default function DraftReviewPage() {
     parentCopy.drafts.unknownStudent;
 
   return (
-    <Screen>
-      <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 1.5}px` }}
+    >
+      <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
         {parentCopy.drafts.reviewTitle}
       </Typography>
 
@@ -843,7 +846,11 @@ export default function DraftReviewPage() {
           <>
             {/* Both figures are the server's: this browser holds one draft and
                 could not count the others its job landed. */}
-            <Typography component="p" data-testid="draft-position" sx={{ fontWeight: 700 }}>
+            <Typography
+              component="p"
+              data-testid="draft-position"
+              sx={{ ...typeRoles.label, color: 'text.secondary', mt: `-${density.gap}px` }}
+            >
               {parentCopy.drafts.position(draft.position, draft.siblingCount)}
             </Typography>
             {/* Counted from the questions actually rendered, not from the
@@ -862,6 +869,7 @@ export default function DraftReviewPage() {
                 totalLine.current = node;
               }}
               data-testid="draft-question-total"
+              sx={{ fontSize: '1.25rem', fontWeight: 700, mt: `-${density.gap}px` }}
             >
               {parentCopy.drafts.questionTotal(draft.questions.length)}
             </Typography>
@@ -1044,7 +1052,11 @@ export default function DraftReviewPage() {
 
                           {question.choices.length > 0 && (
                             <Box sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                              <Typography component="h3" variant="label">
+                              <Typography
+                                component="h3"
+                                variant="label"
+                                sx={{ color: 'text.secondary' }}
+                              >
                                 {parentCopy.drafts.optionsLabel}
                               </Typography>
                               <Box
@@ -1053,7 +1065,7 @@ export default function DraftReviewPage() {
                                 // audible once `listStyle: 'none'` has taken
                                 // the semantics.
                                 role="list"
-                                sx={{ display: 'grid', gap: 0, p: 0, m: 0 }}
+                                sx={{ display: 'grid', gap: `${density.gap / 2}px`, p: 0, m: 0 }}
                               >
                                 {question.choices.map((choice) => (
                                   <Typography
@@ -1061,7 +1073,20 @@ export default function DraftReviewPage() {
                                     component="li"
                                     role="listitem"
                                     variant="questionBody"
-                                    sx={{ listStyle: 'none' }}
+                                    sx={{
+                                      listStyle: 'none',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      flexWrap: 'wrap',
+                                      gap: `${density.gap}px`,
+                                      px: `${density.cardPadding}px`,
+                                      py: `${density.gap / 2}px`,
+                                      border: '1px solid',
+                                      // The tint and border repeat the word below;
+                                      // they never stand in for it.
+                                      borderColor: choice.isCorrect ? 'success.main' : 'divider',
+                                      borderRadius: `${rounded.paper}px`,
+                                    }}
                                     data-testid="draft-choice"
                                     data-correct={choice.isCorrect ? 'true' : 'false'}
                                   >
@@ -1073,8 +1098,15 @@ export default function DraftReviewPage() {
                                         component="span"
                                         variant="label"
                                         data-testid="draft-choice-correct"
-                                        sx={{ ml: `${density.gap}px` }}
+                                        sx={{
+                                          ml: 'auto',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: `${density.gap / 2}px`,
+                                          color: 'success.main',
+                                        }}
                                       >
+                                        <CircleCheck size={16} aria-hidden="true" />
                                         {parentCopy.drafts.correctOption}
                                       </Typography>
                                     )}
@@ -1086,7 +1118,11 @@ export default function DraftReviewPage() {
 
                           {question.answer !== null && (
                             <Box sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                              <Typography component="h3" variant="label">
+                              <Typography
+                                component="h3"
+                                variant="label"
+                                sx={{ color: 'text.secondary' }}
+                              >
                                 {parentCopy.drafts.correctAnswerLabel}
                               </Typography>
                               <Typography
@@ -1100,13 +1136,21 @@ export default function DraftReviewPage() {
                           )}
 
                           <Box sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                            <Typography component="h3" variant="label">
+                            <Typography
+                              component="h3"
+                              variant="label"
+                              sx={{ color: 'text.secondary' }}
+                            >
                               {parentCopy.drafts.topicsLabel}
                             </Typography>
                             {/* Raw as stored (AD-11). Nothing here retitles,
                                 merges or truncates a label read off the
                                 parent's own page. */}
-                            <Typography component="p" data-testid="draft-question-topics">
+                            <Typography
+                              component="p"
+                              data-testid="draft-question-topics"
+                              sx={{ color: 'text.secondary' }}
+                            >
                               {question.topics.length === 0
                                 ? parentCopy.drafts.noTopics
                                 : question.topics.join(', ')}
@@ -1116,10 +1160,21 @@ export default function DraftReviewPage() {
                           {/* Both act in place, on this row, with no
                               navigation. Real buttons with names that say which
                               Question they belong to. */}
-                          <Box sx={{ display: 'flex', gap: `${density.gap}px` }}>
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: `${density.gap}px`,
+                              pt: `${density.gap}px`,
+                              borderTop: '1px solid',
+                              borderColor: 'divider',
+                            }}
+                          >
                             <Button
                               type="button"
                               variant="outlined"
+                              size="small"
+                              startIcon={<Pencil size={14} aria-hidden="true" />}
                               ref={(node: HTMLElement | null) => {
                                 editControls.current[question.id] = node;
                               }}
@@ -1140,7 +1195,10 @@ export default function DraftReviewPage() {
                             </Button>
                             <Button
                               type="button"
-                              variant="outlined"
+                              variant="text"
+                              color="error"
+                              size="small"
+                              startIcon={<Trash2 size={14} aria-hidden="true" />}
                               data-testid="draft-delete-open"
                               onClick={() => setPendingDelete(question)}
                             >
@@ -1165,7 +1223,15 @@ export default function DraftReviewPage() {
               component="section"
               aria-labelledby="draft-timer-legend"
               data-testid="draft-timer"
-              sx={{ display: 'grid', gap: `${density.gap}px` }}
+              sx={{
+                display: 'grid',
+                gap: `${density.gap}px`,
+                p: `${density.cardPadding}px`,
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: `${rounded.control}px`,
+                bgcolor: 'background.paper',
+              }}
             >
               <Typography component="h2" id="draft-timer-legend" variant="label">
                 {parentCopy.drafts.timerLegend}
@@ -1240,9 +1306,22 @@ export default function DraftReviewPage() {
                 a batch: a released practice test appears on Student Home on its
                 own, as each one is released. Both are real focusable buttons, and
                 neither acts until the confirmation beside it has been read. */}
-            <Box sx={{ display: 'flex', gap: `${density.gap}px` }}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: `${density.gap}px`,
+                p: `${density.cardPadding}px`,
+                border: '1px solid',
+                borderColor: 'primary.main',
+                borderRadius: `${rounded.control}px`,
+                bgcolor: 'action.hover',
+              }}
+            >
               <PrimaryButton
                 disabled={busy !== null}
+                startIcon={<Send size={16} aria-hidden="true" />}
                 data-testid="draft-release-open"
                 onClick={() => {
                   setNotice(null);
@@ -1254,7 +1333,9 @@ export default function DraftReviewPage() {
               </PrimaryButton>
               <Button
                 type="button"
-                variant="outlined"
+                variant="text"
+                color="error"
+                startIcon={<Trash2 size={16} aria-hidden="true" />}
                 disabled={busy !== null}
                 data-testid="draft-discard-open"
                 onClick={() => {
@@ -1379,9 +1460,14 @@ export default function DraftReviewPage() {
 
       {/* Client-side, so the provider holding the elevation bearer survives the
           navigation. Offered in every state, including the missing one. */}
-      <Link component={NextLink} href="/parent/drafts">
+      <Link
+        component={NextLink}
+        href="/parent/drafts"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
         {parentCopy.drafts.backToList}
       </Link>
-    </Screen>
+    </Box>
   );
 }
