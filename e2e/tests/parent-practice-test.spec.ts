@@ -79,7 +79,7 @@ async function uploadAndRead(page: Page, email: string): Promise<{ subjectName: 
     .getByRole('navigation', { name: 'Parent View' })
     .getByRole('link', { name: 'Upload a test' })
     .click();
-  await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Upload a test', level: 1 })).toBeVisible();
 
   await page.locator('[role="combobox"]#capture-subject').click();
   await page.getByRole('option', { name: subject.name }).click();
@@ -312,7 +312,7 @@ test.describe('generating practice tests', () => {
     // about the job. The screen unmounts on the way out and mounts again on the
     // way in, which is the whole point — whatever it then shows, it read.
     await page.getByRole('link', { name: 'Back to the upload' }).click();
-    await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Upload a test', level: 1 })).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(url);
     await expect(page.getByRole('heading', { name: 'Generate practice tests' })).toBeVisible();

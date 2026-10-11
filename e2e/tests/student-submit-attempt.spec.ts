@@ -89,7 +89,7 @@ async function releaseTests(
     .getByRole('navigation', { name: 'Parent View' })
     .getByRole('link', { name: 'Upload a test' })
     .click();
-  await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Upload a test', level: 1 })).toBeVisible();
 
   await page.locator('[role="combobox"]#capture-subject').click();
   await page.getByRole('option', { name: subject.name }).click();

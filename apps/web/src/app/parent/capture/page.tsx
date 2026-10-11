@@ -721,7 +721,7 @@ export default function CapturePage() {
       sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 2}px` }}
     >
       <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
-        {parentCopy.capture.title}
+        {parentCopy.capture.pageTitle}
       </Typography>
 
       {error !== null && (

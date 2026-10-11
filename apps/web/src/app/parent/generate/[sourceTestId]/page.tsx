@@ -559,7 +559,9 @@ export default function GeneratePage() {
                 data-testid="generate-progress"
               >
                 <Typography component="h2" variant="cardTitle">
-                  {parentCopy.generate.progressHeading}
+                  {running
+                    ? parentCopy.generate.progressHeading
+                    : parentCopy.generate.progressHeadingSettled}
                 </Typography>
                 {/* The figures are the job's own, read from the server. */}
                 <Typography component="p" data-testid="generate-progress-line">

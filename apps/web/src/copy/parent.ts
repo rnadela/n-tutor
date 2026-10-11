@@ -503,6 +503,9 @@ export const parentCopy = {
    * read as `maxPages`.
    */
   capture: {
+    /** The upload screen's own `<h1>`, the same words the sidebar and header use. */
+    pageTitle: 'Upload a test',
+    /** The page list's heading, here and on the generate step. */
     title: 'Pages',
     orderLabel: 'Order',
     /** The mockup's caption, with both figures supplied by the API. */
@@ -936,6 +939,8 @@ export const parentCopy = {
     startFailed: 'The practice tests could not be started. Try again.',
 
     progressHeading: 'Making the practice tests',
+    /** The same panel once the request has settled, whichever way it went. */
+    progressHeadingSettled: 'Practice tests from this upload',
     /**
      * The progress sentence, announced in exactly the words it displays.
      *

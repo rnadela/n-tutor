@@ -82,7 +82,7 @@ async function openCapture(page: Page): Promise<{ gradeLevelName: string; subjec
     .getByRole('navigation', { name: 'Parent View' })
     .getByRole('link', { name: 'Upload a test' })
     .click();
-  await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Upload a test', level: 1 })).toBeVisible();
   return { gradeLevelName: gradeLevel.name, subjectName: subject.name };
 }
 
@@ -201,7 +201,7 @@ test.describe('page management before submit', () => {
       .getByRole('navigation', { name: 'Parent View' })
       .getByRole('link', { name: 'Upload a test' })
       .click();
-    await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Upload a test', level: 1 })).toBeVisible();
     await expect(rows(page).nth(0)).toHaveAttribute('data-page-id', secondId!);
     await expect(rows(page).nth(1)).toHaveAttribute('data-page-id', firstId!);
 
@@ -441,7 +441,7 @@ test.describe('page management before submit', () => {
       .getByRole('navigation', { name: 'Parent View' })
       .getByRole('link', { name: 'Upload a test' })
       .click();
-    await expect(page.getByRole('heading', { name: 'Pages', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Upload a test', level: 1 })).toBeVisible();
 
     const retry = page.getByRole('button', { name: 'Try again' });
     await expect(retry).toBeVisible();
