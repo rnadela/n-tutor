@@ -14,9 +14,10 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { Check, GitMerge, Pencil, TriangleAlert } from 'lucide-react';
 import { adminCopy } from '@/copy/admin';
 import type { CanonicalTopic, ProvisionalTopic } from '@/lib/admin-api';
-import { density } from '@/theme/tokens';
+import { density, rounded } from '@/theme/tokens';
 
 export interface TopicCurationListProps {
   topics: ProvisionalTopic[];
@@ -163,188 +164,249 @@ export function TopicCurationList(props: TopicCurationListProps) {
   return (
     <Card component="section" aria-labelledby="topics-heading">
       <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-        <Table size="small" aria-labelledby="topics-heading">
-          <TableHead>
-            <TableRow>
-              <TableCell component="th" scope="col">
-                {adminCopy.topics.nameColumn}
-              </TableCell>
-              <TableCell component="th" scope="col">
-                {adminCopy.topics.subjectColumn}
-              </TableCell>
-              <TableCell component="th" scope="col">
-                {adminCopy.topics.taggedColumn}
-              </TableCell>
-              <TableCell component="th" scope="col">
-                {adminCopy.topics.createdColumn}
-              </TableCell>
-              <TableCell component="th" scope="col">
-                {adminCopy.topics.actionsColumn}
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {topics.map((topic) => (
-              <TableRow
-                key={topic.topicId}
-                data-testid="topic-row"
-                data-topic-id={topic.topicId}
-                data-name={topic.name}
-              >
-                <TableCell>
-                  {renamingId === topic.topicId ? (
-                    <Box
-                      component="form"
-                      sx={{ display: 'flex', gap: `${density.gap}px` }}
-                      onSubmit={async (event) => {
-                        event.preventDefault();
-                        const name = renameDraft.trim();
-                        if (!name || isPending(topic.topicId)) return;
-                        const saved = await withPending(topic.topicId, () =>
-                          props.onRename(topic, name),
-                        );
-                        // Only close on success; a rejected name must survive the error.
-                        if (saved) setRenamingId(null);
-                      }}
-                    >
-                      <TextField
-                        id={`topic-rename-${topic.topicId}`}
-                        label={adminCopy.topics.renameLabel}
-                        value={renameDraft}
-                        onChange={(event) => setRenameDraft(event.target.value)}
-                        size="small"
-                      />
-                      <Button type="submit" variant="contained" disabled={isPending(topic.topicId)}>
-                        {adminCopy.topics.saveName}
-                      </Button>
-                      <Button type="button" onClick={() => setRenamingId(null)}>
-                        {adminCopy.topics.cancelRename}
-                      </Button>
-                    </Box>
-                  ) : (
-                    topic.name
-                  )}
+        <Box sx={{ overflowX: 'auto' }}>
+          <Table
+            size="small"
+            aria-labelledby="topics-heading"
+            sx={{
+              '& thead th': {
+                fontSize: '0.6875rem',
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'text.secondary',
+                whiteSpace: 'nowrap',
+              },
+              '& tbody td': { verticalAlign: 'top', py: `${density.gap * 1.5}px` },
+              '& tbody tr:hover': { bgcolor: 'action.hover' },
+            }}
+          >
+            <TableHead>
+              <TableRow>
+                <TableCell component="th" scope="col">
+                  {adminCopy.topics.nameColumn}
                 </TableCell>
-                <TableCell>{topic.subjectName}</TableCell>
-                <TableCell data-testid="topic-tagged-count">{topic.taggedQuestionCount}</TableCell>
-                <TableCell>{createdOn(topic.createdAt)}</TableCell>
-                <TableCell>
-                  <Box sx={{ display: 'grid', gap: `${density.gap}px`, justifyItems: 'start' }}>
-                    <Box sx={{ display: 'flex', gap: `${density.gap}px` }}>
-                      <Button
-                        type="button"
-                        variant="contained"
-                        disabled={isPending(topic.topicId)}
-                        onClick={() => withPending(topic.topicId, () => props.onConfirm(topic))}
-                        aria-label={`${adminCopy.topics.confirm} ${topic.name}`}
-                      >
-                        {adminCopy.topics.confirm}
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          closeMerge();
-                          setRenamingId(topic.topicId);
-                          setRenameDraft(topic.name);
-                        }}
-                        aria-label={`${adminCopy.topics.rename} ${topic.name}`}
-                      >
-                        {adminCopy.topics.rename}
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() =>
-                          mergingId === topic.topicId ? closeMerge() : openMerge(topic)
-                        }
-                        aria-label={`${adminCopy.topics.startMerge} ${topic.name}`}
-                      >
-                        {mergingId === topic.topicId
-                          ? adminCopy.topics.cancelMerge
-                          : adminCopy.topics.startMerge}
-                      </Button>
-                    </Box>
-
-                    {mergingId === topic.topicId && (
-                      <Box
-                        data-testid="topic-merge-panel"
-                        sx={{ display: 'grid', gap: `${density.gap}px`, justifyItems: 'start' }}
-                      >
-                        {targetsError !== null ? (
-                          <Alert severity="error" role="alert" variant="outlined">
-                            {targetsError}
-                          </Alert>
-                        ) : targets === null ? (
-                          <Typography component="p" role="status">
-                            {adminCopy.topics.loadingTargets}
-                          </Typography>
-                        ) : targets.length === 0 ? (
-                          <Typography component="p" sx={{ color: 'text.secondary' }}>
-                            {adminCopy.topics.noTargets}
-                          </Typography>
-                        ) : (
-                          <>
-                            <TextField
-                              select
-                              id={`topic-merge-target-${topic.topicId}`}
-                              label={adminCopy.topics.mergeTargetLabel}
-                              value={targetId}
-                              onChange={(event) => setTargetId(event.target.value)}
-                              size="small"
-                              sx={{ minWidth: 240 }}
-                            >
-                              <MenuItem value="">{adminCopy.topics.mergeTargetUnchosen}</MenuItem>
-                              {targets.map((candidate) => (
-                                <MenuItem key={candidate.topicId} value={candidate.topicId}>
-                                  {`${candidate.name} (${
-                                    candidate.provisional
-                                      ? adminCopy.topics.targetProvisional
-                                      : adminCopy.topics.targetConfirmed
-                                  })`}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-
-                            {/* Stated before it fires, and only once a target is chosen:
-                                the count is the difference between folding away a stray
-                                spelling and folding away a term's worth of history. */}
-                            {targetId !== '' && (
-                              <Typography component="p" data-testid="topic-merge-confirmation">
-                                {adminCopy.topics.mergeConfirmation(
-                                  topic.name,
-                                  targets.find((candidate) => candidate.topicId === targetId)
-                                    ?.name ?? '',
-                                  topic.taggedQuestionCount,
-                                )}
-                              </Typography>
-                            )}
-
-                            <Button
-                              type="button"
-                              variant="contained"
-                              disabled={targetId === '' || isPending(topic.topicId)}
-                              onClick={async () => {
-                                const target = targets.find(
-                                  (candidate) => candidate.topicId === targetId,
-                                );
-                                if (target === undefined) return;
-                                const merged = await withPending(topic.topicId, () =>
-                                  props.onMerge(topic, target),
-                                );
-                                if (merged) closeMerge();
-                              }}
-                            >
-                              {adminCopy.topics.merge}
-                            </Button>
-                          </>
-                        )}
-                      </Box>
-                    )}
-                  </Box>
+                <TableCell component="th" scope="col">
+                  {adminCopy.topics.subjectColumn}
+                </TableCell>
+                <TableCell component="th" scope="col">
+                  {adminCopy.topics.taggedColumn}
+                </TableCell>
+                <TableCell component="th" scope="col">
+                  {adminCopy.topics.createdColumn}
+                </TableCell>
+                <TableCell component="th" scope="col">
+                  {adminCopy.topics.actionsColumn}
                 </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {topics.map((topic) => (
+                <TableRow
+                  key={topic.topicId}
+                  data-testid="topic-row"
+                  data-topic-id={topic.topicId}
+                  data-name={topic.name}
+                >
+                  <TableCell>
+                    {renamingId === topic.topicId ? (
+                      <Box
+                        component="form"
+                        sx={{ display: 'flex', gap: `${density.gap}px` }}
+                        onSubmit={async (event) => {
+                          event.preventDefault();
+                          const name = renameDraft.trim();
+                          if (!name || isPending(topic.topicId)) return;
+                          const saved = await withPending(topic.topicId, () =>
+                            props.onRename(topic, name),
+                          );
+                          // Only close on success; a rejected name must survive the error.
+                          if (saved) setRenamingId(null);
+                        }}
+                      >
+                        <TextField
+                          id={`topic-rename-${topic.topicId}`}
+                          label={adminCopy.topics.renameLabel}
+                          value={renameDraft}
+                          onChange={(event) => setRenameDraft(event.target.value)}
+                          size="small"
+                        />
+                        <Button
+                          type="submit"
+                          variant="contained"
+                          disabled={isPending(topic.topicId)}
+                        >
+                          {adminCopy.topics.saveName}
+                        </Button>
+                        <Button type="button" onClick={() => setRenamingId(null)}>
+                          {adminCopy.topics.cancelRename}
+                        </Button>
+                      </Box>
+                    ) : (
+                      <Typography component="span" sx={{ fontWeight: 600 }}>
+                        {topic.name}
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>{topic.subjectName}</TableCell>
+                  <TableCell
+                    data-testid="topic-tagged-count"
+                    sx={{ fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {topic.taggedQuestionCount}
+                  </TableCell>
+                  <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                    {createdOn(topic.createdAt)}
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'grid', gap: `${density.gap}px`, justifyItems: 'start' }}>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: `${density.gap / 2}px` }}>
+                        <Button
+                          type="button"
+                          variant="contained"
+                          size="small"
+                          startIcon={<Check size={14} aria-hidden="true" />}
+                          disabled={isPending(topic.topicId)}
+                          onClick={() => withPending(topic.topicId, () => props.onConfirm(topic))}
+                          aria-label={`${adminCopy.topics.confirm} ${topic.name}`}
+                        >
+                          {adminCopy.topics.confirm}
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            closeMerge();
+                            setRenamingId(topic.topicId);
+                            setRenameDraft(topic.name);
+                          }}
+                          aria-label={`${adminCopy.topics.rename} ${topic.name}`}
+                          size="small"
+                          variant="text"
+                          startIcon={<Pencil size={14} aria-hidden="true" />}
+                        >
+                          {adminCopy.topics.rename}
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={() =>
+                            mergingId === topic.topicId ? closeMerge() : openMerge(topic)
+                          }
+                          aria-label={`${adminCopy.topics.startMerge} ${topic.name}`}
+                          size="small"
+                          variant="text"
+                          aria-expanded={mergingId === topic.topicId}
+                          startIcon={<GitMerge size={14} aria-hidden="true" />}
+                        >
+                          {mergingId === topic.topicId
+                            ? adminCopy.topics.cancelMerge
+                            : adminCopy.topics.startMerge}
+                        </Button>
+                      </Box>
+
+                      {mergingId === topic.topicId && (
+                        <Box
+                          data-testid="topic-merge-panel"
+                          sx={{
+                            display: 'grid',
+                            gap: `${density.gap}px`,
+                            justifyItems: 'start',
+                            p: `${density.cardPadding}px`,
+                            bgcolor: 'action.hover',
+                            borderRadius: `${rounded.control}px`,
+                            width: 1,
+                          }}
+                        >
+                          {targetsError !== null ? (
+                            <Alert severity="error" role="alert" variant="outlined">
+                              {targetsError}
+                            </Alert>
+                          ) : targets === null ? (
+                            <Typography component="p" role="status">
+                              {adminCopy.topics.loadingTargets}
+                            </Typography>
+                          ) : targets.length === 0 ? (
+                            <Typography component="p" sx={{ color: 'text.secondary' }}>
+                              {adminCopy.topics.noTargets}
+                            </Typography>
+                          ) : (
+                            <>
+                              <TextField
+                                select
+                                id={`topic-merge-target-${topic.topicId}`}
+                                label={adminCopy.topics.mergeTargetLabel}
+                                value={targetId}
+                                onChange={(event) => setTargetId(event.target.value)}
+                                size="small"
+                                sx={{ minWidth: 240 }}
+                              >
+                                <MenuItem value="">{adminCopy.topics.mergeTargetUnchosen}</MenuItem>
+                                {targets.map((candidate) => (
+                                  <MenuItem key={candidate.topicId} value={candidate.topicId}>
+                                    {`${candidate.name} (${
+                                      candidate.provisional
+                                        ? adminCopy.topics.targetProvisional
+                                        : adminCopy.topics.targetConfirmed
+                                    })`}
+                                  </MenuItem>
+                                ))}
+                              </TextField>
+
+                              {/* Stated before it fires, and only once a target is chosen:
+                                the count is the difference between folding away a stray
+                                spelling and folding away a term's worth of history. */}
+                              {targetId !== '' && (
+                                <Typography
+                                  component="p"
+                                  data-testid="topic-merge-confirmation"
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: `${density.gap}px`,
+                                    color: 'warning.main',
+                                  }}
+                                >
+                                  <TriangleAlert
+                                    size={16}
+                                    aria-hidden="true"
+                                    style={{ flexShrink: 0 }}
+                                  />
+                                  {adminCopy.topics.mergeConfirmation(
+                                    topic.name,
+                                    targets.find((candidate) => candidate.topicId === targetId)
+                                      ?.name ?? '',
+                                    topic.taggedQuestionCount,
+                                  )}
+                                </Typography>
+                              )}
+
+                              <Button
+                                type="button"
+                                variant="contained"
+                                disabled={targetId === '' || isPending(topic.topicId)}
+                                onClick={async () => {
+                                  const target = targets.find(
+                                    (candidate) => candidate.topicId === targetId,
+                                  );
+                                  if (target === undefined) return;
+                                  const merged = await withPending(topic.topicId, () =>
+                                    props.onMerge(topic, target),
+                                  );
+                                  if (merged) closeMerge();
+                                }}
+                              >
+                                {adminCopy.topics.merge}
+                              </Button>
+                            </>
+                          )}
+                        </Box>
+                      )}
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Box>
       </CardContent>
     </Card>
   );

@@ -149,7 +149,7 @@ export default function TopicCurationPage() {
   return (
     <Box sx={{ display: 'grid', gap: `${density.sectionMargin}px` }}>
       <Box>
-        <Typography id="topics-heading" component="h1" sx={{ fontSize: 22, fontWeight: 700 }}>
+        <Typography id="topics-heading" component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
           {adminCopy.topics.title}
         </Typography>
         <Typography component="p" sx={{ color: 'text.secondary' }}>
