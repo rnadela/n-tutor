@@ -198,7 +198,7 @@ export default function ParentAccountsPage() {
   return (
     <Box sx={{ display: 'grid', gap: `${density.sectionMargin}px` }}>
       <Box>
-        <Typography component="h1" sx={{ fontSize: 22, fontWeight: 700 }}>
+        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
           {adminCopy.accounts.title}
         </Typography>
         <Typography component="p" sx={{ color: 'text.secondary' }}>
