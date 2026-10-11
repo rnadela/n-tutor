@@ -10,6 +10,7 @@ import {
   GRADE_RULE_WIDTH,
   comfortableDensity,
   gradeStateMarker,
+  rounded,
   type GradeStateMarker as GradeStateMarkerToken,
   typeRoles,
 } from '@/theme/tokens';
@@ -167,7 +168,8 @@ export function AnswerKeyRow({
         display: 'grid',
         gridTemplateColumns: `${GRADE_RULE_WIDTH}px 1fr`,
         columnGap: `${comfortableDensity.gap}px`,
-        paddingBlock: `${comfortableDensity.gap}px`,
+        paddingBlock: `${comfortableDensity.gap * 1.5}px`,
+        '& + &': { borderTop: '1px solid', borderColor: 'divider' },
       }}
       data-testid="answer-key-row"
       data-state={row.state}
@@ -219,55 +221,73 @@ export function AnswerKeyRow({
           </Typography>
         )}
 
-        <Typography component="p" sx={{ ...typeRoles.caption }} data-testid="answer-key-your-label">
-          {labels.studentAnswer}
-        </Typography>
-        {/* A sentence rather than an empty space: an empty space beside a label
-            reads as something that failed to load. */}
-        {row.studentAnswer === null ? (
-          <Typography
-            component="p"
-            sx={{ ...typeRoles.questionBody }}
-            data-testid="answer-key-no-answer"
-          >
-            {labels.noAnswer}
-          </Typography>
-        ) : (
-          <Typography
-            component="p"
-            sx={{ ...typeRoles.questionBody }}
-            data-testid="answer-key-your-answer"
-          >
-            <RichText segments={row.studentAnswer} />
-          </Typography>
-        )}
-
-        <Typography
-          component="p"
-          sx={{ ...typeRoles.caption }}
-          data-testid="answer-key-correct-label"
+        {/* The two answers side by side, so the comparison is one glance rather than a
+            scroll; stacked again on a phone. Each sits on the paper role, because both
+            are content rather than chrome. */}
+        <Box
+          sx={{
+            display: 'grid',
+            gap: `${comfortableDensity.gap / 2}px`,
+            gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+          }}
         >
-          {labels.correctAnswer}
-        </Typography>
-        {/* The stored key could not be read back. The row still states its state:
+          <Box sx={ANSWER_PANEL}>
+            <Typography
+              component="p"
+              sx={{ ...typeRoles.caption, color: 'text.secondary' }}
+              data-testid="answer-key-your-label"
+            >
+              {labels.studentAnswer}
+            </Typography>
+            {/* A sentence rather than an empty space: an empty space beside a label
+            reads as something that failed to load. */}
+            {row.studentAnswer === null ? (
+              <Typography
+                component="p"
+                sx={{ ...typeRoles.questionBody }}
+                data-testid="answer-key-no-answer"
+              >
+                {labels.noAnswer}
+              </Typography>
+            ) : (
+              <Typography
+                component="p"
+                sx={{ ...typeRoles.questionBody }}
+                data-testid="answer-key-your-answer"
+              >
+                <RichText segments={row.studentAnswer} />
+              </Typography>
+            )}
+          </Box>
+          <Box sx={ANSWER_PANEL}>
+            <Typography
+              component="p"
+              sx={{ ...typeRoles.caption, color: 'text.secondary' }}
+              data-testid="answer-key-correct-label"
+            >
+              {labels.correctAnswer}
+            </Typography>
+            {/* The stored key could not be read back. The row still states its state:
             the work was graded, and only the words for the answer are gone. */}
-        {row.correctAnswer === null ? (
-          <Typography
-            component="p"
-            sx={{ ...typeRoles.questionBody }}
-            data-testid="answer-key-unavailable"
-          >
-            {labels.answerUnavailable}
-          </Typography>
-        ) : (
-          <Typography
-            component="p"
-            sx={{ ...typeRoles.questionBody }}
-            data-testid="answer-key-correct-answer"
-          >
-            <RichText segments={row.correctAnswer} />
-          </Typography>
-        )}
+            {row.correctAnswer === null ? (
+              <Typography
+                component="p"
+                sx={{ ...typeRoles.questionBody }}
+                data-testid="answer-key-unavailable"
+              >
+                {labels.answerUnavailable}
+              </Typography>
+            ) : (
+              <Typography
+                component="p"
+                sx={{ ...typeRoles.questionBody }}
+                data-testid="answer-key-correct-answer"
+              >
+                <RichText segments={row.correctAnswer} />
+              </Typography>
+            )}
+          </Box>
+        </Box>
 
         {/* The gap, on the row it is about, so a row read on its own still says it. */}
         {row.state === 'Ungraded' && (
@@ -311,8 +331,21 @@ export function AnswerKeyRow({
         {/* Whatever the screen put about the mark: the dispute control on the child's
             screen, the reason and the adjustment on the parent's. Before `explain`,
             because a mark is what the row is about. */}
-        {grade}
-        {/* Whatever the screen put here, last inside this row's own content column
+        {/* The row's controls, below a hairline so they read as things to do about
+            the answers above rather than as more of them. */}
+        {(grade !== undefined || explain !== undefined) && (
+          <Box
+            sx={{
+              display: 'grid',
+              gap: `${comfortableDensity.gap / 2}px`,
+              pt: `${comfortableDensity.gap / 2}px`,
+              mt: `${comfortableDensity.gap / 2}px`,
+              borderTop: '1px dashed',
+              borderColor: 'divider',
+            }}
+          >
+            {grade}
+            {/* Whatever the screen put here, last inside this row's own content column
             and never outside it — an explanation belongs directly beneath the
             Question it is about (UX-DR16).
 
@@ -320,8 +353,20 @@ export function AnswerKeyRow({
             `footer` is: this component keeps knowing nothing about explaining, keeps
             having no hooks, and stays assertable as a markup string. It does not
             know what is in here and cannot act on it. */}
-        {explain}
+            {explain}
+          </Box>
+        )}
       </Box>
     </Box>
   );
 }
+
+/** One answer's panel: the paper role's near-square corner on a tint. */
+const ANSWER_PANEL = {
+  display: 'grid',
+  gap: `${comfortableDensity.gap / 4}px`,
+  alignContent: 'start',
+  p: `${comfortableDensity.gap}px`,
+  bgcolor: 'action.hover',
+  borderRadius: `${rounded.paper}px`,
+} as const;

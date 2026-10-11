@@ -165,6 +165,7 @@ export function DisputePanel({
             onClick={send}
             disabled={sending}
             data-testid="dispute-control"
+            sx={{ justifySelf: 'start', minHeight: comfortableDensity.tapTarget }}
           >
             {studentCopy.results.dispute.control}
           </Button>

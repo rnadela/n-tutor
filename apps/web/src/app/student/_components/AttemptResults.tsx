@@ -286,16 +286,25 @@ export function AttemptResults({
 
       {/* Which test this is. Reached from history as well as from a hand-in, so the
           Subject and the length are the only things on screen that say which one. */}
-      <Typography component="p" sx={{ ...typeRoles.caption }} data-testid="attempt-results-test">
+      <Typography
+        component="p"
+        sx={{
+          ...typeRoles.caption,
+          color: 'text.secondary',
+          mt: `-${comfortableDensity.gap / 2}px`,
+        }}
+        data-testid="attempt-results-test"
+      >
         {studentCopy.results.testMeta(results.subjectName, results.questionCount)}
       </Typography>
 
       {/* One sentence, chosen by what the server stated. A zero denominator is said
           in words: `0 out of 0` is not a sentence and dividing by it is not a thing
           this screen does. */}
+      {/* The figure a child came here for, so it is the largest thing on the screen. */}
       <Typography
         component="p"
-        sx={{ ...typeRoles.dashboardBody }}
+        sx={{ fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.25 }}
         data-testid="attempt-results-score"
       >
         {score.denominator === 0
@@ -329,7 +338,11 @@ export function AttemptResults({
       )}
 
       {meta !== null && (
-        <Typography component="p" sx={{ ...typeRoles.caption }} data-testid="attempt-results-meta">
+        <Typography
+          component="p"
+          sx={{ ...typeRoles.caption, color: 'text.secondary' }}
+          data-testid="attempt-results-meta"
+        >
           {meta}
         </Typography>
       )}
@@ -362,7 +375,7 @@ export function AttemptResults({
 
       <Typography
         component="h3"
-        sx={{ ...typeRoles.label }}
+        sx={{ ...typeRoles.label, mt: `${comfortableDensity.gap}px` }}
         data-testid="attempt-results-questions"
       >
         {studentCopy.results.questionsHeading}
