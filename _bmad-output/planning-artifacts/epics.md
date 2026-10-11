@@ -163,7 +163,7 @@ NFR18: Safety — Every AI-generated Question and Explanation is child-directed 
 
 ### UX Design Requirements
 
-UX-DR1: Implement the Clear Room dual-accent theme — `primary-student` (#0F6E78 / dark #71C3CE) and `primary-parent` (#0B5FA5 / dark #7FB6E8) — as one base MUI theme plus a nested `ThemeProvider` overriding `palette.primary` only per surface; every other token stays byte-identical across Student Mode, Parent View, and Admin.
+UX-DR1: Implement the Reading Room dual-accent theme — `primary-student` (#1E5A45 forest / dark #7FC4A4) and `primary-parent` (#2C4F7C ink navy / dark #8FB3E0) — as one base MUI theme plus a nested `ThemeProvider` overriding `palette.primary` only per surface; every other token stays byte-identical across Student Mode, Parent View, and Admin. *(Palette revised 2026-10-11 to match the app icon; see `sprint-change-proposal-2026-10-11-brand-palette.md`.)*
 
 UX-DR2: Implement the full semantic color set (secondary, success, error, warning, info, background-default, background-paper, text-primary, text-secondary, divider) in both light and dark, matched to the measured contrast ratios in DESIGN.md's ratios table, with `divider` held to the SC 1.4.11 3:1 floor as the product's only non-text boundary.
 
@@ -332,7 +332,7 @@ Every Parent Account's Upload, Generation, and Explanation Allowances are tracke
 **FRs covered:** FR-31
 
 ### Epic 10: Installable App (PWA)
-A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can.
+A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can, and the app's palette matches the icon they tapped.
 **FRs covered:** FR-41
 
 ## Epic 1: Parent Accounts, PINs & Student Profiles
@@ -1335,10 +1335,10 @@ So that I can plan ahead of hitting a cap.
 
 ## Epic 10: Installable App (PWA)
 
-A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can.
+A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can, and the app's palette matches the icon they tapped.
 
 **FRs covered:** FR-41
-**Relevant UX-DRs:** UX-DR42, UX-DR5 (self-hosted assets, no runtime CDN)
+**Relevant UX-DRs:** UX-DR42, UX-DR5 (self-hosted assets, no runtime CDN), UX-DR1, UX-DR2, UX-DR3, UX-DR17 (Story 10.3)
 
 ### Story 10.1: Web App Manifest, Icons & Minimal Service Worker
 
@@ -1407,3 +1407,31 @@ So that getting back into it next time is one tap.
 
 **Given** the banner
 **Then** it meets UX-DR42 and the Accessibility Floor in light and dark mode, its copy lives in the `copy/` modules, and it is covered by a unit test (visibility rules) and a Playwright E2E (Chromium: shown → dismissed → hidden → new context shown again; standalone emulated → hidden)
+
+### Story 10.3: Brand Palette
+
+As a family,
+I want the app to look like the icon I tapped,
+So that the installed app feels like one product.
+
+**Acceptance Criteria:**
+
+**Given** `DESIGN.md` (Reading Room) as revised 2026-10-11
+**When** `apps/web/src/theme/tokens.ts` is updated
+**Then** every colour token carries the DESIGN.md light and dark value, with no token added, removed, or renamed, and no hex literal introduced outside `tokens.ts`
+
+**Given** the measured-contrast table in DESIGN.md
+**Then** a unit spec computes each listed pair from `colorTokens` and asserts it meets its floor (4.5:1 text, 3:1 non-text/divider), in light and dark, so a future token change that breaks a pair fails CI
+
+**Given** the grade-state markers (UX-DR17)
+**When** rendered with Correct in teal and Not graded yet in info blue
+**Then** each state stays identifiable with colour removed (glyph, word, shape), verified in light and dark
+
+**Given** the camera capture chrome
+**Then** it takes the updated on-inverted set, and its deliberate-duplicate comments name the new values
+
+**Given** `brandGround` and `brandInk`
+**Then** they are unchanged and documented as deliberate duplicates (icon colours never follow the palette)
+
+**Given** Student Mode, Parent View, Admin, and camera capture, in light and dark
+**Then** a visual pass shows no surface left on an old palette value, and the existing unit and E2E suites pass

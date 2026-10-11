@@ -110,7 +110,8 @@ development_status:
   9-5-explanation-allowance-enforcement: done
   9-6-allowances-surface-atomic-monthly-reset: done
   epic-9-retrospective: optional
-  epic-10: backlog
+  epic-10: in-progress
   10-1-web-app-manifest-icons-minimal-service-worker: done
   10-2-install-banner: done
+  10-3-brand-palette: backlog
   epic-10-retrospective: optional

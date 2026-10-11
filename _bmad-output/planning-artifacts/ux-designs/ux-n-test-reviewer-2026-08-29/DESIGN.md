@@ -2,64 +2,64 @@
 title: n-test-reviewer
 status: final
 created: 2026-08-29
-updated: 2026-09-01
+updated: 2026-10-11
 sources:
   - ../../prds/prd-n-test-reviewer-2026-08-29/prd.md
   - ../../prds/prd-n-test-reviewer-2026-08-29/addendum.md
-name: Clear Room
-description: Cool clinical daylight for a product that turns a returned school test into practice. One palette, one type scale, two densities, two accents. MUI on Next.js + React; this DESIGN.md specifies the theme the app builds.
+name: Reading Room
+description: Warm reading-lamp ivory for a product that turns a returned school test into practice. One palette, one type scale, two densities, two accents. Colours follow the app icon. MUI on Next.js + React; this DESIGN.md specifies the theme the app builds.
 colors:
   # --- Accent split. The ONLY role that differs between Student Mode and Parent View. ---
-  primary-student: '#0F6E78'
-  primary-student-dark: '#71C3CE'
-  primary-parent: '#0B5FA5'
-  primary-parent-dark: '#7FB6E8'
+  primary-student: '#1E5A45'
+  primary-student-dark: '#7FC4A4'
+  primary-parent: '#2C4F7C'
+  primary-parent-dark: '#8FB3E0'
   on-primary: '#FFFFFF'
-  on-primary-dark: '#0E1620'
+  on-primary-dark: '#101713'
   # --- Everything below is byte-identical across Student Mode, Parent View, and Admin. ---
-  secondary: '#4A6072'
-  secondary-dark: '#9DB2C4'
-  success: '#0F6B4F'
-  success-dark: '#6FD1AC'
+  secondary: '#56634F'
+  secondary-dark: '#A9B8A2'
+  success: '#0F6E78'
+  success-dark: '#71C3CE'
   error: '#B3261E'
   error-dark: '#F19B94'
   warning: '#8A5A00'
   warning-dark: '#E3B457'
   info: '#2E6E9E'
   info-dark: '#8CC0E4'
-  background-default: '#F6F8FA'
-  background-default-dark: '#0E1620'
-  background-paper: '#FFFFFF'
-  background-paper-dark: '#16202C'
-  text-primary: '#10202E'
-  text-primary-dark: '#E7EEF5'
-  text-secondary: '#4E6070'
-  text-secondary-dark: '#A3B3C2'
+  background-default: '#F4EFE4'
+  background-default-dark: '#101713'
+  background-paper: '#FDFAF3'
+  background-paper-dark: '#17201B'
+  text-primary: '#1B2620'
+  text-primary-dark: '#E6EDE8'
+  text-secondary: '#545F58'
+  text-secondary-dark: '#A4B2AA'
   # divider carries the ENTIRE boundary of every control, because shadows are banned
-  # and the paper->default step is only 1.06:1. It is therefore a non-text-contrast
+  # and the paper->default step is only 1.10:1. It is therefore a non-text-contrast
   # surface under SC 1.4.11 and is specified at >=3:1 against both grounds, in both modes.
-  divider: '#7C8894'
-  divider-dark: '#6A747E'
+  divider: '#7E857C'
+  divider-dark: '#6C766F'
   # Inverted surfaces are a DECLARED EXCEPTION, used only for the camera viewfinder
   # chrome. They take neither the light nor the dark palette but the on-inverted set.
   # An inverted surface is dark in BOTH light and dark mode, so it must not track
   # either mode's palette. Each of the three carries a machine-visible
   # deliberateDuplicate marker: the value is knowingly equal to another token and
   # must NEVER be aliased, collapsed, or deduplicated by a tidying pass.
-  background-inverted: '#10202E'
-  background-inverted-deliberateDuplicate: 'equals light text-primary #10202E — never alias, collapse, or deduplicate'
-  primary-on-inverted: '#7FB6E8'
-  primary-on-inverted-deliberateDuplicate: 'equals primary-parent-dark #7FB6E8 — never alias, collapse, or deduplicate'
-  divider-on-inverted: '#6A747E'
-  divider-on-inverted-deliberateDuplicate: 'equals divider-dark #6A747E — never alias, collapse, or deduplicate'
+  background-inverted: '#1B2620'
+  background-inverted-deliberateDuplicate: 'equals light text-primary #1B2620 — never alias, collapse, or deduplicate'
+  primary-on-inverted: '#8FB3E0'
+  primary-on-inverted-deliberateDuplicate: 'equals primary-parent-dark #8FB3E0 — never alias, collapse, or deduplicate'
+  divider-on-inverted: '#6C766F'
+  divider-on-inverted-deliberateDuplicate: 'equals divider-dark #6C766F — never alias, collapse, or deduplicate'
 state:
   # Both tints are a step toward background-default. Neither ever uses the accent,
   # and neither is ever the sole carrier of meaning — a tint only reinforces a state
   # that is already carried by glyph and by word.
-  tintSelected: '#E8F1F2'
-  tintSelectedDark: '#0D2A33'
-  tintHover: '#EEF3F5'
-  tintHoverDark: '#1C2836'
+  tintSelected: '#E7EEE5'
+  tintSelectedDark: '#142B23'
+  tintHover: '#EFE9DC'
+  tintHoverDark: '#1F2A24'
 typography:
   # Family assignment is by CONTENT vs CHROME, never by surface.
   # Root font-size 16px. Both families self-hosted; fallback stacks are required.
@@ -344,13 +344,13 @@ components:
     warningCarrier: 'a text label beside the value, not color and not motion'
 ---
 
-# n-test-reviewer — Clear Room
+# n-test-reviewer — Reading Room
 
 Reference mocks and exploration artifacts are catalogued in `EXPERIENCE.md` §Foundation, which owns their provenance and precedence. Mocks are linked inline below from the sections they illustrate.
 
 ## Brand & Style
 
-Clear Room is cool clinical daylight. The product takes a returned school test — a thing that arrives home covered in red pen — and turns it into practice. Its job is to be accurate and calm, so the visual system has almost no opinion of its own: neutral grounds, a single accent, flat bordered surfaces, and one serif reserved for the only thing a user actually reads slowly.
+Reading Room is warm reading-lamp ivory: the colours of the app icon — ivory paper, forest-green book spines, a pencil. The product takes a returned school test — a thing that arrives home covered in red pen — and turns it into practice. Its job is to be accurate and calm, so the visual system still has almost no opinion of its own: warm neutral grounds, a single accent, flat bordered surfaces, and one serif reserved for the only thing a user actually reads slowly.
 
 The governing metaphor is **paper**. A generated Question should read like a question on a real test, because the product thesis is *no surprises on test day*. The metaphor is enforced structurally, not decoratively: square corners and a serif mark test content; rounded corners and a sans mark interface. Nothing is textured, skeuomorphic, or nostalgic about it.
 
@@ -362,16 +362,16 @@ Admin inherits the whole theme and receives no craft beyond it (see Dos and don'
 
 ## Colors
 
-Clear Room is one palette with one divergent role.
+Reading Room is one palette with one divergent role. *(Revised 2026-10-11 from the cool Clear Room palette to match the app icon; see `sprint-change-proposal-2026-10-11-brand-palette.md`.)*
 
 **The accent split.** `primary` is the only token that differs between surfaces.
 
 | Role | Student Mode | Parent View | Admin |
 |---|---|---|---|
-| Light | `{colors.primary-student}` `#0F6E78` calm teal | `{colors.primary-parent}` `#0B5FA5` clinical blue | Parent value |
-| Dark | `{colors.primary-student-dark}` `#71C3CE` | `{colors.primary-parent-dark}` `#7FB6E8` | Parent value |
+| Light | `{colors.primary-student}` `#1E5A45` forest | `{colors.primary-parent}` `#2C4F7C` ink navy | Parent value |
+| Dark | `{colors.primary-student-dark}` `#7FC4A4` | `{colors.primary-parent-dark}` `#8FB3E0` | Parent value |
 | On-primary | `{colors.on-primary}` `#FFFFFF` | `{colors.on-primary}` `#FFFFFF` | `#FFFFFF` |
-| On-primary (dark) | `{colors.on-primary-dark}` `#0E1620` | `{colors.on-primary-dark}` `#0E1620` | `#0E1620` |
+| On-primary (dark) | `{colors.on-primary-dark}` `#101713` | `{colors.on-primary-dark}` `#101713` | `#101713` |
 
 **Implementation is one base MUI theme plus a nested `ThemeProvider` that overrides `palette.primary` only.** Not two themes. Not a fourth accent for Admin. If a second token ever needs to diverge, that is a design change, not an implementation detail.
 
@@ -379,18 +379,22 @@ Clear Room is one palette with one divergent role.
 
 | Role | Light | Dark | Meaning |
 |---|---|---|---|
-| `secondary` | `#4A6072` | `#9DB2C4` | Muted chrome, non-primary controls, the trend sparkline stroke |
-| `success` | `#0F6B4F` | `#6FD1AC` | **Correct** grade state only |
+| `secondary` | `#56634F` | `#A9B8A2` | Muted chrome, non-primary controls, the trend sparkline stroke |
+| `success` | `#0F6E78` | `#71C3CE` | **Correct** grade state only |
 | `error` | `#B3261E` | `#F19B94` | **Not correct** grade state, destructive confirm |
 | `warning` | `#8A5A00` | `#E3B457` | **Weak Area** flag, legibility warning, pre-expiry timer warning |
 | `info` | `#2E6E9E` | `#8CC0E4` | **Not graded yet** grade state, neutral informational notices |
-| `background-default` | `#F6F8FA` | `#0E1620` | The room behind the paper |
-| `background-paper` | `#FFFFFF` | `#16202C` | Cards, rows, question containers, dialogs |
-| `text-primary` | `#10202E` | `#E7EEF5` | Question text, headings, values |
-| `text-secondary` | `#4E6070` | `#A3B3C2` | Meta, captions, **Unanswered** grade state |
-| `divider` | `#7C8894` | `#6A747E` | Every border in the product |
-| `state.tintHover` | `#EEF3F5` | `#1C2836` | Hover ground, one step toward `background-default` |
-| `state.tintSelected` | `#E8F1F2` | `#0D2A33` | Selected-or-answered ground; first consumer is the answered question-map cell |
+| `background-default` | `#F4EFE4` | `#101713` | The room behind the paper |
+| `background-paper` | `#FDFAF3` | `#17201B` | Cards, rows, question containers, dialogs |
+| `text-primary` | `#1B2620` | `#E6EDE8` | Question text, headings, values |
+| `text-secondary` | `#545F58` | `#A4B2AA` | Meta, captions, **Unanswered** grade state |
+| `divider` | `#7E857C` | `#6C766F` | Every border in the product |
+| `state.tintHover` | `#EFE9DC` | `#1F2A24` | Hover ground, one step toward `background-default` |
+| `state.tintSelected` | `#E7EEE5` | `#142B23` | Selected-or-answered ground; first consumer is the answered question-map cell |
+
+**Why Correct is teal, not green.** The Student accent is forest green, and the accent means *interactive*. A green Correct would make "this is a button" and "this answer was right" the same colour. Correct therefore takes teal `#0F6E78` (the retired Student accent), a hue no interactive control uses. Teal and `info` blue are close in lightness, so their distinction rests on hue plus the non-colour carriers every grade state already has — the existing rule, not a new dependency.
+
+**Brand tokens are not palette tokens.** `brandGround` `#FDFAF3` and `brandInk` `#173D30` are the app icon's own colours, used only by the web manifest and the browser `theme-color`. `brandGround` equals light `background-paper` by deliberate duplication: never alias one to the other, because the icon must not change when the palette does.
 
 **The two tints are the only sanctioned surface tints, and both are reinforcement only.** `{state.tintHover}` is the canonical hover ground and **supersedes the earlier `hover-tint` `#EDF1F5` / `#121B25`**, which is retired; `{state.tintSelected}` is the sanctioned treatment for a selected or answered control, so no component ever invents a hex value for that state. Neither tint is ever the sole carrier of meaning — the answered map cell already states answered by glyph and by word, and removing both tints entirely must leave every state fully readable.
 
@@ -400,36 +404,42 @@ Dark mode ships in v0. It is an addition beyond PRD §9.1, logged as a departure
 
 | Pair | Light | Dark |
 |---|---|---|
-| `question-body` text on `background-paper` | 16.56:1 | 14.05:1 |
-| `success` on `background-paper` | 6.49:1 | 8.92:1 |
-| `error` on `background-paper` | 6.54:1 | 7.72:1 |
-| `warning` on `background-paper` | 5.93:1 | 8.56:1 |
-| `info` on `background-paper` | 5.47:1 | 8.44:1 |
-| `text-secondary` on `background-paper` | 6.50:1 | 7.66:1 |
-| `text-primary` on `state.tintHover` | 14.81:1 | 12.76:1 |
-| `text-primary` on `state.tintSelected` | 14.43:1 | 12.85:1 |
-| `divider` on `background-paper` | **3.62:1** | **3.45:1** |
-| `divider` on `background-default` | **3.40:1** | **3.82:1** |
-| `divider` on `state.tintHover` | **3.23:1** | **3.14:1** |
-| `divider` on `state.tintSelected` | **3.15:1** | **3.16:1** |
-| `primary-student` on `background-paper` | 5.96:1 | 8.14:1 |
-| `primary-student` on `background-default` | 5.60:1 | 9.01:1 |
-| `primary-parent` on `background-paper` | 6.57:1 | 7.64:1 |
-| `primary-parent` on `background-default` | 6.18:1 | 8.45:1 |
-| `primary-on-inverted` on `background-inverted` | **7.70:1** | n/a — one ground only |
-| `divider-on-inverted` on `background-inverted` | **3.48:1** | n/a — one ground only |
-| `background-default` → `background-paper` step | 1.06:1 | 1.06:1 |
-| Rejected: light `primary-parent` on `background-inverted` | 2.52:1 — fails SC 1.4.11 | n/a |
-| Rejected: previous `divider` `#DCE3E9` / `#26333F` on `background-paper` | 1.30:1 — failed | 1.27:1 — failed |
-| Retired: `divider` on the superseded `hover-tint` `#EDF1F5` / `#121B25` | 3.19:1 | 3.65:1 |
+| `question-body` text on `background-paper` | 14.98:1 | 14.02:1 |
+| `success` on `background-paper` | 5.72:1 | 8.26:1 |
+| `error` on `background-paper` | 6.27:1 | 7.83:1 |
+| `warning` on `background-paper` | 5.69:1 | 8.68:1 |
+| `info` on `background-paper` | 5.25:1 | 8.56:1 |
+| `secondary` on `background-paper` | 6.12:1 | 8.00:1 |
+| `text-secondary` on `background-paper` | 6.39:1 | 7.57:1 |
+| `text-secondary` on `background-default` | 5.81:1 | 8.26:1 |
+| `text-primary` on `state.tintHover` | 12.91:1 | 12.47:1 |
+| `text-primary` on `state.tintSelected` | 13.21:1 | 12.61:1 |
+| `divider` on `background-paper` | **3.64:1** | **3.54:1** |
+| `divider` on `background-default` | **3.31:1** | **3.86:1** |
+| `divider` on `state.tintHover` | **3.14:1** | **3.15:1** |
+| `divider` on `state.tintSelected` | **3.21:1** | **3.19:1** |
+| `primary-student` on `background-paper` | 7.74:1 | 8.21:1 |
+| `primary-student` on `background-default` | 7.03:1 | 8.96:1 |
+| `primary-parent` on `background-paper` | 8.01:1 | 7.70:1 |
+| `primary-parent` on `background-default` | 7.28:1 | 8.40:1 |
+| `on-primary` on `primary-student` | 8.07:1 | 8.96:1 |
+| `on-primary` on `primary-parent` | 8.34:1 | 8.40:1 |
+| `success` on `state.tintSelected` | 5.04:1 | 7.43:1 |
+| `primary-on-inverted` on `background-inverted` | **7.21:1** | n/a — one ground only |
+| `divider-on-inverted` on `background-inverted` | **3.32:1** | n/a — one ground only |
+| `text-on-inverted` on `background-inverted` | 15.62:1 | n/a — one ground only |
+| `background-default` → `background-paper` step | 1.10:1 | 1.09:1 |
+| Rejected: light `primary-parent` on `background-inverted` | 1.87:1 — fails SC 1.4.11 | n/a |
+| Rejected: dark `tintSelected` `#163027` with `divider` | n/a | 3.00:1 — at floor, moved |
+| Superseded: Clear Room palette (2026-08-29 → 2026-10-11) | see git history | — |
 
 Question body on paper clears AAA in both modes, kept because it fell out for free.
 
-**Both hover grounds clear the SC 1.4.11 floor at the new tint values**, so the tint change cost the divider nothing: `divider` measures **3.23:1** on `{state.tintHover}` light and **3.14:1** on `{state.tintHoverDark}`, against 3.19:1 and 3.65:1 on the retired ground. No tint value was adjusted to get there. **One pair did not clear it and has been settled:** `divider-dark` on the earlier `{state.tintSelectedDark}` value measured 2.88:1, so the answered question-map cell's border fell below 3:1 in dark mode only. By the rule above it was settled by moving the tint, never the divider: `{state.tintSelectedDark}` is now `#0D2A33`, on which `divider-dark` measures **3.16:1**. Resolved.
+**Both tints clear the SC 1.4.11 floor against the divider in both modes** (Reading Room, 2026-10-11): `divider` measures **3.14:1** on `{state.tintHover}` light and **3.15:1** on `{state.tintHoverDark}`, and **3.21:1** / **3.19:1** on `{state.tintSelected}` / `{state.tintSelectedDark}`. **One candidate did not clear it and was settled by the standing rule — move the tint, never the divider:** dark selected `#163027` measured exactly 3.00:1, so `{state.tintSelectedDark}` is `#142B23`. (Under Clear Room the same rule moved the dark selected tint from a 2.88:1 value to `#0D2A33`; that palette is superseded.)
 
 **`divider` is a non-text-contrast surface, not a decorative rule.** Because shadows are banned and the `background-default` → `background-paper` step is only a reading cue, the 1px divider border is the *entire* boundary of every control in the product — cards, map cells, thumbnails, dialogs, snackbars, icon buttons, the PIN field. WCAG 2.1 SC 1.4.11 therefore applies to it at 3:1; the previous token failed and was darkened to the current values. See the ratios table for the measured pairs, including the hover ground, where the boundary still holds. Flat-with-borders is unchanged — only the token moved. There is deliberately **no second, weaker divider token**: a two-tier divider would reintroduce per-component judgment about which boundary is "real", which is exactly the failure mode this repair closes. (`divider-on-inverted`, below, is a different ground — not a weaker tier.)
 
-**Inverted surfaces are a declared exception, and they take the on-inverted token set.** The camera viewfinder chrome in the capture flow is the *only* inverted surface in the product: a dark ground inside the light theme, not a dark-mode screen. Its ground is declared as its own surface token, `{colors.background-inverted}` `#10202E` — the same value as light-mode `text-primary`, but named separately so the chrome is not an undeclared surface borrowing a text role. The light `primary` would itself fail SC 1.4.11 on that ground (see the ratios table), so inverted surfaces take neither the light nor the dark palette: they take `{colors.primary-on-inverted}` and `{colors.divider-on-inverted}`.
+**Inverted surfaces are a declared exception, and they take the on-inverted token set.** The camera viewfinder chrome in the capture flow is the *only* inverted surface in the product: a dark ground inside the light theme, not a dark-mode screen. Its ground is declared as its own surface token, `{colors.background-inverted}` `#1B2620` — the same value as light-mode `text-primary`, but named separately so the chrome is not an undeclared surface borrowing a text role. The light `primary` would itself fail SC 1.4.11 on that ground (see the ratios table), so inverted surfaces take neither the light nor the dark palette: they take `{colors.primary-on-inverted}` and `{colors.divider-on-inverted}`.
 
 `{colors.primary-on-inverted}` on camera chrome is therefore **not** dark-mode leakage and must not be "corrected" back to the light `primary` — that swap reintroduces the contrast failure. The exception is closed: no surface other than camera chrome may claim the on-inverted set, and camera chrome uses nothing else.
 
@@ -444,6 +454,8 @@ Question body on paper clears AAA in both modes, kept because it fell out for fr
 **`warning` does not do double duty as a grade state.** It marks Weak Areas, the legibility warning, and the pre-expiry timer warning — all of which mean *look at this*. `Not graded yet` means nothing of the kind: it is a neutral, transient, system-side fact about the app, not a finding about the student, so it takes `info`. An earlier revision of the reference mock painted unanswered as `warning`; that mapping is superseded — **this file is the single source of truth** and the normative mapping is the one in Components. [`mockups/key-results.html`](mockups/key-results.html) and [`mockups/key-analytics.html`](mockups/key-analytics.html) are repainted to match.
 
 Not used: gradients, tinted surfaces beyond `{state.tintHover}` and `{state.tintSelected}`, brand color as decoration, any hue outside this table. The accent means *interactive*; semantic colors mean *state*; nothing means *personality*.
+
+The HTML mockups in `mockups/` were painted in the superseded Clear Room palette. They stay valid for layout, hierarchy, and state treatment; for colour, this file wins.
 
 ## Typography
 
