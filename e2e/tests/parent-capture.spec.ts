@@ -149,7 +149,7 @@ test.describe('page management before submit', () => {
     // requirements are named rather than only the first.
     await expect(page.getByRole('button', { name: 'Check pages' })).toBeDisabled();
     await expect(page.getByTestId('submit-blocked')).toHaveText(
-      'Add at least one page before submitting. Choose a subject and a grade level before submitting.',
+      'Before submitting, add at least one page and choose a subject and grade level.',
     );
 
     await chooseSubject(page, subjectName);

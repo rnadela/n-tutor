@@ -664,16 +664,26 @@ export const parentCopy = {
      * courtesy; this sentence is what makes the refusal legible, and the server
      * refuses a zero-page submission whatever the browser did.
      */
-    submitBlocked: (reasons: readonly ('pages' | 'classification' | 'legibility')[]): string =>
-      reasons
-        .map((reason) =>
-          reason === 'pages'
-            ? 'Add at least one page before submitting.'
-            : reason === 'classification'
-              ? 'Choose a subject and a grade level before submitting.'
-              : 'Check the pages before submitting.',
-        )
-        .join(' '),
+    submitBlocked: (reasons: readonly ('pages' | 'classification' | 'legibility')[]): string => {
+      if (reasons.length === 0) return '';
+      if (reasons.length === 1) {
+        return reasons[0] === 'pages'
+          ? 'Add at least one page before submitting.'
+          : reasons[0] === 'classification'
+            ? 'Choose a subject and a grade level before submitting.'
+            : 'Check the pages before submitting.';
+      }
+      // More than one: said once, as a list, rather than "before submitting" each time.
+      const steps = reasons.map((reason) =>
+        reason === 'pages'
+          ? 'add at least one page'
+          : reason === 'classification'
+            ? 'choose a subject and grade level'
+            : 'check the pages',
+      );
+      const last = steps.pop();
+      return `Before submitting, ${steps.join(', ')}${steps.length > 1 ? ',' : ''} and ${last}.`;
+    },
 
     deleted: (ordinal: number, total: number) =>
       ordinal < total

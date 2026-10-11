@@ -376,7 +376,7 @@ describe('the classification the screen adds above the strip', () => {
       'Choose a subject and a grade level before submitting.',
     );
     expect(capture.submitBlocked(['pages', 'classification'])).toBe(
-      'Add at least one page before submitting. Choose a subject and a grade level before submitting.',
+      'Before submitting, add at least one page and choose a subject and grade level.',
     );
     // Nothing unmet states nothing — the sentence is only rendered when the
     // control is refused, and it should not manufacture one.
@@ -1445,7 +1445,7 @@ describe('the legibility result', () => {
       'Check the pages before submitting.',
     );
     expect(parentCopy.capture.submitBlocked(['pages', 'classification', 'legibility'])).toBe(
-      'Add at least one page before submitting. Choose a subject and a grade level before submitting. Check the pages before submitting.',
+      'Before submitting, add at least one page, choose a subject and grade level, and check the pages.',
     );
   });
 });
