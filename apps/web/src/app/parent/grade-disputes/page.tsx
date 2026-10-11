@@ -439,7 +439,7 @@ export default function ParentGradeDisputesPage() {
                   </Box>
                   {/* What the marking recorded, which an adjustment does not erase — and what
                       the mark counts as now. Both stated, even when they agree, so nothing is
-                      implied by an omission; the arrow is the order they happened in. */}
+                      implied by an omission. */}
                   <Box
                     sx={{
                       display: 'flex',
@@ -455,9 +455,14 @@ export default function ParentGradeDisputesPage() {
                     <Typography component="p" data-testid="parent-dispute-recorded">
                       {parentCopy.disputes.recorded(parentCopy.disputes.grade[entry.recordedState])}
                     </Typography>
-                    <Box component="span" sx={{ display: 'inline-flex', color: 'text.secondary' }}>
-                      <ArrowRight size={16} aria-hidden="true" />
-                    </Box>
+                    {/* A plain divider, not an arrow: the two marks are often the same,
+                        and an arrow between equal marks would claim a change that never
+                        happened. This screen does not compare them to decide. */}
+                    <Box
+                      component="span"
+                      aria-hidden="true"
+                      sx={{ alignSelf: 'stretch', width: '1px', bgcolor: 'divider' }}
+                    />
                     <Typography
                       component="p"
                       data-testid="parent-dispute-effective"
