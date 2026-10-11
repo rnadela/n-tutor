@@ -387,7 +387,7 @@ export const parentCopy = {
    * third. No figure is stated beyond the counts the API sends.
    */
   settings: {
-    title: 'Settings',
+    title: 'Settings and account deletion',
     intro: 'Settings for this account, and what can be removed from it.',
     loading: 'Loading the settings…',
     /**
@@ -1217,7 +1217,7 @@ export const parentCopy = {
    * a parent reading an Explanation is spending nothing, and the screen says so.
    */
   attempts: {
-    listTitle: 'Finished practice tests',
+    listTitle: 'Practice tests a student has finished',
     /**
      * What the list is for, stated as the reason a parent is here: this is where
      * what a child was told can be read.
@@ -1588,7 +1588,7 @@ export const parentCopy = {
    * sentence here.
    */
   flags: {
-    title: 'What a student has reported',
+    title: 'Explanations a student has reported',
     /**
      * Why a parent is here, stated as what the screen is for: their child said an
      * explanation was wrong, and this is where those are found.

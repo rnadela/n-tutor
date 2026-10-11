@@ -198,7 +198,7 @@ test.describe('a parent reading and reporting what their child was told', () => 
       .getByRole('link', { name: 'Practice tests a student has finished' })
       .click();
     await expect(
-      page.getByRole('heading', { name: 'Finished practice tests', level: 1 }),
+      page.getByRole('heading', { name: 'Practice tests a student has finished', level: 1 }),
     ).toBeVisible();
 
     const runRows = page.locator('[data-testid="parent-attempt-row"]');
@@ -290,7 +290,7 @@ test.describe('a parent reading and reporting what their child was told', () => 
     // that is served. So the child's own results screen is checked, not assumed.
     await page.getByRole('link', { name: 'Back to the finished practice tests' }).click();
     await expect(
-      page.getByRole('heading', { name: 'Finished practice tests', level: 1 }),
+      page.getByRole('heading', { name: 'Practice tests a student has finished', level: 1 }),
     ).toBeVisible();
     await page.getByRole('link', { name: 'Back to Parent View' }).click();
     await page.getByRole('button', { name: 'Back to Student Mode' }).click();

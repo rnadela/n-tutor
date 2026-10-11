@@ -261,7 +261,7 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
       .getByRole('link', { name: 'Explanations a student has reported' })
       .click();
     await expect(
-      page.getByRole('heading', { name: 'What a student has reported', level: 1 }),
+      page.getByRole('heading', { name: 'Explanations a student has reported', level: 1 }),
     ).toBeVisible();
 
     const flagRows = page.locator('[data-testid="parent-flag-row"]');
