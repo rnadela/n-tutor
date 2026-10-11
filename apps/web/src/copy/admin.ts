@@ -13,7 +13,20 @@ export const adminCopy = {
     submitting: 'Signing in…',
     failed: 'Sign-in failed. Check the email and password and try again.',
   },
+  /**
+   * The console's own landing at `/admin`: one card per area, each saying what the
+   * screen behind it is for. Factual and third person, like the rest of this file.
+   */
+  home: {
+    title: 'Admin console',
+    intro: 'Each area opens the screen that owns it.',
+    taxonomy: 'Which Subjects are offered, and at which Grade Levels.',
+    accounts: 'Every Parent Account, its Account Tier and its consumption this period.',
+    flaggedExplanations: 'Explanations reported as wrong, waiting for a decision.',
+    topics: 'Automatically created Topics waiting to be confirmed, renamed or merged.',
+  },
   nav: {
+    overview: 'Overview',
     taxonomy: 'Subjects & Grade Levels',
     accounts: 'Parent Accounts',
     /**

@@ -12,9 +12,12 @@ import { useTheme } from '@mui/material/styles';
 import {
   BookOpen,
   Flag,
+  LayoutGrid,
+  LogOut,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  ShieldCheck,
   Tags,
   Users,
   type LucideIcon,
@@ -35,7 +38,7 @@ const RAIL_WIDTH = 72;
  * to the Admin console alone, not shared with Parent View's own key. */
 const COLLAPSE_STORAGE_KEY = 'n-tutor:admin-sidebar-collapsed';
 
-interface NavItem {
+export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
@@ -45,7 +48,11 @@ interface NavItem {
  * Every destination an operator can reach from the Admin console, in the
  * order the header falls back to for a page title lookup.
  */
-const NAV_ITEMS: NavItem[] = [
+/**
+ * Every Admin destination, in one list the sidebar and the `/admin` landing both
+ * read — so the two can never offer different ways in.
+ */
+export const NAV_ITEMS: NavItem[] = [
   { href: '/admin/taxonomy', label: adminCopy.nav.taxonomy, icon: BookOpen },
   { href: '/admin/accounts', label: adminCopy.nav.accounts, icon: Users },
   { href: '/admin/flagged-explanations', label: adminCopy.nav.flaggedExplanations, icon: Flag },
@@ -54,8 +61,12 @@ const NAV_ITEMS: NavItem[] = [
 
 /** The current screen's own name, for the header's left side. Falls back to
  * the app name for a destination the sidebar does not list. */
+/** The landing, ahead of the destinations it links to. */
+const OVERVIEW_ITEM: NavItem = { href: '/admin', label: adminCopy.nav.overview, icon: LayoutGrid };
+const SIDEBAR_ITEMS: NavItem[] = [OVERVIEW_ITEM, ...NAV_ITEMS];
+
 function pageTitle(pathname: string): string {
-  return NAV_ITEMS.find((item) => item.href === pathname)?.label ?? adminCopy.appName;
+  return SIDEBAR_ITEMS.find((item) => item.href === pathname)?.label ?? adminCopy.appName;
 }
 
 /**
@@ -77,7 +88,7 @@ function NavList({
 }) {
   return (
     <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
-      {NAV_ITEMS.map((item) => {
+      {SIDEBAR_ITEMS.map((item) => {
         const current = pathname === item.href;
         const Icon = item.icon;
         const link = (
@@ -217,8 +228,17 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
           >
             <Typography
               component="p"
-              sx={{ fontWeight: 700, mb: `${density.gap}px`, px: `${density.gap}px` }}
+              sx={{
+                fontWeight: 700,
+                fontSize: '0.875rem',
+                mb: `${density.gap}px`,
+                px: `${density.gap}px`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: `${density.gap}px`,
+              }}
             >
+              <ShieldCheck size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
               {adminCopy.appName}
             </Typography>
             <NavList pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
@@ -248,6 +268,7 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
             component="p"
             sx={{
               fontWeight: 700,
+              fontSize: '0.875rem',
               mb: `${density.gap}px`,
               px: `${density.gap}px`,
               whiteSpace: 'nowrap',
@@ -255,7 +276,17 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
               textOverflow: 'ellipsis',
             }}
           >
-            {railCollapsed ? adminCopy.appName.slice(0, 1) : adminCopy.appName}
+            {railCollapsed ? (
+              <ShieldCheck size={20} aria-label={adminCopy.appName} />
+            ) : (
+              <Box
+                component="span"
+                sx={{ display: 'inline-flex', alignItems: 'center', gap: `${density.gap}px` }}
+              >
+                <ShieldCheck size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
+                {adminCopy.appName}
+              </Box>
+            )}
           </Typography>
           <Box sx={{ flexGrow: 1 }}>
             <NavList pathname={pathname} collapsed={railCollapsed} />
@@ -326,6 +357,8 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
           </Box>
           <Button
             type="button"
+            color="inherit"
+            startIcon={<LogOut size={18} aria-hidden="true" />}
             onClick={() => {
               clearToken();
               router.replace('/admin/login');
