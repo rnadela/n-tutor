@@ -4,6 +4,7 @@ import type { RefObject } from 'react';
 import Box from '@mui/material/Box';
 
 import Typography from '@mui/material/Typography';
+import { Camera } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { colorTokens, density, rounded } from '@/theme/tokens';
 import { controlSx } from './PageStrip';
@@ -39,6 +40,26 @@ const BUTTON_RESET = {
 } as const;
 
 /** The viewfinder's heading, which the surface is named by rather than repeating. */
+/** The four corner guides, each drawing two edges of an L. */
+const CORNERS = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'] as const;
+const CORNER_INSET = `${density.gap * 2}px`;
+const CORNER_SX: Record<(typeof CORNERS)[number], Record<string, string | number>> = {
+  topLeft: { top: CORNER_INSET, left: CORNER_INSET, borderTopWidth: 3, borderLeftWidth: 3 },
+  topRight: { top: CORNER_INSET, right: CORNER_INSET, borderTopWidth: 3, borderRightWidth: 3 },
+  bottomLeft: {
+    bottom: CORNER_INSET,
+    left: CORNER_INSET,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+  },
+  bottomRight: {
+    bottom: CORNER_INSET,
+    right: CORNER_INSET,
+    borderBottomWidth: 3,
+    borderRightWidth: 3,
+  },
+};
+
 export const VIEWFINDER_HEADING_ID = 'capture-viewfinder-heading';
 
 export interface CameraViewfinderProps {
@@ -94,13 +115,38 @@ export function CameraViewfinder({
         color: INVERTED.text,
       }}
     >
-      <Typography
-        id={VIEWFINDER_HEADING_ID}
-        component="h3"
-        sx={{ fontSize: 18, fontWeight: 700, color: INVERTED.text }}
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: `${density.gap}px`,
+        }}
       >
-        {camera.heading}
-      </Typography>
+        <Typography
+          id={VIEWFINDER_HEADING_ID}
+          component="h3"
+          sx={{ fontSize: 18, fontWeight: 700, color: INVERTED.text }}
+        >
+          {camera.heading}
+        </Typography>
+        {/* The live count, both figures from the server's answer. */}
+        <Typography
+          component="p"
+          data-testid="viewfinder-count"
+          sx={{
+            color: INVERTED.text,
+            px: `${density.gap}px`,
+            borderRadius: 999,
+            border: `1px solid ${INVERTED.divider}`,
+            fontSize: '0.875rem',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {camera.captured(pageCount, maxPages)}
+        </Typography>
+      </Box>
 
       {/*
         A live camera view is content, not decoration, so it carries a name. It
@@ -108,30 +154,61 @@ export function CameraViewfinder({
         blocked otherwise on iOS, and it holds no controls: the shutter below is
         the only thing a parent does with it.
       */}
+      {/* A page-shaped frame, capped in height so the shutter is never scrolled off,
+          with four corner guides showing where the page should sit. The guides are
+          drawn only: the framing sentence below says the same thing in words. */}
       <Box
-        component="video"
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        aria-label={camera.viewfinderLabel}
         sx={{
+          position: 'relative',
+          aspectRatio: '3 / 4',
+          maxHeight: '60vh',
           width: '100%',
-          display: 'block',
+          justifySelf: 'center',
+          overflow: 'hidden',
           borderRadius: `${rounded.control}px`,
           border: `1px solid ${INVERTED.divider}`,
           backgroundColor: INVERTED.ground,
         }}
-      />
+      >
+        <Box
+          component="video"
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          aria-label={camera.viewfinderLabel}
+          sx={{
+            width: '100%',
+            height: '100%',
+            display: 'block',
+            objectFit: 'cover',
+            backgroundColor: INVERTED.ground,
+          }}
+        />
+        {CORNERS.map((corner) => (
+          <Box
+            key={corner}
+            aria-hidden="true"
+            sx={{
+              position: 'absolute',
+              width: density.gap * 4,
+              height: density.gap * 4,
+              borderColor: INVERTED.accent,
+              borderStyle: 'solid',
+              borderWidth: 0,
+              ...CORNER_SX[corner],
+            }}
+          />
+        ))}
+      </Box>
 
       {/* What to frame, named by the page the shot will become. */}
-      <Typography component="p" data-testid="viewfinder-framing" sx={{ color: INVERTED.text }}>
+      <Typography
+        component="p"
+        data-testid="viewfinder-framing"
+        sx={{ color: INVERTED.text, textAlign: 'center' }}
+      >
         {camera.framing(nextOrdinal)}
-      </Typography>
-
-      {/* The live count, both figures from the server's answer. */}
-      <Typography component="p" data-testid="viewfinder-count" sx={{ color: INVERTED.text }}>
-        {camera.captured(pageCount, maxPages)}
       </Typography>
 
       {/*
@@ -141,7 +218,18 @@ export function CameraViewfinder({
         The tap-target floor and the focus ring still come from `controlSx`, so
         nothing about the control is written as a figure here either.
       */}
-      <Box sx={{ display: 'flex', gap: `${density.gap}px`, flexWrap: 'wrap' }}>
+      {/* The shutter first in source and tab order — it is what the surface is for —
+          and drawn on the right, where a thumb on a held phone reaches it. */}
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'row-reverse',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: `${density.gap}px`,
+          flexWrap: 'wrap',
+        }}
+      >
         <Box
           component="button"
           type="button"
@@ -154,6 +242,11 @@ export function CameraViewfinder({
             backgroundColor: INVERTED.accent,
             color: INVERTED.ground,
             border: `1px solid ${INVERTED.accent}`,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: `${density.gap}px`,
+            px: `${density.gap * 2.5}px`,
+            fontWeight: 700,
             '&:disabled': { opacity: 0.5, cursor: 'default' },
             '&:focus-visible': {
               ...controlSx['&:focus-visible'],
@@ -161,6 +254,7 @@ export function CameraViewfinder({
             },
           }}
         >
+          <Camera size={20} aria-hidden="true" />
           {camera.shutter}
         </Box>
         {/*
