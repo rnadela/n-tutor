@@ -8,16 +8,18 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import Divider from '@mui/material/Divider';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Link from '@mui/material/Link';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import { NETWORK_STATUS, ParentApiError, parentApi, type AuthPolicy } from '@/lib/parent-api';
-import { density } from '@/theme/tokens';
+import { density, rounded, typeRoles } from '@/theme/tokens';
 
 type Confirmation = 'pin' | 'password';
 
@@ -97,63 +99,113 @@ export default function ChangePinPage() {
   }
 
   return (
-    <Card sx={{ maxWidth: 420, mx: 'auto' }}>
-      <CardContent>
-        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700, mb: `${density.gap}px` }}>
-          {parentCopy.pin.changeTitle}
-        </Typography>
-        <Box
+    <Box sx={{ maxWidth: 520, mx: 'auto', display: 'grid', gap: `${density.gap * 2}px` }}>
+      <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
+        {parentCopy.pin.changeTitle}
+      </Typography>
+      <Card>
+        <CardContent
           component="form"
           onSubmit={onSubmit}
-          sx={{ display: 'grid', gap: `${density.gap}px` }}
+          sx={{ display: 'grid', gap: `${density.gap * 2}px` }}
           noValidate
         >
-          <Typography>{parentCopy.pin.changeIntro}</Typography>
-          <TextField
-            id="parent-new-pin"
-            label={parentCopy.pin.newPinLabel}
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            {...(policy
-              ? {
-                  helperText: parentCopy.pin.pinShape(policy.pinLength),
-                  slotProps: { htmlInput: { maxLength: policy.pinLength } },
-                }
-              : {})}
-            value={newPin}
-            onChange={(event) => setNewPin(event.target.value)}
-            required
-          />
-          <TextField
-            id="parent-confirm-new-pin"
-            label={parentCopy.pin.confirmNewPinLabel}
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            {...(policy ? { slotProps: { htmlInput: { maxLength: policy.pinLength } } } : {})}
-            value={confirmNewPin}
-            onChange={(event) => setConfirmNewPin(event.target.value)}
-            required
-          />
-          <RadioGroup
-            value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value as Confirmation)}
+          {/* The new PIN and its repeat, side by side: both are a handful of
+              digits, and reading them as a pair is the point of the second. */}
+          <Box
+            sx={{
+              display: 'grid',
+              gap: `${density.gap * 1.5}px`,
+              gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+              alignItems: 'start',
+            }}
           >
-            <FormControlLabel
-              value="pin"
-              control={<Radio />}
-              label={parentCopy.pin.useCurrentPin}
+            <TextField
+              id="parent-new-pin"
+              fullWidth
+              label={parentCopy.pin.newPinLabel}
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              {...(policy
+                ? {
+                    helperText: parentCopy.pin.pinShape(policy.pinLength),
+                    slotProps: { htmlInput: { maxLength: policy.pinLength } },
+                  }
+                : {})}
+              value={newPin}
+              onChange={(event) => setNewPin(event.target.value)}
+              required
             />
-            <FormControlLabel
-              value="password"
-              control={<Radio />}
-              label={parentCopy.pin.usePassword}
+            <TextField
+              id="parent-confirm-new-pin"
+              fullWidth
+              label={parentCopy.pin.confirmNewPinLabel}
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              {...(policy ? { slotProps: { htmlInput: { maxLength: policy.pinLength } } } : {})}
+              value={confirmNewPin}
+              onChange={(event) => setConfirmNewPin(event.target.value)}
+              required
             />
-          </RadioGroup>
+          </Box>
+
+          <Divider />
+
+          {/* The intro sentence is exactly what the choice below asks, so it is
+              that choice's visible label rather than a paragraph above the form. */}
+          <Box sx={{ display: 'grid', gap: `${density.gap}px` }}>
+            <Typography
+              id="parent-change-pin-confirm-with"
+              component="p"
+              sx={{
+                ...typeRoles.label,
+                display: 'flex',
+                alignItems: 'center',
+                gap: `${density.gap}px`,
+              }}
+            >
+              <ShieldCheck size={16} aria-hidden="true" />
+              {parentCopy.pin.changeIntro}
+            </Typography>
+            <RadioGroup
+              aria-labelledby="parent-change-pin-confirm-with"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value as Confirmation)}
+              sx={{
+                display: 'grid',
+                gap: `${density.gap}px`,
+                gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+              }}
+            >
+              {(['pin', 'password'] as const).map((option) => (
+                <FormControlLabel
+                  key={option}
+                  value={option}
+                  control={<Radio size="small" />}
+                  label={
+                    option === 'pin' ? parentCopy.pin.useCurrentPin : parentCopy.pin.usePassword
+                  }
+                  sx={(theme) => ({
+                    m: 0,
+                    pr: `${density.cardPadding}px`,
+                    minHeight: density.tapTarget,
+                    border: '1px solid',
+                    borderColor: confirmation === option ? 'primary.main' : 'divider',
+                    bgcolor: confirmation === option ? 'action.selected' : 'transparent',
+                    borderRadius: `${rounded.control}px`,
+                    transition: theme.transitions.create(['border-color', 'background-color']),
+                  })}
+                />
+              ))}
+            </RadioGroup>
+          </Box>
+
           {confirmation === 'pin' ? (
             <TextField
               id="parent-current-pin"
+              fullWidth
               label={parentCopy.pin.currentPinLabel}
               type="password"
               inputMode="numeric"
@@ -166,6 +218,7 @@ export default function ChangePinPage() {
           ) : (
             <TextField
               id="parent-account-password"
+              fullWidth
               label={parentCopy.pin.passwordLabel}
               type="password"
               autoComplete="current-password"
@@ -184,14 +237,25 @@ export default function ChangePinPage() {
               {parentCopy.pin.changed}
             </Alert>
           )}
-          <Button type="submit" variant="contained" disabled={busy}>
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={busy}
+            sx={{ minHeight: density.tapTarget }}
+          >
             {busy ? parentCopy.pin.saving : parentCopy.pin.changeSubmit}
           </Button>
-          <Link component={NextLink} href="/parent">
-            {parentCopy.pin.back}
-          </Link>
-        </Box>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+      {/* Client-side, so the provider holding the token stays mounted. */}
+      <Link
+        component={NextLink}
+        href="/parent"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
+        {parentCopy.pin.back}
+      </Link>
+    </Box>
   );
 }
