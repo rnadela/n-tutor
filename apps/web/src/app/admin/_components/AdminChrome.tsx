@@ -278,6 +278,12 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
           sx={{
             width: railCollapsed ? RAIL_WIDTH : SIDEBAR_WIDTH,
             flexShrink: 0,
+            // Pinned to the viewport, so the brand, every destination and the rail
+            // toggle stay in view down a long page; its own list scrolls if it has to.
+            position: 'sticky',
+            top: 0,
+            height: '100vh',
+            alignSelf: 'flex-start',
             display: 'flex',
             flexDirection: 'column',
             borderRight: '1px solid',
@@ -288,7 +294,8 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
             transition: theme.transitions.create('width', {
               duration: theme.transitions.duration.shortest,
             }),
-            overflow: 'hidden',
+            overflowX: 'hidden',
+            overflowY: 'auto',
           }}
         >
           <Typography
@@ -354,6 +361,10 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
         <Box
           component="header"
           sx={{
+            // Pinned, so Sign out stays reachable down a long table.
+            position: 'sticky',
+            top: 0,
+            zIndex: theme.zIndex.appBar,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -389,6 +400,7 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
           </Box>
           <Button
             type="button"
+            variant="text"
             color="inherit"
             startIcon={<LogOut size={18} aria-hidden="true" />}
             onClick={() => {
