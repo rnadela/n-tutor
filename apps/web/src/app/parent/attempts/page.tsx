@@ -13,7 +13,7 @@ import Link from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { Screen } from '@/components/Screen';
+import { ArrowLeft, ArrowRight, CalendarCheck, ClipboardCheck, Repeat, Users } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
@@ -23,7 +23,7 @@ import {
   type StudentProfileView,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView, readableInstant } from '@/lib/parent-view';
-import { density } from '@/theme/tokens';
+import { density, rounded } from '@/theme/tokens';
 
 /**
  * One run's own address, which is the whole of the parent's position in this review.
@@ -182,11 +182,18 @@ export default function ParentAttemptsPage() {
   }, [token, studentProfileId, attempt, leave]);
 
   return (
-    <Screen>
-      <Typography component="h1" sx={{ fontSize: 24, fontWeight: 700 }}>
-        {parentCopy.attempts.listTitle}
-      </Typography>
-      <Typography component="p">{parentCopy.attempts.listIntro}</Typography>
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 2}px` }}
+    >
+      <Box component="header" sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>
+        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
+          {parentCopy.attempts.listTitle}
+        </Typography>
+        <Typography component="p" sx={{ color: 'text.secondary' }}>
+          {parentCopy.attempts.listIntro}
+        </Typography>
+      </Box>
 
       {error !== null && (
         <Alert
@@ -213,15 +220,33 @@ export default function ParentAttemptsPage() {
         // an alert saying the profiles could not be read would be two statements with
         // one of them untrue.
         profilesLoaded && (
-          <Typography component="p" data-testid="parent-attempts-no-students">
-            {parentCopy.attempts.noStudents}
-          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              justifyItems: 'center',
+              gap: `${density.gap}px`,
+              py: `${density.sectionMargin * 2}px`,
+              px: `${density.cardPadding}px`,
+              border: '1px dashed',
+              borderColor: 'divider',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              textAlign: 'center',
+            }}
+          >
+            <Users size={28} aria-hidden="true" />
+            <Typography component="p" data-testid="parent-attempts-no-students">
+              {parentCopy.attempts.noStudents}
+            </Typography>
+          </Box>
         )
       ) : (
         <TextField
           select
           id="parent-attempts-student"
+          size="small"
           label={parentCopy.attempts.studentLabel}
+          sx={{ width: { xs: '100%', sm: 320 } }}
           value={studentProfileId}
           onChange={(event) => setStudentProfileId(event.target.value)}
         >
@@ -234,7 +259,11 @@ export default function ParentAttemptsPage() {
       )}
 
       {loading ? (
-        <Typography component="p" data-testid="parent-attempts-loading">
+        <Typography
+          component="p"
+          data-testid="parent-attempts-loading"
+          sx={{ color: 'text.secondary' }}
+        >
           {parentCopy.attempts.loading}
         </Typography>
       ) : (
@@ -242,9 +271,25 @@ export default function ParentAttemptsPage() {
         // is a claim about the child, and a screen whose read failed cannot make it.
         loaded &&
         (runs.length === 0 ? (
-          <Typography component="p" data-testid="parent-attempts-empty">
-            {parentCopy.attempts.empty}
-          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              justifyItems: 'center',
+              gap: `${density.gap}px`,
+              py: `${density.sectionMargin * 2}px`,
+              px: `${density.cardPadding}px`,
+              border: '1px dashed',
+              borderColor: 'divider',
+              borderRadius: `${rounded.control}px`,
+              color: 'text.secondary',
+              textAlign: 'center',
+            }}
+          >
+            <ClipboardCheck size={28} aria-hidden="true" />
+            <Typography component="p" data-testid="parent-attempts-empty">
+              {parentCopy.attempts.empty}
+            </Typography>
+          </Box>
         ) : (
           <Box
             component="ul"
@@ -260,38 +305,82 @@ export default function ParentAttemptsPage() {
                 key={run.attemptId}
                 component="li"
                 role="listitem"
-                sx={{ listStyle: 'none' }}
+                sx={{
+                  listStyle: 'none',
+                  transition: (theme) => theme.transitions.create('border-color'),
+                  '&:hover': { borderColor: 'primary.main' },
+                }}
                 data-testid="parent-attempt-row"
                 data-attempt-id={run.attemptId}
               >
-                <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-                  {/* The Subject, or a neutral stand-in for a classification that no
-                      longer resolves: the row keeps its place and loses its label. */}
-                  <Typography component="h2" variant="cardTitle">
-                    {run.subjectName ?? parentCopy.attempts.unknownSubject}
-                  </Typography>
-                  {/* The server's ordinal, which is which run of that test this is.
-                      Never this row's position in the list. */}
-                  <Typography component="p" data-testid="parent-attempt-run">
-                    {parentCopy.attempts.run(run.ordinal)}
-                  </Typography>
-                  {/* The instant, in the device's own formatting — and the same fact
-                      without one if the stored string will not parse. The run was handed
-                      in either way, which is why it is in this list at all; "Handed in
-                      Invalid Date" would read as a fault in the practice test rather
-                      than in a string, and a screen reader would say those words. */}
-                  <Typography component="p" data-testid="parent-attempt-submitted">
-                    {submittedSentence(run.submittedAt)}
-                  </Typography>
+                <CardContent
+                  sx={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: `${density.gap * 1.5}px`,
+                    '&:last-child': { pb: `${density.cardPadding + density.gap}px` },
+                  }}
+                >
+                  <Box sx={{ display: 'grid', gap: `${density.gap / 2}px`, minWidth: 0 }}>
+                    {/* The Subject, or a neutral stand-in for a classification that no
+                        longer resolves: the row keeps its place and loses its label. */}
+                    <Typography component="h2" variant="cardTitle">
+                      {run.subjectName ?? parentCopy.attempts.unknownSubject}
+                    </Typography>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        columnGap: `${density.gap * 2}px`,
+                        rowGap: `${density.gap / 2}px`,
+                        color: 'text.secondary',
+                        '& > p': {
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: `${density.gap / 2}px`,
+                          fontSize: '0.9375rem',
+                        },
+                      }}
+                    >
+                      {/* The server's ordinal, which is which run of that test this is.
+                          Never this row's position in the list. */}
+                      <Typography component="p" data-testid="parent-attempt-run">
+                        <Repeat size={16} aria-hidden="true" />
+                        {parentCopy.attempts.run(run.ordinal)}
+                      </Typography>
+                      {/* The instant, in the device's own formatting — and the same fact
+                          without one if the stored string will not parse. The run was handed
+                          in either way, which is why it is in this list at all; "Handed in
+                          Invalid Date" would read as a fault in the practice test rather
+                          than in a string, and a screen reader would say those words. */}
+                      <Typography component="p" data-testid="parent-attempt-submitted">
+                        <CalendarCheck size={16} aria-hidden="true" />
+                        {submittedSentence(run.submittedAt)}
+                      </Typography>
+                    </Box>
+                  </Box>
                   {/* Client-side, so the provider holding the elevation bearer stays
                       mounted across the navigation. */}
-                  <Link
+                  <Button
                     component={AttemptLink}
                     href={attemptHref(run.attemptId)}
-                    sx={{ minHeight: density.tapTarget }}
+                    variant="outlined"
+                    endIcon={<ArrowRight size={16} aria-hidden="true" />}
+                    sx={{
+                      minHeight: density.tapTarget,
+                      flexShrink: 0,
+                      '& .MuiButton-endIcon': {
+                        transition: (theme) => theme.transitions.create('transform'),
+                      },
+                      '&:hover .MuiButton-endIcon, &:focus-visible .MuiButton-endIcon': {
+                        transform: 'translateX(2px)',
+                      },
+                    }}
                   >
                     {parentCopy.attempts.open}
-                  </Link>
+                  </Button>
                 </CardContent>
               </Card>
             ))}
@@ -299,9 +388,14 @@ export default function ParentAttemptsPage() {
         ))
       )}
 
-      <Link component={NextLink} href="/parent">
+      <Link
+        component={NextLink}
+        href="/parent"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
+      >
+        <ArrowLeft size={16} aria-hidden="true" />
         {parentCopy.attempts.backToParentView}
       </Link>
-    </Screen>
+    </Box>
   );
 }
