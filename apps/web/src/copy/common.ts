@@ -9,6 +9,17 @@ import type { GradeState } from '@/lib/parent-api';
  * costs, and nothing else.
  */
 export const commonCopy = {
+  /**
+   * What the product is called, and the **one place it is decided**.
+   *
+   * This is the installed app's `name` and `short_name` — the words under the
+   * icon on a home screen — so it has to be a copy-module string rather than a
+   * literal inside the manifest route (AD-32: no user-facing literal inside a
+   * module that renders). `adminCopy.appName` is the Admin console's own window
+   * title and names a different thing; reusing it would put "Admin" on a
+   * family's home screen.
+   */
+  appName: 'n-tutor',
   destructive: {
     /** Names exactly what will be destroyed — never "this item" (UX-DR27). */
     title: (subject: string) => `Delete ${subject}?`,

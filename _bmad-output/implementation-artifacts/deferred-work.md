@@ -2533,3 +2533,19 @@ source_spec: `spec-7-6-admin-topic-curation.md`
 severity: low
 reason: TopicCurationList's openMerge sets targetsError on any loadTargets failure but renders no retry action beside it, unlike the page-level load failure which shows an explicit Retry button.
 status: open
+
+### DW-318: The product's family-facing name is stated three times and the three disagree: the installed app is "n-tutor" while every in-app surface says "n-test-reviewer".
+origin: spec-deferred fd0cce910fe0
+location: apps/web/src/copy/parent.ts:79, apps/web/src/copy/admin.ts:7, apps/web/src/app/layout.tsx:14
+source_spec: `spec-10-1-web-app-manifest-icons-minimal-service-worker.md`
+severity: medium
+reason: `commonCopy.appName` is 'n-tutor' (the name Story 10.1's acceptance criteria require on the home screen), while `parentCopy.appName` is 'n-test-reviewer' (rendered by AuthBrand and ParentSidebarChrome) and `adminCopy.appName` is 'n-test-reviewer Admin', which is still the root layout's `metadata.title` on every page. Pre-existing naming drift that this story surfaces rather than causes: renaming the product is a product decision, not a PWA change.
+status: open
+
+### DW-319: The manifest declares no `id`, so app identity is derived from `start_url` and a later `start_url` change would install a second app.
+origin: spec-deferred 41c2f3e52aa8
+location: apps/web/src/app/manifest.ts
+source_spec: `spec-10-1-web-app-manifest-icons-minimal-service-worker.md`
+severity: low
+reason: `manifest.ts` omits `id`. Browsers fall back to `start_url` for identity; once families have installed, the identity cannot be changed compatibly. Nothing in the story asks for it, and `start_url` is `/` with no reason to move, so it is a future-proofing item rather than a defect in this change.
+status: open
