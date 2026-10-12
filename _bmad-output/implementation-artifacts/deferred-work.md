@@ -2597,3 +2597,19 @@ source_spec: `spec-3-7-upload-stepper.md`
 severity: low
 reason: The dev session recorded deferred findings the orchestrator could not parse, so they were NOT filed as entries: item 2: not a mapping (got str); item 3: not a mapping (got str). Read `spec-3-7-upload-stepper.md`'s frontmatter and re-file them by hand.
 status: open
+
+### DW-326: The API's own refusal sentence for an unchecked submission still reads "Check the pages before submitting." and reaches the parent on the Check step, so one system-vocabulary string survives this
+origin: spec-deferred fff31bf42b7d
+location: apps/api/src/sourcetest (submit refusal copy) + e2e/tests/parent-capture.spec.ts
+source_spec: `spec-3-8-plain-language-check-step.md`
+severity: low
+reason: The web copy for that same refusal was reworded to "Check the pages before you continue.", but the server authors its own 400 body, and `writeRefusal` deliberately prefers the API's sentence over the screen's fallback. `e2e/tests/parent-capture.spec.ts` asserts the API text verbatim at the API-only flow. Closing it means rewording the API's allowance/legibility policy strings and their integration-test assertions, which this story's intent-contract forbids ("no API, DTO, Prisma or route change"). Pre-existing: the sentence predates this story.
+status: open
+
+### DW-327: None of this screen's six request-counter reads — including the new allowance read — has a behavioral test for the endsParentView(cause) → leave() branch; only source-text assertions check for the
+origin: spec-deferred c32b670c7d30
+location: apps/web/src/app/parent/capture/page.tsx (all six request-counter reads, including the allowance read added by this story)
+source_spec: `spec-3-8-plain-language-check-step.md`
+severity: low
+reason: page.spec.tsx slices PAGE_SOURCE and asserts the handler text contains 'leave();' and not 'setError', which would still pass if the branch's condition were inverted or deleted. No e2e test in e2e/tests/parent-capture.spec.ts supplies a session-ending cause to any of the screen's reads (the only mocked allowance failure is a plain 500, which is not session-ending). page.spec.tsx never renders CapturePage itself with mocked fetches — it only does static source-text assertions and renders small subcomponents via renderToStaticMarkup — so this is a pre-existing limitation of the test architecture, not something this story introduced or worsened for its one new read.
+status: open

@@ -37,6 +37,19 @@ const GRADE_LABELS = {
 } as const;
 
 /**
+ * The allowance a parent spends by saving an upload, **named once**.
+ *
+ * Declared beside `GRADE_LABELS` for exactly its reason: two groups state this
+ * term — Settings' Allowances panel, which labels the counter, and the upload's
+ * Check step, which says what is left before the parent spends one — and a
+ * parent moves between those two surfaces in one press. Two separately
+ * maintained spellings is two chances for the same allowance to be called two
+ * things, and the capitalisation is load-bearing: this is the product's name for
+ * it, not a description of it.
+ */
+const UPLOAD_ALLOWANCE_TERM = 'Upload Allowance';
+
+/**
  * The mastery figure and the blank count, as four functions **two groups share**.
  *
  * Declared beside `parentCopy` for exactly `GRADE_LABELS`' reason: the dashboard row
@@ -422,7 +435,7 @@ export const parentCopy = {
     allowancesFailed: 'The allowances could not be read. Nothing has changed. Try again.',
     /** The tier line's label. The tier's own name comes from the API. */
     tierLine: (tier: string) => `Account Tier: ${tier}`,
-    uploadAllowance: 'Upload Allowance',
+    uploadAllowance: UPLOAD_ALLOWANCE_TERM,
     generationAllowance: 'Generation Allowance',
     explanationAllowance: 'Explanation Allowance',
     uploadUnit: 'uploaded tests',
@@ -663,17 +676,23 @@ export const parentCopy = {
      * Shown beside the disabled submit control. The button being disabled is a
      * courtesy; this sentence is what makes the refusal legible, and the server
      * refuses a zero-page submission whatever the browser did.
+     *
+     * All four forms say "before you continue" rather than "before submitting":
+     * "submit" is the API's word for the write, not anything a parent does, and
+     * the control they are being refused is the one labelled with the step they
+     * are on. The server states its own refusal in its own words and is not
+     * reworded here — this is the sentence the *screen* shows.
      */
     submitBlocked: (reasons: readonly ('pages' | 'classification' | 'legibility')[]): string => {
       if (reasons.length === 0) return '';
       if (reasons.length === 1) {
         return reasons[0] === 'pages'
-          ? 'Add at least one page before submitting.'
+          ? 'Add at least one page before you continue.'
           : reasons[0] === 'classification'
-            ? 'Choose a subject and a grade level before submitting.'
-            : 'Check the pages before submitting.';
+            ? 'Choose a subject and a grade level before you continue.'
+            : 'Check the pages before you continue.';
       }
-      // More than one: said once, as a list, rather than "before submitting" each time.
+      // More than one: said once, as a list, rather than "before you continue" each time.
       const steps = reasons.map((reason) =>
         reason === 'pages'
           ? 'add at least one page'
@@ -682,7 +701,7 @@ export const parentCopy = {
             : 'check the pages',
       );
       const last = steps.pop();
-      return `Before submitting, ${steps.join(', ')}${steps.length > 1 ? ',' : ''} and ${last}.`;
+      return `Before you continue, ${steps.join(', ')}${steps.length > 1 ? ',' : ''} and ${last}.`;
     },
 
     deleted: (ordinal: number, total: number) =>
@@ -691,12 +710,18 @@ export const parentCopy = {
         : `Page ${ordinal} was deleted.`,
     retaken: (ordinal: number) => `Page ${ordinal} was replaced.`,
     moved: (from: number, to: number) => `Page ${from} is now page ${to}.`,
-    submitted: 'The pages were submitted.',
     /**
-     * A submitted upload is shown rather than hidden — the work did not vanish
-     * — and the sentence says plainly why nothing on it can be changed.
+     * Announced the moment the upload is saved. "Saved", not "submitted": what
+     * happened from the parent's side is that their photos were kept.
      */
-    submittedNote: 'These pages were submitted. Nothing on this upload can be changed now.',
+    submitted: 'The pages were saved.',
+    /**
+     * A saved upload is shown rather than hidden — the work did not vanish —
+     * and the sentence says plainly why nothing on it can be changed. One
+     * string for two places: the Pages step and the committed Check step both
+     * render it, so it is reworded once.
+     */
+    submittedNote: 'These pages are saved. Nothing on this upload can be changed now.',
 
     /**
      * What the upload is *of*. One subject and one grade level, chosen from
@@ -740,10 +765,10 @@ export const parentCopy = {
      *
      * Two rules shape every string here. The verdict is stated per page and
      * the page is named, because the retake it offers is scoped to that page
-     * alone. And the cost is stated in **words** before the commit control —
-     * one Upload Allowance, and nothing at all for leaving — because Story 9.6
-     * owns the parent-facing Allowances surface and no figure or counter is
-     * this screen's to show.
+     * alone. And the cost is stated before the control that spends it — one
+     * upload of the Upload Allowance, and nothing at all for leaving — with
+     * what is left stated above it, read from the allowances endpoint. Not one
+     * figure, ceiling or date here is the screen's own.
      */
     legibility: {
       heading: 'How the pages read',
@@ -770,8 +795,14 @@ export const parentCopy = {
             : `Pages ${ordinals.slice(0, -1).join(', ')} and ${ordinals[ordinals.length - 1]} may be too blurry to read.`,
       /** Said when nothing was flagged, so silence is never the only answer. */
       allReadable: 'Every page reads clearly.',
-      /** The advisory sentence. It is a warning, and it says so plainly. */
-      advisory: 'This is a warning, not a block. Continuing is allowed.',
+      /**
+       * The advisory sentence. It is a warning, and it says so plainly.
+       *
+       * "not a block" was the system's word for what the check *is not*, which
+       * told a parent nothing about what they may do. This states what they may
+       * do.
+       */
+      advisory: 'This is a warning only. You can continue if the pages look right to you.',
       /** Scoped to one page, exactly as the strip's own retake control is. */
       retakeFor: (ordinal: number) => `Retake page ${ordinal}`,
       /**
@@ -781,18 +812,34 @@ export const parentCopy = {
       continueWith: (count: number) =>
         count === 1 ? 'Continue with 1 page' : `Continue with all ${count} pages`,
       /**
-       * FR-31's two halves, stated beforehand and in words. No figure and no
-       * counter: the parent-facing Allowances surface is Story 9.6's.
+       * What is left, and when it starts again — above the sentence that says
+       * one of them is about to be spent.
+       *
+       * Every figure here arrives in the allowances payload: the count left is
+       * the only arithmetic the app does (`uploadAllowanceLeft`), the ceiling is
+       * the API's, and the date is rendered in the *account's* timezone by
+       * `dateOnly`. No tier, no limit and no period is restated.
        */
-      cost: 'Continuing commits this upload and uses one upload allowance.',
+      allowanceLeft: (left: number, limit: number, date: string) =>
+        `${UPLOAD_ALLOWANCE_TERM}: ${left} of ${limit} left this month. Starts again on ${date}.`,
+      /** No ceiling. Said in words, never as a number and never as "0 left". */
+      allowanceUnlimited: `Your ${UPLOAD_ALLOWANCE_TERM} is unlimited.`,
+      /**
+       * FR-31's two halves, stated beforehand and in words: the pages are kept,
+       * and one upload of the allowance goes on keeping them.
+       *
+       * "commits this upload" was the database's word for it. A parent is not
+       * committing anything; they are saving their child's test paper.
+       */
+      cost: `Continuing saves this upload and uses one upload from your ${UPLOAD_ALLOWANCE_TERM}.`,
       noCost: 'Nothing is used if you leave without continuing.',
       /**
-       * While the commit is in flight. Distinct from `capture.submitting`,
-       * which now says "Checking…" and belongs to the control before this
-       * one: a commit button that reports checking describes the wrong step
-       * at the one moment the allowance is actually spent.
+       * While the write is in flight. Distinct from `capture.submitting`,
+       * which says "Checking…" and belongs to the control before this one: a
+       * button that reports checking describes the wrong step at the one
+       * moment the allowance is actually spent.
        */
-      committing: 'Committing the upload…',
+      committing: 'Saving these pages…',
       /** Announced from the answer the server returned, never predicted. */
       checked: (flagged: number) =>
         flagged === 0
@@ -888,7 +935,8 @@ export const parentCopy = {
 
     failed: 'That change could not be saved. Try again.',
     addFailed: 'That page could not be added. Try again with another photo.',
-    submitFailed: 'The pages could not be submitted. Try again.',
+    /** Nothing was kept and nothing was spent, so it may simply be tried again. */
+    submitFailed: 'The pages could not be saved. Try again.',
     back: 'Back to Parent View',
   },
   generate: {

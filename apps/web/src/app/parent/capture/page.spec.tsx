@@ -349,7 +349,7 @@ describe('the announcements the screen makes', () => {
     expect(parentCopy.capture.deleted(1, 1)).toBe('Page 1 was deleted.');
     expect(parentCopy.capture.retaken(1)).toBe('Page 1 was replaced.');
     expect(parentCopy.capture.moved(1, 3)).toBe('Page 1 is now page 3.');
-    expect(parentCopy.capture.submitted).toBe('The pages were submitted.');
+    expect(parentCopy.capture.submitted).toBe('The pages were saved.');
   });
 
   it('states the count line from both figures the API supplies', () => {
@@ -375,12 +375,12 @@ describe('the announcements the screen makes', () => {
 describe('the classification the screen adds above the strip', () => {
   it('states both blocked reasons, in reading order, from the rule', () => {
     const capture = parentCopy.capture;
-    expect(capture.submitBlocked(['pages'])).toBe('Add at least one page before submitting.');
+    expect(capture.submitBlocked(['pages'])).toBe('Add at least one page before you continue.');
     expect(capture.submitBlocked(['classification'])).toBe(
-      'Choose a subject and a grade level before submitting.',
+      'Choose a subject and a grade level before you continue.',
     );
     expect(capture.submitBlocked(['pages', 'classification'])).toBe(
-      'Before submitting, add at least one page and choose a subject and grade level.',
+      'Before you continue, add at least one page and choose a subject and grade level.',
     );
     // Nothing unmet states nothing — the sentence is only rendered when the
     // control is refused, and it should not manufacture one.
@@ -1387,13 +1387,13 @@ describe('the legibility result', () => {
 
   it('says plainly that continuing over a flagged page is allowed', () => {
     expect(parentCopy.capture.legibility.advisory).toBe(
-      'This is a warning, not a block. Continuing is allowed.',
+      'This is a warning only. You can continue if the pages look right to you.',
     );
   });
 
   it('states the cost beforehand, in words, above the control that spends it', () => {
     expect(parentCopy.capture.legibility.cost).toBe(
-      'Continuing commits this upload and uses one upload allowance.',
+      'Continuing saves this upload and uses one upload from your Upload Allowance.',
     );
     expect(parentCopy.capture.legibility.noCost).toBe(
       'Nothing is used if you leave without continuing.',
@@ -1405,10 +1405,142 @@ describe('the legibility result', () => {
     expect(panel.indexOf('legibility-no-cost')).toBeLessThan(panel.indexOf('legibility-continue'));
   });
 
-  it('states no figure and shows no usage counter — Story 9.6 owns that surface', () => {
-    const block = JSON.stringify(parentCopy.capture.legibility);
-    expect(block).not.toMatch(/\b\d+\s*(uploads?|allowances?|left|remaining)\b/i);
-    expect(block.toLowerCase()).not.toContain('remaining');
+  it('states what is left, and spells the allowance the way Settings does', () => {
+    // Supersedes the former `'states no figure and shows no usage counter —
+    // Story 9.6 owns that surface'`: Story 9.6's parent-facing Allowances
+    // endpoint now exists, so the figure *is* stated here — a parent asked to
+    // spend an allowance is told how much of it is left.
+    expect(parentCopy.capture.legibility.allowanceLeft(4, 5, '12 Oct 2026')).toBe(
+      'Upload Allowance: 4 of 5 left this month. Starts again on 12 Oct 2026.',
+    );
+    expect(parentCopy.capture.legibility.allowanceUnlimited).toBe(
+      'Your Upload Allowance is unlimited.',
+    );
+    // One term, shared with Settings' own label rather than re-typed, so the
+    // two surfaces a parent moves between cannot call it two things.
+    expect(parentCopy.capture.legibility.allowanceUnlimited).toContain(
+      parentCopy.settings.uploadAllowance,
+    );
+    expect(parentCopy.capture.legibility.allowanceLeft(1, 2, 'd')).toContain(
+      parentCopy.settings.uploadAllowance,
+    );
+    expect(parentCopy.capture.legibility.cost).toContain(parentCopy.settings.uploadAllowance);
+  });
+
+  it('reads the figure from the API and composes none of it itself', () => {
+    // Which sentence, and whether there is one, is `uploadAllowanceLine`'s —
+    // asserted on its outputs in `upload-allowance.spec.ts`, where swapping its
+    // arms is a failure rather than a green run. What is this screen's is where
+    // the payload comes from, and that it holds no figure of its own.
+    expect(PAGE_SOURCE).toContain('parentApi.allowances(');
+    expect(PAGE_SOURCE).toContain('uploadAllowanceLine(uploadAllowance)');
+    // No tier label, no ceiling and no date literal anywhere on the screen, and
+    // nothing decremented locally after a write.
+    expect(PAGE_SOURCE).not.toMatch(/allowance[A-Za-z]*\s*-\s*\d/iu);
+    expect(PAGE_SOURCE).not.toMatch(/\.upload\.(used|limit)\s*[-+]/u);
+    for (const tier of ACCOUNT_TIERS) expect(PAGE_SOURCE).not.toContain(`'${tier}'`);
+  });
+
+  it('guards the allowance read like the screen’s five other streams', () => {
+    expect(PAGE_SOURCE).toContain('const allowanceRequestId = useRef(0)');
+    expect(PAGE_SOURCE).toContain('allowanceCurrent.current.value = issued;');
+    expect(PAGE_SOURCE).toContain('applyIfCurrent(allowanceCurrent.current, issued');
+    // Degraded, never fatal: the rejection leaves the screen's error alone and
+    // only drops the line, while a cause that ends the parent view still
+    // routes to the PIN gate the way every other read here does. The browser
+    // behaviour itself is pinned in `e2e/tests/parent-capture.spec.ts`, which
+    // answers the read with a 500 and checks the step still works.
+    const read = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('parentApi.allowances(token)'));
+    const handler = read.slice(0, read.indexOf('\n  }, ['));
+    expect(handler).toContain('leave();');
+    expect(handler).not.toContain('setError');
+    expect(handler).toContain('setUploadAllowance(null)');
+  });
+
+  it('re-reads on the upload’s status rather than carrying a figure across a write', () => {
+    // Keyed on status, not bolted into `write()`: the Draft → Submitted move is
+    // what makes the previous figure stale, and keying on it also gives the
+    // resumed session a figure read now rather than one remembered. The deltas
+    // across a real commit are asserted in the browser tier.
+    expect(PAGE_SOURCE).toContain('const uploadStatus = sourceTest?.status ?? null;');
+    const read = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('parentApi.allowances(token)'));
+    const deps = read.slice(read.indexOf('\n  }, [') + 7, read.indexOf(']);'));
+    for (const dep of ['token', 'step', 'uploadId', 'uploadStatus', 'leave']) {
+      expect(deps.split(/,\s*/u)).toContain(dep);
+    }
+    // The one mutation path is untouched by this story's read.
+    const submit = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('function submit()'));
+    expect(submit.slice(0, submit.indexOf('}'))).not.toContain('Allowance');
+  });
+
+  it('renders one allowance node, in both Check-step cards, and nothing when there is no sentence', () => {
+    // One node rather than two copies of the markup: one testid, one piece of
+    // styling, and only one step renders at a time so it is never in the
+    // document twice.
+    expect(PAGE_SOURCE).toContain('allowanceLine === null ? null : (');
+    expect(PAGE_SOURCE.match(/data-testid="legibility-allowance"/gu)).toHaveLength(1);
+    expect(PAGE_SOURCE.match(/\{allowanceNote\}/gu)).toHaveLength(2);
+    // Read before the cost sentence and before the control that spends it.
+    const card = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf("step === 'check' && ready && isDraft"));
+    expect(card.indexOf('{allowanceNote}')).toBeLessThan(card.indexOf('legibility-cost'));
+    expect(card.indexOf('{allowanceNote}')).toBeLessThan(card.indexOf('legibility-continue'));
+    // And again on the committed, read-only step, which is entered after the
+    // allowance was spent.
+    const committed = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('data-testid="legibility-committed"'));
+    expect(committed).toContain('{allowanceNote}');
+  });
+
+  it('never pre-checks the figure or gates the control on a spent allowance', () => {
+    // Zero left is the server's 409 and its own sentence, not a disabled
+    // button: the screen states no tier, no figure and no date of its own in a
+    // refusal, and it invents no gate the product does not have.
+    const panel = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('data-testid="legibility-continue"') - 400);
+    const control = panel.slice(0, panel.indexOf('data-testid="legibility-continue"'));
+    expect(control).toContain('disabled={busy}');
+    expect(control).not.toContain('allowance');
+    expect(control).not.toContain('Allowance');
+    expect(control).not.toContain('flagged');
+  });
+
+  it('uses no system vocabulary in any string the Check step reaches', () => {
+    const legibility = parentCopy.capture.legibility;
+    // Every key, enumerated — and the enumeration is pinned against the block's
+    // own keys below, so a string added later cannot slip past this rule by
+    // being one the test never read. Functions are *called*, because a word
+    // smuggled into a template literal is invisible to `JSON.stringify`.
+    const forms = {
+      heading: legibility.heading,
+      checking: legibility.checking,
+      readable: legibility.readable,
+      blurry: legibility.blurry,
+      verdictFor: legibility.verdictFor(1, legibility.blurry),
+      flagged: `${legibility.flagged([1])} ${legibility.flagged([1, 2, 3])}`,
+      allReadable: legibility.allReadable,
+      advisory: legibility.advisory,
+      retakeFor: legibility.retakeFor(2),
+      continueWith: `${legibility.continueWith(1)} ${legibility.continueWith(3)}`,
+      allowanceLeft: legibility.allowanceLeft(4, 5, '12 Oct 2026'),
+      allowanceUnlimited: legibility.allowanceUnlimited,
+      cost: legibility.cost,
+      noCost: legibility.noCost,
+      committing: legibility.committing,
+      checked: `${legibility.checked(0)} ${legibility.checked(1)} ${legibility.checked(2)}`,
+      failed: legibility.failed,
+    };
+    expect(Object.keys(forms).sort()).toEqual(Object.keys(legibility).sort());
+    const reached = [
+      ...Object.values(forms),
+      parentCopy.capture.submitBlocked(['pages']),
+      parentCopy.capture.submitBlocked(['classification']),
+      parentCopy.capture.submitBlocked(['legibility']),
+      parentCopy.capture.submitBlocked(['pages', 'classification', 'legibility']),
+      parentCopy.capture.submitted,
+      parentCopy.capture.submittedNote,
+      parentCopy.capture.submitFailed,
+    ].join(' ');
+    expect(reached).not.toMatch(/commit/i);
+    expect(reached).not.toMatch(/\bblock/i);
+    expect(reached).not.toMatch(/submitt?/i);
   });
 
   it('never disables the commit control for a flagged page', () => {
@@ -1455,7 +1587,7 @@ describe('the legibility result', () => {
     // before this one. A commit button wearing it would describe the wrong
     // step at the one moment an Upload Allowance is actually spent.
     expect(parentCopy.capture.submitting).toBe('Checking…');
-    expect(parentCopy.capture.legibility.committing).toBe('Committing the upload…');
+    expect(parentCopy.capture.legibility.committing).toBe('Saving these pages…');
     expect(PAGE_SOURCE).toContain('parentCopy.capture.legibility.committing');
     const panel = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('data-testid="legibility-result"'));
     const commit = panel.slice(0, panel.indexOf('data-testid="legibility-continue"'));
@@ -1464,10 +1596,10 @@ describe('the legibility result', () => {
 
   it('states the third submit reason without a code or an apology', () => {
     expect(parentCopy.capture.submitBlocked(['legibility'])).toBe(
-      'Check the pages before submitting.',
+      'Check the pages before you continue.',
     );
     expect(parentCopy.capture.submitBlocked(['pages', 'classification', 'legibility'])).toBe(
-      'Before submitting, add at least one page, choose a subject and grade level, and check the pages.',
+      'Before you continue, add at least one page, choose a subject and grade level, and check the pages.',
     );
   });
 });
@@ -1828,9 +1960,7 @@ describe('which step the screen shows', () => {
     // by it: the region carries one message at a time. Pinned by position, not
     // only by presence, so swapping or splitting the two pieces would fail here
     // rather than only being guessable from the e2e substring checks.
-    expect(body).toContain(
-      "announce(lead === '' ? said : `${lead} ${said}`);",
-    );
+    expect(body).toContain("announce(lead === '' ? said : `${lead} ${said}`);");
     expect(body).toContain('lead');
     // And each lead is the sentence its own setter just caused, never whatever
     // the app-wide region happens to be holding — which may be from another

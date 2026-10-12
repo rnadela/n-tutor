@@ -32,6 +32,7 @@ import {
   previousStep,
   type CaptureStep,
 } from '@/lib/capture-step';
+import type { AccountConsumption } from '@/lib/consumption-format';
 import { EXTRACTION_POLL_MS, isSettled, warningNeeded } from '@/lib/extraction-status';
 import { isChecked, isPageReadable, unreadablePages } from '@/lib/legibility';
 import { canAddPage, canSubmitPages, movedOrder, type MoveDirection } from '@/lib/page-order';
@@ -43,6 +44,7 @@ import {
   type TaxonomyItem,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView, refusalText } from '@/lib/parent-view';
+import { uploadAllowanceLine } from '@/lib/upload-allowance';
 import { density, focusRing, rounded } from '@/theme/tokens';
 import { AddPages } from './AddPages';
 import { CaptureStepper, stepLabel } from './CaptureStepper';
@@ -190,6 +192,15 @@ export default function CapturePage() {
   const extractionRequestId = useRef(0);
   const extractionCurrent = useRef({ value: 0 });
   extractionCurrent.current.value = extractionRequestId.current;
+  /**
+   * The allowances read, with the same guard the other five streams carry: it
+   * re-issues whenever the Check step is entered and again when the upload's
+   * status moves, so a slow first read has every chance of landing after a
+   * later one.
+   */
+  const allowanceRequestId = useRef(0);
+  const allowanceCurrent = useRef({ value: 0 });
+  allowanceCurrent.current.value = allowanceRequestId.current;
 
   /**
    * Where the committed upload's reading stands, and what the parent has done
@@ -197,6 +208,15 @@ export default function CapturePage() {
    */
   const [extraction, setExtraction] = useState<ExtractionStatusView | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
+  /**
+   * The account's consumption, or `null` when there is none to state.
+   *
+   * `null` both before the read lands and after one fails: the Check step's
+   * allowance line is an addition to the step, never a precondition for it, so
+   * its absence has to render as nothing at all rather than as a figure the
+   * screen made up or an error about a sentence the parent did not ask for.
+   */
+  const [uploadAllowance, setUploadAllowance] = useState<AccountConsumption | null>(null);
 
   const leave = useCallback(() => {
     clearElevation();
@@ -368,6 +388,14 @@ export default function CapturePage() {
    */
   const submittedSourceTestId =
     sourceTest !== null && sourceTest.status === 'Submitted' ? sourceTest.id : null;
+  /**
+   * The upload the allowance read is taken against — which upload, and where it
+   * stands. The status is a dependency rather than a value the read uses: it is
+   * what moves when the allowance is spent, so it is what makes the previous
+   * figure stale.
+   */
+  const uploadId = sourceTest?.id ?? null;
+  const uploadStatus = sourceTest?.status ?? null;
   /** Bumped by Retry, so a poll that stopped on an error can be re-issued. */
   const [extractionAttempt, setExtractionAttempt] = useState(0);
 
@@ -416,6 +444,44 @@ export default function CapturePage() {
       extractionCurrent.current.value = extractionRequestId.current;
     };
   }, [token, submittedSourceTestId, extractionAttempt, leave]);
+
+  /**
+   * What is left of the Upload Allowance, read whenever the Check step is
+   * shown.
+   *
+   * Keyed on the upload's `status` rather than hung off `submit()`'s success
+   * handler on purpose. `write()` is the one mutation path and six callers
+   * share it, so a special case inside it for one write's side effect is the
+   * coupling the generate screen avoided by keying its own re-read on
+   * `jobSettled`. Keying on status also fixes the resumed session for free: a
+   * parent who comes back to a saved upload and presses Back to Check gets a
+   * figure read now, not one carried from before. **Nothing here is ever
+   * decremented locally** — a figure the browser computed after a write is a
+   * figure that can disagree with the account.
+   *
+   * Degraded, never fatal: a failure leaves `error` alone and simply drops the
+   * line, because the cost sentence and the control that spends the allowance
+   * work without it and collapsing the step over an extra sentence would tell
+   * the parent less, about the wrong thing. A cause that ends the whole parent
+   * view still routes to the PIN gate, as every other read here does.
+   */
+  useEffect(() => {
+    if (token === null || step !== 'check' || uploadId === null) return;
+    const issued = (allowanceRequestId.current += 1);
+    allowanceCurrent.current.value = issued;
+    parentApi.allowances(token).then(
+      applyIfCurrent(allowanceCurrent.current, issued, (reading: AccountConsumption) => {
+        setUploadAllowance(reading);
+      }),
+      applyIfCurrent(allowanceCurrent.current, issued, (cause: unknown) => {
+        if (endsParentView(cause)) {
+          leave();
+          return;
+        }
+        setUploadAllowance(null);
+      }),
+    );
+  }, [token, step, uploadId, uploadStatus, leave]);
 
   /**
    * What the error Alert's Retry does: every read, not only the first — the
@@ -481,6 +547,24 @@ export default function CapturePage() {
       : null;
   const busy = pending !== null;
   const ready = sourceTest !== null && !draftLoading;
+  /**
+   * The allowance line, as one node both Check-step cards render.
+   *
+   * Which sentence — and whether there is one at all — is
+   * `uploadAllowanceLine`'s, not this screen's: the three-way decision behind
+   * it is the sort that ships green when its arms are swapped if the only thing
+   * watching it is a rendered tree this app's unit tier has no DOM for. One
+   * node rather than two copies of the markup, so there is one testid and one
+   * piece of styling; only one step renders at a time, so it is never in the
+   * document twice.
+   */
+  const allowanceLine = uploadAllowanceLine(uploadAllowance);
+  const allowanceNote =
+    allowanceLine === null ? null : (
+      <Typography component="p" data-testid="legibility-allowance" sx={{ color: 'text.secondary' }}>
+        {allowanceLine}
+      </Typography>
+    );
   // The server's submit gate counts `Ready` rows only — a page stranded in
   // `Uploading` (a crash between insert and byte write) holds no bytes yet.
   // Mirroring the full count here would show an enabled submit control the
@@ -1169,6 +1253,13 @@ export default function CapturePage() {
           {step === 'check' && ready && isDraft && (
             <Card>
               <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
+                {/* What is left, above everything this step offers — the check
+                        control included, because the cost is what continuing
+                        will spend whether or not the check has run yet. Absent
+                        when the read produced nothing: the step works without
+                        it. */}
+                {allowanceNote}
+
                 {/* The check, not the commit. It runs once over the whole
                         page set, in the foreground, and it charges nothing. */}
                 {!checked && (
@@ -1299,9 +1390,9 @@ export default function CapturePage() {
                       {parentCopy.capture.legibility.advisory}
                     </Typography>
 
-                    {/* Stated beforehand, in words, above the control that
-                            spends it. No figure and no counter: the
-                            parent-facing Allowances surface is Story 9.6's. */}
+                    {/* Stated beforehand, above the control that spends it,
+                            and below the line saying what is left — the
+                            parent reads the balance, then what it costs. */}
                     <Typography component="p" data-testid="legibility-cost">
                       {parentCopy.capture.legibility.cost}
                     </Typography>
@@ -1349,6 +1440,11 @@ export default function CapturePage() {
                         : parentCopy.capture.legibility.flagged(flagged)}
                     </Typography>
                   )}
+                  {/* The same node, re-read rather than remembered: this step
+                      is entered again after the upload was saved, and the
+                      figure a parent sees here has to be the one the account
+                      now stands at. */}
+                  {allowanceNote}
                   <Typography
                     component="p"
                     data-testid="submitted-note"

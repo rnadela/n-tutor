@@ -186,6 +186,41 @@ async function checkThenContinue(page: Page): Promise<void> {
   await expect(stepPosition(page)).toContainText('Generate');
 }
 
+/**
+ * The two figures the Check step's allowance line states, and nothing else
+ * about it.
+ *
+ * Only the figures: the ceiling belongs to the tiers table on the API side and
+ * the reset date is rendered by `Intl` in the account's zone, so a test that
+ * restated either would be a second copy of exactly what this story forbids the
+ * browser from holding — and `Intl`'s short month is not a fixed width ("Sept"),
+ * so pinning its shape would fail four weeks a year. The wording itself is
+ * asserted once, against the copy module, in `page.spec.tsx`. What is under
+ * test here is that the line says what the *account* says, and that it moved
+ * across a commit because it was read again.
+ */
+const ALLOWANCE_FIGURES = /(\d+) of (\d+) left this month\./u;
+
+/**
+ * The screen's own error Alert, and only it.
+ *
+ * Next's route announcer is a permanently mounted `role="alert"` node, so a
+ * bare role query is never zero and would make "no error was shown" unassertable.
+ */
+function errorAlert(page: Page) {
+  return page.locator('[role="alert"]:not(#__next-route-announcer__)');
+}
+
+async function allowanceFigures(page: Page): Promise<{ left: number; limit: number }> {
+  const line = page.getByTestId('legibility-allowance');
+  // A waiting assertion rather than a bare `textContent()`, so a re-read still
+  // in flight cannot make the figure flaky.
+  await expect(line).toHaveText(ALLOWANCE_FIGURES);
+  const stated = ALLOWANCE_FIGURES.exec((await line.textContent()) ?? '');
+  expect(stated).not.toBeNull();
+  return { left: Number(stated![1]), limit: Number(stated![2]) };
+}
+
 /** Deletes page `ordinal` through its confirmation, which states what the delete does. */
 async function deletePage(page: Page, ordinal: number): Promise<void> {
   await page.getByRole('button', { name: `Delete page ${ordinal}` }).click();
@@ -362,7 +397,7 @@ test.describe('page management before submit', () => {
     await nextStep(page, 'Check');
     await expect(page.getByTestId('submit-blocked')).toHaveCount(0);
     await checkThenContinue(page);
-    await expect(liveRegion(page)).toContainText('The pages were submitted.');
+    await expect(liveRegion(page)).toContainText('The pages were saved.');
 
     await backStep(page, 'Check');
     await backStep(page, 'Pages');
@@ -421,9 +456,19 @@ test.describe('page management before submit', () => {
     await expect(liveRegion(page)).toContainText('One page was added.');
 
     await nextStep(page, 'Check');
-    await checkThenContinue(page);
+    // What is left, stated before the check has even run — the cost is what
+    // continuing will spend either way — and read above both the cost
+    // sentence and the control that spends it. There is something left to
+    // spend; how much is the account's business, not this test's.
+    const before = await allowanceFigures(page);
+    expect(before.left).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Check pages' }).click();
+    await expect(page.getByTestId('legibility-continue')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('legibility-allowance')).toBeVisible();
+    await page.getByTestId('legibility-continue').click();
+    await expect(stepPosition(page)).toContainText('Generate');
 
-    await expect(liveRegion(page)).toContainText('The pages were submitted.');
+    await expect(liveRegion(page)).toContainText('The pages were saved.');
 
     // The earlier steps are still reachable, and shown complete — read-only
     // means nothing if they cannot be looked at. Every one of them holds its
@@ -437,7 +482,14 @@ test.describe('page management before submit', () => {
       'Pages 1 and 2 may be too blurry to read.',
     );
     await expect(page.getByTestId('submitted-note')).toHaveText(
-      'These pages were submitted. Nothing on this upload can be changed now.',
+      'These pages are saved. Nothing on this upload can be changed now.',
+    );
+    // Read again rather than remembered: the upload just saved spent one, so
+    // the figure the parent comes back to is the account's as it now stands —
+    // not the one the step was holding before the write. A waiting assertion,
+    // because the re-read is a round trip of its own.
+    await expect(page.getByTestId('legibility-allowance')).toContainText(
+      `${before.left - 1} of ${before.limit} left this month.`,
     );
     await expect(page.getByRole('button', { name: 'Check pages' })).toHaveCount(0);
     await expect(page.getByTestId('legibility-continue')).toHaveCount(0);
@@ -445,7 +497,7 @@ test.describe('page management before submit', () => {
 
     await backStep(page, 'Pages');
     await expect(page.getByTestId('submitted-note')).toHaveText(
-      'These pages were submitted. Nothing on this upload can be changed now.',
+      'These pages are saved. Nothing on this upload can be changed now.',
     );
     // The work is still shown — it did not vanish — and nothing on it is live.
     await expect(rows(page)).toHaveCount(2);
@@ -508,10 +560,10 @@ test.describe('page management before submit', () => {
     // Proceeding is allowed and the screen says so, and the cost is stated
     // before the control that spends it.
     await expect(page.getByTestId('legibility-advisory')).toHaveText(
-      'This is a warning, not a block. Continuing is allowed.',
+      'This is a warning only. You can continue if the pages look right to you.',
     );
     await expect(page.getByTestId('legibility-cost')).toHaveText(
-      'Continuing commits this upload and uses one upload allowance.',
+      'Continuing saves this upload and uses one upload from your Upload Allowance.',
     );
     await expect(page.getByTestId('legibility-no-cost')).toHaveText(
       'Nothing is used if you leave without continuing.',
@@ -540,8 +592,59 @@ test.describe('page management before submit', () => {
       timeout: 20_000,
     });
     await page.getByTestId('legibility-continue').click();
-    await expect(liveRegion(page)).toContainText('The pages were submitted.');
+    await expect(liveRegion(page)).toContainText('The pages were saved.');
     await expect(stepPosition(page)).toHaveText('Step 4 of 4: Generate');
+  });
+
+  test('states no figure when the allowance read fails, and the step still works', async ({
+    page,
+  }) => {
+    // The allowance line is an addition to the Check step, never a
+    // precondition for it. A failed read drops the line and nothing else: no
+    // error Alert — the parent did not ask for that sentence and can do
+    // nothing about its absence — and the control that spends the allowance
+    // still spends it, because the server is the authority on whether there is
+    // one to spend.
+    await page.route('**/api/parent/allowances', async (route) => {
+      await route.fulfill({
+        status: 500,
+        headers: {
+          'access-control-allow-origin': 'http://localhost:3000',
+          // `credentials: 'include'` on every parent-api call means the
+          // browser discards a fulfilled response with no explicit
+          // allow-credentials header, surfacing as a network error rather
+          // than the 500 this test means to simulate.
+          'access-control-allow-credentials': 'true',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ message: 'The allowances could not be read.' }),
+      });
+    });
+
+    const { subjectName } = await openCapture(page);
+    await chooseSubject(page, subjectName);
+    await nextStep(page, 'Pages');
+    await addPage(page, jpeg('page-a.jpg', PAGE_A));
+    await nextStep(page, 'Check');
+
+    // Nothing where the figure would be, and nothing on screen about it.
+    await expect(page.getByTestId('legibility-allowance')).toHaveCount(0);
+    await expect(errorAlert(page)).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Check pages' }).click();
+    const commit = page.getByTestId('legibility-continue');
+    await expect(commit).toBeVisible({ timeout: 20_000 });
+    // Both halves of the cost are still stated, above the control, and the
+    // control is still live.
+    await expect(page.getByTestId('legibility-cost')).toBeVisible();
+    await expect(page.getByTestId('legibility-no-cost')).toBeVisible();
+    await expect(page.getByTestId('legibility-allowance')).toHaveCount(0);
+    await expect(errorAlert(page)).toHaveCount(0);
+    await expect(commit).toBeEnabled();
+
+    await commit.click();
+    await expect(stepPosition(page)).toContainText('Generate');
+    await expect(liveRegion(page)).toContainText('The pages were saved.');
   });
 
   test('Retry re-issues the draft open, not only the profile list', async ({ page }) => {
