@@ -2645,3 +2645,35 @@ source_spec: `spec-4-8-figures-in-generated-questions.md`
 severity: low
 reason: `practice-test-schema.ts` widens `prompt` to full `RichText` for every question format uniformly, and the figure-bounding pass in `practice-test-payload.ts` is format-agnostic. The unit, integration and e2e suites added by this story exercise ShortAnswer and MultipleChoice prompts and MultipleChoice choice bodies, but no FillInTheBlank case.
 status: open
+
+### DW-332: No unit case exercises a figure inside a Multiple Choice option tile in `AnswerInput.spec.tsx`, so the tile's own markup around a drawing is stated only by the browser tier.
+origin: spec-deferred 530e02f62760
+location: apps/web/src/app/student/_components/AnswerInput.spec.tsx
+source_spec: `spec-4-9-figure-placement.md`
+severity: low
+reason: `AnswerInput.spec.tsx` renders to static markup with no DOM and its Multiple Choice cases assert `aria-labelledby`, `checked` and the `label for` pairing on text-only choice bodies; a figure-bearing body appears nowhere in the file. The gap predates this story — Story 4.8 added the figure to the generated choice body without a unit case here — and the story's own Block If is now exercised in the browser tier, which is the only tier that can observe a press.
+status: open
+
+### DW-333: No unit case covers a field with text interleaved between two or more figures (text, figure, text, figure), so ordering and per-figure isolation in that shape is unverified at the unit tier.
+origin: spec-deferred 73efca736e23
+location: apps/web/src/components/RichText.spec.tsx
+source_spec: `spec-4-9-figure-placement.md`
+severity: low
+reason: `RichText.spec.tsx`'s two-figure case (`[circle, square]`) has no text segment between the figures, and the new layout e2e test interleaves trailing text only after the last of three figures, never between two of them. No existing case renders `[text, figure, text, figure]` and checks that each figure still lands in a block of its own in stored order.
+status: open
+
+### DW-334: `classOf`/`rulesFor` in `RichText.spec.tsx` match the first node with a given `data-testid` via a non-global regex, so a markup string with two nodes sharing the same test id would silently read only
+origin: spec-deferred a0ef9020c23b
+location: apps/web/src/components/RichText.spec.tsx
+source_spec: `spec-4-9-figure-placement.md`
+severity: low
+reason: `classOf` uses `new RegExp(...).exec(markup)` without the `g` flag, so a second `data-testid="rich-text-figure"` node in the same markup is never reached. No current test renders two figures in one field and then calls `rulesFor` on that shared test id, so the gap is latent rather than presently masking a failing assertion.
+status: open
+
+### DW-335: The `boxOf` locator-geometry helper is defined twice, nearly identically, once in each of the two e2e spec files this story extended.
+origin: spec-deferred fb788e589858
+location: e2e/tests/parent-practice-test.spec.ts
+source_spec: `spec-4-9-figure-placement.md`
+severity: low
+reason: `e2e/tests/parent-practice-test.spec.ts` and `e2e/tests/student-submit-attempt.spec.ts` each declare their own local `boxOf(locator)` returning a bounding-box shape; the two differ only in that the former also returns `right`. Neither existed before this story added layout assertions that needed one.
+status: open

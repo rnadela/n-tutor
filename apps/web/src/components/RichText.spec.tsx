@@ -5,6 +5,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it } from 'vitest';
 import { parentCopy } from '@/copy/parent';
 import { parentTheme } from '@/theme/theme';
+import { spacing } from '@/theme/tokens';
 import type { RichTextSegment } from '@/lib/parent-api';
 import { FIGURE_ATTRIBUTES, FIGURE_ATTRIBUTE_PROPS, parseFigureSvg } from '@/lib/svg-figure';
 import { sanitizeFigureSvg } from '../../../api/src/extraction/svg-figure';
@@ -20,6 +21,44 @@ function render(segments: RichTextSegment[]): string {
 }
 
 const COMPONENT_SOURCE = readFileSync(path.resolve(import.meta.dirname, 'RichText.tsx'), 'utf8');
+
+/**
+ * One spacing-scale read, in the form emotion actually emits it.
+ *
+ * `theme.spacing(n)` hands back the CSS variable with its own fallback
+ * (`var(--mui-spacing, 8px)`); what reaches the stylesheet is the variable
+ * alone. Normalizing the fallback away keeps the assertion a statement about
+ * the scale rather than about a px figure written in the test.
+ */
+function spacingOf(step: number): string {
+  return parentTheme.spacing(step).replaceAll(/,\s*[^)]*\)/gu, ')');
+}
+
+/** The emotion class one named node actually carries. */
+function classOf(markup: string, testid: string): string {
+  const tag = new RegExp(`<[a-z]+[^>]*data-testid="${testid}"[^>]*>`, 'u').exec(markup);
+  expect(tag, testid).toBeTruthy();
+  const attribute = /class="([^"]*)"/u.exec(tag![0]);
+  expect(attribute, `${testid}: class`).toBeTruthy();
+  const emitted = attribute![1]!.split(' ').find((name) => name.startsWith('css-'));
+  expect(emitted, testid).toBeTruthy();
+  return emitted!;
+}
+
+/**
+ * One node's *own* emitted declarations.
+ *
+ * Tied to the class the node carries rather than matched against the whole
+ * stylesheet: a wildcard proves that *some* rule says `display:block`, which
+ * stays true with the declaration on the wrong node — and which node is a block
+ * is the entire subject of this story, so that is what is read here.
+ */
+function rulesFor(markup: string, testid: string): string {
+  const cls = classOf(markup, testid);
+  const rule = new RegExp(`\\.${cls}\\{([^}]*)\\}`, 'u').exec(markup);
+  expect(rule, `${testid}: base rule`).toBeTruthy();
+  return rule![1]!;
+}
 
 describe('a run of text', () => {
   it('renders exactly what was stored, in order', () => {
@@ -231,6 +270,12 @@ describe('a figure', () => {
     expect(markup.split('role="img"').length - 1).toBe(2);
     expect(markup).toContain(`aria-label="${circle.alt}"`);
     expect(markup).toContain('aria-label="A square"');
+    // Each on its own line, in stored order, inside one wrapper: the field is
+    // one block, not one block per drawing.
+    expect(markup.split('data-testid="rich-text-block"').length - 1).toBe(1);
+    expect(markup.indexOf(`aria-label="${circle.alt}"`)).toBeLessThan(
+      markup.indexOf('aria-label="A square"'),
+    );
   });
 
   it('renders two identical sibling shapes as two shapes', () => {
@@ -308,5 +353,135 @@ describe('a figure', () => {
       expect(markup).toContain('aria-label="A stored figure"');
       expect(markup).toContain('viewBox=');
     }
+  });
+});
+
+describe('where a figure sits', () => {
+  const circle: Extract<RichTextSegment, { kind: 'figure' }> = {
+    kind: 'figure',
+    svg: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="currentColor"/></svg>',
+    alt: 'A circle divided into four equal parts',
+  };
+  const square: Extract<RichTextSegment, { kind: 'figure' }> = {
+    kind: 'figure',
+    svg: '<svg viewBox="0 0 4 4"><rect x="0" y="0" width="4" height="4"/></svg>',
+    alt: 'A square',
+  };
+
+  it('pins a letterboxing drawing to the left of its own box, never centred in it', () => {
+    // The element box is the column's width under a height ceiling, so a
+    // drawing taller than it is wide does not fill it — and the default
+    // `xMidYMid` would centre it in the space left over, which is the one way a
+    // figure could still fail to line up with the words above it.
+    const tall: RichTextSegment = {
+      kind: 'figure',
+      svg: '<svg viewBox="0 0 4 20"><line x1="2" y1="0" x2="2" y2="20" stroke="currentColor"/></svg>',
+      alt: 'A tall number line',
+    };
+    expect(render([tall])).toContain('preserveAspectRatio="xMinYMid meet"');
+    // Set on every figure, not only a tall one, and never overridable from a
+    // stored row: the attribute is not in the allowlist, so nothing arrives
+    // carrying one.
+    expect(render([circle])).toContain('preserveAspectRatio="xMinYMid meet"');
+    expect(FIGURE_ATTRIBUTES as readonly string[]).not.toContain('preserveAspectRatio');
+  });
+
+  it('is a block of its own, no longer a thing drawn beside the words', () => {
+    // The declarations the drawing itself carries, read off its own class: a
+    // figure laid out `inline-block` with `vertical-align: middle` is the bug
+    // this story is about.
+    const rule = rulesFor(
+      render([{ kind: 'text', value: 'Which shape? ' }, circle]),
+      'rich-text-figure',
+    );
+    expect(rule).toContain('display:block');
+    expect(rule).not.toContain('inline-block');
+    expect(rule).not.toContain('vertical-align');
+  });
+
+  it('takes its spacing and both ceilings from the spacing scale, never from a figure written here', () => {
+    // Interpolated from the theme rather than written as px: a change to the
+    // token is a decision about the scale, not a failure of this criterion
+    // (AD-32).
+    const markup = render([circle]);
+    const rule = rulesFor(markup, 'rich-text-figure');
+    expect(rule).toContain(`margin-block:${spacingOf(1)}`);
+    expect(rule).toContain(`max-width:${spacingOf(30)}`);
+    expect(rule).toContain(`max-height:${spacingOf(24)}`);
+    // And the scale those three read resolves to the token, not to a figure
+    // this file wrote.
+    expect(markup).toContain(`--mui-spacing:${spacing.base}px`);
+    expect(rule).toContain('width:100%');
+    // Left-aligned with the text above it, so nothing insets it sideways.
+    expect(rule).not.toContain('margin-left');
+    expect(rule).not.toContain('margin-right');
+    expect(rule).not.toContain('margin-inline');
+    expect(rule).not.toContain('margin-top');
+    expect(rule).not.toContain('margin-bottom');
+  });
+
+  it('gives the whole field a block formatting context, whatever the surface lays it out as', () => {
+    // The wrapper, not the svg, is what makes the rule hold inside the
+    // draft-review option list item: that is a flex row, where a block svg on
+    // its own is simply the next item on the line.
+    const markup = render([{ kind: 'text', value: 'Which shape? ' }, circle]);
+    expect(markup).toContain('data-testid="rich-text-block"');
+    const rule = rulesFor(markup, 'rich-text-block');
+    expect(rule).toContain('display:block');
+    expect(rule).toContain('width:100%');
+    // A `span`, not a `div`: every caller renders this inside a `p` or an `li`.
+    expect(markup).toMatch(/<span class="[^"]*" data-testid="rich-text-block"/u);
+    expect(markup).not.toContain('<div');
+  });
+
+  it('wraps a figure-only field, which is what a pictured option is', () => {
+    const markup = render([square]);
+    expect(markup).toContain('data-testid="rich-text-block"');
+    const wrapper = rulesFor(markup, 'rich-text-block');
+    expect(wrapper).toContain('display:block');
+    // No frame, label, caption or centring is added around it, on either the
+    // wrapper or the drawing. Read off their own rules: the theme's own
+    // stylesheet says `border` and `text-align` on its own account, which has
+    // nothing to do with this.
+    for (const rule of [wrapper, rulesFor(markup, 'rich-text-figure')]) {
+      expect(rule).not.toContain('text-align');
+      expect(rule).not.toContain('border');
+      expect(rule).not.toContain('background');
+    }
+  });
+
+  it('leaves a field of text and fractions exactly as it rendered before', () => {
+    // Every field of every draft generated from a source test with nothing
+    // drawn on it. No wrapper, no block, inline flow: the parity claim the
+    // untouched drafts, answer-key, option and explanation specs rest on.
+    const markup = render([
+      { kind: 'text', value: 'Add ' },
+      { kind: 'fraction', whole: null, numerator: 1, denominator: 2 },
+      { kind: 'text', value: ' to it.' },
+    ]);
+    expect(markup).not.toContain('rich-text-block');
+    expect(markup).not.toContain('display:block');
+    // The segment spans are still siblings, with the fraction between them.
+    expect(markup.indexOf('Add ')).toBeLessThan(markup.indexOf('role="math"'));
+    expect(markup.indexOf('role="math"')).toBeLessThan(markup.indexOf(' to it.'));
+    expect(markup.split('data-testid="rich-text-segment"').length - 1).toBe(2);
+  });
+
+  it('still renders the text of a field whose only figure the mirror refuses', () => {
+    const markup = render([
+      { kind: 'text', value: 'Before ' },
+      { kind: 'figure', svg: '<svg><circle cx="1" cy="1" r="1"/></svg>', alt: 'A shape' },
+      { kind: 'text', value: ' after.' },
+    ]);
+    expect(markup).not.toContain('<svg');
+    expect(markup).toContain('Before ');
+    expect(markup).toContain(' after.');
+  });
+
+  it('writes no px literal and no alignment of its own', () => {
+    // Every size and space in the file is a `theme.spacing` read, and nothing
+    // centres a figure.
+    expect(COMPONENT_SOURCE).not.toMatch(/\d+px/u);
+    expect(COMPONENT_SOURCE).not.toContain('textAlign');
   });
 });

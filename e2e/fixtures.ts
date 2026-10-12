@@ -477,6 +477,19 @@ export interface DrawnDraft {
   promptAlt: string;
   /** The text alternative of the figure in that question's first option. */
   optionAlt: string;
+  /**
+   * The text alternative of the *second* figure in that prompt, or `null` when
+   * the layout option was off and only one drawing was written.
+   */
+  secondAlt: string | null;
+  /**
+   * The text alternative of the *third* figure in that prompt — a drawing far
+   * taller than it is wide, which letterboxes inside its own box — or `null` as
+   * above.
+   */
+  tallAlt: string | null;
+  /** The text stored after the last figure in that prompt, or `null` as above. */
+  tailText: string | null;
 }
 
 /**
@@ -490,12 +503,41 @@ export interface DrawnDraft {
  * then asserts — the review render, the editor's token, the save, the released
  * test, the answer key — goes through the real read, the real edit path and the
  * real re-sanitizer.
+ *
+ * With `{ layout: true }` the prompt is written as the shape placement is
+ * actually about — text, a drawing, a second drawing, a third that letterboxes,
+ * then trailing text — so a test can measure where each one sits. Opt-in rather
+ * than always on: the editor cases assert the one-figure prompt's token string
+ * verbatim. The second drawing is the base-ten-blocks shape (a group of rects)
+ * the live draft's own question holds; the third is far taller than it is wide,
+ * which is the case where a centred aspect ratio would float a drawing away
+ * from the left edge of the words above it.
  */
-export async function drawOnPracticeTestFixture(parentEmail: string): Promise<DrawnDraft> {
+export async function drawOnPracticeTestFixture(
+  parentEmail: string,
+  options: { layout?: boolean } = {},
+): Promise<DrawnDraft> {
+  const layout = options.layout === true;
   const promptAlt = 'A half-circle';
   const optionAlt = 'A square with four parts shaded';
+  const secondAlt = 'Three base-ten blocks in a row';
+  const tallAlt = 'A tall number line';
+  const tailText = ' Count the parts.';
   const promptSvg =
     '<svg viewBox="0 0 10 10"><path d="M0 8A5 5 0 0 1 10 8" fill="none" stroke="currentColor"/></svg>';
+  const blocksSvg =
+    '<svg viewBox="0 0 12 4"><g><rect x="0" y="0" width="3" height="4" fill="none" stroke="currentColor"/>' +
+    '<rect x="4" y="0" width="3" height="4" fill="none" stroke="currentColor"/>' +
+    '<rect x="8" y="0" width="3" height="4" fill="none" stroke="currentColor"/></g></svg>';
+  // Far taller than it is wide, so it cannot fill the width the column gives
+  // it: what is left over is where a centred drawing would drift to.
+  // The two ticks span the whole viewBox width and are drawn as thin rects
+  // rather than lines, so a test can measure where the drawing itself starts: a
+  // zero-height line has no box to measure.
+  const tallSvg =
+    '<svg viewBox="0 0 4 40"><line x1="2" y1="0" x2="2" y2="40" fill="none" stroke="currentColor"/>' +
+    '<rect x="0" y="2" width="4" height="0.4" stroke="currentColor"/>' +
+    '<rect x="0" y="37" width="4" height="0.4" stroke="currentColor"/></svg>';
   const optionSvg =
     '<svg viewBox="0 0 8 8"><rect x="1" y="1" width="6" height="6" fill="none" stroke="currentColor"/></svg>';
 
@@ -529,10 +571,20 @@ export async function drawOnPracticeTestFixture(parentEmail: string): Promise<Dr
 
     await client.query(`UPDATE "practice_test_question" SET "prompt" = $2::jsonb WHERE "id" = $1`, [
       target.id,
-      JSON.stringify([
-        { kind: 'text', value: 'Which shape is this? ' },
-        { kind: 'figure', svg: promptSvg, alt: promptAlt },
-      ]),
+      JSON.stringify(
+        layout
+          ? [
+              { kind: 'text', value: 'Which shape is this? ' },
+              { kind: 'figure', svg: promptSvg, alt: promptAlt },
+              { kind: 'figure', svg: blocksSvg, alt: secondAlt },
+              { kind: 'figure', svg: tallSvg, alt: tallAlt },
+              { kind: 'text', value: tailText },
+            ]
+          : [
+              { kind: 'text', value: 'Which shape is this? ' },
+              { kind: 'figure', svg: promptSvg, alt: promptAlt },
+            ],
+      ),
     ]);
     const option = await client.query<{ id: string }>(
       `SELECT "id" FROM "practice_test_choice"
@@ -546,7 +598,14 @@ export async function drawOnPracticeTestFixture(parentEmail: string): Promise<Dr
       JSON.stringify([{ kind: 'figure', svg: optionSvg, alt: optionAlt }]),
     ]);
 
-    return { questionOrdinal: target.ordinal, promptAlt, optionAlt };
+    return {
+      questionOrdinal: target.ordinal,
+      promptAlt,
+      optionAlt,
+      secondAlt: layout ? secondAlt : null,
+      tallAlt: layout ? tallAlt : null,
+      tailText: layout ? tailText : null,
+    };
   } finally {
     await client.end();
   }

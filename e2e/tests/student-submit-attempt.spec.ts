@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   countAttemptsFor,
   drawOnPracticeTestFixture,
@@ -706,9 +706,26 @@ test.describe('a released test with a figure in it', () => {
       expect(stroke).toBe(colour);
     }
 
+    // --- And it sits on its own line, flush with the words above it --------
+    // Measured rather than declared: `apps/web` renders its unit tests without
+    // a DOM, so a line box is only observable here.
+    const promptLead = await boxOf(question.locator('[data-testid="rich-text-segment"]').first());
+    const promptFigure = await boxOf(question.getByRole('img', { name: drawn.promptAlt }));
+    expect(promptFigure.top).toBeGreaterThanOrEqual(promptLead.bottom - 1);
+    expect(Math.abs(promptFigure.left - promptLead.left)).toBeLessThanOrEqual(1);
+
     // The pictured option is answerable as an option, with no drawing asked of
-    // the child.
-    await question.getByRole('radio').first().check();
+    // the child — and it is answerable *as a tile*: pressed on the drawing
+    // itself, which is what a child's finger lands on, the option is chosen.
+    // `check()` would act on the input and never touch the row the figure is
+    // drawn in, which is exactly the thing giving the figure its own line could
+    // have broken.
+    const pictured = question
+      .locator('[data-testid="answer-choice"]')
+      .filter({ has: question.page().getByRole('img', { name: drawn.optionAlt }) })
+      .first();
+    await pictured.getByRole('img', { name: drawn.optionAlt }).click();
+    await expect(pictured.getByRole('radio')).toBeChecked();
 
     // --- Handing in: the answer key -----------------------------------------
     await page.getByTestId('take-test-hand-in').click();
@@ -729,8 +746,27 @@ test.describe('a released test with a figure in it', () => {
       row.getByTestId('answer-key-your-answer').getByRole('img', { name: drawn.optionAlt }),
     ).toBeVisible();
     await expect(row).not.toContainText('[Figure:');
+    // The same break on the answer key, where the prompt is drawn again.
+    const keyPrompt = row.getByTestId('answer-key-prompt');
+    const keyLead = await boxOf(keyPrompt.locator('[data-testid="rich-text-segment"]').first());
+    const keyFigure = await boxOf(keyPrompt.getByRole('img', { name: drawn.promptAlt }));
+    expect(keyFigure.top).toBeGreaterThanOrEqual(keyLead.bottom - 1);
+    expect(Math.abs(keyFigure.left - keyLead.left)).toBeLessThanOrEqual(1);
   });
 });
+
+/**
+ * One node's box, as the browser lays it out.
+ *
+ * Where a drawing sits is a line box: the declarations that put it there are
+ * pinned in `RichText.spec.tsx`, and the consequence is measured here.
+ */
+async function boxOf(locator: Locator): Promise<{ top: number; bottom: number; left: number }> {
+  await expect(locator).toBeVisible();
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  return { top: box!.y, bottom: box!.y + box!.height, left: box!.x };
+}
 
 /**
  * A real Attempt of a real released test, handed in, with the child left on the

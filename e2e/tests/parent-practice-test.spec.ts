@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   chargeGenerationAllowanceFixture,
   drawOnPracticeTestFixture,
@@ -762,6 +762,102 @@ test.describe('generating practice tests', () => {
     );
   });
 
+  test('puts every figure in a field on its own line, left-aligned with the text', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    const email = uniqueParentEmail('draft-figure-layout');
+    await uploadAndRead(page, email);
+    await enterGenerate(page);
+
+    await countRow(page, 1).getByRole('radio').check();
+    await page.getByTestId('generate-start').click();
+    await page.getByTestId('generate-confirm').click();
+    await expect(page.getByTestId('generate-progress-line')).toHaveText(
+      '1 practice test is ready.',
+      { timeout: 60_000 },
+    );
+
+    // Text, a drawing, a second drawing, then trailing text — the shape the
+    // live draft's own pictured question holds.
+    const drawn = await drawOnPracticeTestFixture(email, { layout: true });
+    const { promptAlt, secondAlt, tallAlt } = drawn;
+    if (secondAlt === null || tallAlt === null || drawn.tailText === null) {
+      throw new Error('The layout fixture wrote no second or third drawing.');
+    }
+
+    await page.getByTestId('generate-to-drafts').click();
+    await page
+      .locator('[data-testid="draft-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+
+    const question = page.locator(
+      `[data-testid="draft-question"][data-ordinal="${drawn.questionOrdinal}"]`,
+    );
+    const prompt = question.getByTestId('draft-question-prompt');
+    const spans = prompt.locator('[data-testid="rich-text-segment"]');
+
+    // Guarded before anything is measured: with one text segment `first()` and
+    // `last()` would be the same node and every stacking assertion below would
+    // hold of a box against itself.
+    await expect(spans).toHaveCount(2);
+
+    // --- Measured, because a line box is the acceptance criterion -----------
+    const stacked = async (): Promise<void> => {
+      const lead = await boxOf(spans.first());
+      const first = await boxOf(prompt.getByRole('img', { name: promptAlt }));
+      const second = await boxOf(prompt.getByRole('img', { name: secondAlt }));
+      // Taller than it is wide, so it letterboxes inside the box the column
+      // gives it: centred, it would sit well to the right of the words.
+      const tall = await boxOf(prompt.getByRole('img', { name: tallAlt }));
+      const tail = await boxOf(spans.last());
+
+      // Each one starts below what came before it: nothing is drawn beside the
+      // words, and the three drawings are stacked in stored order.
+      expect(first.top).toBeGreaterThanOrEqual(lead.bottom - 1);
+      expect(second.top).toBeGreaterThanOrEqual(first.bottom - 1);
+      expect(tall.top).toBeGreaterThanOrEqual(second.bottom - 1);
+      expect(tail.top).toBeGreaterThanOrEqual(tall.bottom - 1);
+      // And every one of them flush with the left edge of the words above,
+      // including the text that resumes after the last drawing.
+      for (const box of [first, second, tall, tail]) {
+        expect(Math.abs(box.left - lead.left)).toBeLessThanOrEqual(1);
+      }
+      // The tall one again, measured on what is actually *drawn* rather than on
+      // the element box: its box fills the column either way, and a drawing
+      // that letterboxes inside that box would, centred, start half a column to
+      // the right of the words. The tick spans the whole viewBox width, so
+      // where it starts is where the drawing starts; the few pixels of slack
+      // are the scaled stroke, nowhere near the ~100 a centred drawing costs.
+      const tallInk = await boxOf(
+        prompt.getByRole('img', { name: tallAlt }).locator('rect[x="0"]').first(),
+      );
+      expect(Math.abs(tallInk.left - lead.left)).toBeLessThanOrEqual(8);
+    };
+    await stacked();
+
+    // --- The pictured option, which is the flex row the wrapper exists for ---
+    const option = question.locator('[data-testid="draft-choice"]').first();
+    await expect(option.getByRole('img', { name: drawn.optionAlt })).toBeVisible();
+    // One wrapper, which is the single flex item the drawing breaks inside.
+    await expect(option.locator('[data-testid="rich-text-block"]')).toHaveCount(1);
+    // Still one row: one list item, with the drawing inside its own box.
+    await expect(option).toHaveAttribute('role', 'listitem');
+    const tile = await boxOf(option);
+    const pictured = await boxOf(option.getByRole('img', { name: drawn.optionAlt }));
+    expect(pictured.top).toBeGreaterThanOrEqual(tile.top - 1);
+    expect(pictured.bottom).toBeLessThanOrEqual(tile.bottom + 1);
+
+    // --- "At any width", measured at a second width -------------------------
+    // The same prompt on a phone, re-measured rather than re-generated: the
+    // rule is a property of the renderer, not of one viewport.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await stacked();
+  });
+
   test('deletes the last question, which discards the practice test', async ({ page }) => {
     test.setTimeout(150_000);
     const email = uniqueParentEmail('draft-discard');
@@ -1128,3 +1224,27 @@ test.describe('generating practice tests', () => {
     ).toBeVisible();
   });
 });
+
+/**
+ * One node's box, as the browser lays it out.
+ *
+ * Where a drawing sits is a line box, which no unit test in `apps/web` can see:
+ * those render to static markup with no DOM. The declarations are pinned there;
+ * the consequence is measured here.
+ */
+async function boxOf(locator: Locator): Promise<{
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}> {
+  await expect(locator).toBeVisible();
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  return {
+    top: box!.y,
+    bottom: box!.y + box!.height,
+    left: box!.x,
+    right: box!.x + box!.width,
+  };
+}
