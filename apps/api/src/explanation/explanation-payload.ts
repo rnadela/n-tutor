@@ -58,9 +58,12 @@ export const EXPLANATION_REPEATS_REMOVED = 'The payload repeats an explanation a
  *
  * The body is **normalized, not merely checked**: `parseRichText` rewrites what
  * it is given (AD-32), so the value returned here — and stored — is its output
- * and never the payload's own copy. The explanation wire cannot carry a figure
- * today (`GeneratedRichText`); this is what holds the line for the build in
- * which it can.
+ * and never the payload's own copy. The *explanation* wire still cannot carry a
+ * figure (`GeneratedRichText`): an explanation is a sentence, and a figure
+ * reaches that model as its `[Figure: <alt>]` projection. The generation wire is
+ * no longer narrowed — since Story 4.8 a generated question prompt and a
+ * Multiple Choice option body carry figures — so this normalization is what
+ * holds the line here rather than the narrowing doing it.
  */
 export function validateExplanationPayload(
   payload: ExplanationPayload,

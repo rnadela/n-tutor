@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { canSaveField, plainTextOf } from './rich-text';
-import { plainTextOf as apiPlainTextOf } from '../../../api/src/extraction/rich-text';
+import { canSaveField, figureTokensPreserved, plainTextOf } from './rich-text';
+import {
+  plainTextOf as apiPlainTextOf,
+  richTextFromPlainText as apiRichTextFromPlainText,
+} from '../../../api/src/extraction/rich-text';
 import type { RichTextSegment } from './parent-api';
 
 /**
@@ -145,5 +148,56 @@ describe('the figure projection', () => {
     ];
     expect(plainTextOf(mixed)).toBe('Shade 1/2 of [Figure: A rectangle in four parts].');
     expect(plainTextOf(mixed)).toBe(apiPlainTextOf(mixed));
+  });
+});
+
+describe('the figure-token mirror', () => {
+  const circle: RichTextSegment = { kind: 'figure', svg: FIGURE_SVG, alt: 'A circle' };
+  const square: RichTextSegment = { kind: 'figure', svg: FIGURE_SVG, alt: 'A square' };
+
+  /** Whether the server would take this edit — the rule this one mirrors. */
+  function serverAccepts(segments: RichTextSegment[], text: string): boolean {
+    const figures = segments.filter((segment) => segment.kind === 'figure');
+    try {
+      apiRichTextFromPlainText(text, figures);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Agreement on outputs, so neither side's wording pins the other's. */
+  function agree(segments: RichTextSegment[], text: string, expected: boolean) {
+    expect(figureTokensPreserved(segments, text)).toBe(expected);
+    expect(serverAccepts(segments, text)).toBe(expected);
+  }
+
+  it('passes an untouched prefill', () => {
+    const segments: RichTextSegment[] = [{ kind: 'text', value: 'What shape? ' }, circle];
+    agree(segments, plainTextOf(segments), true);
+  });
+
+  it('passes text edited around the token', () => {
+    agree(
+      [{ kind: 'text', value: 'What shape? ' }, circle],
+      'Which shape? [Figure: A circle]',
+      true,
+    );
+  });
+
+  it('fails a dropped, reordered or altered token', () => {
+    const two: RichTextSegment[] = [circle, { kind: 'text', value: ' then ' }, square];
+    agree(two, 'Only [Figure: A circle] now', false);
+    agree(two, '[Figure: A square] then [Figure: A circle]', false);
+    agree(two, '[Figure: a circle] then [Figure: A square]', false);
+  });
+
+  it('passes a field that holds no figure at all', () => {
+    agree([{ kind: 'text', value: 'What is 1/2 of 8?' }], 'What is 1/4 of 8?', true);
+    agree(
+      [{ kind: 'text', value: 'Anything' }],
+      'Someone typed [Figure: A circle] themselves',
+      true,
+    );
   });
 });

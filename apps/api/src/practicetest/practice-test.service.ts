@@ -28,6 +28,7 @@ import {
   isRichText,
   plainTextOf,
   richTextFromPlainText,
+  type FigureSegment,
   type RichText,
 } from '../extraction/rich-text.js';
 import { ParentAccountService } from '../identity/parent-account.service.js';
@@ -2824,8 +2825,12 @@ export class PracticeTestService {
    *
    * Two things happen before a row is written. The plain text a parent typed
    * goes through `richTextFromPlainText` — the one inverse of `plainTextOf`
-   * (AD-32) — so a fraction stays structure; and the *merged* result, stored
-   * columns and edit together, goes through `validateEditedQuestion`, the same
+   * (AD-32) — so a fraction stays structure and every figure the field already
+   * held is grafted back at its `[Figure: …]` token, unchanged and in its
+   * stored order; an edit that does not restate a token is refused whole, with
+   * nothing written. The
+   * *merged* result, stored columns and edit together, then goes through
+   * `validateEditedQuestion`, the same
    * invariants a generated payload satisfies. A Multiple Choice question that
    * would be left with no correct option is refused with the module's own
    * existing sentence, and nothing is written.
@@ -2877,20 +2882,30 @@ export class PracticeTestService {
       const edited = validatedEdit(
         {
           format: stored.format,
-          prompt: input.prompt === undefined ? storedRichText(stored.prompt) : parsed(input.prompt),
+          // Each field's own stored figures, so the inverse grafts back the
+          // drawings of the field being edited and nothing else: a prompt's
+          // figure cannot migrate into an option, and an option's cannot
+          // migrate into its neighbour.
+          prompt:
+            input.prompt === undefined
+              ? storedRichText(stored.prompt)
+              : parsed(input.prompt, figuresOf(storedRichText(stored.prompt))),
           answer: multipleChoice
             ? null
             : input.answer === undefined
               ? stored.answer === null
                 ? null
                 : storedRichText(stored.answer)
-              : parsed(input.answer),
+              : parsed(
+                  input.answer,
+                  stored.answer === null ? [] : figuresOf(storedRichText(stored.answer)),
+                ),
           choices: stored.choices.map((choice) => ({
             ordinal: choice.ordinal,
             body:
               bodies.get(choice.ordinal) === undefined
                 ? storedRichText(choice.body)
-                : parsed(bodies.get(choice.ordinal)!),
+                : parsed(bodies.get(choice.ordinal)!, figuresOf(storedRichText(choice.body))),
             // Absent `correctOrdinal` on a Multiple Choice edit leaves no
             // option flagged and is refused below: an edit of the options
             // states which one is right, rather than inheriting an answer that
@@ -3376,6 +3391,7 @@ export class PracticeTestService {
             topics: plan.topics,
             weighting: plan.weighting,
             draftOrdinal,
+            withFigures: plan.hasFigures,
             failure,
           }),
       });
@@ -3384,6 +3400,7 @@ export class PracticeTestService {
         return validateGenerationPayload(payload, {
           targets: plan.targets,
           forbiddenPrompts,
+          forbiddenFigures: plan.sourceFigures,
           weighting: plan.weighting,
         });
       } catch (cause) {
@@ -3755,6 +3772,11 @@ function storedRichText(value: Prisma.JsonValue): RichText {
   return value as unknown as RichText;
 }
 
+/** The figure segments of a stored field, in stored order. */
+function figuresOf(rich: RichText): FigureSegment[] {
+  return rich.filter((segment): segment is FigureSegment => segment.kind === 'figure');
+}
+
 /**
  * Everything the Take Test screen reads a released Practice Test by, written
  * **from scratch**.
@@ -4005,10 +4027,19 @@ function refuseEdit(message: string): never {
  * of `parseRichText`, and each is a thing a parent typed rather than a fault of
  * this server — so each becomes a 400 carrying the rich-text module's own
  * sentence, and nothing is written.
+ *
+ * `figures` is the stored field's own figure segments: the inverse grafts them
+ * back at their `[Figure: …]` tokens, so a figure survives an edit of the text
+ * around it byte-identically, wherever in the field the parent left the token —
+ * what is enforced is that every token is still there, written as it was, in
+ * the order the figures are stored in. An edit that does not restate them all
+ * throws `RICH_TEXT_FIGURE_MISSING` out of the same parse and becomes the same
+ * 400 as every other refusal here, with nothing written — rather than a
+ * drawing being put back where the parent had deleted it.
  */
-function parsed(text: string): RichText {
+function parsed(text: string, figures: readonly FigureSegment[] = []): RichText {
   try {
-    return richTextFromPlainText(text);
+    return richTextFromPlainText(text, figures);
   } catch (cause) {
     throw new BadRequestException(cause instanceof Error ? cause.message : RICH_TEXT_EMPTY);
   }
@@ -4046,6 +4077,17 @@ interface GenerationPlan {
   topics: string[];
   sourcePrompts: Set<string>;
   /**
+   * The sanitized SVG of every figure the source draws, in prompts and in
+   * options alike: what a generated figure may not be (`FIGURE_NOT_NEW`).
+   */
+  sourceFigures: Set<string>;
+  /**
+   * Whether the source carries a figure at all — the one condition the
+   * prompt's figure rules and the fake's drawings are added under, so a
+   * figure-less Extraction produces Story 4.1/4.2's prompt byte for byte.
+   */
+  hasFigures: boolean;
+  /**
    * The Topic to concentrate on and how many questions must carry it, or null
    * when nothing is weighted. One value, so the prompt, the fake and the
    * validator are all handed the same indivisible rule.
@@ -4069,6 +4111,13 @@ function planFor(
   const sourcePrompts = new Set(
     extraction.questions.map((question) => normalizePrompt(plainTextOf(question.prompt))),
   );
+  const sourceFigures = new Set(
+    extraction.questions.flatMap((question) =>
+      [question.prompt, ...question.choices].flatMap((field) =>
+        field.filter((segment) => segment.kind === 'figure').map((segment) => segment.svg),
+      ),
+    ),
+  );
   const fakeTargets = [...targets.entries()]
     .filter(([, count]) => count > 0)
     .map(([format, count]) => ({ format, count }));
@@ -4082,6 +4131,8 @@ function planFor(
     fakeTargets,
     topics,
     sourcePrompts,
+    sourceFigures,
+    hasFigures: sourceFigures.size > 0,
     weighting: weightingFor(weightedTopic, total),
   };
 }

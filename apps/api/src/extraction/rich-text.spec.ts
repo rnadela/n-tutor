@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   RICH_TEXT_FIGURE_ALT_EMPTY,
   RICH_TEXT_FIGURE_ALT_INVALID,
+  RICH_TEXT_FIGURE_MISSING,
+  type FigureSegment,
   isRichText,
   parseRichText,
   plainTextOf,
@@ -83,12 +85,8 @@ describe('a figure', () => {
     // A right-to-left override or a zero-width joiner can make an `aria-label`
     // or the plain-text projection read differently than it is stored — the
     // same unspeakable-character concern a C0 control already refuses.
-    expect(() => parseRichText(figure(CIRCLE, 'A circle‮'))).toThrow(
-      RICH_TEXT_FIGURE_ALT_INVALID,
-    );
-    expect(() => parseRichText(figure(CIRCLE, 'A​circle'))).toThrow(
-      RICH_TEXT_FIGURE_ALT_INVALID,
-    );
+    expect(() => parseRichText(figure(CIRCLE, 'A circle‮'))).toThrow(RICH_TEXT_FIGURE_ALT_INVALID);
+    expect(() => parseRichText(figure(CIRCLE, 'A​circle'))).toThrow(RICH_TEXT_FIGURE_ALT_INVALID);
   });
 
   it('refuses an SVG the sanitizer does not admit, through the same one parse', () => {
@@ -118,13 +116,96 @@ describe('a figure', () => {
     expect(plainTextOf(figure(SANITIZED_CIRCLE, 'A circle'))).toBe('[Figure: A circle]');
   });
 
-  it('cannot survive the plain-text round trip, which Story 4.8 closes', () => {
-    // Asserted rather than left implicit so 4.8 inherits a named problem: this
-    // is the exact line that must change when the draft-edit path stops
-    // round-tripping fields through plain text.
-    const rich = parseRichText(figure(CIRCLE, 'A circle'));
-    expect(richTextFromPlainText(plainTextOf(rich))).toEqual([
+  it('stays text when a parent types the token into a field holding no figure', () => {
+    // The editor is not an authoring surface for drawings (Story 4.8): only the
+    // figures already stored on the field can come back as figures.
+    expect(richTextFromPlainText('[Figure: A circle]')).toEqual([
       { kind: 'text', value: '[Figure: A circle]' },
+    ]);
+  });
+});
+
+describe('an edit around a stored figure', () => {
+  const stored = (alt: string): FigureSegment => {
+    const [segment] = parseRichText(figure(CIRCLE, alt));
+    if (segment === undefined || segment.kind !== 'figure') throw new Error('not a figure');
+    return segment;
+  };
+
+  it('grafts the stored figure back at its token, byte-identical', () => {
+    const drawing = stored('A half-circle');
+    expect(richTextFromPlainText('Which shape? [Figure: A half-circle]', [drawing])).toEqual([
+      { kind: 'text', value: 'Which shape? ' },
+      drawing,
+    ]);
+    expect(drawing.svg).toBe(SANITIZED_CIRCLE);
+  });
+
+  it('leaves an already-sanitized figure untouched, which is what makes it byte-identical', () => {
+    // The grafted segment goes back through `parseRichText`, which re-runs the
+    // sanitizer on it — so "the stored figure is reused unchanged" holds only
+    // because the canonical form of a canonical figure is itself. Pinned here
+    // rather than assumed, because every other case in this block is fed a
+    // value the sanitizer already produced.
+    const canonical = { kind: 'figure' as const, svg: SANITIZED_CIRCLE, alt: 'A circle' };
+    const [grafted] = richTextFromPlainText('[Figure: A circle]', [canonical]);
+    expect(grafted).toEqual(canonical);
+    expect((grafted as { svg: string }).svg).toBe(SANITIZED_CIRCLE);
+  });
+
+  it('is a no-op on the segments when the prefill is saved untouched', () => {
+    const rich = parseRichText([
+      { kind: 'text', value: 'What shape? ' },
+      { kind: 'figure', svg: CIRCLE, alt: 'A half-circle' },
+      { kind: 'text', value: ' Choose one.' },
+    ]);
+    const figures = rich.filter((segment): segment is FigureSegment => segment.kind === 'figure');
+    expect(richTextFromPlainText(plainTextOf(rich), figures)).toEqual(rich);
+  });
+
+  it('keeps two figures of one field in their stored order', () => {
+    const first = stored('A circle');
+    const second = stored('A square');
+    expect(
+      richTextFromPlainText('[Figure: A circle] then [Figure: A square]', [first, second]),
+    ).toEqual([first, { kind: 'text', value: ' then ' }, second]);
+  });
+
+  it('refuses the edit when a token is dropped, reordered or altered', () => {
+    const first = stored('A circle');
+    const second = stored('A square');
+    const figures = [first, second];
+    expect(() => richTextFromPlainText('Only one left [Figure: A circle]', figures)).toThrow(
+      RICH_TEXT_FIGURE_MISSING,
+    );
+    // Order is enforced by searching each token from the end of the previous
+    // one, so a swap reads as the second token being absent.
+    expect(() =>
+      richTextFromPlainText('[Figure: A square] then [Figure: A circle]', figures),
+    ).toThrow(RICH_TEXT_FIGURE_MISSING);
+    expect(() =>
+      richTextFromPlainText('[Figure: a circle] then [Figure: A square]', figures),
+    ).toThrow(RICH_TEXT_FIGURE_MISSING);
+  });
+
+  it('round-trips an alternative that itself holds a bracket', () => {
+    // Split on the literal projection rather than a pattern, which is what
+    // makes this exact.
+    const drawing = stored('A circle [shaded]');
+    const rich = parseRichText([
+      { kind: 'text', value: 'Look: ' },
+      { kind: 'figure', svg: CIRCLE, alt: 'A circle [shaded]' },
+    ]);
+    expect(richTextFromPlainText(plainTextOf(rich), [drawing])).toEqual(rich);
+  });
+
+  it('reads fractions in the text around a figure exactly as it does without one', () => {
+    const drawing = stored('A circle');
+    expect(richTextFromPlainText('Shade 1/2 of [Figure: A circle]', [drawing])).toEqual([
+      { kind: 'text', value: 'Shade ' },
+      { kind: 'fraction', whole: null, numerator: 1, denominator: 2 },
+      { kind: 'text', value: ' of ' },
+      drawing,
     ]);
   });
 });

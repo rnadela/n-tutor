@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
   chargeGenerationAllowanceFixture,
+  drawOnPracticeTestFixture,
   countPracticeTestsFor,
   createGradeLevelFixture,
   generatedTopicLabelsFor,
@@ -669,6 +670,96 @@ test.describe('generating practice tests', () => {
     await expect(timerOn).toBeChecked();
     await expect(page.getByTestId('draft-timer-minutes')).toHaveValue('42');
     await expect(page.getByTestId('draft-timer-suggestion')).toContainText(String(before - 1 + 5));
+  });
+
+  test('keeps a figure through a review and an edit of the text around it', async ({ page }) => {
+    test.setTimeout(150_000);
+    const email = uniqueParentEmail('draft-figure');
+    await uploadAndRead(page, email);
+    await enterGenerate(page);
+
+    await countRow(page, 1).getByRole('radio').check();
+    await page.getByTestId('generate-start').click();
+    await page.getByTestId('generate-confirm').click();
+    await expect(page.getByTestId('generate-progress-line')).toHaveText(
+      '1 practice test is ready.',
+      { timeout: 60_000 },
+    );
+
+    // The drawing is written onto the landed draft, then everything below goes
+    // through the real read, the real editor and the real edit endpoint.
+    const drawn = await drawOnPracticeTestFixture(email);
+
+    await page.getByTestId('generate-to-drafts').click();
+    await page
+      .locator('[data-testid="draft-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Read the practice test' })).toBeVisible();
+
+    const question = page.locator(
+      `[data-testid="draft-question"][data-ordinal="${drawn.questionOrdinal}"]`,
+    );
+    // --- Review draws both figures, each as one named image ---------------
+    await expect(
+      question.getByTestId('draft-question-prompt').getByRole('img', { name: drawn.promptAlt }),
+    ).toBeVisible();
+    await expect(
+      question.locator('[data-testid="draft-choice"]').getByRole('img', { name: drawn.optionAlt }),
+    ).toBeVisible();
+
+    // --- The editor says so once, and shows the token in the field --------
+    await question.getByTestId('draft-edit-open').click();
+    await expect(question.getByTestId('draft-edit-figure-hint')).toContainText('[Figure: …]');
+    const prompt = question.getByTestId('draft-edit-prompt');
+    await expect(prompt).toHaveValue(`Which shape is this? [Figure: ${drawn.promptAlt}]`);
+
+    // --- Dropping the token leaves the save control disabled --------------
+    await prompt.fill('Which shape is this?');
+    await expect(question.getByTestId('draft-edit-save')).toBeDisabled();
+    await prompt.fill(`Which shape is this? [Figure: ${drawn.promptAlt}]`);
+
+    // --- And the same mirror on the pictured option's own field -----------
+    // The option field is prefilled with nothing but the token, which is what a
+    // pictured option reads as; altering it is the same refusal.
+    const option = question.locator('[data-testid="draft-edit-choice"]').first();
+    await expect(option).toHaveValue(`[Figure: ${drawn.optionAlt}]`);
+    await option.fill('A square');
+    await expect(question.getByTestId('draft-edit-save')).toBeDisabled();
+    await option.fill(`[Figure: ${drawn.optionAlt}] — a square`);
+    await expect(question.getByTestId('draft-edit-save')).toBeEnabled();
+
+    // --- Editing the text around it keeps the picture ---------------------
+    await prompt.fill(`Name this shape. [Figure: ${drawn.promptAlt}]`);
+    const corrects = question.locator('[data-testid="draft-edit-correct"]');
+    await corrects.nth(0).check();
+    await expect(question.getByTestId('draft-edit-save')).toBeEnabled();
+    await question.getByTestId('draft-edit-save').click();
+    await expect(question).toHaveAttribute('data-editing', 'false');
+
+    // Re-read through the app, so what is asserted is what is stored.
+    await page.getByRole('link', { name: 'Back to the pending practice tests' }).click();
+    await page
+      .locator('[data-testid="draft-row"]')
+      .first()
+      .getByRole('link', { name: 'Read it' })
+      .click();
+    const reread = page.locator(
+      `[data-testid="draft-question"][data-ordinal="${drawn.questionOrdinal}"]`,
+    );
+    await expect(reread.getByTestId('draft-question-prompt')).toContainText('Name this shape.');
+    await expect(
+      reread.getByTestId('draft-question-prompt').getByRole('img', { name: drawn.promptAlt }),
+    ).toBeVisible();
+    await expect(
+      reread.locator('[data-testid="draft-choice"]').getByRole('img', { name: drawn.optionAlt }),
+    ).toBeVisible();
+    // The text typed beside the picture is stored with it, and the picture is
+    // still the stored drawing rather than anything rebuilt from that text.
+    await expect(reread.locator('[data-testid="draft-choice"]').first()).toContainText(
+      '— a square',
+    );
   });
 
   test('deletes the last question, which discards the practice test', async ({ page }) => {

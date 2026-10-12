@@ -70,6 +70,8 @@ export const FigureSegment = z.object({
   alt: z.string(),
 });
 
+export type FigureSegment = z.infer<typeof FigureSegment>;
+
 export const RichTextSegment = z.discriminatedUnion('kind', [
   TextSegment,
   FractionSegment,
@@ -80,21 +82,25 @@ export const RichTextSegment = z.discriminatedUnion('kind', [
 export const RichText = z.array(RichTextSegment);
 
 /**
- * The same primitive with figures withheld: what a *generated* field may be.
+ * The same primitive with figures withheld: what a *narrowed* generated field
+ * may be.
  *
- * **Figures are not generated until Story 4.8.** The union above widened what
- * the wire can carry, and `extraction-schema.ts` wants that — a figure read off
- * a photographed page is this story. The generation and explanation schemas do
- * not: nothing instructs those models to draw, 4.8 owns the prompt work and the
- * draft-review surface that would show a figure, and above all a generated
- * draft's edit path round-trips every field through `plainTextOf` →
- * `richTextFromPlainText`, which cannot read a figure back and would delete one
- * silently. Narrowing the wire is what keeps that from being reachable in this
- * build rather than merely unlikely.
+ * Since Story 4.8 a generated question prompt and a Multiple Choice option body
+ * carry the full `RichText`: the generation prompt shows the model each source
+ * figure and asks it to draw new ones, and `practice-test-payload.ts` bounds and
+ * sanitizes what comes back exactly as extraction does.
+ *
+ * Two places stay narrowed, and both for a reason that is not caution:
+ *
+ * - A generated `answer`. Grading compares `plainTextOf` strings, so an answer
+ *   whose only content is a drawing is an answer nothing can be graded against.
+ * - The explanation schema and its prompt. An explanation is text; a figure
+ *   reaches that model as its `[Figure: <alt>]` projection, which is all a
+ *   sentence about a shape needs.
  *
  * It is a narrowing of the wire only. Those paths still normalize through
- * `parseRichText` on the way into storage, so the day 4.8 widens this name the
- * sanitizing is already in place — defence in depth, not a substitute for it.
+ * `parseRichText` on the way into storage, so the sanitizing does not depend on
+ * the narrowing — defence in depth, not a substitute for it.
  */
 export const GeneratedRichText = z.array(
   z.discriminatedUnion('kind', [TextSegment, FractionSegment]),
@@ -111,6 +117,15 @@ export const RICH_TEXT_ZERO_DENOMINATOR = 'A fraction denominator cannot be zero
 export const RICH_TEXT_FIGURE_ALT_EMPTY = 'A figure carries no text alternative.';
 export const RICH_TEXT_FIGURE_ALT_INVALID =
   'A figure text alternative holds characters that cannot be spoken.';
+/**
+ * An edit did not restate a figure the field already holds.
+ *
+ * The same shape of rule as `CHOICES_MISMATCHED`: an edit either restates what
+ * is there or it is not an edit of it. Naming the token rather than the figure
+ * is deliberate — the token is the only thing the parent can see.
+ */
+export const RICH_TEXT_FIGURE_MISSING =
+  'An edit must keep every [Figure: …] text written as it is, in the order they are stored in, for its picture to stay.';
 
 /**
  * The parse every stored rich-text field goes through, wherever it came from:
@@ -259,14 +274,12 @@ function wholeNumber(digits: string): number | null {
  *   parent-edited fraction as a glyph.
  * - A part too large to be a safe integer is left as the text it was typed as,
  *   because storing it would store a number that is not the one written.
- * - **A figure cannot survive the round trip, and this is knowingly left
- *   open.** This reads text and fractions only, so `[Figure: A circle]` comes
- *   back as that literal text and the drawing is gone. Nothing reaches this
- *   function with a figure in it yet: extraction stores figures but is not an
- *   editable surface, and generation does not emit them until Story 4.8 — which
- *   owns both the generation side and the fix, by stopping the draft-edit path
- *   from round-tripping fields through plain text at all. Left lossy and named
- *   rather than half-closed, so 4.8 inherits a stated problem.
+ * - **A `[Figure: …]` a parent types themselves stays text, by design.** The
+ *   figures handed in are the ones already stored on the field being edited;
+ *   nothing else can become a drawing, because the editor is not an authoring
+ *   surface for figures (Story 4.8). So a parent who types the token into a
+ *   field that holds no figure gets the literal text they typed, which is the
+ *   only honest reading of it.
  * - Adjacent runs of text collapse into one text segment, and a number sitting
  *   immediately before a fraction is read as its whole part. Neither changes
  *   what is written; both are consequences of plain text being the thing a
@@ -274,8 +287,39 @@ function wholeNumber(digits: string): number | null {
  *
  * The result goes through `parseRichText`, so an empty field and a zero
  * denominator are refused here exactly as they are refused on a generated one.
+ *
+ * **Figures are grafted, not re-parsed.** `figures` is the stored field's own
+ * figure segments, in stored order. The typed text is split on each one's exact
+ * `[Figure: <alt>]` projection — the literal string `plainTextOf` wrote, not a
+ * pattern, because an `alt` may itself contain brackets — and each stored
+ * segment is interleaved back **unchanged**, so "the figure is kept as it was"
+ * is literally true rather than reconstructed. Each token is searched from the
+ * end of the previous one, which is what makes stored order an enforced order
+ * rather than a coincidence; a token that is absent, reordered or altered
+ * throws `RICH_TEXT_FIGURE_MISSING` and the whole edit is refused. Putting the
+ * drawing back where the parent deleted it was the alternative, and it would
+ * store a field that differs from the field they saved.
  */
-export function richTextFromPlainText(text: string): RichText {
+export function richTextFromPlainText(
+  text: string,
+  figures: readonly FigureSegment[] = [],
+): RichText {
+  const segments: RichTextSegment[] = [];
+  let cursor = 0;
+  for (const figure of figures) {
+    const token = `[Figure: ${figure.alt}]`;
+    const at = text.indexOf(token, cursor);
+    if (at === -1) throw new Error(RICH_TEXT_FIGURE_MISSING);
+    segments.push(...textAndFractions(text.slice(cursor, at)));
+    segments.push(figure);
+    cursor = at + token.length;
+  }
+  segments.push(...textAndFractions(text.slice(cursor)));
+  return parseRichText(segments);
+}
+
+/** One run of typed text as text and fraction segments, unvalidated. */
+function textAndFractions(text: string): RichTextSegment[] {
   const segments: RichTextSegment[] = [];
   let taken = 0;
   for (const match of text.matchAll(PLAIN_FRACTION)) {
@@ -304,5 +348,5 @@ export function richTextFromPlainText(text: string): RichText {
     taken = match.index + match[0].length;
   }
   if (taken < text.length) segments.push({ kind: 'text', value: text.slice(taken) });
-  return parseRichText(segments);
+  return segments;
 }

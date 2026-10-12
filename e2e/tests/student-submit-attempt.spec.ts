@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
   countAttemptsFor,
+  drawOnPracticeTestFixture,
   createGradeLevelFixture,
   createSubjectFixture,
   newestAttemptFixture,
@@ -657,6 +658,79 @@ function craftedResults(
     })),
   };
 }
+
+test.describe('a released test with a figure in it', () => {
+  test('draws it on the question, on the option and on the answer key', async ({ page }) => {
+    test.setTimeout(300_000);
+    const email = uniqueParentEmail('student-figure');
+    await releaseTests(page, email, 1);
+    // Written onto the released test's own rows, so everything below goes
+    // through the real student read and the browser's own re-sanitizer.
+    const drawn = await drawOnPracticeTestFixture(email);
+
+    await page.locator('[data-testid="student-practice-test"]').first().getByRole('link').click();
+    await expect(page.getByTestId('take-test-counter')).toBeVisible();
+    const total = await totalOf(page);
+
+    // --- Taking it: the question and the pictured option ------------------
+    const rail = page.getByTestId('take-test-map-rail');
+    await rail
+      .getByTestId('question-map-cell')
+      .nth(drawn.questionOrdinal - 1)
+      .click();
+    await expect(page.getByTestId('take-test-counter')).toHaveText(
+      `Question ${drawn.questionOrdinal} of ${total}`,
+    );
+    const question = page.getByTestId('take-test-question');
+    // One image, named by its alternative, in both the question and the option.
+    await expect(question.getByRole('img', { name: drawn.promptAlt })).toBeVisible();
+    await expect(question.getByRole('img', { name: drawn.optionAlt })).toBeVisible();
+    // Drawn, not described: no prose standing in for a shape.
+    await expect(question).not.toContainText('[Figure:');
+    // Inheriting the text colour is what makes one drawing hold in both themes:
+    // the markup says `currentColor`, and what it computes to is the colour the
+    // text around it computes to.
+    const inherited = await question
+      .getByRole('img', { name: drawn.promptAlt })
+      .locator('path')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => ({
+          declared: node.getAttribute('stroke'),
+          stroke: getComputedStyle(node).stroke,
+          colour: getComputedStyle(node).color,
+        })),
+      );
+    expect(inherited.length).toBeGreaterThan(0);
+    for (const { declared, stroke, colour } of inherited) {
+      expect(declared).toBe('currentColor');
+      expect(stroke).toBe(colour);
+    }
+
+    // The pictured option is answerable as an option, with no drawing asked of
+    // the child.
+    await question.getByRole('radio').first().check();
+
+    // --- Handing in: the answer key -----------------------------------------
+    await page.getByTestId('take-test-hand-in').click();
+    await page.getByTestId('take-test-confirm-hand-in').click();
+    await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+    // The answer key renders beneath the handed-in panel, with no further press.
+    await expect(page.getByTestId('attempt-results')).toBeVisible();
+
+    const row = page.locator(
+      `[data-testid="answer-key-row"][data-ordinal="${drawn.questionOrdinal}"]`,
+    );
+    await expect(row).toBeVisible();
+    await expect(row.getByRole('img', { name: drawn.promptAlt })).toBeVisible();
+    // `first()`: the pictured option is both the answer the child gave and the
+    // right one, so the row draws it in each labelled slot.
+    await expect(row.getByRole('img', { name: drawn.optionAlt }).first()).toBeVisible();
+    await expect(
+      row.getByTestId('answer-key-your-answer').getByRole('img', { name: drawn.optionAlt }),
+    ).toBeVisible();
+    await expect(row).not.toContainText('[Figure:');
+  });
+});
 
 /**
  * A real Attempt of a real released test, handed in, with the child left on the

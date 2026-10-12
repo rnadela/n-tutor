@@ -1,5 +1,15 @@
 import type { QuestionFormat } from '../generated/prisma/enums.js';
-import { parseRichText, plainTextOf, type RichText } from '../extraction/rich-text.js';
+import {
+  RichText as RichTextSchema,
+  parseRichText,
+  plainTextOf,
+  type RichText,
+} from '../extraction/rich-text.js';
+import {
+  FIGURE_SVG_TOO_LARGE,
+  MAX_FIGURE_SVG_BYTES,
+  figureSvgByteLength,
+} from '../extraction/svg-figure.js';
 import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-policy.js';
 import { PracticeTestPayload } from './practice-test-schema.js';
 
@@ -53,6 +63,15 @@ export const CHOICE_BODY_EMPTY = 'A multiple-choice option has no text once norm
 export const TOPIC_LABEL_TOO_LONG = 'A topic label is longer than a topic label can plausibly be.';
 export const PAYLOAD_TOO_LARGE = 'The payload is larger than a practice test can plausibly be.';
 /**
+ * A generated figure is one of the source's own drawings.
+ *
+ * The same rule as `PROMPT_NOT_NEW`, one medium over: the prompt tells the
+ * model to draw something new, and this is what holds the line when it redraws
+ * the source instead. Sound because every figure compared here is the canonical
+ * serializer's output on both sides, so "the same drawing" is "the same bytes".
+ */
+export const FIGURE_NOT_NEW = 'A question reproduces a figure the source test already draws.';
+/**
  * An edit names a set of options that is not the stored one.
  *
  * Editing an option's body is a rewrite of what is already there; adding or
@@ -76,6 +95,16 @@ export const MAX_TOPICS = 20;
 export const MAX_SEGMENTS = 200;
 export const MAX_TEXT_LENGTH = 5_000;
 export const MAX_LABEL_LENGTH = 200;
+/**
+ * How many figures one field may hold, and how many bytes of drawing in total
+ * — the extraction module's own figures, for the extraction module's own
+ * reason: `MAX_FIGURE_SVG_BYTES` bounds one drawing, and `MAX_SEGMENTS`
+ * drawings of 16 KB is megabytes in a single question prompt. A question needs
+ * a diagram or two, so the count is where the absurd starts and the byte budget
+ * is the backstop for many small ones.
+ */
+export const MAX_FIGURES = 4;
+export const MAX_FIGURE_BYTES = 32 * 1024;
 
 /** A generated choice as it will be stored. */
 export interface NormalizedGeneratedChoice {
@@ -117,6 +146,16 @@ export interface GenerationExpectation {
    * to say it had.
    */
   weighting?: GenerationWeighting | null;
+  /**
+   * Sanitized SVG of every figure the source test draws. A generated figure
+   * whose own sanitized SVG is in here is a copy, refused `FIGURE_NOT_NEW`.
+   *
+   * A `Set` of the canonical form rather than a similarity measure: the
+   * serializer makes two identical drawings two identical strings, and
+   * "nearly the same shape" is the prompt's business (rule 7), not a rule code
+   * can hold without comparing pictures.
+   */
+  forbiddenFigures?: ReadonlySet<string>;
 }
 
 /**
@@ -153,31 +192,94 @@ export function normalizePrompt(text: string): string {
     .trim();
 }
 
+/** A field as it will be stored, or the one sentence it is refused with. */
+type NormalizedField = { rich: RichText } | { refusal: string };
+
 /**
  * A rich-text field normalized for storage, within this module's ceilings — or
- * `null`, which every caller turns into its own refusal.
+ * the refusal it earned, which each caller raises as its own kind of fault.
  *
  * **Normalized, not merely checked.** `parseRichText` rewrites what it is given
  * (AD-32): it trims a figure's text alternative and replaces a figure's SVG
  * with the sanitizer's own output. A guard that returned the value as received
  * would persist model-authored markup that nothing had rewritten — the exact
  * shape Story 3.9 exists to remove — so the caller stores *this* value and
- * never its own copy. The generation wire cannot carry a figure today
- * (`GeneratedRichText`), and this holds the line for the build in which it can.
+ * never its own copy.
+ *
+ * Since Story 4.8 a generated prompt and a generated option body may carry a
+ * figure, so the ceilings and the copy rule mirror `richTextForStorage` in
+ * `extraction-payload.ts` field for field — judged on the field as it arrived,
+ * so an oversize figure is the honest `PAYLOAD_TOO_LARGE` rather than the
+ * `RICH_TEXT_INVALID` the sanitizer's own cap would report, and re-summed on
+ * the sanitized form, because escaping can only grow a drawing and the raw sum
+ * is therefore not the last word on the aggregate.
+ *
+ * The edit path runs through here too. An edit cannot introduce a figure — the
+ * inverse only grafts back what was stored — but it carries the stored ones,
+ * and a field that was within bounds must stay within them.
  */
-function normalizedRichText(value: unknown): RichText | null {
+function normalizedField(value: unknown, forbiddenFigures: ReadonlySet<string>): NormalizedField {
+  const shaped = RichTextSchema.safeParse(value);
+  if (!shaped.success) return { refusal: RICH_TEXT_INVALID };
+  const bound = figureBoundsRefusal(shaped.data);
+  if (bound !== null) return { refusal: bound };
+
   let rich: RichText;
   try {
-    rich = parseRichText(value);
-  } catch {
-    return null;
+    rich = parseRichText(shaped.data);
+  } catch (cause) {
+    // One rejection reason and no new failure kind, so a figure fault routes
+    // exactly like every other post-hoc one — except the case the raw-byte
+    // check above cannot see: a figure under the cap whose canonical, escaped
+    // form grows past it. That is still an oversize figure.
+    if (cause instanceof Error && cause.message === FIGURE_SVG_TOO_LARGE) {
+      return { refusal: PAYLOAD_TOO_LARGE };
+    }
+    return { refusal: RICH_TEXT_INVALID };
   }
-  if (rich.length > MAX_SEGMENTS) return null;
-  return plainTextOf(rich).length <= MAX_TEXT_LENGTH ? rich : null;
+
+  if (rich.length > MAX_SEGMENTS) return { refusal: RICH_TEXT_INVALID };
+  if (plainTextOf(rich).length > MAX_TEXT_LENGTH) return { refusal: RICH_TEXT_INVALID };
+
+  let figureBytes = 0;
+  for (const segment of rich) {
+    if (segment.kind !== 'figure') continue;
+    figureBytes += figureSvgByteLength(segment.svg);
+    if (figureBytes > MAX_FIGURE_BYTES) return { refusal: PAYLOAD_TOO_LARGE };
+    if (forbiddenFigures.has(segment.svg)) return { refusal: FIGURE_NOT_NEW };
+  }
+  return { rich };
+}
+
+/** The figure ceilings, on the field as it arrived. */
+function figureBoundsRefusal(rich: RichText): string | null {
+  let figures = 0;
+  let figureBytes = 0;
+  for (const segment of rich) {
+    if (segment.kind !== 'figure') continue;
+    figures += 1;
+    figureBytes += figureSvgByteLength(segment.svg);
+    if (
+      segment.alt.length > MAX_TEXT_LENGTH ||
+      figureSvgByteLength(segment.svg) > MAX_FIGURE_SVG_BYTES ||
+      figures > MAX_FIGURES ||
+      figureBytes > MAX_FIGURE_BYTES
+    ) {
+      return PAYLOAD_TOO_LARGE;
+    }
+  }
+  return null;
 }
 
 function refuse(message: string): never {
   throw new GenerationPayloadInvalid(message);
+}
+
+/** The same field, refused as the provider's fault. */
+function normalizedRichText(value: unknown, forbiddenFigures: ReadonlySet<string>): RichText {
+  const field = normalizedField(value, forbiddenFigures);
+  if ('refusal' in field) refuse(field.refusal);
+  return field.rich;
 }
 
 /**
@@ -207,13 +309,14 @@ export function validateGenerationPayload(
   // own prompts are accepted — so a draft that repeats *itself* is caught by
   // exactly the same rule that catches it repeating the source.
   const seen = new Set(expectation.forbiddenPrompts);
+  const forbiddenFigures = expectation.forbiddenFigures ?? new Set<string>();
   const questions: NormalizedGeneratedQuestion[] = [];
 
   raw.questions.forEach((question, index) => {
     const format = question.format as QuestionFormat;
     produced.set(format, (produced.get(format) ?? 0) + 1);
 
-    const prompt = normalizedRichText(question.prompt) ?? refuse(RICH_TEXT_INVALID);
+    const prompt = normalizedRichText(question.prompt, forbiddenFigures);
 
     const normalized = normalizePrompt(plainTextOf(prompt));
     // Post-hoc, never hoped for: the prompt asked the model not to copy, and
@@ -241,7 +344,7 @@ export function validateGenerationPayload(
       const bodies = new Set<string>();
       let correct = 0;
       question.choices.forEach((choice, choiceIndex) => {
-        const body = normalizedRichText(choice.body) ?? refuse(RICH_TEXT_INVALID);
+        const body = normalizedRichText(choice.body, forbiddenFigures);
         const key = normalizePrompt(plainTextOf(body));
         // A repeated option is either two right answers or a distractor that
         // is not one; either way the question cannot be graded honestly.
@@ -255,7 +358,7 @@ export function validateGenerationPayload(
     } else {
       if (question.choices.length > 0) refuse(CHOICES_FORBIDDEN);
       if (question.answer === null) refuse(ANSWER_REQUIRED);
-      answer = normalizedRichText(question.answer) ?? refuse(RICH_TEXT_INVALID);
+      answer = normalizedRichText(question.answer, forbiddenFigures);
     }
 
     questions.push({
@@ -339,6 +442,18 @@ function refuseEdit(message: string): never {
 }
 
 /**
+ * The same field, refused as the parent's 400.
+ *
+ * No forbidden set: an edit carries the figures the field already stored, and
+ * the source's own drawing landing there was the generation pass's business.
+ */
+function editedRichText(value: unknown): RichText {
+  const field = normalizedField(value, new Set<string>());
+  if ('refusal' in field) refuseEdit(field.refusal);
+  return field.rich;
+}
+
+/**
  * Checks one edited Question against the invariants every Question holds,
  * before a row is written.
  *
@@ -356,7 +471,7 @@ export function validateEditedQuestion(
   edited: EditedQuestion,
   storedOrdinals: readonly number[],
 ): EditedQuestion {
-  const prompt = normalizedRichText(edited.prompt) ?? refuseEdit(RICH_TEXT_INVALID);
+  const prompt = editedRichText(edited.prompt);
   if (normalizePrompt(plainTextOf(prompt)) === '') refuseEdit(PROMPT_EMPTY);
 
   if (edited.format === 'MultipleChoice') {
@@ -376,7 +491,7 @@ export function validateEditedQuestion(
     const choices: EditedChoice[] = [];
     let correct = 0;
     for (const choice of edited.choices) {
-      const body = normalizedRichText(choice.body) ?? refuseEdit(RICH_TEXT_INVALID);
+      const body = editedRichText(choice.body);
       const key = normalizePrompt(plainTextOf(body));
       if (key === '') refuseEdit(CHOICE_BODY_EMPTY);
       if (bodies.has(key)) refuseEdit(CHOICES_NOT_DISTINCT);
@@ -392,6 +507,6 @@ export function validateEditedQuestion(
 
   if (edited.choices.length > 0) refuseEdit(CHOICES_FORBIDDEN);
   if (edited.answer === null) refuseEdit(ANSWER_REQUIRED);
-  const answer = normalizedRichText(edited.answer) ?? refuseEdit(RICH_TEXT_INVALID);
+  const answer = editedRichText(edited.answer);
   return { ...edited, prompt, answer, choices: [] };
 }

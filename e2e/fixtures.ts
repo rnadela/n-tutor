@@ -469,6 +469,89 @@ export async function spreadPracticeTestFormatsFixture(parentEmail: string): Pro
   }
 }
 
+/** What a figure fixture wrote, so the test asserts the alternatives it named. */
+export interface DrawnDraft {
+  /** The ordinal of the question whose prompt now carries a drawing. */
+  questionOrdinal: number;
+  /** The text alternative of the figure in that question's prompt. */
+  promptAlt: string;
+  /** The text alternative of the figure in that question's first option. */
+  optionAlt: string;
+}
+
+/**
+ * Writes a figure into this parent's newest draft: one into a question's
+ * prompt, one into that question's first Multiple Choice option.
+ *
+ * The same honest shortcut `spreadPracticeTestFormatsFixture` is. Figures reach
+ * a draft only from a Source Test that was photographed with shapes on it, and
+ * the browser tier photographs synthetic pages; the SVG written here is exactly
+ * what the sanitizer's canonical form of a drawing is, so everything the test
+ * then asserts — the review render, the editor's token, the save, the released
+ * test, the answer key — goes through the real read, the real edit path and the
+ * real re-sanitizer.
+ */
+export async function drawOnPracticeTestFixture(parentEmail: string): Promise<DrawnDraft> {
+  const promptAlt = 'A half-circle';
+  const optionAlt = 'A square with four parts shaded';
+  const promptSvg =
+    '<svg viewBox="0 0 10 10"><path d="M0 8A5 5 0 0 1 10 8" fill="none" stroke="currentColor"/></svg>';
+  const optionSvg =
+    '<svg viewBox="0 0 8 8"><rect x="1" y="1" width="6" height="6" fill="none" stroke="currentColor"/></svg>';
+
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    // Any status, not only `Draft`: a released test's questions are the same
+    // rows, and the student-facing cases draw on a test they have released.
+    const draft = await client.query<{ id: string }>(
+      `SELECT p."id"
+         FROM "practice_test" p
+         JOIN "parent_account" a ON a."id" = p."parentAccountId"
+        WHERE a."email" = $1 AND p."status" <> 'Discarded'
+        ORDER BY p."createdAt" DESC, p."id" DESC
+        LIMIT 1`,
+      [parentEmail],
+    );
+    const practiceTestId = draft.rows[0]?.id;
+    if (practiceTestId === undefined) throw new Error('No practice test to draw on.');
+
+    // The first Multiple Choice question, so the pictured option has somewhere
+    // to go: a free-text question carries no options at all.
+    const question = await client.query<{ id: string; ordinal: number }>(
+      `SELECT "id", "ordinal" FROM "practice_test_question"
+        WHERE "practiceTestId" = $1 AND "format" = 'MultipleChoice'
+        ORDER BY "ordinal" ASC LIMIT 1`,
+      [practiceTestId],
+    );
+    const target = question.rows[0];
+    if (target === undefined) throw new Error('A draft with no Multiple Choice question.');
+
+    await client.query(`UPDATE "practice_test_question" SET "prompt" = $2::jsonb WHERE "id" = $1`, [
+      target.id,
+      JSON.stringify([
+        { kind: 'text', value: 'Which shape is this? ' },
+        { kind: 'figure', svg: promptSvg, alt: promptAlt },
+      ]),
+    ]);
+    const option = await client.query<{ id: string }>(
+      `SELECT "id" FROM "practice_test_choice"
+        WHERE "questionId" = $1 ORDER BY "ordinal" ASC LIMIT 1`,
+      [target.id],
+    );
+    const optionId = option.rows[0]?.id;
+    if (optionId === undefined) throw new Error('A Multiple Choice question with no options.');
+    await client.query(`UPDATE "practice_test_choice" SET "body" = $2::jsonb WHERE "id" = $1`, [
+      optionId,
+      JSON.stringify([{ kind: 'figure', svg: optionSvg, alt: optionAlt }]),
+    ]);
+
+    return { questionOrdinal: target.ordinal, promptAlt, optionAlt };
+  } finally {
+    await client.end();
+  }
+}
+
 /**
  * Sets the countdown on this parent's newest draft, in whole minutes.
  *

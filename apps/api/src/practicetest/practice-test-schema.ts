@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AiFakeFailure } from '../ai/ai-config.js';
-import { GeneratedRichText } from '../extraction/rich-text.js';
+import { GeneratedRichText, RichText } from '../extraction/rich-text.js';
 import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-policy.js';
 
 /**
@@ -17,19 +17,27 @@ import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-p
  * lives in `practice-test-payload.ts`, where it is actually enforced. A limit
  * written here would be one the API silently drops.
  *
- * `GeneratedRichText` is reused from `extraction` rather than forked: a
+ * The rich-text primitives are reused from `extraction` rather than forked: a
  * fraction in a generated question is the same structure as a fraction read off
  * a page, and two spellings of it would be two renderings and two spoken
- * alternatives. It is the *narrowed* name — text and fractions, no figures —
- * because nothing asks a generating model to draw and the draft-edit path's
- * plain-text round trip would silently delete a figure it did. Story 4.8 owns
- * widening it.
+ * alternatives.
+ *
+ * **Two of them are used, and the split is the contract.** A question `prompt`
+ * and a Multiple Choice option `body` take the full `RichText`, because since
+ * Story 4.8 the model is shown the source's figures and asked to draw new ones
+ * where a question needs a shape. The free-text `answer` stays
+ * `GeneratedRichText`: grading compares `plainTextOf` strings, so an answer
+ * whose only content is a drawing is an answer nothing can be graded against —
+ * a figure there is a payload shape fault, not a field to sanitize. The
+ * explanation schema stays narrowed for the same kind of reason: an explanation
+ * is a sentence.
  */
 
 export const QuestionFormat = z.enum(['MultipleChoice', 'FillInTheBlank', 'ShortAnswer']);
 
 export const GeneratedChoicePayload = z.object({
-  body: GeneratedRichText,
+  /** Full `RichText`: a pictured option is how a source's pictured options are answered. */
+  body: RichText,
   /**
    * Whether this is the right answer. Exactly one of a question's choices may
    * say so, and that is checked in code afterwards — a model told to flag one
@@ -40,7 +48,8 @@ export const GeneratedChoicePayload = z.object({
 
 export const GeneratedQuestionPayload = z.object({
   format: QuestionFormat,
-  prompt: GeneratedRichText,
+  /** Full `RichText`: the shape a question is about belongs in the question. */
+  prompt: RichText,
   /** The options, for a MultipleChoice question; empty for every other format. */
   choices: z.array(GeneratedChoicePayload),
   /**
@@ -99,6 +108,16 @@ export function fakePracticeTestPayload(context: {
    */
   weighting?: GenerationWeighting | null;
   draftOrdinal: number;
+  /**
+   * Whether to draw. True only when the source Extraction actually carries a
+   * figure, which is the same condition the real prompt's figure rules are
+   * added under — so a figure-less request produces Story 4.1's payload byte
+   * for byte, and the integration tier's assertions on the fake's text hold.
+   *
+   * Every figure is **appended** to a prompt or an option body that already
+   * says what it said, never substituted into it, for the same reason.
+   */
+  withFigures?: boolean;
   failure: AiFakeFailure;
 }): PracticeTestPayload {
   const topics = context.topics.length > 0 ? context.topics : ['General'];
@@ -115,6 +134,7 @@ export function fakePracticeTestPayload(context: {
     weightedTopic === null
       ? topics
       : topics.filter((label) => normalizeTopicLabel(label) !== normalizeTopicLabel(weightedTopic));
+  const withFigures = context.withFigures ?? false;
   let seq = 0;
   const questions: GeneratedQuestionPayload[] = [];
 
@@ -146,25 +166,51 @@ export function fakePracticeTestPayload(context: {
         },
         { kind: 'text' as const, value: ' of the whole?' },
       ];
+      // Appended, and distinct per draft, question and option: the post-hoc
+      // pass refuses two pictured options whose alternatives read alike
+      // (`CHOICES_NOT_DISTINCT`) and refuses a figure copied from the source
+      // (`FIGURE_NOT_NEW`), so a fake drawing the same shape everywhere would
+      // fail its own validation rather than exercise the rules.
+      const drawn = (alt: string, field: string) => [
+        { kind: 'figure' as const, svg: fakeFigureSvg(context.draftOrdinal, seq, field), alt },
+      ];
+      const promptSegments = withFigures
+        ? [...prompt, ...drawn(`A shape for ${context.draftOrdinal}.${seq}`, 'prompt')]
+        : prompt;
 
       if (target.format === 'MultipleChoice') {
         questions.push({
           format: 'MultipleChoice',
-          prompt,
+          prompt: promptSegments,
           // Three, because the post-hoc rule is "at least three": a two-option
           // question has one distractor, which is a coin toss rather than a
           // test. Exactly one of them is flagged.
           choices: [
             {
-              body: [{ kind: 'text', value: `Option A for ${context.draftOrdinal}.${seq}` }],
+              body: [
+                { kind: 'text', value: `Option A for ${context.draftOrdinal}.${seq}` },
+                ...(withFigures
+                  ? drawn(`Option A shape for ${context.draftOrdinal}.${seq}`, 'option-A')
+                  : []),
+              ],
               isCorrect: true,
             },
             {
-              body: [{ kind: 'text', value: `Option B for ${context.draftOrdinal}.${seq}` }],
+              body: [
+                { kind: 'text', value: `Option B for ${context.draftOrdinal}.${seq}` },
+                ...(withFigures
+                  ? drawn(`Option B shape for ${context.draftOrdinal}.${seq}`, 'option-B')
+                  : []),
+              ],
               isCorrect: false,
             },
             {
-              body: [{ kind: 'text', value: `Option C for ${context.draftOrdinal}.${seq}` }],
+              body: [
+                { kind: 'text', value: `Option C for ${context.draftOrdinal}.${seq}` },
+                ...(withFigures
+                  ? drawn(`Option C shape for ${context.draftOrdinal}.${seq}`, 'option-C')
+                  : []),
+              ],
               isCorrect: false,
             },
           ],
@@ -176,7 +222,7 @@ export function fakePracticeTestPayload(context: {
 
       questions.push({
         format: target.format,
-        prompt,
+        prompt: promptSegments,
         choices: [],
         answer: [{ kind: 'text', value: `Answer for ${context.draftOrdinal}.${seq}` }],
         topics: [topic],
@@ -189,4 +235,31 @@ export function fakePracticeTestPayload(context: {
   // list, which the post-hoc pass rejects as a payload that produced nothing.
   if (context.failure === 'unusable') return { questions: [] };
   return { questions };
+}
+
+/**
+ * A drawing the sanitizer admits, whose bytes carry the draft, the question and
+ * which field it was drawn for.
+ *
+ * All three, because two of them are not enough: a shape varying by the
+ * question number alone would make one question's option and the next
+ * question's prompt the same drawing, and the post-hoc pass refuses a figure it
+ * has already seen in this field or that the source already draws. The fake
+ * must exercise those rules, not collide with them.
+ *
+ * `currentColor` and a `viewBox` already, so the sanitizer's canonical form of
+ * it is the same string — which is what lets a test assert what was stored
+ * without re-deriving it, and what lets an integration case patch a source
+ * Extraction with bytes the fake is about to draw.
+ */
+export function fakeFigureSvg(draftOrdinal: number, seq: number, field: string): string {
+  // A `text` element is the one place in the grammar a discriminator can be
+  // written as itself; the polyline keeps the figure something that draws.
+  const points = Array.from({ length: seq + 2 }, (_, index) => `${index},${index % 3}`);
+  return (
+    `<svg viewBox="0 0 ${seq + 3} 6">` +
+    `<polyline points="${points.join(' ')}" fill="none" stroke="currentColor"/>` +
+    `<text x="0" y="5" font-size="1">${draftOrdinal}.${seq} ${field}</text>` +
+    `</svg>`
+  );
 }

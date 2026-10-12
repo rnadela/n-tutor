@@ -21,6 +21,9 @@ import {
   PROMPT_EMPTY,
   PROMPT_NOT_NEW,
   QUESTION_COUNT_MISMATCH,
+  FIGURE_NOT_NEW,
+  MAX_FIGURES,
+  MAX_FIGURE_BYTES,
   RICH_TEXT_INVALID,
   TOPIC_LABEL_TOO_LONG,
   TOPIC_REQUIRED,
@@ -34,6 +37,13 @@ import {
 } from './practice-test-payload.js';
 import { weightedTopicFloor, weightingFor } from './practice-test-policy.js';
 import { PracticeTestPayload } from './practice-test-schema.js';
+import {
+  MALICIOUS_FIGURES,
+  SANITIZED_FIGURES,
+  figureOfCircles,
+  oversizeFigure,
+} from '../extraction/svg-figure.fixtures.js';
+import { MAX_FIGURE_SVG_BYTES, figureSvgByteLength } from '../extraction/svg-figure.js';
 
 /** A figure as a model would write it, and the only form that may be stored. */
 const FIGURE_RAW =
@@ -542,31 +552,233 @@ describe('weighted topic floor', () => {
 });
 
 describe('a figure on the generation wire', () => {
-  /**
-   * Narrowed on purpose until Story 4.8.
-   *
-   * Nothing instructs a generating model to draw, 4.8 owns the prompt work and
-   * the draft surface that would show a figure, and the draft-edit path
-   * round-trips every field through `plainTextOf` → `richTextFromPlainText`,
-   * which cannot read a figure back and would delete one silently. So the wire
-   * refuses one outright rather than accepting a segment this build would lose.
-   */
-  it('is refused by the schema, so it never reaches the post-hoc pass', () => {
-    const parsed = PracticeTestPayload.safeParse({
-      questions: [
-        {
-          format: 'ShortAnswer',
-          prompt: [{ kind: 'figure', svg: FIGURE_SANITIZED, alt: 'A circle' }],
-          choices: [],
-          answer: text('A circle'),
-          topics: ['Shapes'],
-        },
-      ],
-    });
-    expect(parsed.success).toBe(false);
+  /** The expectation, with the source's own drawings named as copies to refuse. */
+  const forbidding = (figures: string[]): ReturnType<typeof expecting> => ({
+    ...expecting([['MultipleChoice', 1]]),
+    forbiddenFigures: new Set(figures),
   });
 
-  it('takes text and fractions, which is everything generation does emit', () => {
+  const figure = (svg: string, alt: string) => [{ kind: 'figure', svg, alt }];
+
+  it('stores a prompt figure sanitized, never the markup it was handed', () => {
+    const result = validateGenerationPayload(
+      {
+        questions: [
+          mcQuestion({
+            prompt: [{ kind: 'text', value: 'Which shape? ' }, ...figure(FIGURE_RAW, ' A circle ')],
+          }),
+        ],
+      },
+      expecting([['MultipleChoice', 1]]),
+    );
+    expect(result.questions[0]!.prompt[1]).toEqual({
+      kind: 'figure',
+      svg: FIGURE_SANITIZED,
+      alt: 'A circle',
+    });
+  });
+
+  it('stores a figure in an option body the same way', () => {
+    const result = validateGenerationPayload(
+      {
+        questions: [
+          mcQuestion({
+            choices: [
+              { body: figure(FIGURE_RAW, 'A circle'), isCorrect: true },
+              { body: figure(SANITIZED_FIGURES[1]![0], 'A square'), isCorrect: false },
+              { body: text('Neither'), isCorrect: false },
+            ],
+          }),
+        ],
+      },
+      expecting([['MultipleChoice', 1]]),
+    );
+    expect(result.questions[0]!.choices[0]!.body[0]).toEqual({
+      kind: 'figure',
+      svg: FIGURE_SANITIZED,
+      alt: 'A circle',
+    });
+    expect(result.questions[0]!.choices[1]!.body[0]).toMatchObject({
+      svg: SANITIZED_FIGURES[1]![1],
+    });
+  });
+
+  it('is refused by the schema in the answer field, where nothing could grade it', () => {
+    // The narrowing that stays: grading compares plain text, so an answer whose
+    // only content is a drawing is an answer nothing can be marked against.
+    refusedWith(
+      {
+        questions: [shortAnswer({ answer: figure(FIGURE_SANITIZED, 'A circle') })],
+      },
+      expecting([['ShortAnswer', 1]]),
+      PAYLOAD_SHAPE_INVALID,
+    );
+  });
+
+  it('refuses every drawing the sanitizer does not admit, as the one content fault', () => {
+    for (const malicious of MALICIOUS_FIGURES) {
+      refusedWith(
+        { questions: [mcQuestion({ prompt: figure(malicious.svg, 'A shape') })] },
+        expecting([['MultipleChoice', 1]]),
+        // An oversize drawing is reported as the oversize payload it is; every
+        // other grammar refusal is the one content fault.
+        malicious.reason === 'tooLarge' ? PAYLOAD_TOO_LARGE : RICH_TEXT_INVALID,
+      );
+    }
+  });
+
+  it('refuses more figures in one field than a question can need', () => {
+    const many = Array.from({ length: MAX_FIGURES + 1 }, (_unused, index) => ({
+      kind: 'figure',
+      svg: figureOfCircles(index + 1),
+      alt: `Shape ${index}`,
+    }));
+    refusedWith(
+      { questions: [mcQuestion({ prompt: many })] },
+      expecting([['MultipleChoice', 1]]),
+      PAYLOAD_TOO_LARGE,
+    );
+  });
+
+  it('refuses a field whose drawings together exceed the byte budget', () => {
+    // Each figure is under its own cap; together they are over the field's.
+    const half = oversizeFigure(3_000);
+    expect(figureSvgByteLength(half)).toBeLessThan(MAX_FIGURE_SVG_BYTES);
+    const pair = [
+      { kind: 'figure', svg: half, alt: 'One' },
+      { kind: 'figure', svg: oversizeFigure(3_100), alt: 'Two' },
+      { kind: 'figure', svg: oversizeFigure(3_200), alt: 'Three' },
+    ];
+    expect(
+      pair.reduce((sum, segment) => sum + figureSvgByteLength(segment.svg), 0),
+    ).toBeGreaterThan(MAX_FIGURE_BYTES);
+    refusedWith(
+      { questions: [mcQuestion({ prompt: pair })] },
+      expecting([['MultipleChoice', 1]]),
+      PAYLOAD_TOO_LARGE,
+    );
+  });
+
+  it('refuses one figure larger than a drawn shape can plausibly be', () => {
+    refusedWith(
+      { questions: [mcQuestion({ prompt: figure(oversizeFigure(5_000), 'A shape') })] },
+      expecting([['MultipleChoice', 1]]),
+      PAYLOAD_TOO_LARGE,
+    );
+  });
+
+  it('refuses a text alternative longer than a field of text may be', () => {
+    refusedWith(
+      {
+        questions: [
+          mcQuestion({ prompt: figure(FIGURE_SANITIZED, 'A'.repeat(MAX_TEXT_LENGTH + 1)) }),
+        ],
+      },
+      expecting([['MultipleChoice', 1]]),
+      PAYLOAD_TOO_LARGE,
+    );
+  });
+
+  it('refuses a figure the source test already draws', () => {
+    // The prompt says draw something new; this is what holds the line when the
+    // model redraws the source instead. The comparison is on the canonical
+    // form, so the raw markup of the same drawing is caught too.
+    refusedWith(
+      { questions: [mcQuestion({ prompt: figure(FIGURE_RAW, 'A circle') })] },
+      forbidding([FIGURE_SANITIZED]),
+      FIGURE_NOT_NEW,
+    );
+  });
+
+  it('refuses a source drawing redrawn in an option body, not only in a prompt', () => {
+    // Every field a figure may reach is checked against the same set: a pictured
+    // option copied off the source is the same reproduction a copied prompt is.
+    refusedWith(
+      {
+        questions: [
+          mcQuestion({
+            choices: [
+              { body: figure(FIGURE_RAW, 'A circle'), isCorrect: true },
+              { body: text('Five'), isCorrect: false },
+              { body: text('Six'), isCorrect: false },
+            ],
+          }),
+        ],
+      },
+      forbidding([FIGURE_SANITIZED]),
+      FIGURE_NOT_NEW,
+    );
+  });
+
+  it('reports a figure that only crosses the per-figure cap once escaped as oversize', () => {
+    // The raw-byte check cannot see this: the figure arrives under the cap and
+    // grows past it when the sanitizer writes it back canonically. It is still
+    // an oversize figure, and must not fall into the generic content fault.
+    const quotes = '"'.repeat(4_000);
+    const grows = `<svg viewBox="0 0 2 2"><circle cx="1" cy="1" r="1"/><path d='${quotes}'/></svg>`;
+    expect(figureSvgByteLength(grows)).toBeLessThan(MAX_FIGURE_SVG_BYTES);
+    refusedWith(
+      { questions: [mcQuestion({ prompt: figure(grows, 'A quoted path') })] },
+      expecting([['MultipleChoice', 1]]),
+      PAYLOAD_TOO_LARGE,
+    );
+  });
+
+  it('refuses a byte budget only sanitizing escapes past, which the raw sum cannot see', () => {
+    // Each figure is under the per-figure cap raw and escaped, and the field's
+    // *raw* total is under the budget — only the re-sum of the sanitized form
+    // crosses it.
+    const quotes = '"'.repeat(1_500);
+    const inflates = `<svg viewBox="0 0 2 2"><circle cx="1" cy="1" r="1"/><path d='${quotes}'/></svg>`;
+    expect(figureSvgByteLength(inflates) * MAX_FIGURES).toBeLessThan(MAX_FIGURE_BYTES);
+    refusedWith(
+      {
+        questions: [
+          mcQuestion({
+            prompt: Array.from({ length: MAX_FIGURES }, () => ({
+              kind: 'figure',
+              svg: inflates,
+              alt: 'A quoted path',
+            })),
+          }),
+        ],
+      },
+      expecting([['MultipleChoice', 1]]),
+      PAYLOAD_TOO_LARGE,
+    );
+  });
+
+  it('accepts a figure that is not one of the source drawings', () => {
+    expect(() =>
+      validateGenerationPayload(
+        { questions: [mcQuestion({ prompt: figure(figureOfCircles(3), 'Three circles') })] },
+        forbidding([FIGURE_SANITIZED]),
+      ),
+    ).not.toThrow();
+  });
+
+  it('refuses two pictured options whose alternatives read alike', () => {
+    // Distinctness is computed on the plain projection, where a figure reads as
+    // `[Figure: <alt>]` — so two drawings described the same way are one option
+    // said twice, to a screen reader and to the marking alike.
+    refusedWith(
+      {
+        questions: [
+          mcQuestion({
+            choices: [
+              { body: figure(figureOfCircles(1), 'A shape'), isCorrect: true },
+              { body: figure(figureOfCircles(2), 'A shape'), isCorrect: false },
+              { body: text('Neither'), isCorrect: false },
+            ],
+          }),
+        ],
+      },
+      expecting([['MultipleChoice', 1]]),
+      CHOICES_NOT_DISTINCT,
+    );
+  });
+
+  it('takes text and fractions, which is everything a narrowed field may be', () => {
     const parsed = PracticeTestPayload.safeParse({
       questions: [
         {
@@ -623,6 +835,34 @@ describe('an edited question', () => {
       { kind: 'text', value: 'What shape? ' },
       { kind: 'figure', svg: FIGURE_SANITIZED, alt: 'A circle' },
     ]);
+  });
+
+  it('keeps a stored figure byte-identical when the text around it is edited', () => {
+    // What the inverse grafted back, carried through the invariants untouched:
+    // an edit cannot introduce a figure, and it must not alter one either.
+    const kept = { kind: 'figure' as const, svg: FIGURE_SANITIZED, alt: 'A circle' };
+    const stored = validateEditedQuestion(
+      edited({ prompt: [{ kind: 'text', value: 'Which shape? ' }, kept] }),
+      ORDINALS,
+    );
+    expect(stored.prompt[1]).toEqual(kept);
+  });
+
+  it('holds an edited field to the same figure ceilings a generated one', () => {
+    const many: RichText = Array.from({ length: MAX_FIGURES + 1 }, (_unused, index) => ({
+      kind: 'figure' as const,
+      svg: figureOfCircles(index + 1),
+      alt: `Shape ${index}`,
+    }));
+    expect(() => validateEditedQuestion(edited({ prompt: many }), ORDINALS)).toThrow(
+      PAYLOAD_TOO_LARGE,
+    );
+    expect(() =>
+      validateEditedQuestion(
+        edited({ prompt: [{ kind: 'figure', svg: oversizeFigure(5_000), alt: 'A shape' }] }),
+        ORDINALS,
+      ),
+    ).toThrow(PAYLOAD_TOO_LARGE);
   });
 
   it('sanitizes a figure in an option body the same way', () => {

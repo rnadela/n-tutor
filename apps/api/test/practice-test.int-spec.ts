@@ -31,6 +31,8 @@ const {
   resetPracticeTestRuntime,
 } = await import('../src/practicetest/practice-test-policy.js');
 const { PracticeTestService } = await import('../src/practicetest/practice-test.service.js');
+const { RICH_TEXT_FIGURE_MISSING } = await import('../src/extraction/rich-text.js');
+const { fakeFigureSvg } = await import('../src/practicetest/practice-test-schema.js');
 const { GradingService } = await import('../src/grading/grading.service.js');
 const { AiService } = await import('../src/ai/ai.service.js');
 const { SOURCE_TEST_NOT_FOUND } = await import('../src/sourcetest/source-test-policy.js');
@@ -638,6 +640,203 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
   });
 
   // --- Failure ---------------------------------------------------------
+
+  // --- Figures, end to end ----------------------------------------------
+
+  describe('a source test whose questions carry a figure', () => {
+    /**
+     * A circle as the sanitizer's canonical form already has it, so a stored
+     * value can be compared against this literal without re-deriving it.
+     */
+    const SOURCE_FIGURE =
+      '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="currentColor"/></svg>';
+
+    /**
+     * Draws on the real Extraction, by patching the stored prompt.
+     *
+     * The fake *extraction* payload is deliberately untouched: Story 3.9 owns
+     * it and Epics 3 and 4 assert its exact text. What generation reads is the
+     * persisted Extraction, so patching the row is both sufficient and the only
+     * change that leaves every other case as it was.
+     */
+    async function drawOnSource(ready: Ready): Promise<void> {
+      const question = await h.prisma.extractedQuestion.findFirstOrThrow({
+        where: { extraction: { sourceTestId: ready.sourceTestId }, usable: true },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true, prompt: true },
+      });
+      await h.prisma.extractedQuestion.update({
+        where: { id: question.id },
+        data: {
+          prompt: [
+            ...(question.prompt as { kind: string }[]),
+            { kind: 'figure', svg: SOURCE_FIGURE, alt: 'A printed circle' },
+          ],
+        },
+      });
+    }
+
+    it('shows the model the drawing and lands a draft that carries its own', async () => {
+      const ready = await generatable();
+      await drawOnSource(ready);
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      // Two halves of one rule: the source drawing is in the prompt, and a
+      // generated copy of it would have been refused `FIGURE_NOT_NEW`.
+      const calls = h.ai.sent.filter((call) => call.callClass === 'Generation');
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.prompt).toContain(SOURCE_FIGURE);
+      expect(calls[0]!.prompt).toContain('Every figure you draw must be new work.');
+
+      const job = await h.prisma.generationJob.findFirstOrThrow();
+      expect(job.status).toBe('Succeeded');
+
+      const question = await h.prisma.practiceTestQuestion.findFirstOrThrow({
+        where: { practiceTest: { parentAccountId: ready.parentAccountId } },
+        orderBy: { ordinal: 'asc' },
+        select: { prompt: true },
+      });
+      const drawn = (question.prompt as { kind: string; svg?: string }[]).filter(
+        (segment) => segment.kind === 'figure',
+      );
+      expect(drawn).toHaveLength(1);
+      // Stored sanitized, and not the source's drawing.
+      expect(drawn[0]!.svg).toMatch(/^<svg viewBox="[^"]+">/u);
+      expect(drawn[0]!.svg).toContain('currentColor');
+      expect(drawn[0]!.svg).not.toBe(SOURCE_FIGURE);
+      expect(drawn[0]!.svg).not.toContain('<script');
+    });
+
+    it('answers the draft read with the figure, in the question and in an option', async () => {
+      const ready = await generatable();
+      await drawOnSource(ready);
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const stored = await h.prisma.practiceTest.findFirstOrThrow({
+        where: { parentAccountId: ready.parentAccountId },
+        select: { id: true },
+      });
+      const response = await server()
+        .get(`/api/parent/practice-tests/${stored.id}`)
+        .set('Authorization', bearer(ready.token))
+        .expect(200);
+      const questions = response.body.questions as {
+        format: string;
+        prompt: { kind: string; alt?: string }[];
+        choices: { body: { kind: string; alt?: string }[] }[];
+      }[];
+      for (const question of questions) {
+        expect(question.prompt.some((segment) => segment.kind === 'figure')).toBe(true);
+        if (question.format !== 'MultipleChoice') continue;
+        for (const choice of question.choices) {
+          expect(choice.body.some((segment) => segment.kind === 'figure')).toBe(true);
+        }
+      }
+      // Every alternative reads differently, which is what tells two pictured
+      // options apart in speech and in marking.
+      const alts = questions.flatMap((question) =>
+        question.choices.flatMap((choice) =>
+          choice.body.filter((segment) => segment.kind === 'figure').map((segment) => segment.alt),
+        ),
+      );
+      expect(new Set(alts).size).toBe(alts.length);
+    });
+
+    it('refuses the draft when the model redraws a source figure, and fails the job', async () => {
+      // The one case that proves `sourceFigures` actually reaches the post-hoc
+      // pass: the source is patched with the exact bytes the fake is about to
+      // draw for draft 1, question 1, so every attempt is refused
+      // `FIGURE_NOT_NEW`. Without `forbiddenFigures` the draft would land.
+      const ready = await generatable();
+      const copied = fakeFigureSvg(1, 1, 'prompt');
+      const question = await h.prisma.extractedQuestion.findFirstOrThrow({
+        where: { extraction: { sourceTestId: ready.sourceTestId }, usable: true },
+        orderBy: { ordinal: 'asc' },
+        select: { id: true, prompt: true },
+      });
+      await h.prisma.extractedQuestion.update({
+        where: { id: question.id },
+        data: {
+          prompt: [
+            ...(question.prompt as { kind: string }[]),
+            { kind: 'figure', svg: copied, alt: 'A printed shape' },
+          ],
+        },
+      });
+
+      const restoreAttempts = withAttempts(2);
+      try {
+        await requestGeneration(ready, 1).expect(202);
+        expect(await h.practiceTestRunner.runOnce()).toBe(true);
+      } finally {
+        restoreAttempts();
+      }
+
+      // Retried like every other content fault, then routed as the one
+      // upstream fault with the policy's own reason (AD-30/AD-31).
+      expect(h.ai.sent.filter((call) => call.callClass === 'Generation')).toHaveLength(2);
+      const job = await h.prisma.generationJob.findFirstOrThrow();
+      expect(job.status).toBe('Failed');
+      expect(job.producedCount).toBe(0);
+      expect(job.failureKind).toBe('UpstreamFault');
+      expect(job.failureReason).toBe(GENERATION_FAILED);
+      expect(job.retryable).toBe(true);
+      // Nothing stored and nothing charged: a refused draft produced nothing.
+      expect(await h.prisma.practiceTest.count()).toBe(0);
+      expect(await generationUsed(ready.parentAccountId)).toBe(0);
+    });
+
+    it('carries a figure that lives only in a source option body', async () => {
+      // `planFor` reads prompts *and* options, so a test whose shapes are all
+      // pictured options is a figure-bearing source like any other.
+      const ready = await generatable();
+      const choice = await h.prisma.extractedChoice.findFirstOrThrow({
+        where: { question: { extraction: { sourceTestId: ready.sourceTestId }, usable: true } },
+        orderBy: [{ question: { ordinal: 'asc' } }, { ordinal: 'asc' }],
+        select: { id: true, ordinal: true, body: true },
+      });
+      await h.prisma.extractedChoice.update({
+        where: { id: choice.id },
+        data: {
+          body: [
+            ...(choice.body as { kind: string }[]),
+            { kind: 'figure', svg: SOURCE_FIGURE, alt: 'A pictured option' },
+          ],
+        },
+      });
+
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const calls = h.ai.sent.filter((call) => call.callClass === 'Generation');
+      expect(calls[0]!.prompt).toContain(
+        `Figure in option ${choice.ordinal}, alternative "A pictured option": ${SOURCE_FIGURE}`,
+      );
+      expect(calls[0]!.prompt).toContain('Every figure you draw must be new work.');
+      const job = await h.prisma.generationJob.findFirstOrThrow();
+      expect(job.status).toBe('Succeeded');
+    });
+
+    it('leaves a figure-less source test generating exactly as it did', async () => {
+      const ready = await generatable();
+      await requestGeneration(ready, 1).expect(202);
+      expect(await h.practiceTestRunner.runOnce()).toBe(true);
+
+      const calls = h.ai.sent.filter((call) => call.callClass === 'Generation');
+      expect(calls[0]!.prompt).not.toMatch(/figure/iu);
+      expect(calls[0]!.prompt).not.toContain('<svg');
+
+      const questions = await h.prisma.practiceTestQuestion.findMany({
+        where: { practiceTest: { parentAccountId: ready.parentAccountId } },
+        select: { prompt: true },
+      });
+      for (const question of questions) {
+        expect(JSON.stringify(question.prompt)).not.toContain('figure');
+      }
+    });
+  });
 
   describe('partial success', () => {
     it('keeps and charges what landed, and reports the job partially complete', async () => {
@@ -2247,6 +2446,66 @@ describe('Practice Tests: bounded, priced, asynchronous generation', () => {
       });
       return written.id;
     }
+
+    it('keeps a figure byte-identical when the text around it is edited', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const questionId = await addFreeText(ready.practiceTestId, before.length + 1);
+      const drawing = {
+        kind: 'figure',
+        svg: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="currentColor"/></svg>',
+        alt: 'A half-circle',
+      };
+      await h.prisma.practiceTestQuestion.update({
+        where: { id: questionId },
+        data: { prompt: [{ kind: 'text', value: 'What shape? ' }, drawing] },
+      });
+
+      const response = await editQuestion(ready.token, ready.practiceTestId, questionId)
+        .send({ prompt: 'Which shape? [Figure: A half-circle]' })
+        .expect(200);
+
+      const edited = response.body.questions.find((q: { id: string }) => q.id === questionId);
+      // The drawing is the stored segment reused, never one rebuilt from text:
+      // the editor is not an authoring surface for figures.
+      expect(edited.prompt).toEqual([{ kind: 'text', value: 'Which shape? ' }, drawing]);
+      const stored = await h.prisma.practiceTestQuestion.findUniqueOrThrow({
+        where: { id: questionId },
+        select: { prompt: true },
+      });
+      expect(stored.prompt).toEqual(edited.prompt);
+    });
+
+    it('refuses an edit that drops the figure token, writing nothing', async () => {
+      const ready = await withOneDraft();
+      const before = await questionsOf(ready.token, ready.practiceTestId);
+      const questionId = await addFreeText(ready.practiceTestId, before.length + 1);
+      const prompt = [
+        { kind: 'text', value: 'What shape? ' },
+        {
+          kind: 'figure',
+          svg: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="currentColor"/></svg>',
+          alt: 'A half-circle',
+        },
+      ];
+      await h.prisma.practiceTestQuestion.update({
+        where: { id: questionId },
+        data: { prompt },
+      });
+
+      const response = await editQuestion(ready.token, ready.practiceTestId, questionId)
+        .send({ prompt: 'Which shape is it?' })
+        .expect(400);
+      expect(response.body.message).toBe(RICH_TEXT_FIGURE_MISSING);
+
+      // Refused whole: the drawing is not put back in a place the parent did
+      // not choose, and the text they typed is not stored without it either.
+      const stored = await h.prisma.practiceTestQuestion.findUniqueOrThrow({
+        where: { id: questionId },
+        select: { prompt: true },
+      });
+      expect(stored.prompt).toEqual(prompt);
+    });
 
     it('stores an edited free-text prompt as the parsed segments, and answers with the draft', async () => {
       const ready = await withOneDraft();

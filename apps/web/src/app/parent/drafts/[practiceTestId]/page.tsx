@@ -32,7 +32,7 @@ import {
   type StudentProfileView,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
-import { canSaveField, plainTextOf } from '@/lib/rich-text';
+import { canSaveField, figureTokensPreserved, plainTextOf } from '@/lib/rich-text';
 import { density, rounded, typeRoles } from '@/theme/tokens';
 
 /**
@@ -122,15 +122,44 @@ function editPayload(question: DraftQuestionView, edit: QuestionEdit) {
   return { prompt: edit.prompt, answer: edit.answer };
 }
 
+/**
+ * Whether the question holds a picture anywhere — the one condition the figure
+ * sentence is shown under, so a draft with nothing drawn in it reads exactly as
+ * it read before Story 4.8.
+ */
+function holdsFigure(question: DraftQuestionView): boolean {
+  const fields = [question.prompt, ...(question.answer === null ? [] : [question.answer])].concat(
+    question.choices.map((choice) => choice.body),
+  );
+  return fields.some((field) => field.some((segment) => segment.kind === 'figure'));
+}
+
 /** Whether the save control may fire — the client mirror of the server's rules. */
 function canSave(question: DraftQuestionView, edit: QuestionEdit): boolean {
   if (!canSaveField(edit.prompt)) return false;
+  // A dropped `[Figure: …]` token is a 400 whatever this browser offers; the
+  // mirror is here so the control is disabled rather than firing a request
+  // whose only possible answer is a refusal the parent has to read.
+  if (!figureTokensPreserved(question.prompt, edit.prompt)) return false;
   if (question.format === 'MultipleChoice') {
+    // Paired by ordinal and never by position, exactly as the server pairs an
+    // edit with the stored option it restates — and an option whose stored body
+    // cannot be found fails closed, because an unfindable option is the one
+    // case where "it holds no figure" would be a guess.
+    const stored = new Map(question.choices.map((choice) => [choice.ordinal, choice.body]));
     return (
-      edit.correctOrdinal !== null && edit.choices.every((choice) => canSaveField(choice.body))
+      edit.correctOrdinal !== null &&
+      edit.choices.every((choice) => {
+        const body = stored.get(choice.ordinal);
+        return (
+          body !== undefined &&
+          canSaveField(choice.body) &&
+          figureTokensPreserved(body, choice.body)
+        );
+      })
     );
   }
-  return canSaveField(edit.answer);
+  return canSaveField(edit.answer) && figureTokensPreserved(question.answer ?? [], edit.answer);
 }
 
 /**
@@ -921,6 +950,15 @@ export default function DraftReviewPage() {
                           <Typography component="p" data-testid="draft-edit-hint">
                             {parentCopy.drafts.editHint}
                           </Typography>
+                          {/* Only where there is a picture to lose: the
+                              sentence explains the token a parent can see in
+                              the field, and editing a figure is not offered
+                              anywhere. */}
+                          {holdsFigure(question) && (
+                            <Typography component="p" data-testid="draft-edit-figure-hint">
+                              {parentCopy.drafts.editFigureHint}
+                            </Typography>
+                          )}
 
                           <TextField
                             id={`prompt-${question.id}`}

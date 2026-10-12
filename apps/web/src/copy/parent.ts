@@ -1180,6 +1180,14 @@ export const parentCopy = {
      * whole gate rests on: what is saved here is what the child sees.
      */
     editHint: 'What is saved here is what the student sees and is marked against.',
+    /**
+     * Said once, in the editor, and only on a question that actually holds a
+     * picture. It names the one thing a parent could do here that would lose
+     * something, in the words they can see in the field — the API refuses the
+     * save regardless, so this is the explanation and not the enforcement.
+     */
+    editFigureHint:
+      'The [Figure: …] text stands for a picture in this question. Keep every one of them in the words and order they are written in, for the pictures to stay.',
     save: 'Save the changes',
     cancel: 'Cancel',
     /** Said after a save, in the same words the screen shows (UX-DR: a11y). */

@@ -1,5 +1,10 @@
 import type { QuestionFormat } from '../generated/prisma/enums.js';
 import { plainTextOf, type RichText } from '../extraction/rich-text.js';
+import { MAX_FIGURE_SVG_BYTES } from '../extraction/svg-figure.js';
+// The generation validator's own ceilings, not extraction's equal-valued ones:
+// the figure quoted to the model has to be the figure the refusal counts
+// against, or the rule and the check are two symbols free to drift apart.
+import { MAX_FIGURES, MAX_FIGURE_BYTES } from './practice-test-payload.js';
 import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-policy.js';
 
 /**
@@ -51,13 +56,75 @@ export interface GenerationPromptInput {
   alreadyGenerated: readonly string[];
 }
 
-/** One line per source question: its format, its prompt, its options. */
-function describeSource(question: GenerationSourceQuestion): string {
+/**
+ * One line per source question: its format, its prompt, its options — and,
+ * beneath it, the drawing of every figure it carries.
+ *
+ * The prompt line itself still projects a figure as `[Figure: <alt>]`, because
+ * that is where the shape sits in the sentence. What the alt cannot carry is
+ * the drawing, and in early-grade Math the drawing *is* the question — so each
+ * figure's SVG is listed below, labelled by where it came from, so a model
+ * writing a new pictured question can see what kind of picture this test uses.
+ *
+ * A question with no figures emits exactly the one line Story 4.1 emitted: the
+ * listing is additive, not a change to the line.
+ */
+function describeSource(question: GenerationSourceQuestion): string[] {
   const options =
     question.choices.length === 0
       ? ''
       : ` Options: ${question.choices.map((choice) => plainTextOf(choice)).join(' | ')}`;
-  return `${question.ordinal}. [${question.format}] ${plainTextOf(question.prompt)}${options}`;
+  const lines = [
+    `${question.ordinal}. [${question.format}] ${plainTextOf(question.prompt)}${options}`,
+  ];
+  for (const figure of figuresOf(question.prompt)) {
+    lines.push(`   Figure in the question, alternative "${figure.alt}": ${figure.svg}`);
+  }
+  question.choices.forEach((choice, index) => {
+    for (const figure of figuresOf(choice)) {
+      lines.push(`   Figure in option ${index + 1}, alternative "${figure.alt}": ${figure.svg}`);
+    }
+  });
+  return lines;
+}
+
+/** The figure segments of one field, in the order they are drawn. */
+function figuresOf(rich: RichText): { alt: string; svg: string }[] {
+  return rich
+    .filter((segment) => segment.kind === 'figure')
+    .map((segment) => ({ alt: segment.alt, svg: segment.svg }));
+}
+
+/** Whether the Extraction carries a figure anywhere — the one condition the figure rules are added under. */
+function carriesFigure(questions: readonly GenerationSourceQuestion[]): boolean {
+  return questions.some(
+    (question) =>
+      figuresOf(question.prompt).length > 0 ||
+      question.choices.some((choice) => figuresOf(choice).length > 0),
+  );
+}
+
+/**
+ * The figure rules, added **only** when the source actually carries a figure.
+ *
+ * Two halves of one rule, like the never-copy list above it: "draw a new one"
+ * is stated here and `practice-test-payload.ts` refuses a generated figure
+ * whose sanitized bytes equal a source figure's. The grammar and the ceilings
+ * are the sanitizer's and the payload module's own, quoted here so the common
+ * case is right rather than so the check can be skipped.
+ *
+ * A figure-less Extraction takes none of this, which is what keeps Story
+ * 4.1/4.2's prompt byte for byte.
+ */
+function figureRules(): string[] {
+  return [
+    `6. Where a question needs a printed shape, diagram, grid or number line, draw it as a figure segment rather than describing it in words. A figure may appear in a question prompt and in a MultipleChoice option body. Never put a figure in the \`answer\` field: an answer is read as text.`,
+    '7. Every figure you draw must be new work. Never reproduce a figure from the source test, byte for byte or redrawn: change the shape, its size, how many of it there are, or where it sits. A copied drawing is reproduction exactly as a copied question is.',
+    `8. Keep each figure to minimal SVG: a root \`svg\` element with a \`viewBox\`, and shape, path, group and text elements inside it. Use only \`currentColor\` and \`none\` for colours, so the drawing reads in a light and a dark theme alike. No script, no style, no external reference, no embedded image or HTML. Keep each figure under ${Math.floor(MAX_FIGURE_SVG_BYTES / 1024)} KB, at most ${MAX_FIGURES} figures in any one field, and all of one field's figures together under ${Math.floor(MAX_FIGURE_BYTES / 1024)} KB.`,
+    "9. Give every figure a short text alternative that says what is drawn. Where a question has pictured options, each option's alternative must read differently from every other option's — that is how the options are told apart in speech and in marking.",
+    '10. Never invent a figure for source content you could not read. A question you cannot see the shape of is a question to leave unwritten.',
+    '11. Where the source asked the student to draw a shape or move it on a grid, show the grid and the shape and ask where the shape ends up. The answer is a pictured option or the name of a cell, never a drawing the student has to make.',
+  ];
 }
 
 /**
@@ -132,9 +199,10 @@ export function buildGenerationPrompt(input: GenerationPromptInput): string {
     '3. Every other format carries no options at all and states the full correct answer in its `answer` field.',
     '4. Emit every number written as a fraction as a structured fraction segment, with its numerator and denominator as separate integers and its whole part separate again for a mixed number. Never write a fraction as text such as "1/2" or "one half". This applies to question prompts, options and answers alike.',
     '5. Never reproduce a question from the source test, and never reproduce one you have already written for this request. Rewording, reordering the options, or changing only the numbers in an otherwise identical question is reproduction. Each question must be genuinely new work on the same material.',
+    ...(carriesFigure(input.sourceQuestions) ? figureRules() : []),
     '',
     'The source test, which you must not copy from:',
-    ...input.sourceQuestions.map((question) => describeSource(question)),
+    ...input.sourceQuestions.flatMap((question) => describeSource(question)),
   ];
 
   if (input.alreadyGenerated.length > 0) {

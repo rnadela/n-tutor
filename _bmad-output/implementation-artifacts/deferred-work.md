@@ -2637,3 +2637,11 @@ source_spec: `spec-4-7-obvious-progress-spinner.md`
 severity: low
 reason: The poll at `apps/web/src/app/parent/capture/page.tsx:403-446` re-issues until `isSettled`, and only a failed *read* surfaces an error with Retry. A job stuck in `Running` server-side was already a silent forever-wait before this story; the spinner makes the wait obvious without bounding it. A "this is taking longer than expected" branch is a product decision, not a defect of this change.
 status: open
+
+### DW-331: No test exercises a figure in a FillInTheBlank question's prompt, even though the schema permits one there as it does for every format.
+origin: spec-deferred c4ac8fa51711
+location: apps/api/src/practicetest/practice-test-prompt.spec.ts
+source_spec: `spec-4-8-figures-in-generated-questions.md`
+severity: low
+reason: `practice-test-schema.ts` widens `prompt` to full `RichText` for every question format uniformly, and the figure-bounding pass in `practice-test-payload.ts` is format-agnostic. The unit, integration and e2e suites added by this story exercise ShortAnswer and MultipleChoice prompts and MultipleChoice choice bodies, but no FillInTheBlank case.
+status: open

@@ -469,6 +469,44 @@ describe('the draft review screen', () => {
   });
 });
 
+describe('a question that holds a picture', () => {
+  it('says once, in the editor, that the figure text must be left alone', () => {
+    expect(PAGE_SOURCE).toContain('parentCopy.drafts.editFigureHint');
+    expect(PAGE_SOURCE).toContain('data-testid="draft-edit-figure-hint"');
+  });
+
+  it('shows that sentence only where there is a picture to lose', () => {
+    // A draft with nothing drawn in it reads exactly as it read before Story
+    // 4.8, so the sentence is mounted on the condition and not always.
+    expect(PAGE_CODE).toContain('holdsFigure(question) && (');
+    expect(PAGE_CODE).toContain("segment.kind === 'figure'");
+  });
+
+  it('disables the save control when a figure token has been dropped', () => {
+    // A mirror only: the API refuses the save whatever this browser offers.
+    // Every editable field is mirrored, including `answer` — which generation
+    // never fills with a figure, but the mirror does not rely on that staying true.
+    expect(PAGE_CODE).toContain('figureTokensPreserved(question.prompt, edit.prompt)');
+    // Paired by ordinal, as the server pairs them — not by array position, and
+    // not falling open on an option whose stored body is not there.
+    expect(PAGE_CODE).toContain(
+      'new Map(question.choices.map((choice) => [choice.ordinal, choice.body]))',
+    );
+    expect(PAGE_CODE).toContain('figureTokensPreserved(body, choice.body)');
+    expect(PAGE_CODE).toContain('body !== undefined');
+    expect(PAGE_CODE).toContain('figureTokensPreserved(question.answer ?? [], edit.answer)');
+  });
+
+  it('offers no way to edit, add or remove a picture', () => {
+    // Figure editing is not this story's and not any story's: the drawing is
+    // preserved, never authored.
+    expect(PAGE_CODE).not.toMatch(/upload|file input|<input type="file"/iu);
+    expect(PAGE_CODE).not.toContain('svg=');
+    expect(PAGE_CODE).not.toContain("kind: 'figure'");
+    expect(PAGE_CODE).not.toContain('canvas');
+  });
+});
+
 describe('its copy', () => {
   it('is parameterized, with no literal in the component', () => {
     expect(PAGE_SOURCE).toContain('parentCopy.drafts.reviewTitle');
@@ -543,6 +581,14 @@ describe('its copy', () => {
       expect(line).not.toContain('!');
       expect(line).not.toMatch(/upgrade|buy|plan|allowance|tier|gpt-/iu);
     }
+  });
+
+  it('explains the figure token as plain fact, with no urgency', () => {
+    const hint = parentCopy.drafts.editFigureHint;
+    expect(hint).toContain('[Figure: …]');
+    expect(hint).toContain('picture');
+    expect(hint).not.toContain('!');
+    expect(hint).not.toMatch(/upgrade|buy|plan|allowance|tier|gpt-/iu);
   });
 
   it('reads a fraction aloud rather than spelling it as a glyph', () => {
