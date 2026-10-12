@@ -19,6 +19,7 @@ import { ORDER_HEADING_ID, PageStrip } from '@/app/parent/capture/PageStrip';
 import { PrimaryButton } from '@/components/Button';
 import { AppDialog, ConfirmDestructiveDialog } from '@/components/Dialog';
 import { useAnnounce } from '@/components/LiveRegion';
+import { SheetTally } from '@/components/SheetTally';
 import { parentCopy } from '@/copy/parent';
 import { limitLabel } from '@/lib/consumption-format';
 import { useElevation } from '@/lib/elevation';
@@ -563,6 +564,15 @@ export default function GeneratePage() {
                     ? parentCopy.generate.progressHeading
                     : parentCopy.generate.progressHeadingSettled}
                 </Typography>
+                {/* One sheet per requested practice test, directly above the
+                    sentence that states the same thing in words. Fed from the
+                    job's own three figures — `aria-hidden`, so the sentence
+                    stays the only announcement. */}
+                <SheetTally
+                  producedCount={job!.producedCount}
+                  requestedCount={job!.requestedCount}
+                  status={job!.status}
+                />
                 {/* The figures are the job's own, read from the server. */}
                 <Typography component="p" data-testid="generate-progress-line">
                   {job!.status === 'Succeeded'

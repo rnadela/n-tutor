@@ -2621,3 +2621,19 @@ source_spec: `spec-3-9-figures-in-extraction.md`
 severity: medium
 reason: `requireBoundedRichText` in `apps/api/src/extraction/extraction-payload.ts` sums figure bytes within one rich-text field only; nothing in `validateExtractionPayload` sums figure bytes across every question and context body in a document, and `MAX_SEGMENTS` bounds segment count, not figure byte weight.
 status: open
+
+### DW-329: The web unit suite has no DOM tier, so a screen's mount of a component is verified only by a regex over the screen's own source text.
+origin: spec-deferred 11a9874ff91a
+location: apps/web/src/app/parent/capture/page.spec.tsx
+source_spec: `spec-4-7-obvious-progress-spinner.md`
+severity: medium
+reason: `apps/web/src/app/parent/capture/page.spec.tsx` asserts the spinner mount with `expect(PAGE_SOURCE).toMatch(...)`; nothing renders the screen. Delete the `<WaitSpinner />` line and only that source regex fails - no executing test observes the spinner present while the Extraction is unsettled, and the e2e assertions on the capture side are deliberately negative (count 0 once the read has finished). The same holds for every other screen in the app; the missing DOM tier was already recorded as a deferred item on `spec-3-6-thin-extraction-warning.md`.
+status: open
+
+### DW-330: An Extraction job that never settles leaves the capture screen's Generate step waiting forever, now with a spinner, and offers no retry.
+origin: spec-deferred af8aee5918ee
+location: apps/web/src/app/parent/capture/page.tsx:1480-1497
+source_spec: `spec-4-7-obvious-progress-spinner.md`
+severity: low
+reason: The poll at `apps/web/src/app/parent/capture/page.tsx:403-446` re-issues until `isSettled`, and only a failed *read* surfaces an error with Retry. A job stuck in `Running` server-side was already a silent forever-wait before this story; the spinner makes the wait obvious without bounding it. A "this is taking longer than expected" branch is a product decision, not a defect of this change.
+status: open

@@ -495,3 +495,39 @@ describe('what the upload read is allowed to take down with it', () => {
     expect(PAGE_SOURCE).toContain('setError(parentCopy.capture.deletePhotosFailed);');
   });
 });
+
+describe('the sheet tally above the progress sentence', () => {
+  it('mounts the tally from the job’s own three figures', () => {
+    // The figures are the server's. Nothing here counts, estimates or polls on
+    // the tally's behalf.
+    expect(PAGE_SOURCE).toContain("import { SheetTally } from '@/components/SheetTally';");
+    expect(PAGE_SOURCE).toMatch(
+      /<SheetTally\s+producedCount=\{job!\.producedCount\}\s+requestedCount=\{job!\.requestedCount\}\s+status=\{job!\.status\}\s*\/>/u,
+    );
+  });
+
+  it('puts it between the panel heading and the sentence, not after it', () => {
+    // Directly above the sentence is the whole arrangement: the row shows how
+    // far along, the sentence says it in words.
+    const tally = PAGE_SOURCE.indexOf('<SheetTally');
+    const heading = PAGE_SOURCE.indexOf('parentCopy.generate.progressHeading');
+    const line = PAGE_SOURCE.indexOf('data-testid="generate-progress-line"');
+    expect(heading).toBeGreaterThan(-1);
+    expect(tally).toBeGreaterThan(heading);
+    expect(line).toBeGreaterThan(tally);
+  });
+
+  it('leaves the progress sentence exactly as it was', () => {
+    expect(PAGE_SOURCE).toContain(
+      '<Typography component="p" data-testid="generate-progress-line">',
+    );
+    expect(PAGE_SOURCE.match(/data-testid="generate-progress-line"/gu)).toHaveLength(1);
+    expect(PAGE_SOURCE).toContain('progressSentence(job!)');
+  });
+
+  it('adds no second polite region and decides reduced motion in no hook', () => {
+    expect(PAGE_SOURCE).not.toContain('role="status"');
+    expect(PAGE_SOURCE).not.toContain('useMediaQuery');
+    expect(PAGE_SOURCE).not.toContain('matchMedia');
+  });
+});

@@ -1984,3 +1984,40 @@ describe('which step the screen shows', () => {
     expect(code).not.toMatch(/router\.(push|replace)\([^)]*step/);
   });
 });
+
+describe('the wait while the Extraction is being read', () => {
+  it('mounts one shared spinner inside the unsettled branch itself', () => {
+    // Inside the branch and not beside it: that is what makes the spinner
+    // disappear in the very render the proceed button or the failure alert
+    // appears in, with no unmount effect and no timer to get it wrong.
+    expect(PAGE_SOURCE).toMatch(
+      /extraction === null \|\| !isSettled\(extraction\.status\)\s*\?\s*\([\s\S]{0,900}?<WaitSpinner \/>[\s\S]{0,400}?data-testid="extraction-reading"/u,
+    );
+    expect(PAGE_SOURCE).toContain("import { WaitSpinner } from '@/components/WaitSpinner';");
+    // One spinner on the screen, not one per state.
+    expect(PAGE_SOURCE.match(/<WaitSpinner /gu)).toHaveLength(1);
+  });
+
+  it('leaves the sentence it sits above exactly as it was', () => {
+    // Same node, same copy key, same testid: the announcement is word-for-word
+    // what it was before the spinner existed.
+    expect(PAGE_SOURCE).toContain('<Typography component="p" data-testid="extraction-reading">');
+    expect(PAGE_SOURCE).toContain('{parentCopy.capture.generate.reading}');
+    expect(PAGE_SOURCE.match(/data-testid="extraction-reading"/gu)).toHaveLength(1);
+  });
+
+  it('adds no polite region of its own and decides reduced motion in no hook', () => {
+    // The two `role="status"` on this screen are the pre-existing info alerts
+    // and nothing to do with this wait; the spinner adds none, and a
+    // `useMediaQuery` here would render the wrong reduced-motion branch on the
+    // first paint and then correct itself in front of the parent.
+    const regions = PAGE_SOURCE.split('\n').filter(
+      (line) => line.includes('role="status"') && !/^\s*(\*|\/\/|\/\*)/u.test(line),
+    );
+    expect(regions).toHaveLength(2);
+    for (const line of regions) expect(line).toContain('<Alert severity="info" role="status"');
+    expect(PAGE_SOURCE).not.toContain('aria-live');
+    expect(PAGE_SOURCE).not.toContain('useMediaQuery');
+    expect(PAGE_SOURCE).not.toContain('matchMedia');
+  });
+});

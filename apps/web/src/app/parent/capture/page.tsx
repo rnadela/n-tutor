@@ -16,6 +16,7 @@ import { ArrowLeft, FileImage, Info, Lock } from 'lucide-react';
 import { PrimaryButton } from '@/components/Button';
 import { ConfirmDestructiveDialog } from '@/components/Dialog';
 import { useAnnounce } from '@/components/LiveRegion';
+import { WaitSpinner } from '@/components/WaitSpinner';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import {
@@ -1480,9 +1481,20 @@ export default function CapturePage() {
                     </Typography>
 
                     {extraction === null || !isSettled(extraction.status) ? (
-                      <Typography component="p" data-testid="extraction-reading">
-                        {parentCopy.capture.generate.reading}
-                      </Typography>
+                      // The spinner lives inside this branch rather than beside
+                      // it, so it is gone in the very render that shows the
+                      // proceed button or the failure alert — no unmount effect
+                      // and no timer to leave it spinning over a settled job.
+                      // The sentence underneath is untouched: same node, same
+                      // copy, same testid, and it is still what is announced.
+                      <Box
+                        sx={{ display: 'grid', justifyItems: 'center', gap: `${density.gap}px` }}
+                      >
+                        <WaitSpinner />
+                        <Typography component="p" data-testid="extraction-reading">
+                          {parentCopy.capture.generate.reading}
+                        </Typography>
+                      </Box>
                     ) : extraction.status === 'Failed' ? (
                       // The job's own stored reason, which is a written
                       // constant and never a provider string — announced as a

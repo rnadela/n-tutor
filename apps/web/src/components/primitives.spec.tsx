@@ -281,12 +281,50 @@ describe('the snackbar', () => {
   });
 });
 
+/**
+ * The one primitive whose motion is the acceptance criterion rather than
+ * decoration.
+ *
+ * `SheetTally.tsx` draws a sheet landing — the check draws in and the cell
+ * settles from 85% — because a tally that simply swapped glyph would give a
+ * parent nothing to notice. Its durations and easing are `motion`'s own, and it
+ * states `prefers-reduced-motion: reduce` in its own stylesheet on top of the
+ * global rule, which `SheetTally.spec.tsx` asserts on the emitted CSS. The
+ * exemption is from this sweep alone: every other rule below still applies to
+ * it.
+ */
+const MOTION_IS_THE_POINT = new Set(['SheetTally.tsx']);
+
 describe('motion', () => {
+  it('exempts only files that exist, so the sweep cannot be switched off for nothing', () => {
+    // An exemption keyed by file name outlives the file: rename or delete
+    // `SheetTally.tsx` and the sweep below quietly stops covering anything,
+    // while the case after it throws on a source that is no longer there.
+    for (const name of MOTION_IS_THE_POINT) {
+      expect(Object.keys(SOURCES), name).toContain(name);
+    }
+  });
+
   it('introduces no decorative animation in any primitive', () => {
     for (const [name, source] of Object.entries(SOURCES)) {
+      if (MOTION_IS_THE_POINT.has(name)) continue;
       for (const forbidden of ['@keyframes', 'animation:', 'transition:']) {
         expect(source, `${name}: ${forbidden}`).not.toContain(forbidden);
       }
+    }
+  });
+
+  it('takes its durations and easing from the tokens even where motion is the point', () => {
+    for (const name of MOTION_IS_THE_POINT) {
+      const code = codeOf(name);
+      expect(code, `${name}: duration token`).toContain('motion.durationStandard');
+      expect(code, `${name}: easing token`).toContain('motion.easing');
+      // No figure of its own, and the reduced-motion answer stated in CSS
+      // rather than decided by a hook that would render the wrong branch first.
+      expect(code, `${name}: literal ms`).not.toMatch(/\b\d+ms\b/u);
+      expect(code, `${name}: reduced motion`).toContain('prefers-reduced-motion: reduce');
+      expect(code, `${name}: media query hook`).not.toContain('useMediaQuery');
+      expect(code, `${name}: matchMedia`).not.toContain('matchMedia');
     }
   });
 });

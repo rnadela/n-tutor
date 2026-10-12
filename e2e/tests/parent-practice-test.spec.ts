@@ -13,6 +13,9 @@ import {
 const PASSWORD = 'correct-horse-battery-staple';
 const PIN = '4821';
 
+/** Every state one sheet of the tally may be in — the only four it may show. */
+const STATES = ['ready', 'making', 'waiting', 'notMade'];
+
 /**
  * Two real JPEGs, as `parent-capture.spec.ts` carries them: small enough to
  * live here, and embedded rather than read off disk so the suite carries no
@@ -113,6 +116,13 @@ async function uploadAndRead(page: Page, email: string): Promise<{ subjectName: 
   await expect(page.getByRole('button', { name: 'Continue to practice test' })).toBeVisible({
     timeout: 30_000,
   });
+  // The read's spinner is mounted inside the unsettled branch itself, so it is
+  // gone in the very render that offers the way on. Asserted on this side of
+  // the wait rather than the other: whether the Extraction was still running
+  // when the step first drew is a race, whereas "it is not still spinning over
+  // a finished job" is not.
+  await expect(page.getByTestId('wait-spinner')).toHaveCount(0);
+  await expect(page.getByTestId('extraction-reading')).toHaveCount(0);
   // Returned so a case can assert the Subject the child's list shows: it is
   // generated per run, so no case can spell it out for itself.
   return { subjectName: subject.name };
@@ -136,6 +146,29 @@ async function enterGenerate(page: Page): Promise<void> {
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page).toHaveURL(/\/parent\/generate\//);
   await expect(page.getByRole('heading', { name: 'Generate practice tests' })).toBeVisible();
+}
+
+/**
+ * The sheet tally, read as one atomic snapshot of the DOM.
+ *
+ * One `evaluate` rather than several locator assertions, because the job moves
+ * underneath them: "how many sheets are there" and "does the sheet being made
+ * carry the spinner" have to be answered about the same frame, or a poll
+ * landing between the two reads turns a true invariant into a flake.
+ */
+async function tally(page: Page): Promise<{ states: string[]; spinnersOnMaking: number }> {
+  return page.evaluate(() => {
+    const row = document.querySelector('[data-testid="sheet-tally"]');
+    const sheets = [...(row?.querySelectorAll('[data-testid="sheet"]') ?? [])];
+    return {
+      states: sheets.map((sheet) => sheet.getAttribute('data-state') ?? ''),
+      spinnersOnMaking: sheets.filter(
+        (sheet) =>
+          sheet.getAttribute('data-state') === 'making' &&
+          sheet.querySelector('[data-testid="wait-spinner"]') !== null,
+      ).length,
+    };
+  });
 }
 
 /** One count's radio row, by the count it offers. */
@@ -220,10 +253,29 @@ test.describe('generating practice tests', () => {
     // Progress is the job's own, read from the server — and the advice to stay
     // never claims that leaving loses anything.
     await expect(page.getByTestId('generate-progress')).toBeVisible();
+
+    // One sheet per requested practice test, above the sentence that says the
+    // same thing in words — and `aria-hidden`, so the surface still has exactly
+    // one polite region and the announcement is the sentence alone.
+    await expect(page.getByTestId('sheet-tally')).toBeVisible();
+    await expect(page.getByTestId('sheet-tally')).toHaveAttribute('aria-hidden', 'true');
+    await expect(liveRegion(page)).toHaveCount(1);
+    const running = await tally(page);
+    expect(running.states).toHaveLength(1);
+    expect(running.states.every((state) => STATES.includes(state))).toBe(true);
+    // Whatever the job had reached in that frame, a sheet being made carries
+    // the shared spinner and a sheet not being made does not.
+    expect(running.spinnersOnMaking).toBe(
+      running.states.filter((state) => state === 'making').length,
+    );
+
     await expect(page.getByTestId('generate-progress-line')).toHaveText(
       '1 practice test is ready.',
       { timeout: 30_000 },
     );
+    // Settled, in full: the one sheet is ready and nothing is still spinning.
+    expect((await tally(page)).states).toEqual(['ready']);
+    await expect(page.getByTestId('wait-spinner')).toHaveCount(0);
     // Announced in exactly the words it displays.
     await expect(liveRegion(page)).toContainText('1 practice test is ready.');
 
@@ -383,10 +435,22 @@ test.describe('generating practice tests', () => {
     await countRow(page, 2).getByRole('radio').check();
     await page.getByTestId('generate-start').click();
     await page.getByTestId('generate-confirm').click();
+    // Two requested, so the row is two sheets long before either of them lands:
+    // the figure is the job's `requestedCount`, not a count of what exists.
+    await expect(page.getByTestId('sheet-tally')).toBeVisible();
+    const started = await tally(page);
+    expect(started.states).toHaveLength(2);
+    expect(started.spinnersOnMaking).toBe(
+      started.states.filter((state) => state === 'making').length,
+    );
+
     await expect(page.getByTestId('generate-progress-line')).toHaveText(
       '2 practice tests are ready.',
       { timeout: 60_000 },
     );
+    // Settled: both sheets ready, in order, and nothing left spinning.
+    expect((await tally(page)).states).toEqual(['ready', 'ready']);
+    await expect(page.getByTestId('wait-spinner')).toHaveCount(0);
 
     // A finished job links on to Pending drafts — the destination a parent who
     // left would have found the drafts at anyway.
