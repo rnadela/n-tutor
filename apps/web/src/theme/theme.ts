@@ -202,6 +202,23 @@ export function buildTheme(primary: TokenPair, d: DensitySet): Theme {
           },
         },
       },
+      // A menu item is a tap target like any other, and since Story 1.8 it is
+      // where a table row's actions live. MUI's own `MenuItem` drops to
+      // `minHeight: auto` from the `sm` breakpoint up, which would put every
+      // action behind a `⋮` below the surface's floor on exactly the widths
+      // most people use (UX-DR10).
+      MuiMenuItem: {
+        styleOverrides: {
+          // Restated inside the breakpoint as well as outside it: MUI's own
+          // root sets `minHeight: auto` from `sm` up *in a media query*, which
+          // outranks a plain declaration of the same specificity — so a bare
+          // `minHeight` here would hold on a phone and lose everywhere else.
+          root: ({ theme }) => ({
+            minHeight: d.tapTarget,
+            [theme.breakpoints.up('sm')]: { minHeight: d.tapTarget },
+          }),
+        },
+      },
       MuiCheckbox: {
         styleOverrides: { root: { width: d.tapTarget, height: d.tapTarget } },
       },

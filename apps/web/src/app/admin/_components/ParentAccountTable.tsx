@@ -13,6 +13,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import { ChevronDown, Users } from 'lucide-react';
+import { RowActions } from '@/components/RowActions';
 import { adminCopy } from '@/copy/admin';
 import type { AccountConsumption, AccountTier, ParentAccountSummary } from '@/lib/admin-api';
 import { dateOnly, inZone, limitLabel } from '@/lib/consumption-format';
@@ -238,32 +239,39 @@ export function ParentAccountTable(props: ParentAccountTableProps) {
                         {dateOnly(account.createdAt, account.timezone)}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          type="button"
-                          aria-expanded={expanded}
-                          aria-controls={`consumption-${account.id}`}
-                          aria-label={adminCopy.consumptionToggleLabel(account.email)}
-                          onClick={() => props.onToggleConsumption(account)}
-                          size="small"
-                          variant="text"
-                          endIcon={
-                            <Box
-                              component="span"
-                              sx={(theme) => ({
-                                display: 'inline-flex',
-                                transform: expanded ? 'rotate(180deg)' : 'none',
-                                transition: theme.transitions.create('transform'),
-                              })}
-                            >
-                              <ChevronDown size={16} aria-hidden="true" />
-                            </Box>
-                          }
-                          sx={{ whiteSpace: 'nowrap' }}
-                        >
-                          {expanded
-                            ? adminCopy.accounts.hideConsumption
-                            : adminCopy.accounts.showConsumption}
-                        </Button>
+                        {/* One action, and a chevron says "expand" standing
+                            alone — so it is the row's only icon, with the word
+                            in its tooltip rather than in the cell (UX-DR43).
+                            The disclosure state and target ride on the button
+                            itself, exactly as they did on the text control. */}
+                        <RowActions
+                          menuLabel={adminCopy.rowActionsLabel(account.email)}
+                          actions={[
+                            {
+                              key: 'consumption',
+                              label: expanded
+                                ? adminCopy.accounts.hideConsumption
+                                : adminCopy.accounts.showConsumption,
+                              ariaLabel: adminCopy.consumptionToggleLabel(account.email),
+                              selfEvident: true,
+                              expanded,
+                              controls: `consumption-${account.id}`,
+                              icon: (
+                                <Box
+                                  component="span"
+                                  sx={(theme) => ({
+                                    display: 'inline-flex',
+                                    transform: expanded ? 'rotate(180deg)' : 'none',
+                                    transition: theme.transitions.create('transform'),
+                                  })}
+                                >
+                                  <ChevronDown size={16} aria-hidden="true" />
+                                </Box>
+                              ),
+                              onClick: () => props.onToggleConsumption(account),
+                            },
+                          ]}
+                        />
                       </TableCell>
                     </TableRow>
                     {expanded && (

@@ -292,6 +292,14 @@ export const adminCopy = {
     `Offer ${subject} for ${gradeLevel}`,
   tierSelectLabel: (account: string) => `Account Tier for ${account}`,
   consumptionToggleLabel: (account: string) => `Consumption for ${account}`,
+  /**
+   * The `⋮` trigger on a table row, named after the row's own object.
+   *
+   * An icon-only control named "More actions" is one of nine identical controls
+   * to anybody not reading the screen with their eyes; the name has to say
+   * which row it opens.
+   */
+  rowActionsLabel: (name: string) => `More actions for ${name}`,
   errors: {
     generic: 'The change could not be saved. Try again.',
     duplicate: 'That name is already in use.',

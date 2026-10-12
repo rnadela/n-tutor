@@ -14,6 +14,7 @@ import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { Eye, EyeOff, Inbox, Pencil } from 'lucide-react';
+import { RowActions } from '@/components/RowActions';
 import { adminCopy } from '@/copy/admin';
 import type { TaxonomyItem } from '@/lib/admin-api';
 import { density, rounded } from '@/theme/tokens';
@@ -220,43 +221,46 @@ export function TaxonomyList(props: TaxonomyListProps) {
                       </Box>
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', gap: `${density.gap / 2}px` }}>
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            setRenamingId(item.id);
-                            setRenameDraft(item.name);
-                          }}
-                          aria-label={`${adminCopy.taxonomy.rename} ${item.name}`}
-                          size="small"
-                          variant="text"
-                          startIcon={<Pencil size={14} aria-hidden="true" />}
-                        >
-                          {adminCopy.taxonomy.rename}
-                        </Button>
-                        <Button
-                          type="button"
-                          color={item.enabled ? 'error' : 'success'}
-                          size="small"
-                          variant="text"
-                          startIcon={
-                            item.enabled ? (
-                              <EyeOff size={14} aria-hidden="true" />
+                      {/* The pencil says "rename" standing alone; "disable" does
+                          not, so it keeps its word and goes behind the ⋮
+                          (UX-DR43). Both keep the accessible name, the pending
+                          state and the handler they had as text buttons. */}
+                      <RowActions
+                        menuLabel={adminCopy.rowActionsLabel(item.name)}
+                        actions={[
+                          {
+                            key: 'rename',
+                            label: adminCopy.taxonomy.rename,
+                            ariaLabel: `${adminCopy.taxonomy.rename} ${item.name}`,
+                            icon: <Pencil size={16} aria-hidden="true" />,
+                            selfEvident: true,
+                            onClick: () => {
+                              setRenamingId(item.id);
+                              setRenameDraft(item.name);
+                            },
+                          },
+                          {
+                            key: 'enabled',
+                            label: item.enabled
+                              ? adminCopy.taxonomy.disable
+                              : adminCopy.taxonomy.enable,
+                            ariaLabel: `${
+                              item.enabled ? adminCopy.taxonomy.disable : adminCopy.taxonomy.enable
+                            } ${item.name}`,
+                            icon: item.enabled ? (
+                              <EyeOff size={16} aria-hidden="true" />
                             ) : (
-                              <Eye size={14} aria-hidden="true" />
-                            )
-                          }
-                          disabled={isPending(item.id)}
-                          onClick={() =>
-                            withPending(item.id, () => props.onSetEnabled(item, !item.enabled))
-                          }
-                          aria-label={`${
-                            item.enabled ? adminCopy.taxonomy.disable : adminCopy.taxonomy.enable
-                          } ${item.name}`}
-                        >
-                          {item.enabled ? adminCopy.taxonomy.disable : adminCopy.taxonomy.enable}
-                        </Button>
-                      </Box>
+                              <Eye size={16} aria-hidden="true" />
+                            ),
+                            disabled: isPending(item.id),
+                            onClick: () => {
+                              void withPending(item.id, () =>
+                                props.onSetEnabled(item, !item.enabled),
+                              );
+                            },
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

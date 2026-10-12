@@ -15,6 +15,7 @@ import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { Check, CircleCheck, GitMerge, Pencil, TriangleAlert } from 'lucide-react';
+import { RowActions } from '@/components/RowActions';
 import { adminCopy } from '@/copy/admin';
 import type { CanonicalTopic, ProvisionalTopic } from '@/lib/admin-api';
 import { density, rounded } from '@/theme/tokens';
@@ -276,48 +277,61 @@ export function TopicCurationList(props: TopicCurationListProps) {
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'grid', gap: `${density.gap}px`, justifyItems: 'start' }}>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: `${density.gap / 2}px` }}>
-                        <Button
-                          type="button"
-                          variant="contained"
-                          size="small"
-                          startIcon={<Check size={14} aria-hidden="true" />}
-                          disabled={isPending(topic.topicId)}
-                          onClick={() => withPending(topic.topicId, () => props.onConfirm(topic))}
-                          aria-label={`${adminCopy.topics.confirm} ${topic.name}`}
-                        >
-                          {adminCopy.topics.confirm}
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            closeMerge();
-                            setRenamingId(topic.topicId);
-                            setRenameDraft(topic.name);
-                          }}
-                          aria-label={`${adminCopy.topics.rename} ${topic.name}`}
-                          size="small"
-                          variant="text"
-                          startIcon={<Pencil size={14} aria-hidden="true" />}
-                        >
-                          {adminCopy.topics.rename}
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() =>
-                            mergingId === topic.topicId ? closeMerge() : openMerge(topic)
-                          }
-                          aria-label={`${adminCopy.topics.startMerge} ${topic.name}`}
-                          size="small"
-                          variant="text"
-                          aria-expanded={mergingId === topic.topicId}
-                          startIcon={<GitMerge size={14} aria-hidden="true" />}
-                        >
-                          {mergingId === topic.topicId
-                            ? adminCopy.topics.cancelMerge
-                            : adminCopy.topics.startMerge}
-                        </Button>
-                      </Box>
+                      {/* Three actions, so all three go behind the ⋮ (UX-DR43):
+                          a confirm, a merge and a rename are none of them a
+                          glyph an operator could read standing alone, and three
+                          text buttons are what made this cell wrap. */}
+                      <RowActions
+                        menuLabel={adminCopy.rowActionsLabel(topic.name)}
+                        actions={[
+                          {
+                            key: 'confirm',
+                            label: adminCopy.topics.confirm,
+                            ariaLabel: `${adminCopy.topics.confirm} ${topic.name}`,
+                            icon: <Check size={16} aria-hidden="true" />,
+                            disabled: isPending(topic.topicId),
+                            onClick: () => {
+                              void withPending(topic.topicId, () => props.onConfirm(topic));
+                            },
+                          },
+                          {
+                            key: 'rename',
+                            label: adminCopy.topics.rename,
+                            ariaLabel: `${adminCopy.topics.rename} ${topic.name}`,
+                            icon: <Pencil size={16} aria-hidden="true" />,
+                            selfEvident: true,
+                            onClick: () => {
+                              closeMerge();
+                              setRenamingId(topic.topicId);
+                              setRenameDraft(topic.name);
+                            },
+                          },
+                          {
+                            key: 'merge',
+                            // The item is the toggle, so it says which way it
+                            // goes and carries the panel's open state with it.
+                            label:
+                              mergingId === topic.topicId
+                                ? adminCopy.topics.cancelMerge
+                                : adminCopy.topics.startMerge,
+                            // The accessible name mirrors the visible label,
+                            // both ways (WCAG 2.5.3): an item reading "Cancel
+                            // merge" that answers to "Merge Fractions" is a
+                            // control a voice user cannot name.
+                            ariaLabel: `${
+                              mergingId === topic.topicId
+                                ? adminCopy.topics.cancelMerge
+                                : adminCopy.topics.startMerge
+                            } ${topic.name}`,
+                            icon: <GitMerge size={16} aria-hidden="true" />,
+                            expanded: mergingId === topic.topicId,
+                            onClick: () => {
+                              if (mergingId === topic.topicId) closeMerge();
+                              else void openMerge(topic);
+                            },
+                          },
+                        ]}
+                      />
 
                       {mergingId === topic.topicId && (
                         <Box

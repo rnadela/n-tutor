@@ -1,4 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
+import {
+  chooseRowAction,
+  COMPACT_TAP_TARGET,
+  focusByKeyboard,
+  focusedControl,
+  measureActionCell,
+  ONE_LINE_CEILING,
+  rowActionsName,
+} from '../fixtures';
 
 const OPERATOR_EMAIL = process.env.ADMIN_SEED_EMAIL ?? 'operator@example.test';
 const OPERATOR_PASSWORD = process.env.ADMIN_SEED_PASSWORD ?? 'change-me-too';
@@ -14,22 +23,6 @@ async function signIn(page: Page): Promise<void> {
   await page.getByLabel(/^Password/).fill(OPERATOR_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Subjects & Grade Levels' })).toBeVisible();
-}
-
-/**
- * Chromium only paints `:focus-visible` when focus arrived by keyboard, so the
- * focus-ring assertions have to tab their way to the control.
- */
-async function focusByKeyboard(page: Page, accessibleName: string): Promise<void> {
-  await page.locator('body').focus();
-  for (let step = 0; step < 80; step += 1) {
-    await page.keyboard.press('Tab');
-    const name = await page.evaluate(
-      () => (document.activeElement as HTMLElement | null)?.textContent?.trim() ?? '',
-    );
-    if (name === accessibleName) return;
-  }
-  throw new Error(`Tab order never reached "${accessibleName}"`);
 }
 
 async function selectableSubjectNames(page: Page, gradeLevelId: string): Promise<string[]> {
@@ -122,7 +115,7 @@ test.describe('admin taxonomy', () => {
     );
     expect(await selectableSubjectNames(page, levelId)).toEqual([SUBJECT_RENAMED]);
 
-    await page.getByRole('button', { name: `Disable ${SUBJECT_RENAMED}` }).click();
+    await chooseRowAction(page, SUBJECT_RENAMED, 'Disable');
     await expect(page.getByRole('status').first()).toContainText(
       `Subject ${SUBJECT_RENAMED} disabled.`,
     );
@@ -167,11 +160,13 @@ test.describe('admin taxonomy', () => {
       'New Subject name',
       'Add Subject',
       'Rename Keyboard',
-      'Disable Keyboard',
+      // Disable is a menu item now, so what the tab order must reach is the ⋮
+      // that opens it — the menu's own keyboard contract is MUI's.
+      'More actions for Keyboard',
       'New Grade Level name',
       'Add Grade Level',
       'Rename Grade 9',
-      'Disable Grade 9',
+      'More actions for Grade 9',
       'Offer Keyboard for Grade 9',
     ];
 
@@ -206,10 +201,16 @@ test.describe('admin taxonomy', () => {
     await page.getByRole('button', { name: 'Add Subject' }).click();
     await expect(page.getByRole('status').first()).toContainText('Subject Focusable created.');
 
+    // The inline pencil and the ⋮ are the row's whole action cell now, and both
+    // have to clear the 44px floor on their own: an icon-only control is a
+    // smaller target than the text button it replaced.
     for (const [label, control] of [
       ['Add Subject', page.getByRole('button', { name: 'Add Subject' })],
-      ['Rename', page.getByRole('button', { name: 'Rename Focusable' })],
-      ['Disable', page.getByRole('button', { name: 'Disable Focusable' })],
+      ['Rename Focusable', page.getByRole('button', { name: 'Rename Focusable' })],
+      [
+        'More actions for Focusable',
+        page.getByRole('button', { name: 'More actions for Focusable' }),
+      ],
     ] as const) {
       await focusByKeyboard(page, label);
       const style = await control.evaluate((element) => {
@@ -230,6 +231,78 @@ test.describe('admin taxonomy', () => {
       expect(style.height).toBeGreaterThanOrEqual(44);
       expect(style.width).toBeGreaterThanOrEqual(44);
     }
+  });
+
+  // A taxonomy row keeps Rename inline, so its menu holds the one action whose
+  // icon does not speak for itself. Moving *between* items by arrow key needs a
+  // menu with more than one, which `parent-students.spec.ts` walks.
+  test('opens and closes a row’s ⋮ menu by keyboard alone', async ({ page }) => {
+    await signIn(page);
+    await page.getByLabel('New Subject name').fill('Keys');
+    await page.getByRole('button', { name: 'Add Subject' }).click();
+    await expect(page.getByRole('status').first()).toContainText('Subject Keys created.');
+
+    // Tabbed to, not clicked: this is the path a keyboard user actually takes,
+    // and the whole acceptance criterion is about that path.
+    const trigger = rowActionsName('Keys');
+    await focusByKeyboard(page, trigger);
+
+    // --- Enter opens it, with focus already inside -------------------------
+    await page.keyboard.press('Enter');
+    const menu = page.getByRole('menu', { name: trigger });
+    await expect(menu).toBeVisible();
+    expect((await focusedControl(page)).role).toBe('menuitem');
+
+    // Every item shows its own word, not merely an accessible name: the labels
+    // are the reason these actions are in a menu rather than on the row, and a
+    // deleted `ListItemText` would leave every name-based query still passing.
+    await expect(menu.getByRole('menuitem', { name: `Disable Keys` })).toHaveText(/Disable/);
+
+    // An item is a tap target like any other, even inside a menu.
+    //
+    // `offsetHeight`, not the bounding rect: the menu arrives on a Grow
+    // transition whose `transform: scale()` the rect reports but layout does
+    // not, so a rect read mid-animation measures a fraction of the real box.
+    const item = await menu
+      .getByRole('menuitem', { name: 'Disable Keys' })
+      .evaluate((element) => (element as HTMLElement).offsetHeight);
+    expect(item).toBeGreaterThanOrEqual(COMPACT_TAP_TARGET);
+
+    // --- Escape closes it and hands focus back to the trigger -------------
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    expect((await focusedControl(page)).name).toBe(trigger);
+
+    // Space opens it too, and choosing an item closes it and fires the action.
+    await page.keyboard.press(' ');
+    await expect(menu).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Disable Keys' }).press('Enter');
+    await expect(menu).toHaveCount(0);
+    await expect(page.getByRole('status').first()).toContainText('Subject Keys disabled.');
+  });
+
+  test('keeps a row’s actions to two icons and one line at phone width', async ({ page }) => {
+    // The wrapping this story exists to fix is only observable in a real
+    // viewport: three text buttons in a narrow Actions column wrapped onto
+    // three lines and pushed the table into a horizontal scroll.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page);
+
+    await page.getByLabel('New Subject name').fill('Narrow');
+    await page.getByRole('button', { name: 'Add Subject' }).click();
+    await expect(page.getByRole('status').first()).toContainText('Subject Narrow created.');
+
+    await expect(page.getByRole('button', { name: 'Rename Narrow' })).toBeVisible();
+    await expect(page.getByRole('button', { name: rowActionsName('Narrow') })).toBeVisible();
+
+    const cell = await measureActionCell(page, '[data-testid="subjects-row"][data-name="Narrow"]');
+    // Two icons, the ⋮ counting as one — the cap itself.
+    expect(cell.buttons).toBe(2);
+    // No visible action word in the cell: the words are in the menu.
+    expect(cell.text).toBe('');
+    // One line, and no sideways scroll on the table that holds it.
+    expect(cell.height).toBeLessThan(ONE_LINE_CEILING);
+    expect(cell.scrollWidth).toBeLessThanOrEqual(cell.clientWidth);
   });
 
   test('resyncs the availability checkbox to the server state after a failed toggle', async ({

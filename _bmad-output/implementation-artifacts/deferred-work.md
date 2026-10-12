@@ -2677,3 +2677,59 @@ source_spec: `spec-4-9-figure-placement.md`
 severity: low
 reason: `e2e/tests/parent-practice-test.spec.ts` and `e2e/tests/student-submit-attempt.spec.ts` each declare their own local `boxOf(locator)` returning a bounding-box shape; the two differ only in that the former also returns `right`. Neither existed before this story added layout assertions that needed one.
 status: open
+
+### DW-336: The Topic curation screen has no executing test coverage at all: its spec asserts the component's source text and no Playwright suite visits /admin/topics.
+origin: spec-deferred b9dfe95cee4f
+location: apps/web/src/app/admin/topics/page.spec.tsx
+source_spec: `spec-1-8-table-row-actions.md`
+severity: medium
+reason: apps/web/src/app/admin/topics/page.spec.tsx reads page.tsx and TopicCurationList.tsx with readFileSync and asserts on substrings; there is no e2e/tests/admin-topics*.spec.ts. Swapping the Confirm and Merge handlers would ship green. Pre-existing: the screen never had behavioural coverage, and this story only changed how its actions are reached.
+status: open
+
+### DW-337: Choosing Rename from a row menu reveals an inline text field that never receives focus and is never announced.
+origin: spec-deferred 269b4395613c
+location: apps/web/src/app/admin/_components/TaxonomyList.tsx
+source_spec: `spec-1-8-table-row-actions.md`
+severity: low
+reason: TaxonomyList, TopicCurationList and the Students table all swap the cell to a TextField when renamingId is set; nothing calls focus() on it. Pre-existing — the old in-cell Rename button was itself unmounted by the swap, losing focus entirely — but the menu makes the revealed field one more step away from where focus lands.
+status: open
+
+### DW-338: The deferred-work ledger still tracks parentCopy.students.restoreNote, a string this story deleted.
+origin: spec-deferred b584bb252ab2
+location: _bmad-output/implementation-artifacts/deferred-work.md
+source_spec: `spec-1-8-table-row-actions.md`
+severity: low
+reason: _bmad-output/implementation-artifacts/deferred-work.md references restoreNote at a location that no longer exists; the entry needs closing or re-pointing by a sweep.
+status: open
+
+### DW-339: A disabled inline icon action would have no reachable name, because MUI shows no tooltip for a disabled child.
+origin: spec-deferred adf471939baf
+location: apps/web/src/components/RowActions.tsx
+source_spec: `spec-1-8-table-row-actions.md`
+severity: low
+reason: RowActions wraps inline IconButtons in Tooltip and accepts disabled on an inline action. No current call site disables an inline action (the pencil and the chevron are always enabled), so this is latent rather than live; the usual fix is a wrapping span.
+status: open
+
+### DW-340: No automated check covers the four tables in dark mode or at tablet width.
+origin: spec-deferred 31afe3f02364
+location: e2e/tests/admin-taxonomy.spec.ts
+source_spec: `spec-1-8-table-row-actions.md`
+severity: medium
+reason: The new Playwright measurements run at 390px and desktop in the default theme only, and the unit renders use parentTheme. The spec files the light/dark, phone/tablet pass under manual checks; nothing in the repo asserts it, here or on any earlier design-system story.
+status: open
+
+### DW-341: RowActions renders aria-expanded/aria-controls onto a MenuItem whenever a disclosure-type action lands in the overflow menu, which is a different ARIA meaning there (submenu disclosure) than on a
+origin: spec-deferred 8055197eb995
+location: apps/web/src/components/RowActions.tsx
+source_spec: `spec-1-8-table-row-actions.md`
+severity: low
+reason: No current call site puts a disclosure action (expanded/controls) behind the overflow menu — only the inline chevron uses those props today — so this is latent, not live. A future row mixing a disclosure action with 2+ others would hit it.
+status: open
+
+### DW-342: epic-1-context.md now documents Story 1.9 (cards below desktop) as already consuming this story's RowActions component, before 1.9's card-list component exists in the codebase.
+origin: spec-deferred a703974b407a
+location: _bmad-output/implementation-artifacts/epic-1-context.md
+source_spec: `spec-1-8-table-row-actions.md`
+severity: medium
+reason: The compiled epic context describes "1.9's cards consume 1.8's component" and a CSS-only breakpoint swap, but no Cards/list component was added by this diff; whoever starts 1.9 should verify the context doc against the real component surface rather than trusting the description as already-built.
+status: open

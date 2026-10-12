@@ -327,25 +327,24 @@ export const parentCopy = {
     gradeLevelNote: 'Changing the grade level does not change any practice test already made.',
     gradeLevelChanged: (name: string, gradeLevel: string) => `${name} is now in ${gradeLevel}.`,
 
+    /**
+     * The `⋮` trigger on a row, named after the child whose row it opens.
+     *
+     * An icon-only control named "More actions" is one of five identical
+     * controls to anybody not reading the screen with their eyes.
+     */
+    rowActionsLabel: (name: string) => `More actions for ${name}`,
+
     archive: 'Archive',
-    /** Archiving is visibly not deleting: the copy says what is kept. */
-    archiveNote:
-      'Archiving hides the profile from Student Mode and keeps its history. Nothing is deleted.',
     archiveConfirmTitle: (name: string) => `Archive ${name}?`,
     archiveConfirmBody: (name: string) =>
       `${name} is hidden from Student Mode and its history is kept. Nothing is deleted.`,
     archiveCancel: 'Cancel',
     archived: (name: string) => `${name} is archived and hidden from Student Mode.`,
     restore: 'Restore',
-    restoreNote: 'Restoring puts the profile back in Student Mode.',
     restored: (name: string) => `${name} is active again.`,
 
     delete: 'Delete',
-    /**
-     * Beside `archiveNote` in the same row, because the two controls must read
-     * as different actions rather than as two words for one.
-     */
-    deleteNote: 'Deleting removes the profile and everything saved under it, for good.',
     /**
      * The confirmation's body. FR-33 requires it to name the child, every count
      * and kind that will be destroyed, and that it cannot be undone — and to say

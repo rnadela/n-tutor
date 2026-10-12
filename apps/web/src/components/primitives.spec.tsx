@@ -128,13 +128,22 @@ describe('every primitive renders a real control', () => {
     // UX-DR30, as a source rule over the whole primitive layer — the lint
     // config catches the same thing at build time, and this catches a file
     // that slipped past a lint-disable.
+    // The exemption below names a file, so the sweep has to actually hold it:
+    // renamed or deleted, the exemption would otherwise silently cover nothing
+    // while still reading as a deliberate allowance.
+    expect(Object.keys(SOURCES)).toContain('RowActions.tsx');
+
     for (const [name, source] of Object.entries(SOURCES)) {
       for (const forbidden of [
         '<div onClick',
         '<span onClick',
         '<div role="button"',
         '<span role="button"',
-        'aria-expanded',
+        // `RowActions.tsx` is the one primitive allowed to spell this, because
+        // the disclosure it draws *is* a real `IconButton` and the attribute
+        // belongs on it; its own spec asserts the rendered `aria-expanded`
+        // lands on a `<button>` and never on a span dressed up as one.
+        ...(name === 'RowActions.tsx' ? [] : ['aria-expanded']),
         'tabIndex',
       ]) {
         expect(source, `${name}: ${forbidden}`).not.toContain(forbidden);

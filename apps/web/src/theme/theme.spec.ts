@@ -222,6 +222,16 @@ describe('density', () => {
       minHeight: set.tapTarget,
       minWidth: set.tapTarget,
     });
+    // MUI's own `MenuItem` drops to `minHeight: auto` from `sm` up, so without
+    // this override every action a table row keeps behind its `⋮` is a
+    // sub-floor target on most widths — and the floor has to be restated
+    // inside that breakpoint, or it holds on a phone alone.
+    const menuItem = theme.components?.MuiMenuItem?.styleOverrides?.root;
+    expect(typeof menuItem).toBe('function');
+    expect((menuItem as (arg: { theme: Theme }) => object)({ theme })).toMatchObject({
+      minHeight: set.tapTarget,
+      [theme.breakpoints.up('sm')]: { minHeight: set.tapTarget },
+    });
     expect(theme.components?.MuiOutlinedInput?.styleOverrides?.root).toMatchObject({
       minHeight: set.tapTarget,
     });

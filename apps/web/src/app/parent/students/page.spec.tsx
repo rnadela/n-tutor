@@ -1,19 +1,13 @@
-import { renderToStaticMarkup } from 'react-dom/server';
-import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it, vi } from 'vitest';
-import { parentTheme } from '@/theme/theme';
 import { parentCopy } from '@/copy/parent';
 import { NETWORK_STATUS, ParentApiError } from '@/lib/parent-api';
 import {
   announcedText,
   applyIfCurrent,
-  archiveNoteId,
   canCreateStudent,
   createRefusal,
-  deleteNoteId,
   endsParentView,
   refusalText,
-  StudentRowNotes,
 } from './page';
 
 describe('the Students screen’s create rule', () => {
@@ -95,9 +89,6 @@ describe('the archive copy', () => {
     expect(confirmation).toMatch(/Student Mode/);
     expect(confirmation).toMatch(/history is kept/i);
     expect(confirmation).toMatch(/Nothing is deleted/i);
-
-    expect(parentCopy.students.archiveNote).toMatch(/hides/i);
-    expect(parentCopy.students.archiveNote).toMatch(/keeps its history/i);
     // The control itself is labelled Archive, never Delete or Remove.
     expect(parentCopy.students.archive).toBe('Archive');
     expect(parentCopy.students.archive).not.toMatch(/delete|remove/i);
@@ -178,14 +169,23 @@ describe('the delete copy', () => {
   });
 
   it('reads as a different action from archiving, and says which keeps history', () => {
-    // The two controls sit in the same row, so the distinction has to be in the
-    // words rather than in where they are.
+    // The two items sit in the same menu, so the distinction has to be in the
+    // words. It lives in the two confirmations now that the per-row notes are
+    // gone with the notes row: the archive's says what is kept, the delete's
+    // says what is destroyed and that it cannot be undone.
     expect(parentCopy.students.delete).toBe('Delete');
     expect(parentCopy.students.archive).toBe('Archive');
-    expect(parentCopy.students.archiveNote).toMatch(/keeps its history/i);
-    expect(parentCopy.students.archiveNote).toMatch(/Nothing is deleted/i);
-    expect(parentCopy.students.deleteNote).toMatch(/removes/i);
-    expect(parentCopy.students.deleteNote).not.toMatch(/keeps/i);
+
+    const archiving = parentCopy.students.archiveConfirmBody('Noah');
+    expect(archiving).toMatch(/history is kept/i);
+    expect(archiving).toMatch(/Nothing is deleted/i);
+    expect(archiving).not.toMatch(/cannot be undone/i);
+
+    const deleting = parentCopy.students.deleteBody('Noah', FULL);
+    expect(deleting).toMatch(/will be removed/i);
+    expect(deleting).toMatch(/cannot be undone/i);
+    expect(deleting).not.toMatch(/history is kept/i);
+    expect(deleting).not.toMatch(/Nothing is deleted/i);
   });
 
   it('announces the deletion without claiming something was saved under the child', () => {
@@ -278,40 +278,11 @@ describe('what a refused create puts on the screen', () => {
   });
 });
 
-describe('the row’s notes about which control keeps the child’s history', () => {
-  function render(archived: boolean): string {
-    return renderToStaticMarkup(
-      <ThemeProvider theme={parentTheme}>
-        <StudentRowNotes profileId="profile-1" archived={archived} />
-      </ThemeProvider>,
-    ).replace(/<style[\s\S]*?<\/style>/gu, '');
-  }
-
-  it('renders both sentences as text a parent can actually read', () => {
-    // Not a `title`: a tooltip does not exist on touch, and the controls carry
-    // an `aria-label` that would override it for a screen reader — so the one
-    // thing telling Archive and Delete apart would be unreachable.
-    const markup = render(false);
-    expect(markup).toContain(parentCopy.students.archiveNote);
-    expect(markup).toContain(parentCopy.students.deleteNote);
-  });
-
-  it('gives each note the id its control points `aria-describedby` at', () => {
-    const markup = render(false);
-    expect(markup).toContain(`id="${archiveNoteId('profile-1')}"`);
-    expect(markup).toContain(`id="${deleteNoteId('profile-1')}"`);
-  });
-
-  it('drops the archive note on an archived row, whose control is Restore', () => {
-    const markup = render(true);
-    expect(markup).not.toContain(parentCopy.students.archiveNote);
-    expect(markup).toContain(parentCopy.students.deleteNote);
-    expect(markup).toContain(`id="${deleteNoteId('profile-1')}"`);
-  });
-
-  it('says one keeps the history and the other does not', () => {
-    const markup = render(false);
-    expect(markup).toMatch(/keeps its history/i);
-    expect(markup).toMatch(/for good/i);
+describe('the ⋮ trigger on a student row', () => {
+  it('names the child whose row it opens, not merely "more actions"', () => {
+    // An icon-only control named "More actions" is one of five identical
+    // controls to anybody not reading the screen with their eyes.
+    expect(parentCopy.students.rowActionsLabel('Noah')).toContain('Noah');
+    expect(parentCopy.students.rowActionsLabel('Noah')).not.toContain('!');
   });
 });

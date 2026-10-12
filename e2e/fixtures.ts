@@ -1,7 +1,130 @@
 import { randomUUID } from 'node:crypto';
+import type { Page } from '@playwright/test';
 import { Client } from 'pg';
 import { e2eDatabaseUrl } from './database';
 import { lastMailTo, resetLinkFrom } from './mail-sink';
+
+/**
+ * The accessible name of a row's `⋮` trigger, which both copy modules author
+ * identically. Stated once here so a suite cannot drift from the product's
+ * wording — or from the other suite's idea of it.
+ */
+export function rowActionsName(name: string): string {
+  return `More actions for ${name}`;
+}
+
+/**
+ * Reaches an action that lives behind a table row's `⋮` (UX-DR43).
+ *
+ * Since Story 1.8 only a self-evident icon stays on the row; everything else is
+ * a `menuitem`, so it has to be opened before it can be chosen. Shared across
+ * the suites because every table with row actions now reaches them this way.
+ */
+export async function chooseRowAction(page: Page, name: string, action: string): Promise<void> {
+  await page.getByRole('button', { name: rowActionsName(name) }).click();
+  await page.getByRole('menuitem', { name: `${action} ${name}` }).click();
+}
+
+/**
+ * Tabs until the named control has focus, and fails loudly if it never does.
+ *
+ * Chromium only paints `:focus-visible` — and MUI's Tooltip only opens on focus
+ * — when focus arrived by keyboard, so a programmatic `.focus()` is not a
+ * substitute: it tests neither the ring nor the tooltip a keyboard user sees.
+ */
+export async function focusByKeyboard(page: Page, accessibleName: string): Promise<void> {
+  await page.locator('body').focus();
+  for (let step = 0; step < 80; step += 1) {
+    await page.keyboard.press('Tab');
+    // The `aria-label` first: a row's actions are icon-only buttons, and their
+    // accessible name is the only name they have.
+    const name = await page.evaluate(() => {
+      const element = document.activeElement as HTMLElement | null;
+      return element?.getAttribute('aria-label') ?? element?.textContent?.trim() ?? '';
+    });
+    if (name === accessibleName) return;
+  }
+  throw new Error(`Tab order never reached "${accessibleName}"`);
+}
+
+/** What has focus right now: its role, and the name it answers to. */
+export async function focusedControl(page: Page): Promise<{ role: string; name: string }> {
+  return page.evaluate(() => {
+    const element = document.activeElement as HTMLElement | null;
+    return {
+      role: element?.getAttribute('role') ?? '',
+      name: (element?.getAttribute('aria-label') ?? element?.textContent?.trim() ?? '').trim(),
+    };
+  });
+}
+
+/**
+ * The compact surface's tap-target floor (UX-DR10), which both Admin and Parent
+ * View run on. The same figure the hit-area assertions already use; named so
+ * the single-line bound below is derived from it rather than guessed.
+ */
+export const COMPACT_TAP_TARGET = 44;
+
+/**
+ * A one-line action cell's height ceiling.
+ *
+ * A second line of controls adds another whole tap target, so any cell shorter
+ * than two floors is holding exactly one line — which is the wrapping Story 1.8
+ * exists to remove.
+ */
+export const ONE_LINE_CEILING = COMPACT_TAP_TARGET * 2;
+
+export interface ActionCellMetrics {
+  /** How many controls the cell holds — the `⋮` counting as one. */
+  buttons: number;
+  /** Visible text in the cell, which an icon-only cell has none of. */
+  text: string;
+  /** The height of the controls themselves, not of the row-height-driven cell. */
+  height: number;
+  /** The scroll geometry of whichever ancestor scrolls the table sideways. */
+  scrollWidth: number;
+  clientWidth: number;
+}
+
+/**
+ * Measures a row's action cell: how many controls it holds, what it says out
+ * loud, how tall it is, and whether the table it sits in scrolls sideways.
+ *
+ * Shared because the regression is the same on every table — three text buttons
+ * wrapping a narrow Actions column onto three lines — and the two suites that
+ * check it would otherwise each carry their own copy of the measurement.
+ */
+export async function measureActionCell(
+  page: Page,
+  rowSelector: string,
+): Promise<ActionCellMetrics> {
+  const cell = page.locator(`${rowSelector} td`).last();
+  const buttons = await cell.getByRole('button').count();
+  const text = ((await cell.textContent()) ?? '').trim();
+  const box = await cell.evaluate((element) => {
+    // The sideways scroller is whichever ancestor owns the overflow — a
+    // `TableContainer` on one screen and a plain Box on another.
+    let scroller: HTMLElement | null = element.parentElement;
+    while (scroller !== null) {
+      const overflowX = getComputedStyle(scroller).overflowX;
+      if (overflowX === 'auto' || overflowX === 'scroll') break;
+      scroller = scroller.parentElement;
+    }
+    // The controls' own box, not the `td`: a table cell is as tall as its row,
+    // so measuring the cell measures whichever *other* cell is tallest — the
+    // grade-level select and its helper text, on the Students table — and says
+    // nothing about whether the actions wrapped.
+    const content = (element.firstElementChild as HTMLElement | null) ?? (element as HTMLElement);
+    return {
+      // `offsetHeight` rather than the bounding rect: the rect reports any
+      // transform on the way, and layout is what "one line" is about.
+      height: content.offsetHeight,
+      scrollWidth: scroller?.scrollWidth ?? 0,
+      clientWidth: scroller?.clientWidth ?? 0,
+    };
+  });
+  return { buttons, text, ...box };
+}
 
 export interface ParentAccountFixture {
   email: string;

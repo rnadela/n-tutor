@@ -1,8 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  chooseRowAction,
   createGradeLevelFixture,
   disableGradeLevelFixture,
+  focusByKeyboard,
+  focusedControl,
+  measureActionCell,
+  ONE_LINE_CEILING,
   readStudentProfile,
+  rowActionsName,
   uniqueParentEmail,
 } from '../fixtures';
 
@@ -68,11 +74,40 @@ async function profileId(page: Page, name: string): Promise<string> {
 }
 
 /**
+ * A CSS colour as plain `r,g,b`, so a hex token and a computed `rgb()` compare.
+ *
+ * The theme states its palette as CSS variables, and `getComputedStyle` answers
+ * in `rgb()` — two spellings of one colour that a string comparison would call
+ * different.
+ */
+function rgbOf(colour: string): string {
+  const value = colour.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/iu.exec(value);
+  if (hex !== null) {
+    const digits = hex[1]!;
+    const pairs =
+      digits.length === 3
+        ? [...digits].map((digit) => `${digit}${digit}`)
+        : [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 6)];
+    return pairs.map((pair) => parseInt(pair, 16)).join(',');
+  }
+  const channels = value.match(/\d+(\.\d+)?/gu);
+  if (channels === null) throw new Error(`Not a colour: "${colour}"`);
+  return channels
+    .slice(0, 3)
+    .map((channel) => Math.round(Number(channel)))
+    .join(',');
+}
+
+/**
  * Opens the archive confirmation for `name`, returns its text, and confirms it.
  * The text is returned so the assertion happens in the test body.
+ *
+ * The Students row has three actions, so all three are menu items: Archive is
+ * reached through the row's `⋮`.
  */
 async function confirmArchive(page: Page, name: string): Promise<string> {
-  await page.getByRole('button', { name: `Archive ${name}` }).click();
+  await chooseRowAction(page, name, 'Archive');
   const dialog = page.getByRole('dialog', { name: `Archive ${name}?` });
   await expect(dialog).toBeVisible();
   const text = (await dialog.textContent()) ?? '';
@@ -109,7 +144,7 @@ test.describe('Student Profiles in Parent View', () => {
     const created = await readStudentProfile(email, 'Noah');
 
     // --- Rename -----------------------------------------------------------
-    await page.getByRole('button', { name: 'Rename Noah' }).click();
+    await chooseRowAction(page, 'Noah', 'Rename');
     await page.getByLabel('New name').fill('Noa');
     await page.getByRole('button', { name: 'Save the name' }).click();
     await expect(row(page, 'Noa')).toBeVisible();
@@ -144,7 +179,7 @@ test.describe('Student Profiles in Parent View', () => {
     expect(archived.archivedAt).not.toBeNull();
 
     // --- Restore ------------------------------------------------------------
-    await page.getByRole('button', { name: 'Restore Noa' }).click();
+    await chooseRowAction(page, 'Noa', 'Restore');
     await expect(row(page, 'Noa').getByText('Active')).toBeVisible();
     const restored = await readStudentProfile(email, 'Noa');
     expect(restored.archivedAt).toBeNull();
@@ -194,6 +229,105 @@ test.describe('Student Profiles in Parent View', () => {
     // And the row survived untouched.
     const stored = await readStudentProfile(email, 'Mira');
     expect(stored.archivedAt).toBeNull();
+  });
+
+  test('offers all three actions in one menu, with Delete set apart and last', async ({ page }) => {
+    const level = await createGradeLevelFixture('E2E Grade Menu');
+    await openStudents(page);
+    await page.locator('#student-name').fill('Ada');
+    await chooseGradeLevel(page, 'student-grade-level', level.name);
+    await page.getByRole('button', { name: 'Add the profile' }).click();
+    await expect(row(page, 'Ada')).toBeVisible();
+
+    const trigger = page.getByRole('button', { name: rowActionsName('Ada') });
+
+    // The icon's word, on keyboard focus and on hover both. An icon-only
+    // control that names itself to a pointer alone is an unlabelled glyph to
+    // everybody else.
+    //
+    // Focus first, and reached by Tab rather than by `.focus()`: MUI opens the
+    // tooltip only for `:focus-visible`, which a programmatic focus does not
+    // set — so the keyboard case has to be walked, and walked before any hover
+    // has left a pointer sitting on the control.
+    await focusByKeyboard(page, rowActionsName('Ada'));
+    await expect(page.getByRole('tooltip')).toContainText(rowActionsName('Ada'));
+
+    await trigger.hover();
+    await expect(page.getByRole('tooltip')).toContainText(rowActionsName('Ada'));
+
+    await trigger.click();
+    const menu = page.getByRole('menu', { name: rowActionsName('Ada') });
+    await expect(menu).toBeVisible();
+
+    // All three, in the order the story fixes, each showing its own word.
+    await expect(menu.getByRole('menuitem')).toHaveText([/Rename/, /Archive/, /Delete/]);
+
+    // Delete is last, preceded by a separator, and in the error colour.
+    const items = menu.getByRole('menuitem');
+    const deleteItem = items.last();
+    await expect(deleteItem).toHaveText(/Delete/);
+    await expect(menu.getByRole('separator')).toHaveCount(1);
+    const setApart = await deleteItem.evaluate((element) => {
+      const previous = element.previousElementSibling;
+      return {
+        colour: getComputedStyle(element).color,
+        errorColour: getComputedStyle(element).getPropertyValue('--mui-palette-error-main').trim(),
+        afterSeparator:
+          previous?.getAttribute('role') === 'separator' || previous?.tagName === 'HR',
+      };
+    });
+    expect(setApart.afterSeparator).toBe(true);
+    // The theme's own error colour, not merely "some red".
+    expect(rgbOf(setApart.colour)).toBe(rgbOf(setApart.errorColour));
+
+    // --- The arrows move between the items --------------------------------
+    // This is the menu with three of them, so it is where "arrow keys move
+    // between items" can actually be observed.
+    const first = await focusedControl(page);
+    expect(first.role).toBe('menuitem');
+    await page.keyboard.press('ArrowDown');
+    const second = await focusedControl(page);
+    expect(second.role).toBe('menuitem');
+    expect(second.name).not.toBe(first.name);
+    await page.keyboard.press('ArrowUp');
+    expect((await focusedControl(page)).name).toBe(first.name);
+
+    // --- And the action itself still runs from in there -------------------
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await chooseRowAction(page, 'Ada', 'Delete');
+    // The password-gated confirmation, naming the child and what goes.
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Ada');
+    await expect(dialog).toContainText('cannot be undone');
+    await expect(dialog.getByLabel(/account password/i)).toBeVisible();
+
+    // Backed out of, so nothing is destroyed and the row is still there.
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(row(page, 'Ada')).toBeVisible();
+  });
+
+  test('keeps an all-in-menu row to one icon and one line at phone width', async ({ page }) => {
+    // The Students row is the cell that wrapped onto three lines: Rename,
+    // Archive and Delete as text buttons in a four-column table at 390px.
+    const level = await createGradeLevelFixture('E2E Grade Narrow');
+    // Arrived at full width and then narrowed: the Parent View sidebar this
+    // helper navigates through is not on screen at phone width, and what is
+    // under test is the table's own layout once it is there.
+    await openStudents(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#student-name').fill('Ira');
+    await chooseGradeLevel(page, 'student-grade-level', level.name);
+    await page.getByRole('button', { name: 'Add the profile' }).click();
+    await expect(row(page, 'Ira')).toBeVisible();
+
+    const cell = await measureActionCell(page, '[data-testid="student-row"][data-name="Ira"]');
+    // All three actions are in the menu, so the ⋮ is the row's only control.
+    expect(cell.buttons).toBe(1);
+    expect(cell.text).toBe('');
+    expect(cell.height).toBeLessThan(ONE_LINE_CEILING);
+    expect(cell.scrollWidth).toBeLessThanOrEqual(cell.clientWidth);
   });
 
   test('sends a reloaded Students screen back to the PIN gate', async ({ page }) => {
