@@ -45,27 +45,31 @@ development_status:
   1-7-design-system-foundation: done
   epic-1-retrospective: optional
 
-  epic-2: done
+  epic-2: in-progress
   2-1-subject-grade-level-taxonomy: done
   2-2-parent-account-tier-assignment-consumption-view: done
+  2-3-default-subject-seed: backlog
   epic-2-retrospective: optional
 
-  epic-3: done
+  epic-3: in-progress
   3-1-multi-page-capture-camera-library: done
   3-2-page-management-before-submit: done
   3-3-subject-grade-level-assignment: done
   3-4-legibility-check-upload-commit: done
   3-5-structured-extraction: done
   3-6-thin-extraction-warning: done
+  3-7-upload-stepper: backlog
+  3-8-plain-language-check-step: backlog
   epic-3-retrospective: optional
 
-  epic-4: done
+  epic-4: in-progress
   4-1-practice-test-generation-bounded-priced-async: done
   4-2-topic-weighted-regeneration: done
   4-3-draft-review: done
   4-4-draft-editing: done
   4-5-release-or-discard: done
   4-6-optional-timer-configuration: done
+  4-7-obvious-progress-spinner: backlog
   epic-4-retrospective: optional
 
   epic-5: done

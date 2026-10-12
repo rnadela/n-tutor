@@ -548,6 +548,40 @@ So that I can manage the account base.
 
 **And** hard enforcement (blocking at cap) is out of scope for this story and ships in Epic 9 — this story is view and assign only
 
+### Story 2.3: Default Subject Seed
+
+As the operator,
+I want the standard Philippine K to 12 subjects present out of the box,
+So that a fresh environment can accept uploads without manual taxonomy entry.
+
+**Acceptance Criteria:**
+
+**Given** the seed runs on an environment with no subjects
+**Then** the default subjects are created enabled, and each is linked, enabled, to the grade levels in the default mapping
+
+**Given** the seed runs again
+**Then** nothing is created twice, keyed on Subject `nameKey` and on the (Subject, Grade Level) pair
+
+**Given** an operator has renamed, disabled, or unlinked a subject or link
+**When** the seed runs again
+**Then** that change is preserved: nothing is recreated, re-enabled, or relinked
+
+**Given** a grade level in the mapping does not exist (renamed or never seeded)
+**Then** its links are skipped and the seed still succeeds, reporting the skip
+
+**Given** the seed output
+**Then** it reports subjects created and links created
+
+**Default mapping (approved 2026-10-12):**
+| Grade levels | Subjects |
+|---|---|
+| Kindergarten | Mathematics, English, Filipino |
+| Grade 1–2 | Mathematics, English, Filipino, Makabansa, GMRC |
+| Grade 3 | Mathematics, Science, English, Filipino, Makabansa, GMRC |
+| Grade 4–6 | Mathematics, Science, English, Filipino, Araling Panlipunan, MAPEH, GMRC, EPP |
+| Grade 7–10 | Mathematics, Science, English, Filipino, Araling Panlipunan, MAPEH, Values Education, TLE |
+| Grade 11–12 | Mathematics, Science, English, Filipino, Social Sciences |
+
 ## Epic 3: Source Test Capture, Upload & Extraction
 
 Parent can photograph or select a paper test's pages, assign Subject/Grade Level, and the system extracts it into a reusable structured Source Test.
@@ -674,6 +708,68 @@ So that I can decide whether to retake before spending a generation.
 **Then** I am shown the usable-question count and the page count with a choice to proceed or retake
 
 **And** this warning never hard-blocks, and choosing retake consumes no Generation Allowance
+
+### Story 3.7: Upload Stepper
+
+As a parent,
+I want uploading a test broken into clear steps,
+So that I only see what I can act on right now.
+
+**Acceptance Criteria:**
+
+**Given** Upload a test
+**Then** a 4-step stepper is shown — Details, Pages, Check, Generate — with the current step named in text and announced on change
+
+**Given** step 1 (Details: child, grade level, subject)
+**When** no subject is chosen, or the chosen grade level offers no subjects, or no grade levels exist
+**Then** only the classification controls and their message are shown; the page controls (Order, add pages, page strip) are not rendered, and Next is disabled
+
+**Given** a subject and grade level are set
+**When** I press Next
+**Then** step 2 (Pages) shows add pages and the ordered page strip; Next is disabled at zero pages
+
+**Given** step 3 (Check)
+**Then** the batch legibility check and the commit confirmation behave exactly as Story 3.4
+
+**Given** any step before commit
+**When** I press Back
+**Then** I return to the previous step with everything already entered kept
+
+**Given** the upload is committed
+**Then** steps 1–3 are read-only and the stepper shows them complete; step 4 (Generate) behaves as Stories 3.5, 3.6 and 4.1
+
+**Given** I reload or return to an in-progress draft
+**Then** the stepper opens on the furthest step the draft's saved state allows
+
+**Given** keyboard and screen reader use
+**Then** focus moves to the new step's heading on each step change, and Back/Next are real buttons with accessible names
+
+### Story 3.8: Plain-Language Check Step & Upload Allowance Left
+
+As a parent,
+I want the page check to use everyday words and show how much upload allowance I have left,
+So that I know exactly what continuing will cost me.
+
+**Acceptance Criteria:**
+
+**Given** the Check step
+**Then** no parent-facing string uses "commit", "block", or other system terms; every sentence says what happens to the parent in everyday words. The term "upload allowance" is kept, matching Settings
+
+**Given** a limited plan
+**When** the Check step opens
+**Then** it shows the allowance left as a figure with the reset date, e.g. "Upload allowance: 4 of 5 left this month. Resets 1 November.", read from `GET /parent/allowances` and never computed in the app
+
+**Given** an unlimited plan (`limit: null`)
+**Then** it says "Your upload allowance is unlimited." and shows no figure
+
+**Given** the allowance read fails
+**Then** the step still works, the figure is omitted, and the cost sentence alone is shown
+
+**Given** a successful continue
+**Then** the figure shown afterwards reflects the upload just used (re-read, not decremented locally)
+
+**Given** zero upload allowance left
+**Then** the existing Story 9.3 at-cap behaviour applies unchanged
 
 ## Epic 4: Practice Test Generation, Review & Release
 
@@ -803,6 +899,49 @@ So that I can simulate timed conditions.
 
 **Given** the timer expires
 **Then** auto-submit is announced when it happens, the Attempt auto-submits, and every unanswered Question is graded incorrect
+
+### Story 4.7: Obvious Progress Spinner & Sheet Tally
+
+As a parent,
+I want an obvious spinner while my pages are read, and to see each practice test arrive as a ticked sheet,
+So that I can see at a glance the app is working and how far along it is.
+
+**Acceptance Criteria:**
+
+**Given** the capture page's Generate step while the pages are being read
+**Or** the generation page while practice tests are being made
+**Then** a large spinner (MUI `CircularProgress`, accent colour from `tokens.ts`, at least 48px) is centred above the status sentence, and nothing else on the card competes with it
+
+**Given** the wait settles (ready, failed, or done)
+**Then** the spinner is removed in the same render the result appears
+
+**Given** `prefers-reduced-motion`
+**Then** the spinner does not rotate; a static progress mark is shown with the same status sentence, so the wait is still obvious without motion
+
+**Given** a screen reader
+**Then** the spinner is `aria-hidden`; the existing `role="status"` sentence is what is announced, unchanged
+
+**Given** one shared component
+**Then** both waits use it, and no hex value is introduced outside `tokens.ts`
+
+**Given** the generation page while a job runs or after it settles
+**Then** a row of sheet icons is shown, one per requested practice test (`requestedCount` from the job view), wrapping on narrow screens:
+- **Ready** (index < `producedCount`): sheet with a checkmark, `success` colour, light `success` tint fill
+- **Being made** (index = `producedCount`, job running): sheet with the spinner ring around it, accent colour — this is the generation page's spinner
+- **Waiting** (job running, later index): dashed outline sheet, `divider` colour
+- **Not made** (job Partially complete or Failed, index ≥ `producedCount`): sheet with an ×, `textSecondary`
+
+**Given** a sheet turns ready
+**Then** the checkmark draws in and the sheet settles from 85% scale over `motion.durationStandard` with `motion.easing`; under `prefers-reduced-motion` it appears with no motion
+
+**Given** colour removed
+**Then** each state is still told apart by shape alone (check, ×, dashed outline, ring)
+
+**Given** a screen reader
+**Then** the tally is `aria-hidden`; the existing progress sentence (`role="status"`, unchanged words) is the announcement, shown directly under the tally
+
+**Given** the visual reference `mockups/key-generation-progress.html`
+**Then** the build matches it in states, colours and order; the spines win where they differ
 
 ## Epic 5: Taking a Test & Results
 
