@@ -7,6 +7,7 @@ import {
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AdminAuditService } from './admin-audit.service.js';
+import { nameKey, normaliseName } from '../common/name-key.js';
 
 export interface TaxonomyItem {
   id: string;
@@ -24,19 +25,6 @@ export interface TaxonomySnapshot {
   subjects: TaxonomyItem[];
   gradeLevels: TaxonomyItem[];
   availability: AvailabilityEntry[];
-}
-
-/**
- * The stored label: Unicode-normalised (NFKC), trimmed, internal whitespace
- * collapsed. "Grade  4" and "Grade 4" are the same Grade Level.
- */
-export function normaliseName(name: string): string {
-  return name.normalize('NFKC').replace(/\s+/gu, ' ').trim();
-}
-
-/** Case-insensitive uniqueness key. The label keeps its original casing. */
-export function nameKey(name: string): string {
-  return normaliseName(name).toLowerCase();
 }
 
 /**

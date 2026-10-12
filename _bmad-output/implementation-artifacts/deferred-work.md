@@ -2805,3 +2805,27 @@ source_spec: `spec-1-9-cards-below-desktop.md`
 severity: low
 reason: TaxonomyList, TopicCurationList, ParentAccountTable, AvailabilityMatrix, and parent/students's page all gate on `items.length === 0` and render a friendly empty-state message in place of both `TableOnDesktop` and `CardList`, unchanged from before this story. The practical result is identical to pre-story behavior and arguably clearer for a user than a bare empty list, but the I/O matrix's "no empty card, no placeholder" row is formally unmet below `lg`.
 status: open
+
+### DW-352: `seedGradeLevels` is keyed on the name alone, so a standard Grade Level an operator renamed is re-created under its original key on the next seed run, and the default-subject pass then links subjects
+origin: spec-deferred dab895f3b872
+location: apps/api/prisma/seed.ts (seedGradeLevels)
+source_spec: `spec-2-3-default-subject-seed.md`
+severity: medium
+reason: `seedGradeLevels` predates this story and looks a level up by its key only; a rename moves that key (`renameGradeLevel`), freeing it. `runSeed` runs that pass before the subject pass, so the "renamed grade level" case the story's acceptance criteria describe as a reported skip is instead a recreate in the real CLI path. Pre-existing behaviour, not introduced here; fixing it means giving `GradeLevel` the same rename-proof identity `Subject` just gained, which the story's criteria explicitly route to a skip instead.
+status: open
+
+### DW-353: All three seed passes read-then-create with no unique-violation handling, so two seed runs racing each other abort instead of being a no-op.
+origin: spec-deferred 1e288f250910
+location: apps/api/prisma/seed.ts
+source_spec: `spec-2-3-default-subject-seed.md`
+severity: low
+reason: `seedOperator`, `seedGradeLevels` and `seedDefaultSubjects` all check for a row and then create it, with no `P2002` catch and no upsert. The pattern predates this story. Consequence is bounded: the passes are create-only and a re-run heals a partial state, and nothing in the deploy path runs two seeds at once today.
+status: open
+
+### DW-354: No E2E assertion observes the seeded default taxonomy, because the E2E global setup truncates the taxonomy tables right after the seed runs.
+origin: spec-deferred 864ca4d5aa3d
+location: e2e/global-setup.ts
+source_spec: `spec-2-3-default-subject-seed.md`
+severity: low
+reason: `e2e/prepare.mts` runs the seed, then `e2e/global-setup.ts` TRUNCATEs `subject_grade_level`, `subject` and `grade_level` so every E2E run starts from an empty taxonomy its own fixtures build. The seeded defaults are therefore pinned at the integration tier (`runSeed` and `seedDefaultSubjects` specs) and never through the Admin screen. Changing the truncation would destabilise every taxonomy fixture, so it is a separate decision.
+status: open

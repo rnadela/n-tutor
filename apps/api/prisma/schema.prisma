@@ -29,6 +29,12 @@ model Subject {
   name      String
   /// Case-insensitive uniqueness key: lower(trim(name)).
   nameKey   String   @unique
+  /// The default-subject seed's rename-proof identity. Set only by the seed
+  /// (on create, or once when it adopts an operator-made row of the same
+  /// name); a rename moves `nameKey` and never touches this, so a renamed
+  /// seeded Subject is recognised and left alone instead of recreated. Null
+  /// for every operator-created Subject the seed has never adopted.
+  seedKey   String?  @unique
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
