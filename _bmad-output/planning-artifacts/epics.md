@@ -247,6 +247,8 @@ UX-DR42: Implement the Install Banner: a single, compact, dismissible banner at 
 
 UX-DR43: Implement table row actions as one shared pattern: each row action is an icon-only button, and only a self-evident icon (Rename = pencil, Delete = trash, expand/collapse = chevron) may stand alone. Any other action goes in a per-row action menu (⋮) whose items show icon and label together. A row shows at most 2 icons, and the ⋮ counts as one. When a row has more than 2 actions, all of them go in the menu and the ⋮ is the only icon. Every icon button and every ⋮ trigger has an accessible name that includes the row's object ("Rename Grade 3", "Actions for Grade 3"), a tooltip showing the action name on hover and focus, and the surface's tap-target floor. Destructive menu items are set apart by a divider and the error color.
 
+UX-DR44: Implement data tables as cards below desktop: below the `lg` breakpoint (1200px) every data table renders as a list of cards, and only at `lg` and above as a table. The switch is CSS-only (no viewport hook), so there is no layout swap after first paint, and the hidden layout is out of the accessibility tree. Each card is a flat, divider-bordered surface at the surface's card padding: the row's identifying value as the card title, the row actions (UX-DR43) at the card's top-right, and every other column as a labeled field (label in caption, value in body, tabular figures for numbers). Cards stack in one column on phones and two columns from `sm` (600px), except ranked lists, which stay one column so the rank reads top to bottom. The card list is a real list, each card named by its title. Nothing a table shows is dropped from its card.
+
 ### FR Coverage Map
 
 FR-1: Epic 1 - Parent Account sign-up/sign-in
@@ -343,7 +345,7 @@ Parent can sign up, sign in, secure Parent View behind a PIN, create and manage 
 
 **FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-34, FR-35
 **Relevant NFRs:** NFR7 (hashed creds/TLS), NFR8 (server-side authz), NFR9 (Parent View server-enforced time bound)
-**Relevant UX-DRs:** UX-DR1, UX-DR2, UX-DR3, UX-DR5, UX-DR6, UX-DR7, UX-DR9, UX-DR10, UX-DR11, UX-DR12, UX-DR13, UX-DR23, UX-DR26, UX-DR27, UX-DR28, UX-DR30, UX-DR31, UX-DR33, UX-DR36, UX-DR37 (design system foundation, Story 1.7), UX-DR43 (table row actions, Story 1.8)
+**Relevant UX-DRs:** UX-DR1, UX-DR2, UX-DR3, UX-DR5, UX-DR6, UX-DR7, UX-DR9, UX-DR10, UX-DR11, UX-DR12, UX-DR13, UX-DR23, UX-DR26, UX-DR27, UX-DR28, UX-DR30, UX-DR31, UX-DR33, UX-DR36, UX-DR37 (design system foundation, Story 1.7), UX-DR43 (table row actions, Story 1.8), UX-DR44 (cards below desktop, Story 1.9)
 
 ### Story 1.1: Parent Account Sign-Up & Sign-In
 
@@ -545,6 +547,50 @@ So that tables stay readable and uncrowded, on a phone too.
 
 **Given** the change
 **Then** the component has a unit spec covering the cap, menu, label, and keyboard rules; existing table unit and E2E specs pass, updated only for how actions are reached; and a visual pass in light and dark mode, on a phone and a tablet, shows no action cell wrapping onto a second line
+
+### Story 1.9: Cards Below Desktop
+
+As a parent or operator on a phone or tablet,
+I want lists shown as cards rather than squeezed tables,
+So that every value is readable without columns crushing together.
+
+**Acceptance Criteria:**
+
+**Given** any data table in the app
+**When** the viewport is below 1200px (MUI `lg`)
+**Then** it renders as a list of cards, and at 1200px and above it renders as the table
+**And** the switch is CSS-only (`sx` breakpoint keys, no `useMediaQuery`), with no layout swap after first paint
+
+**Given** a card
+**Then** it is a flat surface with a 1px divider border, no shadow, the control radius, and the surface's card padding
+**And** its title is the row's identifying value, the row actions (Story 1.8, same icon and menu rules) sit at its top-right, and every other column is a labeled field: caption label, body value, tabular figures for numbers
+**And** nothing the table shows is missing from the card
+
+**Given** the card list
+**Then** it is one column below 600px, and two columns from 600px, except ranked lists, which stay one column
+**And** it is a real list (`ul`/`li`), and each card is named by its title
+
+**Given** both layouts exist in the DOM
+**Then** the hidden one is `display: none` (out of the accessibility tree), both read the same component state, and every `id` referenced by `aria-controls` or `aria-describedby` is unique across the two
+
+**Given** Parent → Students
+**Then** each card shows name (title), grade level, and status chip, with row actions at top-right; inline rename replaces the title in place
+
+**Given** Parent → Analytics, Mastery
+**Then** each card shows the Topic (title, a real link to the drill-down), Mastery % in tabular figures, the inline bar, answered and unanswered counts, and the Weak Area marker where it applies
+**And** cards stay ranked weakest first in one column, the Subject filter is unchanged, and on a tablet the sparkline and summary stay in the left column beside the card list
+
+**Given** Admin → Taxonomy and Admin → Topics
+**Then** each card shows the item name (title), its status or subject, uses, and created date as fields, with row actions at top-right; inline rename and the merge panel open inside the card
+
+**Given** Admin → Accounts
+**Then** each card shows email (title), name, tier, timezone, and created date, with the consumption chevron at top-right; when expanded, the allowance figures show inside the card as a labeled list, not a nested table
+
+**Given** Admin → Availability
+**Then** each Subject is a card titled with the Subject name, listing its Grade Levels as labeled checkboxes with the same toggle behavior
+
+**Given** the change
+**Then** unit specs cover the card layout; a Playwright E2E checks each affected screen at 390px (cards, no horizontal scroll) and 1280px (table); `mockups/key-analytics.html` phone and tablet frames are updated to cards; and a visual pass in light and dark mode shows no clipped or overlapping field at 360px, 768px, and 1180px
 
 ## Epic 2: Admin Content Governance
 

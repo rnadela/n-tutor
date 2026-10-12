@@ -194,7 +194,7 @@ Six components carry rules too heavy for a table cell and are specified beneath 
 | Profile switcher | Parent View, global | Persistent and reachable from anywhere. Preserves the current view on switch. |
 | Student Profile form | Students, Student Profile detail | Display name and exactly one Grade Level from the Admin-configured list, both required. Archive is presented as *hides from Student Mode, keeps history* and is visibly distinct from delete: separate action-menu items with their own icons, Delete set apart by a divider and the error color, and each confirmation stating what it keeps or destroys. Changing Grade Level does not alter existing Practice Tests, and the form says so. |
 | Destructive confirmation | Data & deletion, Student Profile detail | Names **exactly what will be destroyed** by count and kind, states it cannot be undone, and requires the **account password** — never the Parent PIN. *Why:* the PIN gates a mode rather than a destructive action. Early Page Image deletion is the one destructive action that does not take the password, because derived data survives it unchanged; it still names what goes. |
-| Row actions | Every table with per-row actions (Students, Admin Taxonomy, Topics, Accounts) | Icon-only buttons; only a self-evident icon stands alone (Rename = pencil, Delete = trash, expand/collapse = chevron). Any other action goes in a per-row ⋮ action menu whose items show icon **and** label. **At most 2 icons per row, ⋮ included; more than 2 actions → all in the menu.** Every icon and ⋮ is labeled with the row's object and shows a tooltip. Destructive menu items sit last, after a divider, in the error color. *Why:* text buttons wrap the action cell onto several lines on a phone and crowd the table; an icon that has to be guessed is worse than a menu. |
+| Row actions | Every table row or table card with per-row actions (Students, Admin Taxonomy, Topics, Accounts) | Icon-only buttons; on a card they sit at its top-right; only a self-evident icon stands alone (Rename = pencil, Delete = trash, expand/collapse = chevron). Any other action goes in a per-row ⋮ action menu whose items show icon **and** label. **At most 2 icons per row, ⋮ included; more than 2 actions → all in the menu.** Every icon and ⋮ is labeled with the row's object and shows a tooltip. Destructive menu items sit last, after a divider, in the error color. *Why:* text buttons wrap the action cell onto several lines on a phone and crowd the table; an icon that has to be guessed is worse than a menu. |
 | Allowance readout | Allowances, Generate, weighted regenerate | Names the Account Tier, usage against the limit, and the reset date. The Generation Allowance is always denominated in **Practice Tests**. |
 | Empty state | Everywhere in Parent View | **Mechanism plus progress**, never a bare absence. See State Patterns. |
 
@@ -254,8 +254,8 @@ Six components carry rules too heavy for a table cell and are specified beneath 
 
 **Binding rules.**
 
-- Ranked table with inline bars, **sorted weakest first**, **filterable by Subject** (FR-28), the filter defaulting to all Subjects and stated in the heading when narrowed.
-- Each row: Topic, Mastery % (tabular figures), inline bar, the answered-question count behind the figure, and the `unanswered` count where any exist.
+- Ranked list with inline bars — cards below desktop, a table at desktop width — **sorted weakest first**, **filterable by Subject** (FR-28), the filter defaulting to all Subjects and stated in the heading when narrowed.
+- Each row or card: Topic, Mastery % (tabular figures), inline bar, the answered-question count behind the figure, and the `unanswered` count where any exist.
 - Weak Areas marked with `{components.weak-area-marker}`.
 - Row tap → Topic drill-down.
 - The ranked table, the drill-down, the weighted-regenerate cost block, the empty state, and the tablet layout are rendered in [`mockups/key-analytics.html`](mockups/key-analytics.html).
@@ -521,12 +521,13 @@ Journey names mirror PRD §2.3 verbatim.
 
 ## Responsive & Platform
 
-**Breakpoint-specific layouts only where the device changes the task.** Most screens are a single fluid layout per surface, unchanged between phone and tablet.
+**Breakpoint-specific layouts only where the device changes the task.** Most screens are a single fluid layout per surface, unchanged between phone and tablet. **Data tables are the cross-cutting exception:** cards below desktop (1200px), a table only on desktop (see the Data tables row).
 
 | Screen | Phone | Tablet |
 |---|---|---|
 | **Take Test** | Single column at the `{typography.measure.questionMaxWidth}` measure; question map opens as an overlay. | Tablet-first, read at arm's length. The `{typography.measure.questionMaxWidth}` measure caps line length regardless of viewport, so real width is left over — it is allocated to a **persistently visible question map** beside the Question rather than to a wider column. The rail shows answered / not-answered state only: no score, no correctness hint, nothing that would constitute mid-test feedback. |
-| **Analytics dashboard** | Phone-first, in-hand: Mastery table full-width, sparkline and summary above, one column. | Remains scannable seated: sparkline and summary sit in a fixed left column alongside the Mastery table rather than stacking, and the phone row's stacked sub-line becomes real answered / unanswered / Weak Area columns. No reduction in row density. Rendered in [`mockups/key-analytics.html`](mockups/key-analytics.html). |
+| **Analytics dashboard** | Phone-first, in-hand: Mastery list (cards) full-width, sparkline and summary above, one column. | Remains scannable seated: sparkline and summary sit in a fixed left column alongside the Mastery list rather than stacking. The Mastery list is cards on phone and tablet, and a table with real answered / unanswered / Weak Area columns only at desktop width. Rendered in [`mockups/key-analytics.html`](mockups/key-analytics.html). |
+| **Data tables** (Students, Mastery, Admin Taxonomy, Topics, Accounts, Availability) | Cards, one column. | Cards, two columns (ranked lists stay one). A table only at desktop width (≥ 1200px). Each card: the row's identifying value as title, row actions top-right, every other column as a labeled field. Nothing the table shows is dropped. |
 
 **Density is split by surface; breakpoint is independent.** `DESIGN.md` owns the rule: components read `{spacing.density.comfortable}` or `{spacing.density.compact}` by surface, never by breakpoint.
 
