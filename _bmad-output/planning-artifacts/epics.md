@@ -245,6 +245,8 @@ UX-DR41: Implement the seven binding copy constraints from Voice and Tone: an Ex
 
 UX-DR42: Implement the Install Banner: a single, compact, dismissible banner at the top of the content area, using the active surface's density and tokens (Student palette in Student Mode, Parent palette in Parent View). It never overlays content, never blocks interaction, never animates in a way that pulls focus, and is reachable and dismissible by keyboard and screen reader (`role="region"` with an accessible name; dismiss is a real button). In Student Mode, rendered on Home only (never Take Test or Results); in Parent View, not rendered on the camera capture view; not rendered when running installed (standalone display mode), or on browsers without an install path. Copy is plain and calm, no exclamation marks, no urgency.
 
+UX-DR43: Implement table row actions as one shared pattern: each row action is an icon-only button, and only a self-evident icon (Rename = pencil, Delete = trash, expand/collapse = chevron) may stand alone. Any other action goes in a per-row action menu (⋮) whose items show icon and label together. A row shows at most 2 icons, and the ⋮ counts as one. When a row has more than 2 actions, all of them go in the menu and the ⋮ is the only icon. Every icon button and every ⋮ trigger has an accessible name that includes the row's object ("Rename Grade 3", "Actions for Grade 3"), a tooltip showing the action name on hover and focus, and the surface's tap-target floor. Destructive menu items are set apart by a divider and the error color.
+
 ### FR Coverage Map
 
 FR-1: Epic 1 - Parent Account sign-up/sign-in
@@ -341,7 +343,7 @@ Parent can sign up, sign in, secure Parent View behind a PIN, create and manage 
 
 **FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-34, FR-35
 **Relevant NFRs:** NFR7 (hashed creds/TLS), NFR8 (server-side authz), NFR9 (Parent View server-enforced time bound)
-**Relevant UX-DRs:** UX-DR1, UX-DR2, UX-DR3, UX-DR5, UX-DR6, UX-DR7, UX-DR9, UX-DR10, UX-DR11, UX-DR12, UX-DR13, UX-DR23, UX-DR26, UX-DR27, UX-DR28, UX-DR30, UX-DR31, UX-DR33, UX-DR36, UX-DR37 (design system foundation, Story 1.7)
+**Relevant UX-DRs:** UX-DR1, UX-DR2, UX-DR3, UX-DR5, UX-DR6, UX-DR7, UX-DR9, UX-DR10, UX-DR11, UX-DR12, UX-DR13, UX-DR23, UX-DR26, UX-DR27, UX-DR28, UX-DR30, UX-DR31, UX-DR33, UX-DR36, UX-DR37 (design system foundation, Story 1.7), UX-DR43 (table row actions, Story 1.8)
 
 ### Story 1.1: Parent Account Sign-Up & Sign-In
 
@@ -499,6 +501,50 @@ So that every later epic builds on one consistent system.
 **Then** they are enforced as shared, cross-cutting rules from the first screen onward
 
 **And** Stories 1.1–1.6 are built on this foundation, not ahead of it
+
+### Story 1.8: Table Row Actions
+
+As a parent or operator,
+I want each table row's actions shown as compact icons or a single actions menu,
+So that tables stay readable and uncrowded, on a phone too.
+
+**Acceptance Criteria:**
+
+**Given** a shared row-actions component
+**When** a row has at most 2 actions and every action has a self-evident icon (Rename = pencil, Delete = trash, expand/collapse = chevron)
+**Then** each action renders as an icon-only button, with no visible text
+
+**Given** a row with at most 2 actions where one action's icon is not self-evident
+**Then** the self-evident action renders as an icon-only button and the other goes in an action menu (⋮), and the row shows no more than 2 icons including the ⋮
+
+**Given** a row with more than 2 actions
+**Then** all of its actions go in the action menu and the ⋮ is the row's only icon
+
+**Given** the action menu is open
+**Then** each item shows its icon and its label, keeps the action's disabled/pending state, and a destructive item is set apart by a divider and the error color
+**And** it opens with Enter, Space, or click, moves with arrow keys, closes on Escape or after a choice, and returns focus to the ⋮
+
+**Given** any icon-only button or ⋮ trigger
+**Then** its accessible name includes the row's object (UX-DR33), a tooltip shows the action name on hover and focus, and it meets the surface's tap-target floor
+
+**Given** Admin → Taxonomy (Rename, Disable/Enable)
+**Then** Rename is a pencil icon button and Disable/Enable is in the ⋮ menu
+
+**Given** Admin → Topics (Confirm, Rename, Merge)
+**Then** all three are in the ⋮ menu, and the Merge item reads "Cancel merge" while that row's merge panel is open
+
+**Given** Parent → Students (Rename, Archive or Restore, Delete)
+**Then** all three are in the ⋮ menu, with Delete last after a divider
+**And** the per-row notes row is removed; the Archive confirmation still states that history is kept and nothing is deleted, and the Delete confirmation still names what is destroyed and that it cannot be undone
+
+**Given** Admin → Accounts (show/hide consumption)
+**Then** the toggle is an icon-only chevron button that rotates when open, keeping `aria-expanded` and `aria-controls`
+
+**Given** an action's behavior today (inline rename form, confirmations, pending state, live-region announcement)
+**Then** it is unchanged
+
+**Given** the change
+**Then** the component has a unit spec covering the cap, menu, label, and keyboard rules; existing table unit and E2E specs pass, updated only for how actions are reached; and a visual pass in light and dark mode, on a phone and a tablet, shows no action cell wrapping onto a second line
 
 ## Epic 2: Admin Content Governance
 
