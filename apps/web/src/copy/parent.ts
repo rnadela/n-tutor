@@ -848,6 +848,44 @@ export const parentCopy = {
       retakeStarted: 'A new upload was started. Add the pages again.',
     },
 
+    /**
+     * The four steps the upload is taken in, and the two controls that move
+     * between them.
+     *
+     * The four labels are single everyday words because they are read twice
+     * over: once on the rail that shows where the parent is, and once as the
+     * heading focus lands on. `position` is the same fact in a sentence, for
+     * the parent who cannot see the rail at all.
+     *
+     * Both button names say where the press *goes*, not what the button is:
+     * "Next" alone tells a screen reader nothing, and "Back" would read
+     * alongside the "Back to Parent View" link that leaves the screen
+     * altogether. Neither of these says "step N" — the position line already
+     * does, and a name that counted would have to agree with it.
+     */
+    steps: {
+      details: 'Details',
+      pages: 'Pages',
+      check: 'Check',
+      generate: 'Generate',
+      /** Where the parent is, in words beside the rail that shows it. */
+      position: (index: number, total: number, label: string) =>
+        `Step ${index} of ${total}: ${label}`,
+      /** Said as the step changes, so a move the parent made is never silent. */
+      announced: (label: string) => `You are now on the ${label} step.`,
+      next: 'Next',
+      back: 'Back',
+      /**
+       * Each name starts with the word on the button and then says where the
+       * press goes. The visible word has to be *inside* the accessible name or
+       * voice control cannot reach the button by what it reads (WCAG 2.5.3),
+       * and the destination has to be in it because "Back" alone would read
+       * alongside the "Back to Parent View" link that leaves the screen.
+       */
+      nextTo: (label: string) => `Next: ${label}`,
+      backTo: (label: string) => `Back: ${label}`,
+    },
+
     failed: 'That change could not be saved. Try again.',
     addFailed: 'That page could not be added. Try again with another photo.',
     submitFailed: 'The pages could not be submitted. Try again.',

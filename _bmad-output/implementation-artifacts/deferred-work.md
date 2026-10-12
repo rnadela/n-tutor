@@ -2581,3 +2581,19 @@ source_spec: `spec-10-3-brand-palette.md`
 severity: low
 reason: `withoutComments` in `tokens.spec.ts` truncates a line at any `//`, so a hex after a protocol-bearing string on the same line is never swept, and its block-comment regex can consume real code containing `*/`. The same line-based idiom is pasted into `page.spec.tsx` and the other source-read specs — a pre-existing convention in this codebase, already recorded as a deferral on Story 10.2 from the opposite direction (it fails to strip the body lines of a multi-line comment). One shared, tokenizer-based helper would close both.
 status: open
+
+### DW-324: The Check step's own refusal sentence is still reachable, but no executed test asserts what it says any more.
+origin: spec-deferred 5802a6902f05
+location: apps/web/src/app/parent/capture/page.tsx (Check step, `submit-blocked`)
+source_spec: `spec-3-7-upload-stepper.md`
+severity: medium
+reason: `submit-blocked` renders when `checkable` is false on the Check step, which happens while a retake's replacement page is still `Uploading` and `readyPageCount` has dropped to zero. The three e2e assertions of its text were on the pre-stepper single-page screen and could not survive the step split; what remains is the pure `submitBlockedReasons` spec, the copy function's own spec, and two `toHaveCount(0)` absence checks. Changing the reason filter to pass `[]` or the unfiltered list would break nothing. Closing it needs an e2e case that retakes the only page and asserts the sentence while the replacement uploads — a narrow, timing-sensitive state.
+status: open
+
+### DW-325: Unreadable `deferred:` items in spec-3-7-upload-stepper.md
+origin: spec-deferred-malformed 7088fc1c1e7a
+location: n/a
+source_spec: `spec-3-7-upload-stepper.md`
+severity: low
+reason: The dev session recorded deferred findings the orchestrator could not parse, so they were NOT filed as entries: item 2: not a mapping (got str); item 3: not a mapping (got str). Read `spec-3-7-upload-stepper.md`'s frontmatter and re-file them by hand.
+status: open

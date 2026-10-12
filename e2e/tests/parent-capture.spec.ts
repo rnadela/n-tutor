@@ -51,10 +51,18 @@ async function signUp(page: Page, email: string): Promise<void> {
  * needs one, and the taxonomy is Admin's, so there is no parent-facing route
  * that could create it.
  */
-async function openCapture(page: Page): Promise<{ gradeLevelName: string; subjectName: string }> {
+async function openCapture(
+  page: Page,
+  options: { subject?: boolean } = {},
+): Promise<{ gradeLevelName: string; subjectName: string }> {
   const email = uniqueParentEmail('capture');
   const gradeLevel = await createGradeLevelFixture('Capture Grade');
-  const subject = await createSubjectFixture('Capture Subject', gradeLevel.id);
+  // A Grade Level with no Subject offered for it is the dead end Story 3.7
+  // exists for, so it is arranged by *not* seeding one.
+  const subject =
+    options.subject === false
+      ? { name: '' }
+      : await createSubjectFixture('Capture Subject', gradeLevel.id);
 
   await signUp(page, email);
   await page.getByRole('link', { name: 'Enter Parent View' }).click();
@@ -86,6 +94,47 @@ async function openCapture(page: Page): Promise<{ gradeLevelName: string; subjec
   return { gradeLevelName: gradeLevel.name, subjectName: subject.name };
 }
 
+/** Which step the stepper says the parent is on, in words. */
+function stepPosition(page: Page) {
+  return page.getByTestId('capture-step-position');
+}
+
+/**
+ * One step forward, through the Next button and nothing else.
+ *
+ * The rail is display only, so this is the whole of the way forward — and the
+ * button's accessible name is the step it reaches, which is what is waited on.
+ */
+async function nextStep(page: Page, label: string): Promise<void> {
+  const next = page.getByRole('button', { name: `Next: ${label}` });
+  await expect(next).toBeEnabled();
+  await next.click();
+  await settledOnStep(page, label);
+}
+
+/** And one step back, which issues no write of any kind. */
+async function backStep(page: Page, label: string): Promise<void> {
+  const back = page.getByRole('button', { name: `Back: ${label}` });
+  await expect(back).toBeEnabled();
+  await back.click();
+  await settledOnStep(page, label);
+}
+
+/**
+ * What every step change owes a parent, asserted on every one this suite makes:
+ * the position says where they are, the step is said out loud in the one polite
+ * region, and focus is on the new step's heading rather than left on the button
+ * that has just been swapped out from under it.
+ *
+ * Only a browser can see the last two, so they are asserted here and not in the
+ * DOM-less unit tier.
+ */
+async function settledOnStep(page: Page, label: string): Promise<void> {
+  await expect(stepPosition(page)).toContainText(label);
+  await expect(liveRegion(page)).toContainText(`You are now on the ${label} step.`);
+  await expect(page.getByTestId('capture-step-heading')).toBeFocused();
+}
+
 /** Chooses the Subject from the list the server offers for the Grade Level. */
 async function chooseSubject(page: Page, name: string): Promise<void> {
   await page.locator('[role="combobox"]#capture-subject').click();
@@ -105,12 +154,13 @@ async function addPage(page: Page, file: ReturnType<typeof jpeg>): Promise<void>
   await expect(page.locator('#capture-add-page')).toBeEnabled();
   const before = await rows(page).count();
   await page.locator('#capture-add-page').setInputFiles(file);
-  // Says what it is doing while it is doing it, so a slow ingest never reads
-  // as a dead control — and gone again once the row lands.
-  await expect(page.getByTestId('adding')).toBeVisible();
   // Ingest re-encodes the photo before the row leaves `Uploading`, so the first
   // upload of a run waits on a cold image pipeline as well as the round trip.
   await expect(rows(page)).toHaveCount(before + 1, { timeout: 20_000 });
+  // The in-flight sentence is gone again once the row lands. Catching it while
+  // it is *up* is a race against however warm the image pipeline happens to be,
+  // so that half of the rule is asserted once, deliberately, in its own test
+  // below, against a held-open request — not on every page a fixture adds.
   await expect(page.getByTestId('adding')).toBeHidden();
 }
 
@@ -131,6 +181,9 @@ async function checkThenContinue(page: Page): Promise<void> {
   const commit = page.getByTestId('legibility-continue');
   await expect(commit).toBeVisible({ timeout: 20_000 });
   await commit.click();
+  // The commit is the one move the parent does not press Next for: the upload
+  // is spent and the only thing left is the reading.
+  await expect(stepPosition(page)).toContainText('Generate');
 }
 
 /** Deletes page `ordinal` through its confirmation, which states what the delete does. */
@@ -142,27 +195,72 @@ async function deletePage(page: Page, ordinal: number): Promise<void> {
 }
 
 test.describe('page management before submit', () => {
+  test('says what it is doing while a page is being added', async ({ page }) => {
+    const { subjectName } = await openCapture(page);
+    await chooseSubject(page, subjectName);
+    await nextStep(page, 'Pages');
+
+    // The in-flight sentence is only up for as long as the request is, and on a
+    // warm image pipeline that is shorter than Playwright's first poll. The
+    // request is therefore held open on purpose, so the assertion is about the
+    // rule — a slow ingest never reads as a dead control — and not about how
+    // fast this machine happens to be.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/parent/source-tests/*/pages', async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.fallback();
+        return;
+      }
+      await held;
+      await route.fallback();
+    });
+
+    await page.locator('#capture-add-page').setInputFiles(jpeg('page-a.jpg', PAGE_A));
+    try {
+      await expect(page.getByTestId('adding')).toBeVisible();
+      // And the control it describes is not a second way to start the same write.
+      await expect(page.locator('#capture-add-page')).toBeDisabled();
+    } finally {
+      // Released whatever happened above: a held request left held turns a
+      // clear assertion failure into a test timeout with no reason in it.
+      release();
+    }
+    await expect(rows(page)).toHaveCount(1, { timeout: 20_000 });
+    // Gone again once the row lands: it says what is happening, not what happened.
+    await expect(page.getByTestId('adding')).toBeHidden();
+    await page.unroute('**/parent/source-tests/*/pages');
+  });
+
   test('orders, renumbers and refuses an empty submission', async ({ page }) => {
     const { subjectName } = await openCapture(page);
 
-    // Nothing yet: the submit control is already refused, and *both* unmet
-    // requirements are named rather than only the first.
-    await expect(page.getByRole('button', { name: 'Check pages' })).toBeDisabled();
-    await expect(page.getByTestId('submit-blocked')).toHaveText(
-      'Before submitting, add at least one page and choose a subject and grade level.',
-    );
+    // A fresh draft opens on the first step, and nothing past it is reachable:
+    // the step's own condition — a subject — is unmet, so Next is refused and
+    // not one page control exists anywhere on the page.
+    await expect(stepPosition(page)).toHaveText('Step 1 of 4: Details');
+    await expect(page.getByRole('button', { name: 'Next: Pages' })).toBeDisabled();
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.locator('#capture-add-page')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Check pages' })).toHaveCount(0);
 
     await chooseSubject(page, subjectName);
+    await nextStep(page, 'Pages');
+
+    // Zero pages: the same rule one step along.
+    await expect(page.getByRole('button', { name: 'Next: Check' })).toBeDisabled();
+
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
+    await expect(page.getByRole('button', { name: 'Next: Check' })).toBeEnabled();
 
     await expect(page.getByTestId('page-count')).toHaveText(
       'Pages are used in this order. 2 of 10 page images.',
     );
     await expect(rows(page).nth(0)).toContainText('Page 1');
     await expect(rows(page).nth(1)).toContainText('Page 2');
-    await expect(page.getByRole('button', { name: 'Check pages' })).toBeEnabled();
-    await expect(page.getByTestId('submit-blocked')).toHaveCount(0);
 
     // The ends are disabled, which is the rule stated as a control.
     await expect(page.getByRole('button', { name: 'Move page 1 up' })).toBeDisabled();
@@ -202,8 +300,20 @@ test.describe('page management before submit', () => {
       .getByRole('link', { name: 'Upload a test' })
       .click();
     await expect(page.getByRole('heading', { name: 'Upload a test', level: 1 })).toBeVisible();
+
+    // A resumed draft opens on the furthest step its saved state allows —
+    // classified, with pages that landed — which is the check.
+    await expect(stepPosition(page)).toHaveText('Step 3 of 4: Check');
+    await expect(rows(page)).toHaveCount(0);
+
+    // And Back leaves everything exactly as it was: the strip, in order, and
+    // the classification behind it. The move itself writes nothing.
+    await backStep(page, 'Pages');
     await expect(rows(page).nth(0)).toHaveAttribute('data-page-id', secondId!);
     await expect(rows(page).nth(1)).toHaveAttribute('data-page-id', firstId!);
+    await backStep(page, 'Details');
+    await expect(page.locator('[role="combobox"]#capture-subject')).toHaveText(subjectName);
+    await nextStep(page, 'Pages');
 
     // Down to zero, one page at a time; the survivor renumbers to Page 1.
     await deletePage(page, 1);
@@ -217,12 +327,10 @@ test.describe('page management before submit', () => {
     await deletePage(page, 1);
     await expect(rows(page)).toHaveCount(0);
 
-    await expect(page.getByRole('button', { name: 'Check pages' })).toBeDisabled();
-    // The classification survived every page change, so the pages are now the
-    // only thing left unmet.
-    await expect(page.getByTestId('submit-blocked')).toHaveText(
-      'Add at least one page before submitting.',
-    );
+    // The classification survived every page change, so the pages are the only
+    // thing left unmet — and the check is not reachable without them.
+    await expect(page.getByRole('button', { name: 'Next: Check' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Check pages' })).toHaveCount(0);
   });
 
   test('defaults the grade level to the child’s, and gates submit on the subject', async ({
@@ -236,13 +344,10 @@ test.describe('page management before submit', () => {
       page.getByText('Changing it here does not change the child’s profile.', { exact: false }),
     ).toBeVisible();
 
-    await addPage(page, jpeg('page-a.jpg', PAGE_A));
-
-    // Pages, but no subject: refused, with the missing requirement named.
-    await expect(page.getByRole('button', { name: 'Check pages' })).toBeDisabled();
-    await expect(page.getByTestId('submit-blocked')).toHaveText(
-      'Choose a subject and a grade level before submitting.',
-    );
+    // A grade level but no subject: the step is unfinished, so there is no way
+    // past it and no page control under it to invite work that cannot be sent.
+    await expect(page.getByRole('button', { name: 'Next: Pages' })).toBeDisabled();
+    await expect(page.locator('#capture-add-page')).toHaveCount(0);
 
     // The subject list holds exactly what an administrator offers for that
     // grade level, and choosing one clears the gate.
@@ -252,9 +357,15 @@ test.describe('page management before submit', () => {
     await expect(page.getByRole('listbox')).toBeHidden();
     await expect(liveRegion(page)).toContainText(`The subject is ${subjectName}.`);
 
+    await nextStep(page, 'Pages');
+    await addPage(page, jpeg('page-a.jpg', PAGE_A));
+    await nextStep(page, 'Check');
     await expect(page.getByTestId('submit-blocked')).toHaveCount(0);
     await checkThenContinue(page);
     await expect(liveRegion(page)).toContainText('The pages were submitted.');
+
+    await backStep(page, 'Check');
+    await backStep(page, 'Pages');
     await expect(page.getByTestId('submitted-note')).toBeVisible();
   });
 
@@ -280,9 +391,8 @@ test.describe('page management before submit', () => {
     await expect(liveRegion(page)).toContainText(
       `The grade level is ${other.name}. That grade level does not offer the subject that was chosen, so the subject was cleared.`,
     );
-    await expect(page.getByTestId('submit-blocked')).toHaveText(
-      'Before submitting, add at least one page and choose a subject and grade level.',
-    );
+    // Cleared means unclassified, so the step is unfinished again.
+    await expect(page.getByRole('button', { name: 'Next: Pages' })).toBeDisabled();
 
     // And the Subject list is the new Grade Level's, re-read rather than
     // filtered from the one already held.
@@ -294,22 +404,46 @@ test.describe('page management before submit', () => {
 
     // Re-classified against the grade level it now holds, so the only thing
     // left between the parent and submitting is a page.
+    await nextStep(page, 'Pages');
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
+    await nextStep(page, 'Check');
     await expect(page.getByTestId('submit-blocked')).toHaveCount(0);
   });
 
   test('submits the pages and then refuses every further change to them', async ({ page }) => {
     const { subjectName } = await openCapture(page);
     await chooseSubject(page, subjectName);
+    await nextStep(page, 'Pages');
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
     // One `write` per parent action, so each single-file add announces one
     // page rather than the running total.
     await expect(liveRegion(page)).toContainText('One page was added.');
 
+    await nextStep(page, 'Check');
     await checkThenContinue(page);
 
     await expect(liveRegion(page)).toContainText('The pages were submitted.');
+
+    // The earlier steps are still reachable, and shown complete — read-only
+    // means nothing if they cannot be looked at. Every one of them holds its
+    // values and not one live control.
+    await backStep(page, 'Check');
+    // The verdict the parent decided on is still there, and says the upload is
+    // saved — a step with nothing on it is not a read-only step.
+    await expect(page.getByTestId('legibility-committed')).toBeVisible();
+    // Whatever the check said about these pages, said again — not recomputed.
+    await expect(page.getByTestId('legibility-summary')).toHaveText(
+      'Pages 1 and 2 may be too blurry to read.',
+    );
+    await expect(page.getByTestId('submitted-note')).toHaveText(
+      'These pages were submitted. Nothing on this upload can be changed now.',
+    );
+    await expect(page.getByRole('button', { name: 'Check pages' })).toHaveCount(0);
+    await expect(page.getByTestId('legibility-continue')).toHaveCount(0);
+    await expect(page.locator('input[type="file"]')).toHaveCount(0);
+
+    await backStep(page, 'Pages');
     await expect(page.getByTestId('submitted-note')).toHaveText(
       'These pages were submitted. Nothing on this upload can be changed now.',
     );
@@ -318,11 +452,21 @@ test.describe('page management before submit', () => {
     await expect(page.getByTestId('page-count')).toHaveText(
       'Pages are used in this order. 2 of 10 page images.',
     );
-    await expect(page.getByRole('button', { name: 'Check pages' })).toHaveCount(0);
     await expect(page.locator('#capture-add-page')).toHaveCount(0);
-    await expect(page.locator('#capture-subject')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Delete page/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Move page/ })).toHaveCount(0);
+
+    await backStep(page, 'Details');
+    await expect(page.locator('#capture-subject')).toHaveCount(0);
+    await expect(page.locator('#capture-grade-level')).toHaveCount(0);
+    // The child picker is the one control that outlives the draft's own
+    // section, so it is the one that has to be refused by hand: switching the
+    // child here would abandon a spent upload from a step meant only to be
+    // looked at.
+    await expect(page.locator('[role="combobox"]#capture-student')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
   });
 
   test('checks the pages once, names the blurry one, states the cost, then commits', async ({
@@ -330,11 +474,13 @@ test.describe('page management before submit', () => {
   }) => {
     const { subjectName } = await openCapture(page);
     await chooseSubject(page, subjectName);
+    await nextStep(page, 'Pages');
     // One page the check will flag and one it will not, arranged by the bytes
     // alone: the fake transport reads a stored page under its byte threshold
     // as Low (AD-22), so nothing in this test touches the seam.
     await addPage(page, jpeg('page-legible.jpg', PAGE_LEGIBLE));
     await addPage(page, jpeg('page-tiny.jpg', PAGE_A));
+    await nextStep(page, 'Check');
 
     // Before the check, the commit control does not exist at all.
     await expect(page.getByTestId('legibility-continue')).toHaveCount(0);
@@ -343,14 +489,17 @@ test.describe('page management before submit', () => {
     const panel = page.getByTestId('legibility-result');
     await expect(panel).toBeVisible({ timeout: 20_000 });
 
-    // Per page, never a whole-test verdict — and each badge is a word, not a
-    // colour.
-    await expect(page.getByTestId('legibility-badge-1')).toHaveText('✓ Page 1: Readable');
-    await expect(page.getByTestId('legibility-badge-2')).toHaveText('! Page 2: Blurry');
     await expect(page.getByTestId('legibility-summary')).toHaveText(
       'Page 2 may be too blurry to read.',
     );
     await expect(liveRegion(page)).toContainText('One page may be too blurry to read.');
+
+    // Per page, never a whole-test verdict — and each badge is a word, not a
+    // colour. The badges live on the strip, which is the step before this one.
+    await backStep(page, 'Pages');
+    await expect(page.getByTestId('legibility-badge-1')).toHaveText('✓ Page 1: Readable');
+    await expect(page.getByTestId('legibility-badge-2')).toHaveText('! Page 2: Blurry');
+    await nextStep(page, 'Check');
 
     // The retake is offered for the flagged page alone.
     await expect(page.getByTestId('legibility-retake-2')).toHaveText('Retake page 2');
@@ -374,12 +523,14 @@ test.describe('page management before submit', () => {
     await expect(commit).toBeEnabled();
 
     // Retaking page 2 clears the check, because the bytes under a verdict
-    // moved — so the panel goes and the check control comes back.
-    await page.getByTestId('legibility-retake-2').click();
+    // moved — so the panel goes and the check control comes back. The flagged
+    // page's retake is a real control on this step, not a label pointing at an
+    // input a step away: it is pressed here, where the verdict was read.
     await page
       .locator('input[type="file"][aria-label="Retake page 2"]')
       .setInputFiles(jpeg('page-retake.jpg', PAGE_LEGIBLE));
     await expect(liveRegion(page)).toContainText('Page 2 was replaced.');
+    await expect(stepPosition(page)).toHaveText('Step 3 of 4: Check');
     await expect(page.getByTestId('legibility-result')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Check pages' })).toBeEnabled();
 
@@ -390,7 +541,7 @@ test.describe('page management before submit', () => {
     });
     await page.getByTestId('legibility-continue').click();
     await expect(liveRegion(page)).toContainText('The pages were submitted.');
-    await expect(page.getByTestId('submitted-note')).toBeVisible();
+    await expect(stepPosition(page)).toHaveText('Step 4 of 4: Generate');
   });
 
   test('Retry re-issues the draft open, not only the profile list', async ({ page }) => {
@@ -445,13 +596,16 @@ test.describe('page management before submit', () => {
 
     const retry = page.getByRole('button', { name: 'Try again' });
     await expect(retry).toBeVisible();
+    // The open failed, so no step holds a value yet.
+    await expect(page.locator('#capture-grade-level')).toHaveCount(0);
     await retry.click();
 
     // Only reachable once the retried draft-open call actually landed: the
-    // profile list alone never renders the page count.
-    await expect(page.getByTestId('page-count')).toHaveText(
-      'Pages are used in this order. 0 of 10 page images.',
-    );
+    // classification controls are rendered from the draft itself, and the
+    // profile list alone never renders them. The page count is a step along
+    // from here, and this grade level offers no subject to get there with.
+    await expect(stepPosition(page)).toHaveText('Step 1 of 4: Details');
+    await expect(page.locator('[role="combobox"]#capture-grade-level')).toHaveText(gradeLevel.name);
     await expect(retry).toHaveCount(0);
   });
 
@@ -461,10 +615,11 @@ test.describe('page management before submit', () => {
     const { subjectName } = await openCapture(page);
 
     await chooseSubject(page, subjectName);
+    await nextStep(page, 'Pages');
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
+    await nextStep(page, 'Check');
     await checkThenContinue(page);
-    await expect(page.getByTestId('submitted-note')).toBeVisible();
 
     // The job outlives the request, so the step says what it is doing and then
     // polls until the worker has finished — no reload anywhere in between.
@@ -489,23 +644,28 @@ test.describe('page management before submit', () => {
     // And the proceed is offered, not withheld: the warning informs.
     await expect(warning.getByRole('button', { name: 'Continue anyway' })).toBeEnabled();
 
-    // Retake: a fresh upload for the same child, back at an empty strip.
+    // Retake: a fresh upload for the same child, which derives its own opening
+    // step — back at the start, because nothing about it is classified yet.
     await warning.getByRole('button', { name: 'Retake the pages' }).click();
     await expect(liveRegion(page)).toContainText('A new upload was started.');
-    await expect(page.getByTestId('page-count')).toHaveText(
-      'Pages are used in this order. 0 of 10 page images.',
-    );
-    await expect(rows(page)).toHaveCount(0);
-    await expect(page.getByTestId('submitted-note')).toHaveCount(0);
+    await expect(stepPosition(page)).toHaveText('Step 1 of 4: Details');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     // Nothing was generated on the way through, and the step is gone with the
     // upload it was about.
     await expect(page.getByRole('heading', { name: 'Generate a practice test' })).toHaveCount(0);
 
-    // The same path again, taken to the end this time.
+    // The same path again, taken to the end this time — and the strip it comes
+    // back to is empty.
     await chooseSubject(page, subjectName);
+    await nextStep(page, 'Pages');
+    await expect(page.getByTestId('page-count')).toHaveText(
+      'Pages are used in this order. 0 of 10 page images.',
+    );
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.getByTestId('submitted-note')).toHaveCount(0);
     await addPage(page, jpeg('page-a.jpg', PAGE_A));
     await addPage(page, jpeg('page-b.jpg', PAGE_B));
+    await nextStep(page, 'Check');
     await checkThenContinue(page);
     const proceedAgain = page.getByRole('button', { name: 'Continue to practice test' });
     await expect(proceedAgain).toBeVisible({ timeout: 30_000 });
@@ -517,6 +677,75 @@ test.describe('page management before submit', () => {
     // `parent-practice-test.spec.ts`'s.
     await expect(page).toHaveURL(/\/parent\/generate\//);
     await expect(page.getByRole('heading', { name: 'Generate practice tests' })).toBeVisible();
+  });
+
+  test('shows a grade level with no subjects as a dead end, with no page controls under it', async ({
+    page,
+  }) => {
+    // The worst case this story exists for, and the one that reached
+    // production: a grade level offering nothing to choose, with the whole
+    // page-capture apparatus sitting under the message inviting work that
+    // could never be submitted.
+    await openCapture(page, { subject: false });
+
+    await expect(stepPosition(page)).toHaveText('Step 1 of 4: Details');
+    await expect(page.getByTestId('no-subjects')).toHaveText(
+      'No subjects are offered for that grade level yet. Choose another grade level.',
+    );
+    await expect(page.getByRole('button', { name: 'Next: Pages' })).toBeDisabled();
+
+    // Not below the fold: not in the document at all.
+    await expect(page.getByRole('heading', { name: 'Order' })).toHaveCount(0);
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.locator('#capture-add-page')).toHaveCount(0);
+    await expect(page.getByTestId('page-count')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Check pages' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Generate a practice test' })).toHaveCount(0);
+  });
+
+  test('is a dead end on an empty grade-level list too, with no page controls under it', async ({
+    page,
+  }) => {
+    // The other half of the dead end: not a grade level that offers nothing,
+    // but no grade level on offer at all. Grade levels are seeded for the whole
+    // environment, so emptiness is arranged at the read rather than in the
+    // database every other test shares.
+    await page.route('**/api/parent/grade-levels', async (route) => {
+      // Student Profiles reads the same list to pick the child's grade level
+      // with, and the fixture needs that one to answer normally — so only the
+      // upload screen's read is emptied.
+      if (!page.url().includes('/parent/capture')) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'access-control-allow-origin': 'http://localhost:3000',
+          'access-control-allow-credentials': 'true',
+          'content-type': 'application/json',
+        },
+        body: '[]',
+      });
+    });
+
+    const { gradeLevelName } = await openCapture(page, { subject: false });
+
+    await expect(stepPosition(page)).toHaveText('Step 1 of 4: Details');
+    // The draft opens holding the child's own grade level, and the control says
+    // what the upload *is* even when nothing is offered to change it to — the
+    // whole point of `optionsWithStored`. So the step is a dead end on the
+    // subject, which no empty grade-level list can supply.
+    await expect(page.locator('[role="combobox"]#capture-grade-level')).toHaveText(gradeLevelName);
+    await expect(page.getByTestId('no-subjects')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Next: Pages' })).toBeDisabled();
+
+    // And the same rule as the no-subjects case: nothing past this step exists.
+    await expect(page.getByRole('heading', { name: 'Order' })).toHaveCount(0);
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.locator('#capture-add-page')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Check pages' })).toHaveCount(0);
+    await page.unroute('**/api/parent/grade-levels');
   });
 
   test('refuses a submission made straight to the API, with no browser involved', async () => {

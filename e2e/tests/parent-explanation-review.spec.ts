@@ -80,6 +80,11 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
   await page.getByRole('option', { name: subject.name }).click();
   await expect(page.getByRole('listbox')).toBeHidden();
 
+  // Story 3.7's stepper: only the current step's controls render, so the pages
+  // are added on the step after the classification and the check runs on the
+  // one after that.
+  await page.getByRole('button', { name: 'Next: Pages' }).click();
+
   for (const file of [jpeg('page-a.jpg', PAGE_A), jpeg('page-b.jpg', PAGE_B)]) {
     const before = await page.locator('[data-testid="page-row"]').count();
     await expect(page.locator('#capture-add-page')).toBeEnabled();
@@ -89,11 +94,13 @@ async function releaseOneTest(page: Page, email: string): Promise<void> {
     });
   }
 
+  await page.getByRole('button', { name: 'Next: Check' }).click();
   await page.getByRole('button', { name: 'Check pages' }).click();
   const commit = page.getByTestId('legibility-continue');
   await expect(commit).toBeVisible({ timeout: 20_000 });
   await commit.click();
-  await expect(page.getByTestId('submitted-note')).toBeVisible();
+  // The commit lands on the last step; the note lives two steps back.
+  await expect(page.getByTestId('capture-step-position')).toContainText('Generate');
   await expect(page.getByRole('button', { name: 'Continue to practice test' })).toBeVisible({
     timeout: 30_000,
   });

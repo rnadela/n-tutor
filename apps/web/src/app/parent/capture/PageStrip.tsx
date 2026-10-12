@@ -9,25 +9,13 @@ import { isPageReadable } from '@/lib/legibility';
 import { canMoveDown, canMoveUp, type MoveDirection } from '@/lib/page-order';
 import type { PageImageView } from '@/lib/parent-api';
 import { density, focusRing, rounded } from '@/theme/tokens';
+import { RetakePageInput } from './RetakePageInput';
 
 /**
  * Every strip control is a real control at the parent tap-target floor, with a
  * visible focus ring. Both figures come from the theme; neither is written as a
  * number here (UX-DR9, UX-DR10).
  */
-/** Off screen but in the tab order and reachable by `setInputFiles`. */
-const VISUALLY_HIDDEN_INPUT = {
-  position: 'absolute',
-  width: '1px',
-  height: '1px',
-  p: 0,
-  m: '-1px',
-  overflow: 'hidden',
-  clip: 'rect(0 0 0 0)',
-  whiteSpace: 'nowrap',
-  border: 0,
-} as const;
-
 export const controlSx = {
   minHeight: density.tapTarget,
   minWidth: density.tapTarget,
@@ -229,22 +217,14 @@ export function PageStrip({ pages, editable, busy, onMove, onRetake, onDelete }:
               <Box sx={{ position: 'relative', display: 'inline-flex' }}>
                 {/* Off screen but still focusable and still named by its own
                     `aria-label`; the label after it is the part a parent sees and
-                    presses, and it shows the input's focus and disabled states. */}
-                <Box
-                  component="input"
-                  id={`capture-retake-${page.id}`}
-                  type="file"
-                  accept="image/*"
-                  disabled={busy}
-                  aria-label={parentCopy.capture.retakeFor(page.ordinal)}
-                  sx={VISUALLY_HIDDEN_INPUT}
-                  onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-                    const file = event.target.files?.[0];
-                    // Cleared so retaking the same photo twice still fires a
-                    // change event the second time.
-                    event.target.value = '';
-                    if (file) onRetake(page.id, file);
-                  }}
+                    presses, and it shows the input's focus and disabled states.
+                    The Check step offers the same retake for a flagged page, so
+                    the element itself is shared rather than written twice. */}
+                <RetakePageInput
+                  pageId={page.id}
+                  ordinal={page.ordinal}
+                  busy={busy}
+                  onRetake={onRetake}
                 />
                 <Typography
                   component="label"

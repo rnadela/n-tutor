@@ -24,6 +24,14 @@ import {
   optionsWithStored,
   submitBlockedReasons,
 } from '@/lib/classification';
+import {
+  canAdvance,
+  captureStepState,
+  furthestStep,
+  nextStep,
+  previousStep,
+  type CaptureStep,
+} from '@/lib/capture-step';
 import { EXTRACTION_POLL_MS, isSettled, warningNeeded } from '@/lib/extraction-status';
 import { isChecked, isPageReadable, unreadablePages } from '@/lib/legibility';
 import { canAddPage, canSubmitPages, movedOrder, type MoveDirection } from '@/lib/page-order';
@@ -35,9 +43,11 @@ import {
   type TaxonomyItem,
 } from '@/lib/parent-api';
 import { applyIfCurrent, endsParentView, refusalText } from '@/lib/parent-view';
-import { density, rounded } from '@/theme/tokens';
+import { density, focusRing, rounded } from '@/theme/tokens';
 import { AddPages } from './AddPages';
+import { CaptureStepper, stepLabel } from './CaptureStepper';
 import { ORDER_HEADING_ID, PageStrip } from './PageStrip';
+import { RetakePageInput } from './RetakePageInput';
 import { ThinExtractionWarning } from './ThinExtractionWarning';
 
 /**
@@ -121,6 +131,25 @@ export default function CapturePage() {
   // `role="status"` on the screen would make "the region here" ambiguous, for a
   // screen reader as much as for a test.
   const { announce } = useAnnounce();
+  /**
+   * Which step is being *shown*. Which step is *allowed* is
+   * `capture-step.ts`'s, and nothing here restates it.
+   */
+  const [step, setStep] = useState<CaptureStep>('details');
+  /**
+   * The sentence the next step announcement leads with, or empty.
+   *
+   * Set by the two transitions the screen makes on the parent's behalf — the
+   * commit, and the fresh draft a retake opens — and cleared by Back and Next:
+   * a step the parent pressed for needs no preamble, and an unconsumed lead
+   * must never attach itself to a later move.
+   *
+   * Each setter states the sentence it just caused rather than reading whatever
+   * the live region happens to hold. The region is app-wide and is never
+   * cleared, so reading it would lead a step with a sentence from another
+   * screen, or with one the parent has already heard.
+   */
+  const stepLead = useRef('');
 
   const token = elevation?.token ?? null;
   /**
@@ -480,6 +509,12 @@ export default function CapturePage() {
   /** The check has run, so the result panel and the commit control exist. */
   const checked = isDraft && isChecked(gate);
   /**
+   * Whether the check ever ran, draft or not. `checked` answers whether the
+   * *live* panel exists; this answers whether there is a verdict to show at
+   * all, which is what the committed, read-only Check step reads.
+   */
+  const checkOutcome = isChecked(gate);
+  /**
    * Every page the check flagged, by ordinal. Empty both when nothing was
    * flagged and before the check ran — the panel only exists in the first
    * case, so the two never have to be told apart here.
@@ -502,6 +537,103 @@ export default function CapturePage() {
     classification.subjectId,
     sourceTest?.subjectName ?? null,
   );
+
+  /**
+   * The same saved state the gates above are built from, as the four booleans
+   * every step rule is written against. The rules are in `capture-step.ts`;
+   * this is only the reading of them.
+   */
+  const stepState = captureStepState(sourceTest);
+
+  /**
+   * The step the draft's own saved state opens on, derived once per opened
+   * draft rather than on every render.
+   *
+   * Continuously derived it would drag the parent forward the instant a write
+   * landed — choose a subject on Details and be thrown to Pages mid-sentence,
+   * or press Back from Check only to be pushed straight back. Keyed on the
+   * draft id instead, which also makes the fresh draft a retake opens re-derive
+   * for free, because its id is new.
+   */
+  const derivedForDraftId = useRef<string | null>(null);
+  useEffect(() => {
+    if (sourceTest === null || derivedForDraftId.current === sourceTest.id) return;
+    const first = derivedForDraftId.current === null;
+    derivedForDraftId.current = sourceTest.id;
+    const derived = furthestStep(captureStepState(sourceTest));
+    // The step the screen *opens* on is not a step change: announcing it would
+    // say the step to a parent who has not moved, and focusing its heading
+    // would take focus off the top of a page they have only just opened. The
+    // mount guard below cannot cover this on its own, because the first draft
+    // arrives after the mount — and it must not be re-armed when the first
+    // draft opens on the step already shown, or the parent's first Back or
+    // Next would be the move that spends the guard.
+    if (first && derived !== step) stepSettled.current = false;
+    setStep(derived);
+  }, [sourceTest, step]);
+
+  /**
+   * The one step change the parent should not have to press for: the commit.
+   *
+   * Past it the upload is spent and the only thing left is the reading, so the
+   * screen lands them there. A previous-status ref rather than `status` driving
+   * the shown step continuously, which would pin a committed upload to Generate
+   * and contradict the earlier steps being read-only — read-only means nothing
+   * if they cannot still be looked at.
+   */
+  const previousStatus = useRef<SourceTestView['status'] | null>(null);
+  useEffect(() => {
+    const status = sourceTest?.status ?? null;
+    const before = previousStatus.current;
+    previousStatus.current = status;
+    if (before === 'Draft' && status === 'Submitted') {
+      stepLead.current = parentCopy.capture.submitted;
+      setStep('generate');
+    }
+  }, [sourceTest]);
+
+  /**
+   * Where focus goes on a step change, and what is said about it.
+   *
+   * The idiom the take-test screen's handed-in heading uses: a heading that is
+   * focusable only programmatically, focused from an effect keyed on the state
+   * that moved. The announcement is made in the same effect and before the
+   * focus, so the reason the screen moved is the first thing read out.
+   *
+   * The first run is the mount, which is not a change: focusing there would
+   * take focus off the top of the page the parent has only just opened, and
+   * announcing there would say the step twice for a resumed draft that is about
+   * to re-derive.
+   */
+  const stepHeading = useRef<HTMLHeadingElement | null>(null);
+  const stepSettled = useRef(false);
+  useEffect(() => {
+    if (!stepSettled.current) {
+      stepSettled.current = true;
+      stepLead.current = '';
+      return;
+    }
+    const lead = stepLead.current;
+    stepLead.current = '';
+    const said = parentCopy.capture.steps.announced(stepLabel(step));
+    announce(lead === '' ? said : `${lead} ${said}`);
+    stepHeading.current?.focus();
+  }, [step, announce]);
+
+  /** Navigation the parent pressed for: no write, and no sentence to lead with. */
+  function goNext(): void {
+    const next = nextStep(step);
+    if (next === null || busy || !canAdvance(step, stepState)) return;
+    stepLead.current = '';
+    setStep(next);
+  }
+
+  function goBack(): void {
+    const previous = previousStep(step);
+    if (previous === null || busy) return;
+    stepLead.current = '';
+    setStep(previous);
+  }
 
   function move(pageId: string, ordinal: number, direction: MoveDirection): void {
     if (!isDraft) return;
@@ -681,7 +813,13 @@ export default function CapturePage() {
    */
   function retakePages(): void {
     setWarningOpen(false);
-    openDraft(() => announce(parentCopy.capture.generate.retakeStarted));
+    // Said as the lead of the step the fresh draft opens on, not separately:
+    // the step effect is the one announcement, so the parent hears why the
+    // screen moved and where it moved to in one sentence instead of losing the
+    // first to the second.
+    openDraft(() => {
+      stepLead.current = parentCopy.capture.generate.retakeStarted;
+    });
   }
 
   /**
@@ -743,396 +881,498 @@ export default function CapturePage() {
         <Typography component="p">{parentCopy.capture.noProfiles}</Typography>
       ) : (
         <>
+          <CaptureStepper
+            step={step}
+            state={stepState}
+            busy={busy}
+            onBack={goBack}
+            onNext={goNext}
+          />
+
+          {/* The step's own heading, and where focus lands on every change.
+              Focusable only programmatically: it is the destination, not a stop
+              on the way through the page. */}
+          <Typography
+            component="h2"
+            variant="cardTitle"
+            tabIndex={-1}
+            ref={stepHeading}
+            data-testid="capture-step-heading"
+          >
+            {stepLabel(step)}
+          </Typography>
+
+          {/* Exactly one step's controls are in the DOM at a time, which is the
+              whole of this story: a grade level offering no subjects must not
+              have the page-capture apparatus sitting under its dead end. */}
+
           {/* Who the test is for, and what it is. */}
-          <Card>
-            <CardContent sx={{ display: 'grid', gap: `${density.gap * 2}px` }}>
-              <TextField
-                id="capture-student"
-                select
-                fullWidth
-                size="small"
-                disabled={busy}
-                label={parentCopy.capture.childLabel}
-                value={studentProfileId}
-                onChange={(event) => setStudentProfileId(event.target.value)}
-              >
-                {profiles.map((profile) => (
-                  <MenuItem key={profile.id} value={profile.id}>
-                    {profile.displayName}
-                  </MenuItem>
-                ))}
-              </TextField>
-
-              {ready && isDraft && (
-                <Box
-                  component="section"
-                  aria-labelledby={CLASSIFICATION_HEADING_ID}
-                  sx={{ display: 'grid', gap: `${density.gap}px` }}
+          {step === 'details' && (
+            <Card>
+              <CardContent sx={{ display: 'grid', gap: `${density.gap * 2}px` }}>
+                <TextField
+                  id="capture-student"
+                  select
+                  fullWidth
+                  size="small"
+                  // Read-only once the upload is committed: switching the child
+                  // there would abandon a spent upload for another draft, from
+                  // a step that is supposed to only be looked at. Left enabled
+                  // while the draft is still being read, so a failed open is
+                  // still recoverable from here.
+                  disabled={busy || (sourceTest !== null && !isDraft)}
+                  label={parentCopy.capture.childLabel}
+                  value={studentProfileId}
+                  onChange={(event) => setStudentProfileId(event.target.value)}
                 >
-                  <Typography id={CLASSIFICATION_HEADING_ID} component="h2" variant="cardTitle">
-                    {parentCopy.capture.classification.heading}
-                  </Typography>
-                  {/* Says plainly what changing the grade level here does *not*
-                    touch, because the default came from the child's profile. */}
-                  <Typography component="p" sx={{ color: 'text.secondary' }}>
-                    {parentCopy.capture.classification.intro}
-                  </Typography>
+                  {profiles.map((profile) => (
+                    <MenuItem key={profile.id} value={profile.id}>
+                      {profile.displayName}
+                    </MenuItem>
+                  ))}
+                </TextField>
 
+                {ready && isDraft && (
                   <Box
-                    sx={{
-                      display: 'grid',
-                      gap: `${density.gap * 1.5}px`,
-                      gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
-                      alignItems: 'start',
-                    }}
+                    component="section"
+                    aria-labelledby={CLASSIFICATION_HEADING_ID}
+                    sx={{ display: 'grid', gap: `${density.gap}px` }}
                   >
-                    {gradeLevelsLoading ? (
-                      <Typography
-                        component="p"
-                        data-testid="grade-levels-loading"
-                        sx={{ color: 'text.secondary' }}
-                      >
-                        {parentCopy.capture.classification.loadingGradeLevels}
-                      </Typography>
-                    ) : gradeLevelOptions.length === 0 ? (
-                      <Typography
-                        component="p"
-                        data-testid="no-grade-levels"
-                        sx={{ color: 'text.secondary' }}
-                      >
-                        {parentCopy.capture.classification.noGradeLevels}
-                      </Typography>
-                    ) : (
-                      <TextField
-                        id="capture-grade-level"
-                        select
-                        fullWidth
-                        size="small"
-                        disabled={busy}
-                        label={parentCopy.capture.classification.gradeLevelLabel}
-                        value={
-                          gradeLevelOptions.some((item) => item.id === sourceTest.gradeLevelId)
-                            ? sourceTest.gradeLevelId!
-                            : ''
-                        }
-                        onChange={(event) => classify({ gradeLevelId: event.target.value })}
-                      >
-                        {gradeLevelOptions.map((gradeLevel) => (
-                          <MenuItem
-                            key={gradeLevel.id}
-                            value={gradeLevel.id}
-                            disabled={!gradeLevel.enabled}
-                          >
-                            {gradeLevel.name}
-                          </MenuItem>
-                        ))}
-                      </TextField>
-                    )}
-
-                    {/* The Subject list is a function of the Grade Level, so each
-                    state of that function says which one it is in. */}
-                    {sourceTest.gradeLevelId === null ? (
-                      <Typography
-                        component="p"
-                        data-testid="choose-grade-level-first"
-                        sx={{ color: 'text.secondary' }}
-                      >
-                        {parentCopy.capture.classification.chooseGradeLevelFirst}
-                      </Typography>
-                    ) : subjectsLoading ? (
-                      <Typography
-                        component="p"
-                        data-testid="subjects-loading"
-                        sx={{ color: 'text.secondary' }}
-                      >
-                        {parentCopy.capture.classification.loadingSubjects}
-                      </Typography>
-                    ) : subjectOptions.length === 0 ? (
-                      <Typography
-                        component="p"
-                        data-testid="no-subjects"
-                        sx={{ color: 'text.secondary' }}
-                      >
-                        {parentCopy.capture.classification.noSubjects}
-                      </Typography>
-                    ) : (
-                      <TextField
-                        id="capture-subject"
-                        select
-                        fullWidth
-                        size="small"
-                        disabled={busy}
-                        label={parentCopy.capture.classification.subjectLabel}
-                        value={
-                          subjectOptions.some((item) => item.id === sourceTest.subjectId)
-                            ? sourceTest.subjectId!
-                            : ''
-                        }
-                        onChange={(event) => classify({ subjectId: event.target.value })}
-                      >
-                        {subjectOptions.map((subject) => (
-                          <MenuItem key={subject.id} value={subject.id} disabled={!subject.enabled}>
-                            {subject.name}
-                          </MenuItem>
-                        ))}
-                      </TextField>
-                    )}
-                  </Box>
-
-                  {pending === 'classify' && (
-                    <Typography component="span" data-testid="classifying">
-                      {parentCopy.capture.classification.saving}
+                    <Typography id={CLASSIFICATION_HEADING_ID} component="h2" variant="cardTitle">
+                      {parentCopy.capture.classification.heading}
                     </Typography>
-                  )}
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
-              <Typography id={ORDER_HEADING_ID} component="h2" variant="cardTitle">
-                {parentCopy.capture.orderLabel}
-              </Typography>
-
-              {!ready ? (
-                <Alert severity="info" role="status" variant="outlined">
-                  {parentCopy.capture.loading}
-                </Alert>
-              ) : (
-                <>
-                  <Typography
-                    component="p"
-                    data-testid="page-count"
-                    sx={{ color: 'text.secondary' }}
-                  >
-                    {parentCopy.capture.countLine(pages.length, maxPages)}
-                  </Typography>
-
-                  {/* A submitted Source Test is shown, not hidden — the parent's
-                    work did not vanish — but nothing on it is editable. */}
-                  {!isDraft && (
-                    <Typography
-                      component="p"
-                      data-testid="submitted-note"
-                      sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}
-                    >
-                      <Lock size={16} aria-hidden="true" />
-                      {parentCopy.capture.submittedNote}
+                    {/* Says plainly what changing the grade level here does *not*
+                    touch, because the default came from the child's profile. */}
+                    <Typography component="p" sx={{ color: 'text.secondary' }}>
+                      {parentCopy.capture.classification.intro}
                     </Typography>
-                  )}
 
-                  {pages.length === 0 ? (
                     <Box
                       sx={{
                         display: 'grid',
-                        justifyItems: 'center',
-                        gap: `${density.gap}px`,
-                        py: `${density.sectionMargin * 1.5}px`,
-                        px: `${density.cardPadding}px`,
-                        border: '1px dashed',
-                        borderColor: 'divider',
-                        borderRadius: `${rounded.control}px`,
-                        color: 'text.secondary',
-                        textAlign: 'center',
+                        gap: `${density.gap * 1.5}px`,
+                        gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+                        alignItems: 'start',
                       }}
                     >
-                      <FileImage size={28} aria-hidden="true" />
-                      <Typography component="p">{parentCopy.capture.empty}</Typography>
+                      {gradeLevelsLoading ? (
+                        <Typography
+                          component="p"
+                          data-testid="grade-levels-loading"
+                          sx={{ color: 'text.secondary' }}
+                        >
+                          {parentCopy.capture.classification.loadingGradeLevels}
+                        </Typography>
+                      ) : gradeLevelOptions.length === 0 ? (
+                        <Typography
+                          component="p"
+                          data-testid="no-grade-levels"
+                          sx={{ color: 'text.secondary' }}
+                        >
+                          {parentCopy.capture.classification.noGradeLevels}
+                        </Typography>
+                      ) : (
+                        <TextField
+                          id="capture-grade-level"
+                          select
+                          fullWidth
+                          size="small"
+                          disabled={busy}
+                          label={parentCopy.capture.classification.gradeLevelLabel}
+                          value={
+                            gradeLevelOptions.some((item) => item.id === sourceTest.gradeLevelId)
+                              ? sourceTest.gradeLevelId!
+                              : ''
+                          }
+                          onChange={(event) => classify({ gradeLevelId: event.target.value })}
+                        >
+                          {gradeLevelOptions.map((gradeLevel) => (
+                            <MenuItem
+                              key={gradeLevel.id}
+                              value={gradeLevel.id}
+                              disabled={!gradeLevel.enabled}
+                            >
+                              {gradeLevel.name}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                      )}
+
+                      {/* The Subject list is a function of the Grade Level, so each
+                    state of that function says which one it is in. */}
+                      {sourceTest.gradeLevelId === null ? (
+                        <Typography
+                          component="p"
+                          data-testid="choose-grade-level-first"
+                          sx={{ color: 'text.secondary' }}
+                        >
+                          {parentCopy.capture.classification.chooseGradeLevelFirst}
+                        </Typography>
+                      ) : subjectsLoading ? (
+                        <Typography
+                          component="p"
+                          data-testid="subjects-loading"
+                          sx={{ color: 'text.secondary' }}
+                        >
+                          {parentCopy.capture.classification.loadingSubjects}
+                        </Typography>
+                      ) : subjectOptions.length === 0 ? (
+                        <Typography
+                          component="p"
+                          data-testid="no-subjects"
+                          sx={{ color: 'text.secondary' }}
+                        >
+                          {parentCopy.capture.classification.noSubjects}
+                        </Typography>
+                      ) : (
+                        <TextField
+                          id="capture-subject"
+                          select
+                          fullWidth
+                          size="small"
+                          disabled={busy}
+                          label={parentCopy.capture.classification.subjectLabel}
+                          value={
+                            subjectOptions.some((item) => item.id === sourceTest.subjectId)
+                              ? sourceTest.subjectId!
+                              : ''
+                          }
+                          onChange={(event) => classify({ subjectId: event.target.value })}
+                        >
+                          {subjectOptions.map((subject) => (
+                            <MenuItem
+                              key={subject.id}
+                              value={subject.id}
+                              disabled={!subject.enabled}
+                            >
+                              {subject.name}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                      )}
                     </Box>
-                  ) : (
-                    <PageStrip
-                      pages={pages}
-                      editable={isDraft}
-                      busy={busy}
-                      onMove={move}
-                      onRetake={retakePage}
-                      onDelete={deletePage}
-                    />
-                  )}
 
-                  {isDraft && (
-                    <>
-                      {/* The camera, the photo library, and the guidance when the
-                        camera cannot be used. One call back per parent action,
-                        with the files in the order they were added. */}
-                      <AddPages
-                        pageCount={pages.length}
-                        maxPages={maxPages}
-                        editable={isDraft}
-                        busy={busy}
-                        onAdd={addPages}
-                        onAnnounce={announce}
-                      />
-                      {/* Ingest re-encodes before each row leaves `Uploading`,
-                        which is long enough that silence reads as a dead
-                        control. */}
-                      {pending === 'add' && (
-                        <Typography component="span" data-testid="adding">
-                          {parentCopy.capture.adding}
-                        </Typography>
-                      )}
-                      {!addable && (
-                        <Typography component="p">
-                          {parentCopy.capture.limitReached(maxPages)}
-                        </Typography>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
+                    {pending === 'classify' && (
+                      <Typography component="span" data-testid="classifying">
+                        {parentCopy.capture.classification.saving}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-          {/* The check and, past submit, the generate step: the screen's one
-                way forward, in a card of its own so it never reads as part of
-                the page list above it. */}
-          {ready && (
+          {/* The page list, and the four things a parent may do to it. */}
+          {step === 'pages' && (
             <Card>
               <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
-                {isDraft && (
+                <Typography id={ORDER_HEADING_ID} component="h2" variant="cardTitle">
+                  {parentCopy.capture.orderLabel}
+                </Typography>
+
+                {!ready ? (
+                  <Alert severity="info" role="status" variant="outlined">
+                    {parentCopy.capture.loading}
+                  </Alert>
+                ) : (
                   <>
-                    {/* The check, not the commit. It runs once over the whole
-                        page set, in the foreground, and it charges nothing. */}
-                    {!checked && (
+                    <Typography
+                      component="p"
+                      data-testid="page-count"
+                      sx={{ color: 'text.secondary' }}
+                    >
+                      {parentCopy.capture.countLine(pages.length, maxPages)}
+                    </Typography>
+
+                    {/* A submitted Source Test is shown, not hidden — the parent's
+                    work did not vanish — but nothing on it is editable. */}
+                    {!isDraft && (
+                      <Typography
+                        component="p"
+                        data-testid="submitted-note"
+                        sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}
+                      >
+                        <Lock size={16} aria-hidden="true" />
+                        {parentCopy.capture.submittedNote}
+                      </Typography>
+                    )}
+
+                    {pages.length === 0 ? (
+                      <Box
+                        sx={{
+                          display: 'grid',
+                          justifyItems: 'center',
+                          gap: `${density.gap}px`,
+                          py: `${density.sectionMargin * 1.5}px`,
+                          px: `${density.cardPadding}px`,
+                          border: '1px dashed',
+                          borderColor: 'divider',
+                          borderRadius: `${rounded.control}px`,
+                          color: 'text.secondary',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <FileImage size={28} aria-hidden="true" />
+                        <Typography component="p">{parentCopy.capture.empty}</Typography>
+                      </Box>
+                    ) : (
+                      <PageStrip
+                        pages={pages}
+                        editable={isDraft}
+                        busy={busy}
+                        onMove={move}
+                        onRetake={retakePage}
+                        onDelete={deletePage}
+                      />
+                    )}
+
+                    {isDraft && (
                       <>
-                        <PrimaryButton
-                          disabled={busy || !checkable}
-                          sx={{ minHeight: density.tapTarget }}
-                          onClick={checkPages}
-                          data-testid="check-pages"
-                        >
-                          {pending === 'check'
-                            ? parentCopy.capture.submitting
-                            : parentCopy.capture.submit}
-                        </PrimaryButton>
-                        {pending === 'check' && (
-                          <Typography component="p" data-testid="checking">
-                            {parentCopy.capture.legibility.checking}
+                        {/* The camera, the photo library, and the guidance when the
+                        camera cannot be used. One call back per parent action,
+                        with the files in the order they were added. */}
+                        <AddPages
+                          pageCount={pages.length}
+                          maxPages={maxPages}
+                          editable={isDraft}
+                          busy={busy}
+                          onAdd={addPages}
+                          onAnnounce={announce}
+                        />
+                        {/* Ingest re-encodes before each row leaves `Uploading`,
+                        which is long enough that silence reads as a dead
+                        control. */}
+                        {pending === 'add' && (
+                          <Typography component="span" data-testid="adding">
+                            {parentCopy.capture.adding}
                           </Typography>
                         )}
-                        {/* The reason, on screen, whenever the control is
+                        {!addable && (
+                          <Typography component="p">
+                            {parentCopy.capture.limitReached(maxPages)}
+                          </Typography>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* The check: the screen's one way forward, in a card of its own so
+                it never reads as part of the page list. Past the commit it
+                holds nothing at all — every control on it is already behind
+                `isDraft`, which is what makes this step read-only afterwards
+                without a second rendering mode. */}
+          {step === 'check' && ready && isDraft && (
+            <Card>
+              <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
+                {/* The check, not the commit. It runs once over the whole
+                        page set, in the foreground, and it charges nothing. */}
+                {!checked && (
+                  <>
+                    <PrimaryButton
+                      disabled={busy || !checkable}
+                      sx={{ minHeight: density.tapTarget }}
+                      onClick={checkPages}
+                      data-testid="check-pages"
+                    >
+                      {pending === 'check'
+                        ? parentCopy.capture.submitting
+                        : parentCopy.capture.submit}
+                    </PrimaryButton>
+                    {pending === 'check' && (
+                      <Typography component="p" data-testid="checking">
+                        {parentCopy.capture.legibility.checking}
+                      </Typography>
+                    )}
+                    {/* The reason, on screen, whenever the control is
                             refused for it. The disabled button alone states
                             nothing a parent can act on. */}
-                        {!checkable && (
-                          <Typography
-                            component="p"
-                            data-testid="submit-blocked"
-                            sx={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: `${density.gap}px`,
-                              color: 'text.secondary',
-                            }}
-                          >
-                            <Info
-                              size={18}
-                              aria-hidden="true"
-                              style={{ flexShrink: 0, marginTop: 3 }}
-                            />
-                            {/* The check reason is left out here: this control
+                    {!checkable && (
+                      <Typography
+                        component="p"
+                        data-testid="submit-blocked"
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: `${density.gap}px`,
+                          color: 'text.secondary',
+                        }}
+                      >
+                        <Info
+                          size={18}
+                          aria-hidden="true"
+                          style={{ flexShrink: 0, marginTop: 3 }}
+                        />
+                        {/* The check reason is left out here: this control
                                 *is* the check, so telling a parent to run it
                                 is telling them to press the button they are
                                 being refused. It is stated by the server, and
                                 by the copy function, for the caller that never
                                 saw this screen. */}
-                            {parentCopy.capture.submitBlocked(
-                              blockedReasons.filter((reason) => reason !== 'legibility'),
-                            )}
-                          </Typography>
+                        {parentCopy.capture.submitBlocked(
+                          blockedReasons.filter((reason) => reason !== 'legibility'),
                         )}
-                      </>
-                    )}
-
-                    {/* The result, above the commit control: the parent reads
-                        what the check said, and only then is asked to
-                        continue. */}
-                    {checked && (
-                      <Box
-                        component="section"
-                        aria-labelledby={LEGIBILITY_HEADING_ID}
-                        data-testid="legibility-result"
-                        sx={{ display: 'grid', gap: `${density.gap}px` }}
-                      >
-                        <Typography id={LEGIBILITY_HEADING_ID} component="h2" variant="cardTitle">
-                          {parentCopy.capture.legibility.heading}
-                        </Typography>
-
-                        <Typography component="p" data-testid="legibility-summary">
-                          {flagged.length === 0
-                            ? parentCopy.capture.legibility.allReadable
-                            : parentCopy.capture.legibility.flagged(flagged)}
-                        </Typography>
-
-                        {/* The retake, offered for each flagged page alone.
-                            Every verdict badge lives on the strip above — the
-                            ordered list that names each page's ordinal and its
-                            readability — and this drives that page's own
-                            retake input by `htmlFor` rather than adding a
-                            second way to replace a page's bytes. */}
-                        {pages.filter((page) => !isPageReadable(page)).length > 0 && (
-                          <Box
-                            component="ul"
-                            sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid' }}
-                          >
-                            {pages
-                              .filter((page) => !isPageReadable(page))
-                              .map((page) => (
-                                <Box
-                                  component="li"
-                                  key={page.id}
-                                  sx={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    minHeight: density.tapTarget,
-                                  }}
-                                >
-                                  <Typography
-                                    component="label"
-                                    htmlFor={`capture-retake-${page.id}`}
-                                    data-testid={`legibility-retake-${page.ordinal}`}
-                                  >
-                                    {parentCopy.capture.legibility.retakeFor(page.ordinal)}
-                                  </Typography>
-                                </Box>
-                              ))}
-                          </Box>
-                        )}
-
-                        {/* Proceeding over a flagged page is allowed, and the
-                            screen says so rather than leaving it to be tried. */}
-                        <Typography component="p" data-testid="legibility-advisory">
-                          {parentCopy.capture.legibility.advisory}
-                        </Typography>
-
-                        {/* Stated beforehand, in words, above the control that
-                            spends it. No figure and no counter: the
-                            parent-facing Allowances surface is Story 9.6's. */}
-                        <Typography component="p" data-testid="legibility-cost">
-                          {parentCopy.capture.legibility.cost}
-                        </Typography>
-                        <Typography component="p" data-testid="legibility-no-cost">
-                          {parentCopy.capture.legibility.noCost}
-                        </Typography>
-
-                        <PrimaryButton
-                          disabled={busy}
-                          sx={{ minHeight: density.tapTarget }}
-                          onClick={submit}
-                          data-testid="legibility-continue"
-                        >
-                          {pending === 'submit'
-                            ? parentCopy.capture.legibility.committing
-                            : parentCopy.capture.legibility.continueWith(readyPageCount)}
-                        </PrimaryButton>
-                      </Box>
+                      </Typography>
                     )}
                   </>
                 )}
 
-                {/* The generate step, and the gate on the way into it. It
+                {/* The result, above the commit control: the parent reads
+                        what the check said, and only then is asked to
+                        continue. */}
+                {checked && (
+                  <Box
+                    component="section"
+                    aria-labelledby={LEGIBILITY_HEADING_ID}
+                    data-testid="legibility-result"
+                    sx={{ display: 'grid', gap: `${density.gap}px` }}
+                  >
+                    <Typography id={LEGIBILITY_HEADING_ID} component="h2" variant="cardTitle">
+                      {parentCopy.capture.legibility.heading}
+                    </Typography>
+
+                    <Typography component="p" data-testid="legibility-summary">
+                      {flagged.length === 0
+                        ? parentCopy.capture.legibility.allReadable
+                        : parentCopy.capture.legibility.flagged(flagged)}
+                    </Typography>
+
+                    {/* The retake, offered for each flagged page alone.
+                            Every verdict badge lives on the strip, the ordered
+                            list that names each page's ordinal and its
+                            readability. Only one step renders at a time, so
+                            `capture-retake-{pageId}` is never in the document
+                            twice: on the Pages step the strip owns that input,
+                            and here the Check step owns it. The label keeps
+                            driving it by `htmlFor`, and both inputs route to
+                            the same `retakePage` write — one affordance per
+                            step, not a second way to replace a page's bytes. */}
+                    {pages.filter((page) => !isPageReadable(page)).length > 0 && (
+                      <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid' }}>
+                        {pages
+                          .filter((page) => !isPageReadable(page))
+                          .map((page) => (
+                            <Box
+                              component="li"
+                              key={page.id}
+                              sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                minHeight: density.tapTarget,
+                              }}
+                            >
+                              <RetakePageInput
+                                pageId={page.id}
+                                ordinal={page.ordinal}
+                                busy={busy}
+                                onRetake={retakePage}
+                              />
+                              <Typography
+                                component="label"
+                                htmlFor={`capture-retake-${page.id}`}
+                                data-testid={`legibility-retake-${page.ordinal}`}
+                                // The input it drives is off screen, so this
+                                // label has to show its focus — the same rule
+                                // the strip's own retake label carries.
+                                sx={{
+                                  cursor: 'pointer',
+                                  'input:focus-visible + &': {
+                                    outline: `${focusRing.width}px solid`,
+                                    outlineOffset: `${focusRing.offset}px`,
+                                  },
+                                }}
+                              >
+                                {parentCopy.capture.legibility.retakeFor(page.ordinal)}
+                              </Typography>
+                            </Box>
+                          ))}
+                      </Box>
+                    )}
+
+                    {/* Proceeding over a flagged page is allowed, and the
+                            screen says so rather than leaving it to be tried. */}
+                    <Typography component="p" data-testid="legibility-advisory">
+                      {parentCopy.capture.legibility.advisory}
+                    </Typography>
+
+                    {/* Stated beforehand, in words, above the control that
+                            spends it. No figure and no counter: the
+                            parent-facing Allowances surface is Story 9.6's. */}
+                    <Typography component="p" data-testid="legibility-cost">
+                      {parentCopy.capture.legibility.cost}
+                    </Typography>
+                    <Typography component="p" data-testid="legibility-no-cost">
+                      {parentCopy.capture.legibility.noCost}
+                    </Typography>
+
+                    <PrimaryButton
+                      disabled={busy}
+                      sx={{ minHeight: density.tapTarget }}
+                      onClick={submit}
+                      data-testid="legibility-continue"
+                    >
+                      {pending === 'submit'
+                        ? parentCopy.capture.legibility.committing
+                        : parentCopy.capture.legibility.continueWith(readyPageCount)}
+                    </PrimaryButton>
+                  </Box>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* The same step once the upload is committed: read-only, which only
+              means anything if there is still something to read. It keeps the
+              verdict the parent decided on and says the upload is saved, and it
+              offers no control — the check cannot be run again and the commit
+              has happened. */}
+          {step === 'check' && ready && !isDraft && (
+            <Card>
+              <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
+                <Box
+                  component="section"
+                  aria-labelledby={LEGIBILITY_HEADING_ID}
+                  data-testid="legibility-committed"
+                  sx={{ display: 'grid', gap: `${density.gap}px` }}
+                >
+                  <Typography id={LEGIBILITY_HEADING_ID} component="h2" variant="cardTitle">
+                    {parentCopy.capture.legibility.heading}
+                  </Typography>
+                  {checkOutcome && (
+                    <Typography component="p" data-testid="legibility-summary">
+                      {flagged.length === 0
+                        ? parentCopy.capture.legibility.allReadable
+                        : parentCopy.capture.legibility.flagged(flagged)}
+                    </Typography>
+                  )}
+                  <Typography
+                    component="p"
+                    data-testid="submitted-note"
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: `${density.gap}px`,
+                      color: 'text.secondary',
+                    }}
+                  >
+                    <Lock size={18} aria-hidden="true" style={{ flexShrink: 0, marginTop: 3 }} />
+                    {parentCopy.capture.submittedNote}
+                  </Typography>
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* The generate step, and the gate on the way into it. It
                     exists only past submit: a Draft has no Extraction job, and
                     the status read answers 404 for one. */}
+          {step === 'generate' && ready && (
+            <Card>
+              <CardContent sx={{ display: 'grid', gap: `${density.gap * 1.5}px` }}>
                 {!isDraft && (
                   <Box
                     component="section"

@@ -6,12 +6,14 @@ import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, it } from 'vitest';
 import { parentCopy } from '@/copy/parent';
 import { ACCOUNT_TIERS } from '@/lib/admin-api';
+import { CAPTURE_STEPS, type CaptureStepState } from '@/lib/capture-step';
 import { ParentApiError, type PageImageView } from '@/lib/parent-api';
 import { endsParentView } from '@/lib/parent-view';
 import { parentTheme } from '@/theme/theme';
 import { colorTokens, density } from '@/theme/tokens';
 import { CameraGuidance, LibraryTrimNotice, type CameraStatus } from './AddPages';
 import { CameraViewfinder, type CameraViewfinderProps } from './CameraViewfinder';
+import { CaptureStepper, type CaptureStepperProps } from './CaptureStepper';
 import { PageStrip, type PageStripProps } from './PageStrip';
 import { ThinExtractionWarning, type ThinExtractionWarningProps } from './ThinExtractionWarning';
 import { writeRefusal } from './page';
@@ -22,6 +24,8 @@ const DIR = import.meta.dirname;
 const PAGE_SOURCE = readFileSync(path.resolve(DIR, 'page.tsx'), 'utf8');
 /** The strip's own source: it carries the per-page legibility badge. */
 const STRIP_SOURCE = readFileSync(path.resolve(DIR, 'PageStrip.tsx'), 'utf8');
+/** The one retake input both the Pages step and the Check step mount. */
+const RETAKE_INPUT_SOURCE = readFileSync(path.resolve(DIR, 'RetakePageInput.tsx'), 'utf8');
 
 function page(ordinal: number, legibility: PageImageView['legibility'] = null): PageImageView {
   return {
@@ -703,11 +707,14 @@ describe('the generate step and the gate on the way into it', () => {
   it('opens a fresh draft on retake, and says so rather than implying the pages return', () => {
     const retake = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('function retakePages()'));
     const body = retake.slice(0, retake.indexOf('\n  }'));
-    // Announced from the draft the server answered with, never up front: a
-    // failed open would otherwise claim a new upload started beside an error
-    // saying it did not.
-    expect(body).toContain('openDraft(() => announce(parentCopy.capture.generate.retakeStarted));');
+    // Said from the draft the server answered with, never up front: a failed
+    // open would otherwise claim a new upload started beside an error saying it
+    // did not. It is handed to the step the fresh draft lands on rather than
+    // announced on its own, so the one region does not lose it to the step's
+    // own sentence.
+    expect(body).toContain('stepLead.current = parentCopy.capture.generate.retakeStarted;');
     expect(body).not.toMatch(/openDraft\(\);\s*\n\s*announce\(/);
+    expect(body).not.toContain('announce(');
     expect(parentCopy.capture.generate.retakeStarted).toContain('new upload');
     expect(parentCopy.capture.generate.retakeStarted).not.toContain('Generation Allowance');
   });
@@ -1361,10 +1368,19 @@ describe('the legibility result', () => {
 
   it('offers a retake scoped to the flagged page alone', () => {
     expect(parentCopy.capture.legibility.retakeFor(2)).toBe('Retake page 2');
-    // It drives the strip's own per-page retake input by `htmlFor` rather
-    // than adding a second way to replace a page's bytes.
+    // It drives a real per-page retake input by `htmlFor`. Only one step
+    // renders at a time, so that id is never in the document twice: the strip
+    // owns the element on the Pages step and the Check step owns it here. Both
+    // mount the one shared input, which holds the single id, the single
+    // accessible name and the single write — not a second way to replace a
+    // page's bytes.
     expect(PAGE_SOURCE).toContain('htmlFor={`capture-retake-${page.id}`}');
-    expect(STRIP_SOURCE).toContain('id={`capture-retake-${page.id}`}');
+    expect(PAGE_SOURCE).toContain('<RetakePageInput');
+    expect(PAGE_SOURCE).toContain('onRetake={retakePage}');
+    expect(STRIP_SOURCE).toContain('<RetakePageInput');
+    expect(RETAKE_INPUT_SOURCE).toContain('id={`capture-retake-${pageId}`}');
+    expect(RETAKE_INPUT_SOURCE).toContain('aria-label={parentCopy.capture.retakeFor(ordinal)}');
+    expect(RETAKE_INPUT_SOURCE).toContain('if (file) onRetake(pageId, file);');
     // And it exists only for a page the check flagged.
     expect(PAGE_SOURCE).toContain('pages.filter((page) => !isPageReadable(page))');
   });
@@ -1505,5 +1521,336 @@ describe('what a refused commit puts on the screen', () => {
     }
     expect(ours).not.toContain('Account Tier');
     expect(ours).not.toContain('resets');
+  });
+});
+
+/**
+ * Story 3.7's stepper.
+ *
+ * The rail and the two controls are rendered, because they are a component of
+ * their own precisely so that they can be. Everything the *screen* decides —
+ * which step opens, what moves it, what is announced — is stated here as
+ * source text: this suite renders no screen, and the rules themselves are
+ * asserted as rules in `lib/capture-step.spec.ts`.
+ */
+const NOTHING_DONE: CaptureStepState = {
+  classified: false,
+  hasPages: false,
+  checked: false,
+  submitted: false,
+};
+
+const COMMITTED: CaptureStepState = {
+  classified: true,
+  hasPages: true,
+  checked: true,
+  submitted: true,
+};
+
+function stepper(overrides: Partial<CaptureStepperProps> = {}): string {
+  const props: CaptureStepperProps = {
+    step: 'details',
+    state: NOTHING_DONE,
+    busy: false,
+    onBack: () => undefined,
+    onNext: () => undefined,
+    ...overrides,
+  };
+  return renderToStaticMarkup(
+    createElement(ThemeProvider, { theme: parentTheme }, createElement(CaptureStepper, props)),
+  );
+}
+
+/**
+ * The rendered markup with emotion's injected `<style>` blocks taken out.
+ *
+ * Those blocks name every MUI state class the component *could* wear, so an
+ * assertion about `Mui-completed` made against the whole string is satisfied by
+ * a stylesheet rather than by a step the parent has actually finished.
+ */
+function withoutStyles(markup: string): string {
+  return markup.replace(/<style[\s\S]*?<\/style>/g, '');
+}
+
+/** The rail's four steps, one segment each, so a mark belongs to exactly one. */
+function steps(markup: string): string[] {
+  return withoutStyles(markup).split('<li ').slice(1);
+}
+
+/** The markup of one control, from its opening tag to the next one. */
+function controlFor(markup: string, testId: string): string {
+  const marker = markup.indexOf(`data-testid="${testId}"`);
+  if (marker === -1) throw new Error(`controlFor: no element carries data-testid="${testId}"`);
+  const opened = markup.lastIndexOf('<button', marker);
+  return markup.slice(opened, markup.indexOf('</button>', opened));
+}
+
+describe('the rail that shows where in the upload the parent is', () => {
+  it('names all four steps, in the order they are taken', () => {
+    const markup = stepper();
+    let at = -1;
+    for (const step of CAPTURE_STEPS) {
+      const found = markup.indexOf(parentCopy.capture.steps[step], at + 1);
+      expect(found).toBeGreaterThan(at);
+      at = found;
+    }
+  });
+
+  it('names the current step in visible text, not only as a position on the rail', () => {
+    // A rail is a picture. The parent who cannot see it is still told where
+    // they are, in a sentence.
+    expect(stepper({ step: 'pages' })).toContain(
+      parentCopy.capture.steps.position(2, 4, parentCopy.capture.steps.pages),
+    );
+    expect(parentCopy.capture.steps.position(2, 4, 'Pages')).toBe('Step 2 of 4: Pages');
+  });
+
+  it('is display only: no step on it is a control', () => {
+    // A clickable rail would be a second, differently-gated way through state
+    // that is already sequential, and nothing in the intent says what a tap on
+    // a future step should do.
+    const source = readFileSync(path.resolve(DIR, 'CaptureStepper.tsx'), 'utf8');
+    const code = source
+      .split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toContain('StepButton');
+    // The two real buttons are the only ones in it.
+    expect(withoutStyles(stepper()).match(/<button/g)).toHaveLength(2);
+    expect(withoutStyles(stepper())).not.toContain('<li><button');
+  });
+
+  it('marks the steps the draft has finished, and never the last one', () => {
+    // The whole point of the post-commit case: Details, Pages and Check are
+    // read-only *and shown complete*, while Generate is where the parent is.
+    const committed = steps(stepper({ step: 'generate', state: COMMITTED }));
+    expect(committed.map((step) => step.includes('Mui-completed'))).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
+    // And nothing is marked on a draft that has done nothing yet.
+    expect(steps(stepper()).map((step) => step.includes('Mui-completed'))).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    // Still all three once the pages a committed upload was made of are gone:
+    // Epic 8 deletes them eventually, and the steps were finished by the
+    // commit, not by rows that still exist.
+    const expired = steps(
+      stepper({
+        step: 'generate',
+        state: { classified: false, hasPages: false, checked: false, submitted: true },
+      }),
+    );
+    expect(expired.map((step) => step.includes('Mui-completed'))).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it('adds no second live region: the surface has exactly one', () => {
+    const source = readFileSync(path.resolve(DIR, 'CaptureStepper.tsx'), 'utf8');
+    expect(source).not.toContain('role="status"');
+    expect(source).not.toContain('aria-live');
+    expect(stepper()).not.toContain('aria-live');
+    // And the screen's own two are the pre-existing loading alerts, unchanged.
+    expect(PAGE_SOURCE.match(/<Alert severity="info" role="status"/g)).toHaveLength(2);
+    expect(PAGE_SOURCE).not.toContain('aria-live');
+  });
+
+  it('decides nothing about which step is reachable, and issues no request', () => {
+    const source = readFileSync(path.resolve(DIR, 'CaptureStepper.tsx'), 'utf8');
+    const code = source
+      .split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toContain('parentApi');
+    expect(code).not.toContain('useState');
+    expect(code).not.toContain('useEffect');
+    // Every rule it renders is read from the pure lib, never restated here.
+    expect(code).toContain('isStepComplete(candidate, state)');
+    expect(code).toContain('canAdvance(step, state)');
+  });
+
+  it('states every one of its own words from the copy module', () => {
+    const source = readFileSync(path.resolve(DIR, 'CaptureStepper.tsx'), 'utf8');
+    const code = source
+      .split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toMatch(/(aria-label|children)=["']/);
+    expect(code).toContain('parentCopy.capture.steps');
+  });
+});
+
+describe('the two controls that move between the steps', () => {
+  it('are real buttons, each named for the step it would reach', () => {
+    const markup = stepper({ step: 'pages', state: { ...NOTHING_DONE, hasPages: true } });
+    const back = controlFor(markup, 'capture-step-back');
+    const next = controlFor(markup, 'capture-step-next');
+    expect(back).toContain('type="button"');
+    expect(next).toContain('type="button"');
+    expect(back).toContain(
+      `aria-label="${parentCopy.capture.steps.backTo(parentCopy.capture.steps.details)}"`,
+    );
+    expect(next).toContain(
+      `aria-label="${parentCopy.capture.steps.nextTo(parentCopy.capture.steps.check)}"`,
+    );
+    // Neither name collides with the "Back to Parent View" link, which leaves
+    // the screen altogether.
+    expect(parentCopy.capture.steps.backTo('Details')).not.toContain(parentCopy.capture.back);
+    // And each name contains the word printed on the button, or voice control
+    // cannot reach the button by what it reads (WCAG 2.5.3, Label in Name).
+    expect(parentCopy.capture.steps.backTo('Details')).toContain(parentCopy.capture.steps.back);
+    expect(parentCopy.capture.steps.nextTo('Check')).toContain(parentCopy.capture.steps.next);
+  });
+
+  it('names the end of the flow for what the button is, not for where it stands', () => {
+    // On the first step Back leads nowhere, so naming it "Back: Details" would
+    // have it claim to reach the step the parent is already on.
+    expect(controlFor(stepper(), 'capture-step-back')).toContain(
+      `aria-label="${parentCopy.capture.steps.back}"`,
+    );
+    expect(
+      controlFor(stepper({ step: 'generate', state: COMMITTED }), 'capture-step-next'),
+    ).toContain(`aria-label="${parentCopy.capture.steps.next}"`);
+  });
+
+  it('refuses Next while the step’s own condition is unmet', () => {
+    expect(controlFor(stepper(), 'capture-step-next')).toContain('disabled=""');
+    expect(
+      controlFor(stepper({ state: { ...NOTHING_DONE, classified: true } }), 'capture-step-next'),
+    ).not.toContain('disabled=""');
+  });
+
+  it('refuses Next at the end of the flow, where there is nowhere to go', () => {
+    expect(
+      controlFor(stepper({ step: 'generate', state: COMMITTED }), 'capture-step-next'),
+    ).toContain('disabled=""');
+  });
+
+  it('refuses Back on the first step, where there is nothing behind', () => {
+    expect(controlFor(stepper(), 'capture-step-back')).toContain('disabled=""');
+    expect(
+      controlFor(
+        stepper({ step: 'pages', state: { ...NOTHING_DONE, classified: true } }),
+        'capture-step-back',
+      ),
+    ).not.toContain('disabled=""');
+  });
+
+  it('refuses both while a write is in flight', () => {
+    // Two writes against one ordinal sequence could land out of order, and a
+    // step change mid-write would hide the control that is reporting it.
+    const markup = stepper({ step: 'pages', state: COMMITTED, busy: true });
+    expect(controlFor(markup, 'capture-step-back')).toContain('disabled=""');
+    expect(controlFor(markup, 'capture-step-next')).toContain('disabled=""');
+  });
+
+  it('issues no write of its own: navigation is not a mutation', () => {
+    // The ACs require that moving Back leaves every value already entered
+    // exactly as it was, which is only true if the move touches nothing.
+    const back = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('function goBack()'));
+    const body = back.slice(0, back.indexOf('\n  }'));
+    expect(body).not.toContain('write(');
+    expect(body).not.toContain('parentApi');
+    expect(body).toContain('setStep(previous);');
+    const next = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('function goNext()'));
+    const nextBody = next.slice(0, next.indexOf('\n  }'));
+    expect(nextBody).not.toContain('write(');
+    expect(nextBody).not.toContain('parentApi');
+    // And neither moves anywhere the pure rule refuses.
+    expect(nextBody).toContain('!canAdvance(step, stepState)');
+  });
+});
+
+describe('which step the screen shows', () => {
+  it('derives the opening step from the draft’s saved state, never from a literal', () => {
+    expect(PAGE_SOURCE).toContain('furthestStep(captureStepState(sourceTest))');
+    // The only literal step anywhere is the commit's forced landing, below.
+    expect(PAGE_SOURCE.match(/setStep\('[a-z]+'\)/g)).toEqual(["setStep('generate')"]);
+    expect(PAGE_SOURCE).toContain('captureStepState(sourceTest)');
+  });
+
+  it('derives it once per opened draft, keyed on that draft’s id', () => {
+    // Re-derived on every render it would drag the parent forward the instant a
+    // write landed — choose a subject and be thrown to Pages mid-sentence, or
+    // press Back only to be pushed straight back.
+    expect(PAGE_SOURCE).toContain('derivedForDraftId.current === sourceTest.id');
+    expect(PAGE_SOURCE).toContain('derivedForDraftId.current = sourceTest.id;');
+    // Which is also why the fresh draft a retake opens re-derives for free.
+    expect(PAGE_SOURCE).toContain('}, [sourceTest]);');
+  });
+
+  it('lands on Generate as the upload is committed, and only on that transition', () => {
+    // Past the commit the upload is spent, so the parent should not have to
+    // press Next. A previous-status ref rather than `status` driving the shown
+    // step continuously, which would pin a committed upload to Generate and
+    // leave the earlier steps unreachable.
+    expect(PAGE_SOURCE).toContain("if (before === 'Draft' && status === 'Submitted') {");
+    expect(PAGE_SOURCE).toContain("setStep('generate')");
+    expect(PAGE_SOURCE).toContain('previousStatus.current = status;');
+  });
+
+  it('renders exactly one step’s body, each behind its own step', () => {
+    for (const step of CAPTURE_STEPS) {
+      expect(PAGE_SOURCE).toContain(`{step === '${step}' &&`);
+    }
+    // The error Alert, the delete confirmation and the link off the screen are
+    // outside the stepper: none of them belongs to a step.
+    const stepped = PAGE_SOURCE.indexOf("{step === 'details' &&");
+    expect(PAGE_SOURCE.indexOf('role="alert"')).toBeLessThan(stepped);
+    expect(PAGE_SOURCE.indexOf('<ConfirmDestructiveDialog')).toBeGreaterThan(stepped);
+    expect(PAGE_SOURCE.indexOf('parentCopy.capture.back')).toBeGreaterThan(stepped);
+  });
+
+  it('moves focus to the new step’s heading, which is focusable only programmatically', () => {
+    // The same idiom the take-test screen's handed-in heading uses.
+    expect(PAGE_SOURCE).toContain('tabIndex={-1}');
+    expect(PAGE_SOURCE).toContain('ref={stepHeading}');
+    expect(PAGE_SOURCE).toContain('stepHeading.current?.focus();');
+    expect(PAGE_SOURCE).toContain('}, [step, announce]);');
+  });
+
+  it('announces the step in the one live region, in the same effect as the focus', () => {
+    const effect = PAGE_SOURCE.slice(PAGE_SOURCE.indexOf('const stepSettled = useRef(false);'));
+    const body = effect.slice(0, effect.indexOf('}, [step, announce]);'));
+    expect(body).toContain('parentCopy.capture.steps.announced(stepLabel(step))');
+    expect(body).toContain('announce(');
+    // The sentence explaining a move the *screen* made — the commit, the fresh
+    // draft a retake opened — leads the announcement rather than being replaced
+    // by it: the region carries one message at a time. Pinned by position, not
+    // only by presence, so swapping or splitting the two pieces would fail here
+    // rather than only being guessable from the e2e substring checks.
+    expect(body).toContain(
+      "announce(lead === '' ? said : `${lead} ${said}`);",
+    );
+    expect(body).toContain('lead');
+    // And each lead is the sentence its own setter just caused, never whatever
+    // the app-wide region happens to be holding — which may be from another
+    // screen, or already heard.
+    expect(PAGE_SOURCE).toContain('stepLead.current = parentCopy.capture.submitted;');
+    expect(PAGE_SOURCE).toContain('stepLead.current = parentCopy.capture.generate.retakeStarted;');
+    expect(PAGE_SOURCE).not.toContain('liveMessage');
+    // The step the screen *opens* on is not a change: it is neither announced
+    // nor focused, whether it is the mount default or the first derived step.
+    expect(PAGE_SOURCE).toContain('if (first && derived !== step) stepSettled.current = false;');
+  });
+
+  it('keeps the shown step out of the URL, the server and the browser’s stores', () => {
+    // Navigation is Back/Next plus the derived opening step, and nothing else.
+    const code = PAGE_SOURCE.split('\n')
+      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toContain('localStorage');
+    expect(code).not.toContain('sessionStorage');
+    expect(code).not.toContain('useSearchParams');
+    expect(code).not.toMatch(/router\.(push|replace)\([^)]*step/);
   });
 });
