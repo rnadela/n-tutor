@@ -620,6 +620,7 @@ The third column links to the section that carries the rationale.
 | Set Question and Explanation text in Literata wherever it appears, including Parent View and Admin | Assign families by surface instead of by content | [Typography](#typography) |
 | Apply `tnum` explicitly on Literata wherever numerals align | Assume Literata is tabular by default | [Typography](#typography) |
 | Render generated fractions typographically via `frac` | Ship `1/2` as plain text in Question, answer-key, or Explanation content | [Typography](#typography) |
+| Render figures inline from the sanitized `figure` segment, in the current text colour, at a responsive width | Ship a prose description of a shape ("[A half-circle is shown]"), hardcode a figure colour, or render model SVG unsanitized | [Typography](#typography) |
 | Render the student's typed fraction in a sibling beside a real input holding the raw string | Overlay the render on the input, or make the rendered glyphs the field's value | [Components](#components) |
 | Carry every grade state on all four carriers from `{components.grade-state-marker}` | Ship four colored circles and call the never-color-alone rule met | [Components](#components) |
 | Use the literal labels `Correct` / `Not correct` / `Unanswered` / `Not graded yet` **for grade state** | Substitute "Wrong", "Incorrect", or "Not answered" **for a grade state** — the in-test question map's `Answered` / `Not answered` is progress vocabulary and stays as it is | [Components](#components) |

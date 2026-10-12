@@ -62,6 +62,7 @@ development_status:
   3-6-thin-extraction-warning: done
   3-7-upload-stepper: backlog
   3-8-plain-language-check-step: backlog
+  3-9-figures-in-extraction: backlog
   epic-3-retrospective: optional
 
   epic-4: in-progress
@@ -72,6 +73,7 @@ development_status:
   4-5-release-or-discard: done
   4-6-optional-timer-configuration: done
   4-7-obvious-progress-spinner: backlog
+  4-8-figures-in-generated-questions: backlog
   epic-4-retrospective: optional
 
   epic-5: done

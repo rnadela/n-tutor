@@ -863,6 +863,36 @@ So that I know exactly what continuing will cost me.
 **Given** zero upload allowance left
 **Then** the existing Story 9.3 at-cap behaviour applies unchanged
 
+### Story 3.9: Figures in Extraction
+
+As the system,
+I want shapes and diagrams photographed on a Source Test carried into the Extraction as figures,
+So that generation can build questions that show shapes instead of describing them.
+
+**Acceptance Criteria:**
+
+**Given** a rich-text field
+**Then** it may hold a `figure` segment carrying an SVG string and a required, non-empty text alternative, alongside `text` and `fraction` segments
+
+**Given** any figure segment, from any source (extraction, generation, edit)
+**When** it is parsed for storage
+**Then** its SVG passes an allowlist sanitizer: only basic shape, path, group and text elements and geometry/presentation attributes survive; scripts, event handlers, external references, embedded HTML, images and CSS are removed; the root carries a viewBox; colours are rewritten to the current text colour or none; and an SVG over the size cap or with no drawable content is rejected as a content fault (AD-30)
+
+**Given** a question on a photographed page that needs a printed figure to be answered
+**When** Extraction runs
+**Then** the figure is reproduced as a figure segment in the prompt or choice it belongs to, and the question is usable; a figure that is cropped, un-photographed or unreadable is still recorded as uninterpretable, never guessed at
+
+**Given** a figure segment
+**When** any surface needs plain text (grading, explanation, dedupe, topic prompts)
+**Then** it reads as its text alternative
+
+**Given** a figure segment
+**When** the web `RichText` component renders it
+**Then** it is re-sanitized client-side, drawn inline at a responsive width, inherits the text colour in light and dark mode, and is exposed to assistive tech as one image named by its text alternative
+
+**Given** a malicious SVG corpus (script, on* handler, foreignObject, external href, javascript: URL, CSS url(), oversize)
+**Then** the sanitizer neutralizes or rejects every case in unit tests on both API and web
+
 ## Epic 4: Practice Test Generation, Review & Release
 
 Parent can generate one or more Practice Tests from a Source Test, review and edit the draft, optionally configure a timer, and release it to a Student Profile.
@@ -1034,6 +1064,40 @@ So that I can see at a glance the app is working and how far along it is.
 
 **Given** the visual reference `mockups/key-generation-progress.html`
 **Then** the build matches it in states, colours and order; the spines win where they differ
+
+### Story 4.8: Figures in Generated Questions
+
+As a parent,
+I want generated Practice Tests to show shapes when the Source Test used shapes,
+So that my child practises the same kind of visual question they were tested on.
+
+**Acceptance Criteria:**
+
+**Given** an Extraction whose questions carry figures
+**When** a Practice Test is generated
+**Then** generated questions on those Topics carry their own figure segments in the prompt and, for Multiple Choice, in choices where the source used pictured options; figures are new, not verbatim copies of a source figure
+
+**Given** a generated figure
+**Then** it passes the same sanitizer and text-alternative rule as Story 3.9, and a figure that fails is a content fault routed per AD-30/AD-31
+
+**Given** a draft with figures
+**When** I review it (Story 4.3)
+**Then** every figure is shown in the question and choices where it appears
+
+**Given** a draft question with figures
+**When** I edit its text, options or answer (Story 4.4)
+**Then** every figure in the edited field is kept unchanged; editing a figure itself is not offered
+
+**Given** a released Practice Test with figures
+**When** the student takes it, and later views results and the answer key
+**Then** every figure is shown where it appears, in both themes, with its text alternative available to a screen reader
+
+**Given** the Source Test `9f295f36…` style input (circles, half/quarter circles, composite figures, base-ten blocks, shapes on a grid)
+**Then** a generated test from it shows those kinds of shapes rather than text descriptions of them
+
+**Given** a source question that asks the child to draw or move a shape on a grid
+**When** it is generated from
+**Then** the generated question shows the grid and shape as a figure and asks where the shape ends up, answered by Multiple Choice (pictured options) or a cell label — never by drawing
 
 ## Epic 5: Taking a Test & Results
 

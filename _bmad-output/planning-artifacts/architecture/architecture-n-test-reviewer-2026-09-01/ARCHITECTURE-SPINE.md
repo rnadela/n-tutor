@@ -373,6 +373,7 @@ One NestJS application; `api` and `worker` are the same image with different ent
 - **Rule:**
   - Every Extraction schema field carries a self-assessed confidence of **low / medium / high**, and prompts instruct the model to return `null` for any field it cannot read confidently rather than guess — the mechanism behind FR-9's uninterpretable-not-hallucinated rule. Aggregate low confidence across a page is the signal behind FR-8 and FR-9a.
   - **Deterministic post-hoc validation runs in code on every AI payload after schema validation**, downgrading confidence or rejecting outright. Canonical case: a generated Multiple Choice Question whose correct answer is not among its own options is malformed and must be caught in code.
+  - **Every figure SVG passes an allowlist sanitizer in code** — shape, path, group and text elements and geometry/presentation attributes only; no script, handler, external reference, embedded HTML, image or CSS; colours rewritten to current colour; capped at 16 KB. A figure that fails is a content fault. The web re-sanitizes before rendering; neither side trusts the other.
   - Validation failure is a **content** fault, distinct from a transport fault, and routes per AD-31.
 
 ### AD-31 — AI failures split into client-fault and upstream-fault, and degrade differently
@@ -392,6 +393,7 @@ One NestJS application; `api` and `worker` are the same image with different ent
 - **Rule:**
   - **Accessibility is a build constraint, not a review step:** WCAG 2.1 AA, an ARIA-live timer, a keyboard-reachable question map, and DESIGN.md's contrast floors including SC 1.4.11 for the divider tokens that are the sole boundary of every control. PRD §10.1's SC 2.2.1 essential-timing exception argument is retained as written and must not be re-derived.
   - **Fractions render typographically, and what is structured is the emission behind them** — a **schema** constraint on the Question and Explanation schemas, not a CSS concern, because a spoken alternative cannot be recovered from a glyph.
+  - **Figures are structured too:** a shape or diagram is a `figure` rich-text segment holding sanitized SVG and a required text alternative, never prose describing it. It renders inline in the current text colour (dark mode holds) and is announced as one image by its alternative.
   - **Dark mode is scope, not polish:** every DESIGN.md token has both values and no surface hardcodes a color. The inverted camera-chrome tokens are a **declared exception** carrying `deliberateDuplicate` markers that forbid aliasing them back to the primary palette; light primary measures 2.52:1 on the inverted ground and "fixing it back" is forbidden.
   - **Copy is a parameterized layer:** no result string is a fixed literal, and person differs by surface — **second** person to the student, **third** person to the parent. A hardcoded user-facing string is a defect.
   - **Child-facing exposure rule:** no allowance counter, cost figure, tier label, model name, or AI grading rationale is ever reachable from a student-scoped endpoint. The API-surface twin of AD-20's logging rule.

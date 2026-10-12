@@ -320,6 +320,7 @@ The system produces a structured Extraction from a submitted Source Test, captur
 - Each extracted question is classified into exactly one of the three Question Formats.
 - Each extracted question carries at least one Topic.
 - Content the system cannot interpret (an un-photographed diagram, a handwriting-only region) is recorded as uninterpretable rather than guessed at, and questions depending on it are not used as a basis for generation.
+- A shape or diagram photographed legibly on a Page Image, that a question needs, is carried into the Extraction as a figure with a text alternative rather than as a prose description of it.
 - Extraction is persisted and reused for subsequent generations from the same Source Test, so regeneration does not re-read Page Images and continues to work after the Page Images are deleted (§5.2).
 - Fractions read off a Page Image are carried into the Extraction in a structured form, so that Questions generated from them inherit it (FR-10, §10.1).
 - Extraction is not exposed as a product surface in v0.
@@ -348,6 +349,7 @@ A parent can generate 1 to N Practice Tests from one Source Test, for one Studen
 - Multiple Practice Tests from the same Source Test are materially different from each other, not reorderings of one set.
 - No generated Question is a verbatim copy of a Source Test question.
 - Each generated Question carries its correct answer, its Topic(s), and, for Multiple Choice, plausible distractors.
+- Where the Source Test's questions on a Topic use figures, generated Questions on that Topic carry their own figures — in the prompt and, for Multiple Choice, in the options — each with a text alternative.
 - Any fraction appearing in a generated Question, answer option, or correct answer is emitted in a **structured renderable form** carrying its numerator and denominator, not as an ambiguous inline string. This is a constraint on generation output, not on styling (§10.1).
 - Generation runs asynchronously with a visible progress state; the parent can leave the screen and return.
 - Generation failure leaves the Source Test intact and retryable without re-uploading photos.
