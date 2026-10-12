@@ -1099,6 +1099,30 @@ So that my child practises the same kind of visual question they were tested on.
 **When** it is generated from
 **Then** the generated question shows the grid and shape as a figure and asks where the shape ends up, answered by Multiple Choice (pictured options) or a cell label — never by drawing
 
+### Story 4.9: Figure Placement
+
+As a parent or student,
+I want each figure shown on its own line beneath the words it belongs to,
+So that the question reads top to bottom instead of the picture sitting beside the sentence.
+
+**Acceptance Criteria:**
+
+**Given** a rich-text field holding a figure segment (question prompt, choice, answer key)
+**When** it renders at any width
+**Then** the figure starts on a new line after the text before it, and any text after it starts on a new line below it, never flowing beside it
+
+**Given** a field holding two or more figures
+**Then** each sits on its own line, in stored order
+
+**Given** a figure on its own line
+**Then** it keeps Story 3.9's responsive width and height ceiling, is left-aligned with the text above it, and has vertical spacing from the spacing scale (no literal values)
+
+**Given** a fraction or plain text segment
+**Then** it still flows inline exactly as before; only figures change
+
+**Given** the draft `1075e3d5…` style content (Q12 base-ten blocks currently beside the sentence)
+**Then** the blocks render below the question text, on draft review, test taking, results and answer key
+
 ## Epic 5: Taking a Test & Results
 
 Student can take a released Practice Test — answering, navigating, surviving interruption and offline gaps — submit it, and see a graded result with an answer key.
