@@ -11,7 +11,7 @@ import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
-import { visuallyHidden } from '@/components/LiveRegion';
+import { CardField, CardList, TableCard, TableOnDesktop } from '@/components/TableCards';
 import { WeakAreaMarker } from '@/components/WeakAreaMarker';
 import { parentCopy } from '@/copy/parent';
 import { masteryPercent } from '@/lib/analytics-view';
@@ -37,22 +37,22 @@ import { density, typeRoles } from '@/theme/tokens';
  * rather than letting the two figures on one page be read as one window. Both the
  * window and the per-row count are the server's figures; this file knows neither.
  *
- * **Two shapes at two widths, one density, and one accessibility tree.** On a phone
- * the answered and blank counts stack under the figure as a sub-line, because five
- * columns at 360px is five columns of two characters each. From the tablet
- * breakpoint they are real columns — the same rows, the same row height, no second
- * table.
+ * **Two layouts, one state, and one accessibility tree (UX-DR44).** From the
+ * desktop breakpoint this is the six-column table. Below it, every row is a card
+ * carrying the same six facts as labeled fields — because six columns at 360px is
+ * six columns of two characters each, and the hidden-column trick this layout
+ * replaced answered that by dropping four of them from the eye and leaving a
+ * sighted reader a figure with no counts beside it.
  *
- * The narrow layout hides those columns **visually only**: `display: none` would
- * take the header cells out of the accessibility tree along with the pixels, and a
- * table whose headers are gone is a table whose cells have nothing to be associated
- * with. So the columns are visually hidden instead and stay in the tree at every
- * width, and the phone-only sub-line — which restates exactly those figures for a
- * sighted reader — is `aria-hidden`, so nothing is announced twice.
+ * The card list is `ranked`: one column at every width, in the server's order.
+ * Weakest-first is the answer this table gives, and two columns would turn that
+ * into a reading order a parent has to reconstruct.
  *
- * The breakpoints are `sx` keys and never `useMediaQuery`: a hook that reads the
- * viewport renders the phone layout first on every device and then swaps, which is
- * a visible reflow on the slowest device the product runs on.
+ * Only one layout is ever in the accessibility tree: the other is `display: none`,
+ * so no row is announced twice. The breakpoints are `sx` keys and never
+ * `useMediaQuery`: a hook that reads the viewport renders the phone layout first on
+ * every device and then swaps, which is a visible reflow on the slowest device the
+ * product runs on.
  *
  * **Every row opens.** The topic name is a link filling its cell, and `hrefFor` is a
  * required prop rather than an optional one: a row that cannot be opened is a
@@ -77,28 +77,97 @@ import { density, typeRoles } from '@/theme/tokens';
 function TopicLink(props: LinkProps<`/parent/analytics/topics/${string}`>) {
   return <NextLink {...props} />;
 }
+
+/** The stored name, or a neutral stand-in for a topic that no longer resolves. */
+function labelOf(topic: MasteryTopicView): string {
+  return topic.topicName ?? parentCopy.analytics.unknownTopic;
+}
+
 /**
- * Visually hidden up to the tablet breakpoint, an ordinary cell from there up.
+ * The row's one way on, in whichever layout is asking for it.
  *
- * Every property is written at both widths rather than only at `xs`: MUI merges
- * breakpoint objects, so a value set only for the narrow case would still be in
- * force at `sm` and the cell would stay collapsed. That includes the border and
- * the padding — an `sm` of `undefined` restores nothing, and left the wide cells
- * with no row rule and no inset. Both are restated here from the theme's own cell.
+ * A real anchor filling its cell, so it is keyboard reachable and its accessible
+ * name is the topic. Client-side, so the provider holding the elevation bearer
+ * stays mounted across the navigation.
+ *
+ * The card's copy carries the `-card` testid: the two layouts are both in the
+ * markup, and a spec counting one of them must not be handed the sum.
  */
-const phoneVisuallyHidden = {
-  position: { xs: visuallyHidden.position, sm: 'static' },
-  width: { xs: visuallyHidden.width, sm: 'auto' },
-  height: { xs: visuallyHidden.height, sm: 'auto' },
-  overflow: { xs: visuallyHidden.overflow, sm: 'visible' },
-  clip: { xs: visuallyHidden.clip, sm: 'auto' },
-  clipPath: { xs: visuallyHidden.clipPath, sm: 'none' },
-  whiteSpace: { xs: visuallyHidden.whiteSpace, sm: 'normal' },
-  borderWidth: { xs: 0, sm: '0 0 1px 0' },
-  paddingBlock: { xs: 0, sm: 0 },
-  paddingInline: { xs: 0, sm: `${density.cardPadding}px` },
-  margin: { xs: visuallyHidden.margin, sm: 0 },
-} as const;
+function TopicOpener({
+  topic,
+  href,
+  testId,
+}: {
+  topic: MasteryTopicView;
+  href: Route<`/parent/analytics/topics/${string}`>;
+  testId: string;
+}) {
+  return (
+    <Link
+      component={TopicLink}
+      href={href}
+      sx={{ display: 'block', minHeight: density.tapTarget }}
+      data-testid={testId}
+    >
+      {labelOf(topic)}
+    </Link>
+  );
+}
+
+/**
+ * The figure and the bar that restates it, shared by both layouts.
+ *
+ * A topic with no fraction says so in words: rendering it as 0% would tell a
+ * parent their child got everything wrong on a topic they never answered.
+ */
+function MasteryReading({
+  topic,
+  percent,
+  suffix,
+}: {
+  topic: MasteryTopicView;
+  percent: number | null;
+  /** `-card` on the card layout, empty on the table's. */
+  suffix: string;
+}) {
+  return (
+    <Box sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>
+      <Typography
+        component="span"
+        sx={{ ...typeRoles.tableCell, fontVariantNumeric: 'tabular-nums' }}
+        data-testid={`mastery-figure${suffix}`}
+      >
+        {percent === null
+          ? parentCopy.analytics.masteryNone
+          : parentCopy.analytics.masteryFigure(percent, topic.answered)}
+      </Typography>
+      {/* The bar, which carries the same figure a second way. It is decoration
+        over text that already states the number, so it is hidden from the
+        accessibility tree rather than duplicating the sentence above it. */}
+      <Box
+        aria-hidden="true"
+        data-testid={`mastery-bar${suffix}`}
+        sx={(theme) => ({
+          height: density.gap / 2,
+          width: '100%',
+          maxWidth: 120,
+          backgroundColor: theme.vars.palette.action.hover,
+          overflow: 'hidden',
+        })}
+      >
+        <Box
+          sx={(theme) => ({
+            height: '100%',
+            width: `${percent ?? 0}%`,
+            backgroundColor: topic.isWeakArea
+              ? theme.vars.palette.warning.main
+              : theme.vars.palette.primary.main,
+          })}
+        />
+      </Box>
+    </Box>
+  );
+}
 
 export function MasteryTable({
   topics,
@@ -129,37 +198,33 @@ export function MasteryTable({
       <Typography component="p" sx={{ ...typeRoles.dashboardBody }} data-testid="mastery-scope">
         {parentCopy.analytics.masteryScope(name, windowSize)}
       </Typography>
-      <Table size="small" aria-label={heading} data-testid="mastery-table">
-        <TableHead>
-          <TableRow>
-            <TableCell component="th" scope="col">
-              {parentCopy.analytics.topicColumn}
-            </TableCell>
-            <TableCell component="th" scope="col">
-              {parentCopy.analytics.masteryColumn}
-            </TableCell>
-            {/* Present in the accessibility tree at every width, and hidden only
-              from the eye on a phone — `display: none` would take the header out
-              of the tree too, leaving the cells below with nothing to be
-              associated with. */}
-            <TableCell component="th" scope="col" sx={phoneVisuallyHidden}>
-              {parentCopy.analytics.answeredColumn}
-            </TableCell>
-            <TableCell component="th" scope="col" sx={phoneVisuallyHidden}>
-              {parentCopy.analytics.unansweredColumn}
-            </TableCell>
-            <TableCell component="th" scope="col" sx={phoneVisuallyHidden}>
-              {parentCopy.analytics.runsColumn}
-            </TableCell>
-            <TableCell component="th" scope="col" sx={phoneVisuallyHidden}>
-              {parentCopy.analytics.statusColumn}
-            </TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {topics.map((topic) => {
-            const percent = masteryPercent(topic.value);
-            return (
+
+      <TableOnDesktop>
+        <Table size="small" aria-label={heading} data-testid="mastery-table">
+          <TableHead>
+            <TableRow>
+              <TableCell component="th" scope="col">
+                {parentCopy.analytics.topicColumn}
+              </TableCell>
+              <TableCell component="th" scope="col">
+                {parentCopy.analytics.masteryColumn}
+              </TableCell>
+              <TableCell component="th" scope="col">
+                {parentCopy.analytics.answeredColumn}
+              </TableCell>
+              <TableCell component="th" scope="col">
+                {parentCopy.analytics.unansweredColumn}
+              </TableCell>
+              <TableCell component="th" scope="col">
+                {parentCopy.analytics.runsColumn}
+              </TableCell>
+              <TableCell component="th" scope="col">
+                {parentCopy.analytics.statusColumn}
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {topics.map((topic) => (
               <TableRow
                 key={topic.topicId}
                 data-testid="mastery-row"
@@ -169,111 +234,107 @@ export function MasteryTable({
                 data-weak-area={topic.isWeakArea ? 'true' : 'false'}
               >
                 <TableCell>
-                  {/* The stored name, or a neutral stand-in for a topic that no
-                    longer resolves: the row keeps its place and loses its label — and
-                    it still opens, because the figure is still true whatever became of
-                    the row that named it.
-
-                    A real anchor filling the cell, so it is keyboard reachable and its
-                    accessible name is the topic. Client-side, so the provider holding
-                    the elevation bearer stays mounted across the navigation. */}
-                  <Link
-                    component={TopicLink}
+                  <TopicOpener
+                    topic={topic}
                     href={hrefFor(topic.topicId)}
-                    sx={{ display: 'block', minHeight: density.tapTarget }}
-                    data-testid="mastery-topic-link"
-                  >
-                    {topic.topicName ?? parentCopy.analytics.unknownTopic}
-                  </Link>
+                    testId="mastery-topic-link"
+                  />
                 </TableCell>
                 <TableCell>
-                  <Box sx={{ display: 'grid', gap: `${density.gap / 2}px` }}>
-                    <Typography
-                      component="span"
-                      sx={{ ...typeRoles.tableCell, fontVariantNumeric: 'tabular-nums' }}
-                      data-testid="mastery-figure"
-                    >
-                      {/* A topic with no fraction says so in words. Rendering it as
-                        0% would tell a parent their child got everything wrong on
-                        a topic they never answered. */}
-                      {percent === null
-                        ? parentCopy.analytics.masteryNone
-                        : parentCopy.analytics.masteryFigure(percent, topic.answered)}
-                    </Typography>
-                    {/* The bar, which carries the same figure a second way. It is
-                      decoration over text that already states the number, so it is
-                      hidden from the accessibility tree rather than duplicating
-                      the sentence above it. */}
-                    <Box
-                      aria-hidden="true"
-                      data-testid="mastery-bar"
-                      sx={(theme) => ({
-                        height: density.gap / 2,
-                        width: '100%',
-                        maxWidth: 120,
-                        backgroundColor: theme.vars.palette.action.hover,
-                        overflow: 'hidden',
-                      })}
-                    >
-                      <Box
-                        sx={(theme) => ({
-                          height: '100%',
-                          width: `${percent ?? 0}%`,
-                          backgroundColor: topic.isWeakArea
-                            ? theme.vars.palette.warning.main
-                            : theme.vars.palette.primary.main,
-                        })}
-                      />
-                    </Box>
-                    {/* The phone's sub-line: the counts the columns carry at wider
-                      widths, so a sighted reader never meets the figure without
-                      them. `aria-hidden`, because those columns are still in the
-                      accessibility tree at this width — announcing both would read
-                      every row's blanks and run count twice. */}
-                    <Typography
-                      component="span"
-                      aria-hidden="true"
-                      sx={{ ...typeRoles.label, display: { xs: 'inline', sm: 'none' } }}
-                      data-testid="mastery-subline"
-                    >
-                      {`${
-                        topic.unanswered === 0
-                          ? parentCopy.analytics.unansweredNone
-                          : parentCopy.analytics.unansweredNote(topic.unanswered)
-                      } — ${parentCopy.analytics.masteryRowScope(topic.attemptsCounted)}`}
-                    </Typography>
-                    {/* The verdict, for the same reason and with the same rule: the
-                      status column below is still announced at this width. */}
-                    <Box aria-hidden="true" sx={{ display: { xs: 'inline-flex', sm: 'none' } }}>
-                      {topic.isWeakArea && <WeakAreaMarker />}
-                    </Box>
-                  </Box>
+                  <MasteryReading topic={topic} percent={masteryPercent(topic.value)} suffix="" />
                 </TableCell>
                 <TableCell
-                  sx={{ ...phoneVisuallyHidden, fontVariantNumeric: 'tabular-nums' }}
+                  sx={{ fontVariantNumeric: 'tabular-nums' }}
                   data-testid="mastery-answered"
                 >
                   {topic.answered}
                 </TableCell>
                 <TableCell
-                  sx={{ ...phoneVisuallyHidden, fontVariantNumeric: 'tabular-nums' }}
+                  sx={{ fontVariantNumeric: 'tabular-nums' }}
                   data-testid="mastery-unanswered"
                 >
                   {topic.unanswered}
                 </TableCell>
                 {/* How many runs this row's own figure is over — the row's own scope,
                   and the server's count, never one derived here. */}
-                <TableCell sx={phoneVisuallyHidden} data-testid="mastery-runs">
+                <TableCell data-testid="mastery-runs">
                   {parentCopy.analytics.masteryRowScope(topic.attemptsCounted)}
                 </TableCell>
-                <TableCell sx={phoneVisuallyHidden}>
-                  {topic.isWeakArea && <WeakAreaMarker />}
-                </TableCell>
+                <TableCell>{topic.isWeakArea && <WeakAreaMarker />}</TableCell>
               </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+            ))}
+          </TableBody>
+        </Table>
+      </TableOnDesktop>
+
+      {/* The same rows, below the desktop breakpoint, with every column that was
+          a column now a labeled field. Ranked, so the server's weakest-first
+          order is still the reading order. */}
+      <CardList ranked label={heading} testId="mastery-cards">
+        {topics.map((topic) => (
+          <TableCard
+            key={topic.topicId}
+            title={labelOf(topic)}
+            titleContent={
+              <TopicOpener
+                topic={topic}
+                href={hrefFor(topic.topicId)}
+                testId="mastery-topic-link-card"
+              />
+            }
+            testId="mastery-card"
+            dataAttributes={{
+              'data-topic-id': topic.topicId,
+              'data-weak-area': topic.isWeakArea ? 'true' : 'false',
+            }}
+          >
+            <CardField
+              label={parentCopy.analytics.masteryColumn}
+              value={
+                <MasteryReading
+                  topic={topic}
+                  percent={masteryPercent(topic.value)}
+                  suffix="-card"
+                />
+              }
+            />
+            <CardField
+              label={parentCopy.analytics.answeredColumn}
+              value={topic.answered}
+              tabular
+              testId="mastery-answered-card"
+            />
+            {/* A bare `0` implies nothing by silence, which is exactly what the
+              deleted phone sub-line said in words instead — so the card says it
+              too. A real count keeps the tabular figures the column has; the
+              sentence does not need them. */}
+            <CardField
+              label={parentCopy.analytics.unansweredColumn}
+              value={
+                topic.unanswered === 0 ? parentCopy.analytics.unansweredNone : topic.unanswered
+              }
+              tabular={topic.unanswered !== 0}
+              testId="mastery-unanswered-card"
+            />
+            {/* The count itself, as the column states it. `masteryRowScope` reads
+              "over 3 practice tests", which stutters the label into the value. */}
+            <CardField
+              label={parentCopy.analytics.runsColumn}
+              value={topic.attemptsCounted}
+              tabular
+              testId="mastery-runs-card"
+            />
+            {/* The verdict, where the server gave one. A row it did not mark shows
+              nothing here, exactly as its status cell does — the field itself
+              still renders, matching the column it stands in for. */}
+            <CardField
+              label={parentCopy.analytics.statusColumn}
+              value={topic.isWeakArea ? <WeakAreaMarker /> : null}
+              testId="mastery-status-card"
+            />
+          </TableCard>
+        ))}
+      </CardList>
     </Box>
   );
 }

@@ -1,5 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createGradeLevelFixture, setParentTierFixture, uniqueParentEmail } from '../fixtures';
+import {
+  chooseRowAction,
+  createGradeLevelFixture,
+  setParentTierFixture,
+  uniqueParentEmail,
+} from '../fixtures';
 
 const PASSWORD = 'correct-horse-battery-staple';
 const PIN = '4821';
@@ -317,7 +322,9 @@ test.describe('Student Mode and the handover', () => {
     await openStudents(page);
     await addProfile(page, 'Noah', grade.name);
 
-    await page.getByRole('button', { name: 'Archive Noah' }).click();
+    // Since Story 1.8 Archive is a `menuitem` behind the row's `⋮`, not a button
+    // on the row itself.
+    await chooseRowAction(page, 'Noah', 'Archive');
     await page.getByRole('dialog').getByRole('button', { name: 'Archive' }).click();
     await expect(page.locator('main').getByRole('status')).toContainText('archived');
 

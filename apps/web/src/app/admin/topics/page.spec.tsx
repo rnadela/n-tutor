@@ -92,7 +92,9 @@ describe('what the Topic curation screen does', () => {
     // Nothing on this screen undoes a merge: the tags move, the Topic is removed and
     // Mastery is recomputed for every affected child.
     expect(LIST).toContain('adminCopy.topics.mergeConfirmation(');
-    expect(LIST).toContain('data-testid="topic-merge-confirmation"');
+    // One panel, rendered into whichever of the two layouts is drawn, so the
+    // testid carries the layout's suffix rather than being written twice.
+    expect(LIST).toContain('data-testid={`topic-merge-confirmation${idSuffix}`}');
     // The confirmation is rendered before the control that fires it.
     expect(LIST.indexOf('topic-merge-confirmation')).toBeLessThan(
       LIST.indexOf('props.onMerge(topic, target)'),

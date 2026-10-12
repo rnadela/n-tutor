@@ -98,7 +98,36 @@ export async function measureActionCell(
   page: Page,
   rowSelector: string,
 ): Promise<ActionCellMetrics> {
-  const cell = page.locator(`${rowSelector} td`).last();
+  // `> td:last-child`, not a descendant match: the Accounts screen's expanded
+  // disclosure holds a nested table, and a descendant selector would happily
+  // resolve *its* last cell instead of the row's own action cell.
+  return measureActionArea(page, `${rowSelector} > td:last-child`);
+}
+
+/**
+ * The same measurement, against a card's action area rather than a table cell.
+ *
+ * Since Story 1.9 the table is `display: none` below `lg`, so a phone-width
+ * check has nothing to measure in a `td` — the layout a phone is actually shown
+ * is the card list, and `TableCard` names its action slot `card-actions` for
+ * exactly this.
+ */
+export async function measureCardActions(
+  page: Page,
+  cardSelector: string,
+): Promise<ActionCellMetrics> {
+  return measureActionArea(page, `${cardSelector} [data-testid="card-actions"]`);
+}
+
+/** The shared measurement, over whichever element holds the row's actions. */
+async function measureActionArea(page: Page, selector: string): Promise<ActionCellMetrics> {
+  const cell = page.locator(selector).first();
+  // A missing action area (wrong selector, or a card rendered with no `actions`
+  // prop) must fail here with the selector that found nothing, not time out
+  // opaquely on every call below.
+  if ((await cell.count()) === 0) {
+    throw new Error(`measureActionArea: no element matched "${selector}"`);
+  }
   const buttons = await cell.getByRole('button').count();
   const text = ((await cell.textContent()) ?? '').trim();
   const box = await cell.evaluate((element) => {
@@ -124,6 +153,43 @@ export async function measureActionCell(
     };
   });
   return { buttons, text, ...box };
+}
+
+/**
+ * The widest sideways overflow of any **scrollable** box inside `main`, in pixels.
+ *
+ * `document.documentElement.scrollWidth - clientWidth` is not this: it stays 0
+ * while an inner container scrolls sideways on its own, and since Story 1.9
+ * `TableOnDesktop` puts `overflowX: 'auto'` on every table's wrapper — so the
+ * page-level figure is exactly blind to the failure this check exists for. (It is
+ * also owned by the app chrome rather than by any one screen's layout, which is
+ * why it is not what gets asserted here.)
+ *
+ * Only boxes that can actually be scrolled are counted — `overflow-x` of `auto`
+ * or `scroll`. An `overflow: hidden` or `clip` box whose content is wider than it
+ * is, which MUI emits for every truncated label, select value and outline legend,
+ * is text being cut off on purpose and not a scroller a reader can get lost in.
+ *
+ * A box with no layout is skipped: the hidden layout is `display: none`, and the
+ * table inside it is not on the screen to overflow anything.
+ *
+ * Strictly stronger than the page-level figure it replaces — it keeps `main`'s own
+ * box and adds every real scroller under it — but it is still only a *scroller*
+ * check: a card whose content is clipped rather than scrolled is not what it sees.
+ */
+export async function worstSidewaysOverflow(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const main = document.querySelector('main') ?? document.body;
+    let worst = 0;
+    for (const element of [main, ...main.querySelectorAll<HTMLElement>('*')]) {
+      const box = element as HTMLElement;
+      if (box.offsetParent === null && box.offsetWidth === 0) continue;
+      const overflowX = getComputedStyle(box).overflowX;
+      if (overflowX !== 'auto' && overflowX !== 'scroll') continue;
+      worst = Math.max(worst, box.scrollWidth - box.clientWidth);
+    }
+    return worst;
+  });
 }
 
 export interface ParentAccountFixture {

@@ -16,6 +16,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { Check, CircleCheck, GitMerge, Pencil, TriangleAlert } from 'lucide-react';
 import { RowActions } from '@/components/RowActions';
+import { CardField, CardList, TableCard, TableOnDesktop } from '@/components/TableCards';
 import { adminCopy } from '@/copy/admin';
 import type { CanonicalTopic, ProvisionalTopic } from '@/lib/admin-api';
 import { density, rounded } from '@/theme/tokens';
@@ -84,6 +85,15 @@ function createdOn(createdAt: string): string {
  *
  * One write at a time per row, so a double-click cannot issue duplicate requests
  * whose responses land out of order.
+ *
+ * **Two layouts, one state (UX-DR44).** From the desktop breakpoint this is the
+ * five-column table; below it every row is a card titled by the Topic, with the
+ * Subject, the tagged count and the created instant as labeled fields and the
+ * rename form and the merge panel opening inside the card they belong to. Both
+ * layouts read `renamingId`, `mergingId`, `targets` and `pendingIds` — there is no
+ * second copy of any of them, and no second read of a Subject's canonical set. The
+ * card's row-scoped ids are suffixed `-card` so no `<label>` points at an `id`
+ * that appears twice.
  */
 export function TopicCurationList(props: TopicCurationListProps) {
   const { topics } = props;
@@ -154,6 +164,196 @@ export function TopicCurationList(props: TopicCurationListProps) {
     }
   }
 
+  /**
+   * The rename form, in whichever layout is asking for it. `idSuffix` is empty in
+   * the table and `-card` on the card, so the one visible input is the one its own
+   * label points at.
+   */
+  function renameForm(topic: ProvisionalTopic, idSuffix: string) {
+    return (
+      <Box
+        component="form"
+        sx={{ display: 'flex', flexWrap: 'wrap', gap: `${density.gap}px`, flex: 1, minWidth: 0 }}
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const name = renameDraft.trim();
+          if (!name || isPending(topic.topicId)) return;
+          const saved = await withPending(topic.topicId, () => props.onRename(topic, name));
+          // Only close on success; a rejected name must survive the error.
+          if (saved) setRenamingId(null);
+        }}
+      >
+        <TextField
+          id={`topic-rename-${topic.topicId}${idSuffix}`}
+          label={adminCopy.topics.renameLabel}
+          value={renameDraft}
+          onChange={(event) => setRenameDraft(event.target.value)}
+          size="small"
+        />
+        <Button type="submit" variant="contained" disabled={isPending(topic.topicId)}>
+          {adminCopy.topics.saveName}
+        </Button>
+        <Button type="button" onClick={() => setRenamingId(null)}>
+          {adminCopy.topics.cancelRename}
+        </Button>
+      </Box>
+    );
+  }
+
+  /**
+   * The row's three actions, unchanged in either layout.
+   *
+   * All three go behind the ⋮ (UX-DR43): a confirm, a merge and a rename are none
+   * of them a glyph an operator could read standing alone, and three text buttons
+   * are what made this cell wrap.
+   */
+  function rowActions(topic: ProvisionalTopic) {
+    return (
+      <RowActions
+        menuLabel={adminCopy.rowActionsLabel(topic.name)}
+        actions={[
+          {
+            key: 'confirm',
+            label: adminCopy.topics.confirm,
+            ariaLabel: `${adminCopy.topics.confirm} ${topic.name}`,
+            icon: <Check size={16} aria-hidden="true" />,
+            disabled: isPending(topic.topicId),
+            onClick: () => {
+              void withPending(topic.topicId, () => props.onConfirm(topic));
+            },
+          },
+          {
+            key: 'rename',
+            label: adminCopy.topics.rename,
+            ariaLabel: `${adminCopy.topics.rename} ${topic.name}`,
+            icon: <Pencil size={16} aria-hidden="true" />,
+            selfEvident: true,
+            onClick: () => {
+              closeMerge();
+              setRenamingId(topic.topicId);
+              setRenameDraft(topic.name);
+            },
+          },
+          {
+            key: 'merge',
+            // The item is the toggle, so it says which way it goes and carries
+            // the panel's open state with it.
+            label:
+              mergingId === topic.topicId
+                ? adminCopy.topics.cancelMerge
+                : adminCopy.topics.startMerge,
+            // The accessible name mirrors the visible label, both ways (WCAG
+            // 2.5.3): an item reading "Cancel merge" that answers to "Merge
+            // Fractions" is a control a voice user cannot name.
+            ariaLabel: `${
+              mergingId === topic.topicId
+                ? adminCopy.topics.cancelMerge
+                : adminCopy.topics.startMerge
+            } ${topic.name}`,
+            icon: <GitMerge size={16} aria-hidden="true" />,
+            expanded: mergingId === topic.topicId,
+            onClick: () => {
+              if (mergingId === topic.topicId) closeMerge();
+              else void openMerge(topic);
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  /** The merge panel, rendered inside whichever layout the row is drawn in. */
+  function mergePanel(topic: ProvisionalTopic, idSuffix: string) {
+    return (
+      <Box
+        data-testid={`topic-merge-panel${idSuffix}`}
+        sx={{
+          display: 'grid',
+          gap: `${density.gap}px`,
+          justifyItems: 'start',
+          p: `${density.cardPadding}px`,
+          bgcolor: 'action.hover',
+          borderRadius: `${rounded.control}px`,
+          width: 1,
+        }}
+      >
+        {targetsError !== null ? (
+          <Alert severity="error" role="alert" variant="outlined">
+            {targetsError}
+          </Alert>
+        ) : targets === null ? (
+          <Typography component="p" role="status">
+            {adminCopy.topics.loadingTargets}
+          </Typography>
+        ) : targets.length === 0 ? (
+          <Typography component="p" sx={{ color: 'text.secondary' }}>
+            {adminCopy.topics.noTargets}
+          </Typography>
+        ) : (
+          <>
+            <TextField
+              select
+              id={`topic-merge-target-${topic.topicId}${idSuffix}`}
+              label={adminCopy.topics.mergeTargetLabel}
+              value={targetId}
+              onChange={(event) => setTargetId(event.target.value)}
+              size="small"
+              sx={{ minWidth: 240, maxWidth: '100%' }}
+            >
+              <MenuItem value="">{adminCopy.topics.mergeTargetUnchosen}</MenuItem>
+              {targets.map((candidate) => (
+                <MenuItem key={candidate.topicId} value={candidate.topicId}>
+                  {`${candidate.name} (${
+                    candidate.provisional
+                      ? adminCopy.topics.targetProvisional
+                      : adminCopy.topics.targetConfirmed
+                  })`}
+                </MenuItem>
+              ))}
+            </TextField>
+
+            {/* Stated before it fires, and only once a target is chosen: the count
+              is the difference between folding away a stray spelling and folding
+              away a term's worth of history. */}
+            {targetId !== '' && (
+              <Typography
+                component="p"
+                data-testid={`topic-merge-confirmation${idSuffix}`}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: `${density.gap}px`,
+                  color: 'warning.main',
+                }}
+              >
+                <TriangleAlert size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+                {adminCopy.topics.mergeConfirmation(
+                  topic.name,
+                  targets.find((candidate) => candidate.topicId === targetId)?.name ?? '',
+                  topic.taggedQuestionCount,
+                )}
+              </Typography>
+            )}
+
+            <Button
+              type="button"
+              variant="contained"
+              disabled={targetId === '' || isPending(topic.topicId)}
+              onClick={async () => {
+                const target = targets.find((candidate) => candidate.topicId === targetId);
+                if (target === undefined) return;
+                const merged = await withPending(topic.topicId, () => props.onMerge(topic, target));
+                if (merged) closeMerge();
+              }}
+            >
+              {adminCopy.topics.merge}
+            </Button>
+          </>
+        )}
+      </Box>
+    );
+  }
+
   if (topics.length === 0) {
     return (
       <Box
@@ -181,7 +381,7 @@ export function TopicCurationList(props: TopicCurationListProps) {
   return (
     <Card component="section" aria-labelledby="topics-heading">
       <CardContent sx={{ display: 'grid', gap: `${density.gap}px` }}>
-        <Box sx={{ overflowX: 'auto' }}>
+        <TableOnDesktop>
           <Table
             size="small"
             aria-labelledby="topics-heading"
@@ -227,38 +427,7 @@ export function TopicCurationList(props: TopicCurationListProps) {
                 >
                   <TableCell>
                     {renamingId === topic.topicId ? (
-                      <Box
-                        component="form"
-                        sx={{ display: 'flex', gap: `${density.gap}px` }}
-                        onSubmit={async (event) => {
-                          event.preventDefault();
-                          const name = renameDraft.trim();
-                          if (!name || isPending(topic.topicId)) return;
-                          const saved = await withPending(topic.topicId, () =>
-                            props.onRename(topic, name),
-                          );
-                          // Only close on success; a rejected name must survive the error.
-                          if (saved) setRenamingId(null);
-                        }}
-                      >
-                        <TextField
-                          id={`topic-rename-${topic.topicId}`}
-                          label={adminCopy.topics.renameLabel}
-                          value={renameDraft}
-                          onChange={(event) => setRenameDraft(event.target.value)}
-                          size="small"
-                        />
-                        <Button
-                          type="submit"
-                          variant="contained"
-                          disabled={isPending(topic.topicId)}
-                        >
-                          {adminCopy.topics.saveName}
-                        </Button>
-                        <Button type="button" onClick={() => setRenamingId(null)}>
-                          {adminCopy.topics.cancelRename}
-                        </Button>
-                      </Box>
+                      renameForm(topic, '')
                     ) : (
                       <Typography component="span" sx={{ fontWeight: 600 }}>
                         {topic.name}
@@ -277,166 +446,45 @@ export function TopicCurationList(props: TopicCurationListProps) {
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'grid', gap: `${density.gap}px`, justifyItems: 'start' }}>
-                      {/* Three actions, so all three go behind the ⋮ (UX-DR43):
-                          a confirm, a merge and a rename are none of them a
-                          glyph an operator could read standing alone, and three
-                          text buttons are what made this cell wrap. */}
-                      <RowActions
-                        menuLabel={adminCopy.rowActionsLabel(topic.name)}
-                        actions={[
-                          {
-                            key: 'confirm',
-                            label: adminCopy.topics.confirm,
-                            ariaLabel: `${adminCopy.topics.confirm} ${topic.name}`,
-                            icon: <Check size={16} aria-hidden="true" />,
-                            disabled: isPending(topic.topicId),
-                            onClick: () => {
-                              void withPending(topic.topicId, () => props.onConfirm(topic));
-                            },
-                          },
-                          {
-                            key: 'rename',
-                            label: adminCopy.topics.rename,
-                            ariaLabel: `${adminCopy.topics.rename} ${topic.name}`,
-                            icon: <Pencil size={16} aria-hidden="true" />,
-                            selfEvident: true,
-                            onClick: () => {
-                              closeMerge();
-                              setRenamingId(topic.topicId);
-                              setRenameDraft(topic.name);
-                            },
-                          },
-                          {
-                            key: 'merge',
-                            // The item is the toggle, so it says which way it
-                            // goes and carries the panel's open state with it.
-                            label:
-                              mergingId === topic.topicId
-                                ? adminCopy.topics.cancelMerge
-                                : adminCopy.topics.startMerge,
-                            // The accessible name mirrors the visible label,
-                            // both ways (WCAG 2.5.3): an item reading "Cancel
-                            // merge" that answers to "Merge Fractions" is a
-                            // control a voice user cannot name.
-                            ariaLabel: `${
-                              mergingId === topic.topicId
-                                ? adminCopy.topics.cancelMerge
-                                : adminCopy.topics.startMerge
-                            } ${topic.name}`,
-                            icon: <GitMerge size={16} aria-hidden="true" />,
-                            expanded: mergingId === topic.topicId,
-                            onClick: () => {
-                              if (mergingId === topic.topicId) closeMerge();
-                              else void openMerge(topic);
-                            },
-                          },
-                        ]}
-                      />
-
-                      {mergingId === topic.topicId && (
-                        <Box
-                          data-testid="topic-merge-panel"
-                          sx={{
-                            display: 'grid',
-                            gap: `${density.gap}px`,
-                            justifyItems: 'start',
-                            p: `${density.cardPadding}px`,
-                            bgcolor: 'action.hover',
-                            borderRadius: `${rounded.control}px`,
-                            width: 1,
-                          }}
-                        >
-                          {targetsError !== null ? (
-                            <Alert severity="error" role="alert" variant="outlined">
-                              {targetsError}
-                            </Alert>
-                          ) : targets === null ? (
-                            <Typography component="p" role="status">
-                              {adminCopy.topics.loadingTargets}
-                            </Typography>
-                          ) : targets.length === 0 ? (
-                            <Typography component="p" sx={{ color: 'text.secondary' }}>
-                              {adminCopy.topics.noTargets}
-                            </Typography>
-                          ) : (
-                            <>
-                              <TextField
-                                select
-                                id={`topic-merge-target-${topic.topicId}`}
-                                label={adminCopy.topics.mergeTargetLabel}
-                                value={targetId}
-                                onChange={(event) => setTargetId(event.target.value)}
-                                size="small"
-                                sx={{ minWidth: 240 }}
-                              >
-                                <MenuItem value="">{adminCopy.topics.mergeTargetUnchosen}</MenuItem>
-                                {targets.map((candidate) => (
-                                  <MenuItem key={candidate.topicId} value={candidate.topicId}>
-                                    {`${candidate.name} (${
-                                      candidate.provisional
-                                        ? adminCopy.topics.targetProvisional
-                                        : adminCopy.topics.targetConfirmed
-                                    })`}
-                                  </MenuItem>
-                                ))}
-                              </TextField>
-
-                              {/* Stated before it fires, and only once a target is chosen:
-                                the count is the difference between folding away a stray
-                                spelling and folding away a term's worth of history. */}
-                              {targetId !== '' && (
-                                <Typography
-                                  component="p"
-                                  data-testid="topic-merge-confirmation"
-                                  sx={{
-                                    display: 'flex',
-                                    alignItems: 'flex-start',
-                                    gap: `${density.gap}px`,
-                                    color: 'warning.main',
-                                  }}
-                                >
-                                  <TriangleAlert
-                                    size={16}
-                                    aria-hidden="true"
-                                    style={{ flexShrink: 0 }}
-                                  />
-                                  {adminCopy.topics.mergeConfirmation(
-                                    topic.name,
-                                    targets.find((candidate) => candidate.topicId === targetId)
-                                      ?.name ?? '',
-                                    topic.taggedQuestionCount,
-                                  )}
-                                </Typography>
-                              )}
-
-                              <Button
-                                type="button"
-                                variant="contained"
-                                disabled={targetId === '' || isPending(topic.topicId)}
-                                onClick={async () => {
-                                  const target = targets.find(
-                                    (candidate) => candidate.topicId === targetId,
-                                  );
-                                  if (target === undefined) return;
-                                  const merged = await withPending(topic.topicId, () =>
-                                    props.onMerge(topic, target),
-                                  );
-                                  if (merged) closeMerge();
-                                }}
-                              >
-                                {adminCopy.topics.merge}
-                              </Button>
-                            </>
-                          )}
-                        </Box>
-                      )}
+                      {rowActions(topic)}
+                      {mergingId === topic.topicId && mergePanel(topic, '')}
                     </Box>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        </Box>
+        </TableOnDesktop>
+
+        {/* The same rows below the desktop breakpoint. The rename form and the
+          merge panel open inside the card they belong to, reading the one piece
+          of state the table reads. */}
+        <CardList label={adminCopy.topics.title} testId="topic-cards">
+          {topics.map((topic) => (
+            <TableCard
+              key={topic.topicId}
+              title={topic.name}
+              titleContent={renamingId === topic.topicId ? renameForm(topic, '-card') : undefined}
+              actions={rowActions(topic)}
+              testId="topic-card"
+              dataAttributes={{ 'data-topic-id': topic.topicId, 'data-name': topic.name }}
+            >
+              <CardField label={adminCopy.topics.subjectColumn} value={topic.subjectName} />
+              <CardField
+                label={adminCopy.topics.taggedColumn}
+                value={topic.taggedQuestionCount}
+                tabular
+                testId="topic-tagged-count-card"
+              />
+              <CardField
+                label={adminCopy.topics.createdColumn}
+                value={createdOn(topic.createdAt)}
+                tabular
+              />
+              {mergingId === topic.topicId && mergePanel(topic, '-card')}
+            </TableCard>
+          ))}
+        </CardList>
       </CardContent>
     </Card>
   );

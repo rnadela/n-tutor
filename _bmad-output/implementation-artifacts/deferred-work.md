@@ -2733,3 +2733,75 @@ source_spec: `spec-1-8-table-row-actions.md`
 severity: medium
 reason: The compiled epic context describes "1.9's cards consume 1.8's component" and a CSS-only breakpoint swap, but no Cards/list component was added by this diff; whoever starts 1.9 should verify the context doc against the real component surface rather than trusting the description as already-built.
 status: open
+
+### DW-343: The Taxonomy table scrolls inside a 440px box with a sticky header; the card list that replaces it below `lg` has no equivalent cap, so a long taxonomy becomes an unbounded page on a phone.
+origin: spec-deferred c4b004e162d4
+location: apps/web/src/app/admin/_components/TaxonomyList.tsx
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: low
+reason: TaxonomyList's TableContainer keeps `maxHeight: 440`; CardList states only the grid, the gap and the column rule. Not a regression — the card layout is new — but the two layouts now disagree about how a long list is bounded, and nothing decides which is right for a parent or an operator scrolling it.
+status: open
+
+### DW-344: Every row of every converted table is now rendered twice, and nothing bounds the cost on the unpaginated lists.
+origin: spec-deferred b77a42b62785
+location: apps/web/src/components/TableCards.tsx
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: low
+reason: Each row ships a second `RowActions` with its menu, and on Students a second `TextField select` holding every grade level per profile, on Accounts a second `TierSelect`. Inherent to the approved dual-render approach rather than a defect in it, but the Students, Taxonomy, Topics and Accounts lists are all unpaginated and no test or budget observes the DOM node count.
+status: open
+
+### DW-345: The Topic curation screen still has no executing browser coverage, so the card layout's open-merge and renaming states are pinned at source only.
+origin: spec-deferred e9e007ccf10d
+location: apps/web/src/app/admin/_components/TopicCurationList.spec.tsx
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: medium
+reason: The new TopicCurationList.spec.tsx renders the closed state under renderToStaticMarkup; `mergingId`/`renamingId` are internal `useState` and unreachable without a DOM runner, so the open merge panel inside a card is asserted as source text. No Playwright spec visits /admin/topics at all — the same pre-existing gap Story 1.8 deferred.
+status: open
+
+### DW-346: The e2e sideways-scroll probe is strictly stronger than the page-level figure it replaced, but no case demonstrates it firing.
+origin: spec-deferred 3ad1719c915f
+location: e2e/fixtures.ts
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: low
+reason: measureCardActions' sibling check now measures only boxes whose computed `overflow-x` is `auto`/`scroll`, plus `main`. An attempt to make it fire by revealing the hidden `TableOnDesktop` wrapper at 390px still measured 0, because the Students table happens to fit 390px. A probe that has never gone red is a probe whose wiring is unproven.
+status: open
+
+### DW-347: Row actions, a rename field, and a select control are each mounted twice from one row's state, with no handling for a live breakpoint crossing mid-interaction.
+origin: spec-deferred 69a6bb30485f
+location: apps/web/src/components/RowActions.tsx
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: low
+reason: `RowActions` keeps its open/anchor state in a local `useState`, so the table's menu and the card's menu are two independent instances; the same is true of each layout's rename `TextField` (focus) and of the grade-level/merge-target/tier `select` controls. Resizing across `lg` while one of these is open (a window resize, a foldable rotation) hides the active layout's control via `display: none` with nothing moving focus, closing the menu, or carrying the interaction to the now-visible counterpart. No test exercises a breakpoint crossing while any of these is mid-interaction.
+status: open
+
+### DW-348: ParentAccountTable's `aria-controls` can point at an id that is not in the DOM.
+origin: spec-deferred 40b69a926ca7
+location: apps/web/src/app/admin/_components/ParentAccountTable.tsx
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: low
+reason: The consumption chevron's `controls: \`consumption-${account.id}${idSuffix}\`` is only backed by a real element while `expandedId === account.id`; collapsed, neither the table's nor the new card's target id exists. Pre-existing pattern, now duplicated into the card layout rather than fixed.
+status: open
+
+### DW-349: The unranked two-column card grid can produce visually ragged rows.
+origin: spec-deferred 049e71f5201b
+location: apps/web/src/components/TableCards.tsx
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: low
+reason: `CardList`'s unranked layout is `repeat(2, minmax(0, 1fr))` from `sm`; a card whose merge panel, consumption disclosure, or rename form is open can be much taller than its row-mate (Topics, Accounts), and nothing in the pattern or its tests addresses the resulting unevenness in the 600-1200px band.
+status: open
+
+### DW-350: A `TableCard`'s sole accessible name can collide with another card's when the underlying value falls back to the same placeholder string.
+origin: spec-deferred e05561a8df6e
+location: apps/web/src/app/parent/analytics/_components/MasteryTable.tsx
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: low
+reason: `TableCard` names itself via `aria-label={title}` alone, no `aria-labelledby`. `MasteryTable`'s `labelOf()` falls back to `parentCopy.analytics.unknownTopic` for a topic with no resolvable name; if more than one row hits that fallback, their cards become indistinguishable by name to assistive technology — a pre-existing ambiguity on the link text, now extended to the list item itself.
+status: open
+
+### DW-351: Five converted screens show their pre-existing "no items" message for an empty list at every width instead of the spec's literal "empty `ul`, no placeholder" requirement.
+origin: spec-deferred 041d6e0d14b4
+location: apps/web/src/app/admin/_components/TaxonomyList.tsx
+source_spec: `spec-1-9-cards-below-desktop.md`
+severity: low
+reason: TaxonomyList, TopicCurationList, ParentAccountTable, AvailabilityMatrix, and parent/students's page all gate on `items.length === 0` and render a friendly empty-state message in place of both `TableOnDesktop` and `CardList`, unchanged from before this story. The practical result is identical to pre-story behavior and arguably clearer for a user than a bare empty list, but the I/O matrix's "no empty card, no placeholder" row is formally unmet below `lg`.
+status: open

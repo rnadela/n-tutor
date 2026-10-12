@@ -6,10 +6,13 @@ import {
   focusByKeyboard,
   focusedControl,
   measureActionCell,
+  measureCardActions,
   ONE_LINE_CEILING,
   readStudentProfile,
   rowActionsName,
+  setParentTierFixture,
   uniqueParentEmail,
+  worstSidewaysOverflow,
 } from '../fixtures';
 
 const PASSWORD = 'correct-horse-battery-staple';
@@ -145,7 +148,9 @@ test.describe('Student Profiles in Parent View', () => {
 
     // --- Rename -----------------------------------------------------------
     await chooseRowAction(page, 'Noah', 'Rename');
-    await page.getByLabel('New name').fill('Noa');
+    // By role, not by label: both layouts carry the rename form, and only the one
+    // that is drawn is in the accessibility tree.
+    await page.getByRole('textbox', { name: 'New name' }).fill('Noa');
     await page.getByRole('button', { name: 'Save the name' }).click();
     await expect(row(page, 'Noa')).toBeVisible();
     // The old name is gone from the screen, not merely contained in the new one.
@@ -308,25 +313,130 @@ test.describe('Student Profiles in Parent View', () => {
     await expect(row(page, 'Ada')).toBeVisible();
   });
 
-  test('keeps an all-in-menu row to one icon and one line at phone width', async ({ page }) => {
-    // The Students row is the cell that wrapped onto three lines: Rename,
-    // Archive and Delete as text buttons in a four-column table at 390px.
+  test('shows cards, not the table, at phone width — one icon and one line', async ({ page }) => {
+    // Below `lg` the table is `display: none` and the layout a phone is shown is
+    // the card list (Story 1.9). What used to wrap onto three lines is now the
+    // card's own action area, and it is still one icon on one line.
     const level = await createGradeLevelFixture('E2E Grade Narrow');
     // Arrived at full width and then narrowed: the Parent View sidebar this
     // helper navigates through is not on screen at phone width, and what is
-    // under test is the table's own layout once it is there.
+    // under test is the layout the screen settles into once it is there.
     await openStudents(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('#student-name').fill('Ira');
     await chooseGradeLevel(page, 'student-grade-level', level.name);
     await page.getByRole('button', { name: 'Add the profile' }).click();
-    await expect(row(page, 'Ira')).toBeVisible();
+    await expect(page.locator('[data-testid="student-card"][data-name="Ira"]')).toBeVisible();
 
-    const cell = await measureActionCell(page, '[data-testid="student-row"][data-name="Ira"]');
-    // All three actions are in the menu, so the ⋮ is the row's only control.
+    // The table is out of the accessibility tree and off the screen entirely, so
+    // no row is announced twice and nothing is read without its counts.
+    await expect(page.getByTestId('student-row').first()).toBeHidden();
+    // A real list of real list items, and the card is named by the child.
+    const card = page.locator('[data-testid="student-card"][data-name="Ira"]');
+    await expect(card).toHaveJSProperty('tagName', 'LI');
+    await expect(card).toHaveAttribute('aria-label', 'Ira');
+    // Both remaining columns are on the card, each under its own label.
+    await expect(card).toContainText('Grade level');
+    await expect(card).toContainText('Status');
+    await expect(card).toContainText('Active');
+
+    const cell = await measureCardActions(page, '[data-testid="student-card"][data-name="Ira"]');
+    // All three actions are in the menu, so the ⋮ is the card's only control.
     expect(cell.buttons).toBe(1);
     expect(cell.text).toBe('');
     expect(cell.height).toBeLessThan(ONE_LINE_CEILING);
+
+    // And nothing on the screen scrolls sideways at 390px — measured over every
+    // box inside `main`, because the page-level figure is blind to a wrapper
+    // that scrolls on its own.
+    expect(await worstSidewaysOverflow(page)).toBeLessThanOrEqual(0);
+  });
+
+  test('renames a profile from its card at phone width', async ({ page }) => {
+    // The whole change rests on the card suffixing every row-scoped id while the
+    // table keeps today's: drop `${idSuffix}` from the rename template and the
+    // visible phone input loses the label bound to it, with every desktop rename
+    // test still green. This is the test that notices.
+    const level = await createGradeLevelFixture('E2E Grade Card Rename');
+    const email = await openStudents(page);
+    await page.locator('#student-name').fill('Rena');
+    await chooseGradeLevel(page, 'student-grade-level', level.name);
+    await page.getByRole('button', { name: 'Add the profile' }).click();
+    await expect(row(page, 'Rena')).toBeVisible();
+    const created = await readStudentProfile(email, 'Rena');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const card = page.locator('[data-testid="student-card"][data-name="Rena"]');
+    await expect(card).toBeVisible();
+
+    // Opened from the card's own ⋮, and the form replaces the title in place.
+    await chooseRowAction(page, 'Rena', 'Rename');
+    const input = page.getByRole('textbox', { name: 'New name' });
+    // Exactly one rename input is in the accessibility tree — the card's. The
+    // table's is `display: none`, so its id is the one nothing points at here.
+    await expect(input).toHaveCount(1);
+    await expect(input).toHaveAttribute('id', /-card$/u);
+    await input.fill('Renata');
+    await page.getByRole('button', { name: 'Save the name' }).click();
+
+    await expect(page.locator('[data-testid="student-card"][data-name="Renata"]')).toBeVisible();
+    await expect(page.locator('[data-testid="student-card"][data-name="Rena"]')).toHaveCount(0);
+    // The same row, renamed through the card: the write the card fired is the
+    // write the table's form fires, not a second one.
+    expect((await readStudentProfile(email, 'Renata')).id).toBe(created.id);
+  });
+
+  test('lays the cards out in two columns in the tablet band', async ({ page }) => {
+    // 600–1200px is the band nothing else observes: one column below 600, two
+    // from 600, and the table only from 1200.
+    const level = await createGradeLevelFixture('E2E Grade Band');
+    const email = await openStudents(page);
+    // Two cards are the point, and the Free tier allows one profile — so the
+    // account is moved off it before the second is added. The limit is enforced
+    // per request, so no reload is needed for the second create to be allowed.
+    await setParentTierFixture(email, 'Family');
+    for (const name of ['Bandi', 'Bandu']) {
+      await page.locator('#student-name').fill(name);
+      await chooseGradeLevel(page, 'student-grade-level', level.name);
+      await page.getByRole('button', { name: 'Add the profile' }).click();
+      await expect(row(page, name)).toBeVisible();
+    }
+
+    await page.setViewportSize({ width: 768, height: 1024 });
+    const first = page.locator('[data-testid="student-card"][data-name="Bandi"]');
+    const second = page.locator('[data-testid="student-card"][data-name="Bandu"]');
+    await expect(first).toBeVisible();
+    // The table is still gone at 768: the cutoff is `lg`, not `sm`.
+    await expect(page.getByTestId('student-row').first()).toBeHidden();
+
+    const [a, b] = [await first.boundingBox(), await second.boundingBox()];
+    expect(a, 'first card box').toBeTruthy();
+    expect(b, 'second card box').toBeTruthy();
+    // Side by side: their vertical extents overlap and their x origins differ.
+    expect(a!.y).toBeLessThan(b!.y + b!.height);
+    expect(b!.y).toBeLessThan(a!.y + a!.height);
+    expect(b!.x).toBeGreaterThan(a!.x + a!.width - 1);
+
+    // And one column below the `sm` cutoff: the same two cards stack.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const [narrowA, narrowB] = [await first.boundingBox(), await second.boundingBox()];
+    expect(narrowB!.y).toBeGreaterThanOrEqual(narrowA!.y + narrowA!.height - 1);
+  });
+
+  test('shows the table, not cards, at desktop width', async ({ page }) => {
+    // The swap is only observable in a real viewport, so both ends of it are
+    // checked: at 1280px the table is what renders and the card list is gone.
+    const level = await createGradeLevelFixture('E2E Grade Wide');
+    await openStudents(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.locator('#student-name').fill('Wide');
+    await chooseGradeLevel(page, 'student-grade-level', level.name);
+    await page.getByRole('button', { name: 'Add the profile' }).click();
+    await expect(row(page, 'Wide')).toBeVisible();
+
+    await expect(page.locator('[data-testid="student-card"][data-name="Wide"]')).toBeHidden();
+    const cell = await measureActionCell(page, '[data-testid="student-row"][data-name="Wide"]');
+    expect(cell.buttons).toBe(1);
     expect(cell.scrollWidth).toBeLessThanOrEqual(cell.clientWidth);
   });
 

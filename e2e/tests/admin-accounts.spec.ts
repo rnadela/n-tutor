@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { uniqueParentAccount } from '../fixtures';
+import { uniqueParentAccount, worstSidewaysOverflow } from '../fixtures';
 import { PARENT_ACCOUNT_FIXTURES } from '../global-setup';
 
 const OPERATOR_EMAIL = process.env.ADMIN_SEED_EMAIL ?? 'operator@example.test';
@@ -22,8 +22,15 @@ async function openAccounts(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Parent Accounts', level: 1 })).toBeVisible();
 }
 
+/**
+ * The Tier control for one account, in whichever layout is drawn.
+ *
+ * By role rather than by label: since Story 1.9 the account is a table row *and*
+ * a card, and only the layout the viewport selects is in the accessibility tree
+ * — a label lookup would match both and fail strict mode.
+ */
 const tierSelect = (page: Page, email: string) =>
-  page.getByLabel(`Account Tier for ${email}`, { exact: true });
+  page.getByRole('combobox', { name: `Account Tier for ${email}`, exact: true });
 
 /** The reset instant the API computed for an account, as an ISO string. */
 async function resetInstantFor(page: Page, email: string): Promise<string> {
@@ -111,11 +118,15 @@ test.describe('admin parent accounts', () => {
     const resetAda = await page.getByTestId('reset-at').textContent();
     expect(resetAda).toBeTruthy();
     await expect(page.getByTestId('consumption-table')).toContainText('Used of limit');
-    await expect(page.getByText(`Computed in: ${ADA.timezone}`)).toBeVisible();
+    await expect(page.getByTestId('consumption-zone')).toContainText(
+      `Computed in: ${ADA.timezone}`,
+    );
 
     // The other account's period is computed in its own zone.
     await page.getByRole('button', { name: `Consumption for ${GRACE.email}` }).click();
-    await expect(page.getByText(`Computed in: ${GRACE.timezone}`)).toBeVisible();
+    await expect(page.getByTestId('consumption-zone')).toContainText(
+      `Computed in: ${GRACE.timezone}`,
+    );
 
     // Each panel renders its own zone's local midnight on the 1st, so the two
     // read alike on screen while standing for different instants. The instants
@@ -279,5 +290,43 @@ test.describe('admin parent accounts', () => {
       (element) => getComputedStyle(element).fontVariantNumeric,
     );
     expect(variant).toContain('tabular-nums');
+  });
+  test('renders the accounts as cards, and no table, at phone width', async ({ page }) => {
+    // Below `lg` the account table is `display: none` and every account is a card
+    // (Story 1.9). The consumption reading expands inside the card as a labeled
+    // field list rather than as a nested two-column table in a 360px column.
+    await signIn(page);
+    await openAccounts(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    const card = page.locator(`[data-testid="account-card"][data-email="${ADA.email}"]`);
+    await expect(card).toBeVisible();
+    await expect(card).toHaveJSProperty('tagName', 'LI');
+    await expect(card).toHaveAttribute('aria-label', ADA.email);
+    await expect(page.getByTestId('account-row').first()).toBeHidden();
+
+    // Every column the table shows is on the card, under its own label.
+    for (const label of ['Name', 'Account Tier', 'Timezone', 'Created']) {
+      await expect(card).toContainText(label);
+    }
+    await expect(card).toContainText(ADA.timezone);
+
+    // The disclosure opens inside the card, and the allowances are fields.
+    await page.getByRole('button', { name: `Consumption for ${ADA.email}` }).click();
+    const allowances = card.getByTestId('allowance-field');
+    await expect(allowances).toHaveCount(3);
+    await expect(allowances.nth(0)).toContainText('Upload Allowance');
+    for (const index of [0, 1, 2]) {
+      await expect(allowances.nth(index)).toContainText(/\d+ of (\d+|Unlimited)/);
+    }
+    await expect(card.getByTestId('reset-at-card')).toBeVisible();
+    // Not a nested table: that is the squeeze this layout exists to end.
+    await expect(card.getByTestId('consumption-table')).toHaveCount(0);
+
+    // And nothing on the screen scrolls sideways at 390px — measured over every
+    // box inside `main`, because the page-level figure is blind to a wrapper
+    // that scrolls on its own, which is exactly what the nested consumption
+    // table used to be.
+    expect(await worstSidewaysOverflow(page)).toBeLessThanOrEqual(0);
   });
 });

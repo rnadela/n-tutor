@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   countGenerationJobsFor,
   createGradeLevelFixture,
@@ -8,6 +8,7 @@ import {
   setParentTierFixture,
   uniqueParentEmail,
   weightedTopicOfNewestJobFor,
+  worstSidewaysOverflow,
 } from '../fixtures';
 
 /**
@@ -118,9 +119,16 @@ test('a parent reaches the dashboard from Parent View and reads why it is empty'
   await expect(page.locator('#parent-pin')).toBeVisible();
 });
 
-test('a parent opens a weak topic from the table and reads the cost before anything fires', async ({
-  page,
-}) => {
+/**
+ * A parent standing on the Mastery dashboard with exactly one graded topic on it.
+ *
+ * Shared by the drill-down test and the layout-swap test below, because the two ask
+ * different questions of the same screen and neither should have to resize a viewport
+ * the other depends on.
+ */
+async function openMasteryWithOneTopic(
+  page: Page,
+): Promise<{ email: string; seeded: Awaited<ReturnType<typeof seedGradedTopicFixture>> }> {
   const email = uniqueParentEmail('drill-down');
   const gradeLevel = await createGradeLevelFixture('Drill-Down Grade');
   const subject = await createSubjectFixture('Drill-Down Maths', gradeLevel.id);
@@ -167,6 +175,14 @@ test('a parent opens a weak topic from the table and reads the cost before anyth
   await expect(
     page.getByRole('heading', { name: 'Where a student is strong and weak', level: 1 }),
   ).toBeVisible();
+
+  return { email, seeded };
+}
+
+test('a parent opens a weak topic from the table and reads the cost before anything fires', async ({
+  page,
+}) => {
+  const { email, seeded } = await openMasteryWithOneTopic(page);
 
   // The row, and the link on it: a row that cannot be opened is a dashboard that still
   // dead-ends, which is the whole gap this story closes.
@@ -226,4 +242,51 @@ test('a parent opens a weak topic from the table and reads the cost before anyth
   // screen returns the parent to the gate rather than rendering a child\u2019s work.
   await page.reload();
   await expect(page.locator('#parent-pin')).toBeVisible();
+});
+
+/**
+ * The layout swap, in its own test.
+ *
+ * Kept apart from the drill-down above on purpose: a test that resized mid-way and
+ * resized back made a responsive regression fail a *navigation* test, which is a
+ * failure pointing at the wrong thing.
+ */
+test('the mastery table becomes a ranked card list below the desktop breakpoint', async ({
+  page,
+}) => {
+  await openMasteryWithOneTopic(page);
+
+  // **Below `lg` the six-column table is `display: none`** and every topic is a card
+  // carrying the same six facts, each under the column's own header as its label —
+  // which is what replaced hiding four of the columns from the eye and leaving the
+  // figure with no counts beside it.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const masteryCard = page.getByTestId('mastery-card');
+  await expect(masteryCard).toHaveCount(1);
+  await expect(masteryCard).toBeVisible();
+  await expect(masteryCard).toHaveJSProperty('tagName', 'LI');
+  await expect(page.getByTestId('mastery-table')).toBeHidden();
+  for (const label of ['How much is right', 'Questions answered', 'Left blank', 'Practice tests']) {
+    await expect(masteryCard).toContainText(label);
+  }
+  // The topic is still a real link, and the card is still named by it.
+  await expect(masteryCard.getByRole('link', { name: 'division with remainders' })).toBeVisible();
+  await expect(masteryCard).toHaveAttribute('aria-label', 'division with remainders');
+  expect(await worstSidewaysOverflow(page)).toBeLessThanOrEqual(0);
+
+  // **Ranked, so one column at every width below the cutoff.** Weakest-first is the
+  // answer this list gives, and the tablet band must not turn it into two columns.
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await expect(masteryCard).toBeVisible();
+  await expect(page.getByTestId('mastery-table')).toBeHidden();
+  const tracks = await page
+    .getByTestId('mastery-cards')
+    .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(/\s+/u).length);
+  expect(tracks).toBe(1);
+
+  // And the table is the layout again from 1200px up.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(page.getByTestId('mastery-table')).toBeVisible();
+  await expect(masteryCard).toBeHidden();
+  await expect(page.getByTestId('mastery-row')).toHaveCount(1);
 });

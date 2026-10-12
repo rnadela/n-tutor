@@ -30,14 +30,23 @@ describe('what the mastery table states', () => {
     expect(CODE).not.toMatch(/\{\s*percent\s*\}%/u);
   });
 
-  it('states the blank count on every row, at every width', () => {
-    // As a column from the tablet breakpoint up, and as the row's sub-line on a
-    // phone — so there is no width at which the figure is read without it.
+  it('states the blank count on every row, in both layouts', () => {
+    // As a column in the table, and as a labeled field on the card — so there is
+    // no width at which the figure is read without it.
     expect(CODE).toContain('data-testid="mastery-unanswered"');
-    expect(CODE).toContain('data-testid="mastery-subline"');
-    expect(CODE).toContain('parentCopy.analytics.unansweredNote(topic.unanswered)');
-    // And "none" is said rather than left out, so nothing is implied by silence.
+    expect(CODE).toContain('testId="mastery-unanswered-card"');
+    expect(CODE).toContain('parentCopy.analytics.unansweredColumn');
+    // And "none" is said in words rather than drawn as a bare `0`, so nothing is
+    // implied by silence. This is the rule the deleted phone sub-line carried.
+    expect(CODE).toContain('topic.unanswered === 0');
     expect(CODE).toContain('parentCopy.analytics.unansweredNone');
+  });
+
+  it('states the run count as the count, not as the sentence about it', () => {
+    // `masteryRowScope` reads "over 3 practice tests", which under a field
+    // labeled "Practice tests" stutters the label into the value. The table's own
+    // cell is where the sentence belongs.
+    expect(CODE).toContain('value={topic.attemptsCounted}');
   });
 
   it('says in words that a topic has no figure, rather than drawing a zero', () => {
@@ -79,24 +88,46 @@ describe('what the mastery table states', () => {
   it('changes shape by breakpoint keys and never by a viewport hook', () => {
     // `useMediaQuery` renders the phone layout first on every device and then
     // swaps, which is a visible reflow on the slowest device the product runs on.
-    expect(CODE).toContain('const phoneVisuallyHidden');
-    expect(CODE).toContain("sm: 'static'");
-    expect(CODE).not.toMatch(/useMediaQuery/u);
+    // The swap itself is the shared pattern's, stated once in `TableCards.tsx`
+    // and asserted there; this file's job is to go through it.
+    expect(CODE).toContain('<TableOnDesktop>');
+    expect(CODE).toContain('<CardList ranked');
+    expect(CODE).not.toMatch(/useMediaQuery|matchMedia/u);
+    // And no breakpoint of its own: the cutoff is not a figure this file knows.
+    expect(CODE).not.toMatch(/@media|breakpoints/u);
   });
 
-  it('hides the narrow-width columns from the eye and never from assistive tech', () => {
-    // `display: none` removes a header from the accessibility tree along with the
-    // pixels, and a table whose headers are gone is a table whose cells have
-    // nothing to be associated with.
-    expect(CODE).toContain('visuallyHidden');
-    expect(CODE).not.toMatch(/display:\s*\{\s*xs:\s*'none'/u);
-    // And the phone-only restatements are hidden instead, so nothing is
-    // announced twice.
-    expect(CODE).toMatch(/aria-hidden="true"[\s\S]*data-testid="mastery-subline"/u);
+  it('drops no column on a phone, and states every one as a labeled field', () => {
+    // What this layout replaced hid four of the six columns from the eye with a
+    // clip rectangle, which left a sighted reader a figure with no counts beside
+    // it. Every column is now a field on the card, labeled by the column's own
+    // header so the two layouts cannot drift into two names for one fact.
+    expect(CODE).not.toContain('phoneVisuallyHidden');
+    expect(CODE).not.toContain('visuallyHidden');
+    for (const label of [
+      'parentCopy.analytics.masteryColumn',
+      'parentCopy.analytics.answeredColumn',
+      'parentCopy.analytics.unansweredColumn',
+      'parentCopy.analytics.runsColumn',
+      'parentCopy.analytics.statusColumn',
+    ]) {
+      // Twice: once as the table's header, once as the card field's label.
+      expect(CODE.split(label).length - 1, label).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('keeps the hidden layout out of the accessibility tree rather than clipping it', () => {
+    // Both layouts are the same rows, so the one that is not drawn has to leave
+    // the tree entirely — a duplicate that is merely invisible is every row
+    // announced twice. That is why the phone-only sub-line and the phone-only
+    // marker, which existed to restate columns that stayed in the tree, are gone.
+    expect(CODE).not.toContain('mastery-subline');
+    expect(CODE).not.toMatch(/display:\s*\{\s*xs:\s*'inline'/u);
+    expect(CODE).not.toMatch(/display:\s*\{\s*xs:\s*'inline-flex'/u);
   });
 
   it('hides the bar from the accessibility tree, because the text already says it', () => {
-    expect(CODE).toContain('data-testid="mastery-bar"');
+    expect(CODE).toContain('data-testid={`mastery-bar${suffix}`}');
     expect(CODE).toContain('aria-hidden="true"');
   });
 
@@ -208,10 +239,21 @@ const ROWS: MasteryTopicView[] = [
 ];
 
 describe('what the rendered mastery table shows a parent', () => {
-  it('renders one row per topic, in the order it was given', () => {
+  it('renders one row per topic, in the order it was given, in both layouts', () => {
     const markup = render(ROWS);
     expect(count(markup, 'mastery-row')).toBe(3);
+    expect(count(markup, 'mastery-card')).toBe(3);
     expect(markup.indexOf('fractions')).toBeLessThan(markup.indexOf('decimals'));
+  });
+
+  it('draws the card list as a ranked, one-column list of real li cards', () => {
+    // Weakest-first is the answer this table gives; two columns would turn that
+    // into a reading order a parent has to reconstruct.
+    const markup = render(ROWS);
+    expect(markup).toContain('data-testid="mastery-cards"');
+    expect(markup).toContain('<ul');
+    expect(markup).toContain('<li');
+    expect(markup).not.toContain('repeat(2');
   });
 
   it('states every figure with the count it is over', () => {
@@ -219,17 +261,40 @@ describe('what the rendered mastery table shows a parent', () => {
     expect(markup).toContain(parentCopy.analytics.masteryFigure(40, 5));
     expect(markup).toContain(parentCopy.analytics.masteryFigure(90, 10));
     // Three figures, three answered counts — none of them a bare percentage.
+    // Once per row in each layout, counted apart: the card's copies carry the
+    // `-card` suffix, so a count of one layout is never handed the sum.
     expect(count(markup, 'mastery-figure')).toBe(3);
+    expect(count(markup, 'mastery-figure-card')).toBe(3);
     expect(count(markup, 'mastery-answered')).toBe(3);
+    expect(count(markup, 'mastery-answered-card')).toBe(3);
   });
 
-  it('states the blank count on every row, as a cell and in the sub-line', () => {
+  it('states the blank count on every row, as a cell and as a card field', () => {
     const markup = render(ROWS);
     expect(count(markup, 'mastery-unanswered')).toBe(3);
-    expect(count(markup, 'mastery-subline')).toBe(3);
-    expect(markup).toContain(parentCopy.analytics.unansweredNote(7));
-    // And says so where there are none, rather than leaving it to be inferred.
-    expect(markup).toContain(parentCopy.analytics.unansweredNone);
+    expect(count(markup, 'mastery-unanswered-card')).toBe(3);
+    // The card names the column it is stating, so the figure is never a bare
+    // number with nothing saying what it counts.
+    expect(markup).toContain(parentCopy.analytics.unansweredColumn);
+  });
+
+  it('says in words that a row has no blanks, rather than drawing a zero', () => {
+    // `decimals` left none blank. A bare `0` under "Left blank" implies nothing by
+    // silence, which is what the deleted phone sub-line said in words instead.
+    const none = render([ROWS[1]!]);
+    expect(none).toContain(parentCopy.analytics.unansweredNone);
+    // A row that does have blanks states the figure itself.
+    const some = render([ROWS[0]!]);
+    expect(some).not.toContain(parentCopy.analytics.unansweredNone);
+  });
+
+  it('states a row’s run count as the number, never as the sentence', () => {
+    const markup = render(ROWS);
+    // The table's cell carries the sentence; the card's field carries the count
+    // under the column's own label, so neither stutters.
+    expect(markup).toContain(parentCopy.analytics.masteryRowScope(3));
+    expect(count(markup, 'mastery-runs-card')).toBe(3);
+    expect(markup.split(parentCopy.analytics.masteryRowScope(3)).length - 1).toBe(1);
   });
 
   it('says in words that a topic with no fraction has no figure', () => {
@@ -241,9 +306,10 @@ describe('what the rendered mastery table shows a parent', () => {
   it('marks exactly the weak row, and no other', () => {
     const markup = render(ROWS);
     expect(markup).toContain('data-weak-area="true"');
-    expect(markup.split('data-weak-area="false"').length - 1).toBe(2);
-    // One marker per weak row and per width it is drawn at — never on a row the
-    // server did not mark. One weak row, two placements (sub-line and column).
+    // Two layouts, so the verdict is mirrored on four unmarked rows and two marked.
+    expect(markup.split('data-weak-area="false"').length - 1).toBe(4);
+    expect(markup.split('data-weak-area="true"').length - 1).toBe(2);
+    // One marker per weak row per layout — never on a row the server did not mark.
     expect(count(markup, 'weak-area-marker')).toBe(2);
     expect(count(render([ROWS[1]!]), 'weak-area-marker')).toBe(0);
   });
@@ -251,8 +317,9 @@ describe('what the rendered mastery table shows a parent', () => {
   it('renders a row whose topic name is null, with its stand-in label', () => {
     const markup = render(ROWS);
     expect(markup).toContain(parentCopy.analytics.unknownTopic);
-    // And it is still a row, not a dropped one.
+    // And it is still a row, not a dropped one — in both layouts.
     expect(count(markup, 'mastery-row')).toBe(3);
+    expect(count(markup, 'mastery-card')).toBe(3);
   });
 
   it('states the table’s own scope and every row’s own run count', () => {
@@ -262,9 +329,9 @@ describe('what the rendered mastery table shows a parent', () => {
     expect(markup).toContain(parentCopy.analytics.masteryRowScope(2));
   });
 
-  it('keeps every header in the markup at every width, never display:none', () => {
-    // `display: none` would take the headers out of the accessibility tree along
-    // with the pixels, leaving the cells below nothing to be associated with.
+  it('keeps every one of the six columns, and states each one on the card too', () => {
+    // The table keeps all six from the desktop breakpoint up; below it every one
+    // of them is a labeled field, so no width drops a fact.
     const markup = render(ROWS);
     for (const header of [
       parentCopy.analytics.topicColumn,
@@ -277,15 +344,25 @@ describe('what the rendered mastery table shows a parent', () => {
       expect(markup).toContain(header);
     }
     // Counted by the attribute rather than by `<th`, which `<thead` also contains.
-    // That the hiding is visual and not `display: none` is asserted at the source
-    // level above; MUI's own emitted stylesheet contains the declaration for
-    // unrelated components, so it cannot be asserted over the markup here.
     expect(markup.split('scope="col"').length - 1).toBe(6);
+    // And the card's own copies of the five non-identifying columns.
+    for (const testid of [
+      'mastery-figure-card',
+      'mastery-answered-card',
+      'mastery-unanswered-card',
+      'mastery-runs-card',
+      'mastery-status-card',
+    ]) {
+      expect(count(markup, testid), testid).toBe(3);
+    }
   });
 
-  it('renders nothing but the scope line and an empty body for no topics', () => {
+  it('renders nothing but the scope line, an empty body and an empty ul for no topics', () => {
     const markup = render([]);
     expect(count(markup, 'mastery-row')).toBe(0);
+    expect(count(markup, 'mastery-card')).toBe(0);
+    expect(markup).toContain('data-testid="mastery-cards"');
+    expect(markup).not.toContain('<li');
     expect(markup).toContain(parentCopy.analytics.masteryScope('Ada', 5));
   });
 });
@@ -296,6 +373,8 @@ describe('opening a row', () => {
     // than a row click handler, so it is keyboard reachable and announced as a link.
     const markup = render(ROWS);
     expect(count(markup, 'mastery-topic-link')).toBe(ROWS.length);
+    // And the card's title is the same anchor, so a row opens at every width.
+    expect(count(markup, 'mastery-topic-link-card')).toBe(ROWS.length);
     for (const topic of ROWS) {
       expect(markup).toContain(`href="/parent/analytics/topics/${topic.topicId}"`);
     }

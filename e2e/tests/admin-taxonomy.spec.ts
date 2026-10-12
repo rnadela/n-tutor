@@ -5,8 +5,10 @@ import {
   focusByKeyboard,
   focusedControl,
   measureActionCell,
+  measureCardActions,
   ONE_LINE_CEILING,
   rowActionsName,
+  worstSidewaysOverflow,
 } from '../fixtures';
 
 const OPERATOR_EMAIL = process.env.ADMIN_SEED_EMAIL ?? 'operator@example.test';
@@ -90,7 +92,9 @@ test.describe('admin taxonomy', () => {
 
     // Rename — the id is unchanged and the selectable list shows the new label.
     await page.getByRole('button', { name: `Rename ${SUBJECT}` }).click();
-    await page.getByLabel('New name').fill(SUBJECT_RENAMED);
+    // By role, not by label: both layouts carry the rename form, and only the one
+    // that is drawn is in the accessibility tree.
+    await page.getByRole('textbox', { name: 'New name' }).fill(SUBJECT_RENAMED);
     await page.getByRole('button', { name: 'Save name' }).click();
     await expect(page.getByRole('status').first()).toContainText(
       `Subject ${SUBJECT} renamed to ${SUBJECT_RENAMED}.`,
@@ -281,10 +285,10 @@ test.describe('admin taxonomy', () => {
     await expect(page.getByRole('status').first()).toContainText('Subject Keys disabled.');
   });
 
-  test('keeps a row’s actions to two icons and one line at phone width', async ({ page }) => {
-    // The wrapping this story exists to fix is only observable in a real
-    // viewport: three text buttons in a narrow Actions column wrapped onto
-    // three lines and pushed the table into a horizontal scroll.
+  test('shows cards, not tables, at phone width — two icons and one line', async ({ page }) => {
+    // The layout a phone is shown is only observable in a real viewport. Below
+    // `lg` every table on this screen is `display: none` and its rows are cards
+    // (Story 1.9), with the actions that used to wrap in the card's header.
     await page.setViewportSize({ width: 390, height: 844 });
     await signIn(page);
 
@@ -295,13 +299,80 @@ test.describe('admin taxonomy', () => {
     await expect(page.getByRole('button', { name: 'Rename Narrow' })).toBeVisible();
     await expect(page.getByRole('button', { name: rowActionsName('Narrow') })).toBeVisible();
 
-    const cell = await measureActionCell(page, '[data-testid="subjects-row"][data-name="Narrow"]');
+    // The card is what renders; the table row is out of the tree entirely, so no
+    // row is named twice.
+    const card = page.locator('[data-testid="subjects-card"][data-name="Narrow"]');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveJSProperty('tagName', 'LI');
+    await expect(card).toHaveAttribute('aria-label', 'Narrow');
+    await expect(card).toContainText('Status');
+    await expect(page.getByTestId('subjects-row').first()).toBeHidden();
+
+    // The availability matrix — the worst offender at this width — is cards too,
+    // and the tick inside one is wired to the same handler the grid's is: a card
+    // branch keyed on the wrong half of the pair, or with a dead `onChange`,
+    // would otherwise ship behind a visibility assertion.
+    await page.getByLabel('New Grade Level name').fill('Narrow Grade');
+    await page.getByRole('button', { name: 'Add Grade Level' }).click();
+    await expect(page.getByRole('status').first()).toContainText(
+      'Grade Level Narrow Grade created.',
+    );
+    const availabilityCard = page.locator(
+      '[data-testid="availability-card"][data-subject="Narrow"]',
+    );
+    await expect(availabilityCard).toBeVisible();
+    const pair = page.getByRole('checkbox', { name: 'Offer Narrow for Narrow Grade' });
+    // One in the tree — the card's; the grid's is `display: none`.
+    await expect(pair).toHaveCount(1);
+    await expect(pair).not.toBeChecked();
+    // `click`, not `check`: the control is `checked` from the server snapshot and
+    // is disabled while the write is in flight, so the state does not change in
+    // the same tick as the click — which is exactly what `check`'s own
+    // did-it-change assertion demands.
+    await pair.click();
+    await expect(page.getByRole('status').first()).toContainText(
+      'Narrow is now offered for Narrow Grade.',
+    );
+    // Re-read from the server snapshot the card is derived from, not from the
+    // control's own optimism.
+    await expect(pair).toBeChecked();
+    await pair.click();
+    await expect(page.getByRole('status').first()).toContainText(
+      'Narrow is no longer offered for Narrow Grade.',
+    );
+    await expect(pair).not.toBeChecked();
+
+    const cell = await measureCardActions(
+      page,
+      '[data-testid="subjects-card"][data-name="Narrow"]',
+    );
     // Two icons, the ⋮ counting as one — the cap itself.
     expect(cell.buttons).toBe(2);
-    // No visible action word in the cell: the words are in the menu.
+    // No visible action word in the header: the words are in the menu.
     expect(cell.text).toBe('');
-    // One line, and no sideways scroll on the table that holds it.
     expect(cell.height).toBeLessThan(ONE_LINE_CEILING);
+
+    // And nothing on the screen scrolls sideways at 390px — measured over every
+    // box inside `main`, because the page-level figure is blind to a wrapper
+    // that scrolls on its own.
+    expect(await worstSidewaysOverflow(page)).toBeLessThanOrEqual(0);
+  });
+
+  test('shows the tables, not cards, at desktop width', async ({ page }) => {
+    // Both ends of the swap: at 1280px the table is the layout that renders.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await signIn(page);
+
+    await page.getByLabel('New Subject name').fill('Wide');
+    await page.getByRole('button', { name: 'Add Subject' }).click();
+    await expect(page.getByRole('status').first()).toContainText('Subject Wide created.');
+
+    const row = page.locator('[data-testid="subjects-row"][data-name="Wide"]');
+    await expect(row).toBeVisible();
+    await expect(page.locator('[data-testid="subjects-card"][data-name="Wide"]')).toBeHidden();
+
+    const cell = await measureActionCell(page, '[data-testid="subjects-row"][data-name="Wide"]');
+    expect(cell.buttons).toBe(2);
     expect(cell.scrollWidth).toBeLessThanOrEqual(cell.clientWidth);
   });
 

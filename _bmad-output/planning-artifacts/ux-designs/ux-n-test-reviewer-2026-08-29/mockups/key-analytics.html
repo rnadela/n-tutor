@@ -338,7 +338,11 @@ body{
 }
 .spark-caption{margin:6px 0 0;font-size:0.8125rem;line-height:1.40;color:var(--text-secondary)}
 
-/* ---- ranked mastery table (Q12b) ------------------------------------------- */
+/* ---- ranked mastery table (Q12b) -------------------------------------------
+   The table is the layout from MUI's `lg` (1200px) up. No frame in this sheet is
+   that wide — the two mastery frames below are a phone and a portrait tablet, and
+   both are therefore drawn as the card list further down (UX-DR44) — so these
+   rules document the desktop shape rather than styling anything on this page. */
 .mtable{width:100%;border-collapse:collapse;table-layout:fixed}
 .mtable caption{
   caption-side:top;text-align:left;
@@ -394,6 +398,46 @@ body{
 .tablefoot{
   padding:10px var(--card-pad);font-size:0.8125rem;line-height:1.40;
   color:var(--text-secondary);border-top:1px solid var(--divider);
+}
+
+/* ---- ranked mastery CARDS (UX-DR44) ----------------------------------------
+   Below MUI's `lg` (1200px) every data table in the product renders as a list of
+   cards instead; at 1200px and above it is the table above. Mastery is RANKED, so
+   it stays ONE column at every width below the cutoff — weakest-first is the
+   answer this list gives, and two columns would turn that into a reading order a
+   parent has to reconstruct. Nothing is dropped from the eye: every column the
+   table carries is a labeled field here, which is what replaced hiding four of
+   the six columns behind a clip rectangle.                                    */
+.mcards-caption{
+  margin:0;padding:0 var(--card-pad) var(--gap);
+  font-size:0.875rem;line-height:1.40;font-weight:600;letter-spacing:0.02em;
+  color:var(--text-secondary);
+}
+.mcards{
+  list-style:none;margin:0;padding:0 var(--card-pad) var(--card-pad);
+  display:grid;grid-template-columns:1fr;gap:var(--gap);
+}
+.mcard{
+  background:var(--bg-paper);border:1px solid var(--divider);
+  border-radius:var(--radius-control);padding:var(--card-pad);
+  display:grid;gap:var(--gap);
+}
+.mcard-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--gap)}
+.mcard-title{
+  display:block;min-height:var(--tap);text-decoration:none;color:var(--text-primary);
+  font-size:1.25rem;line-height:1.35;font-weight:600;
+}
+.mcard-reading{display:grid;gap:4px}
+.mfield{display:grid;gap:4px;min-width:0}
+.mfield-label{font-size:0.8125rem;line-height:1.40;color:var(--text-secondary)}
+.mfield-value{font-size:1rem;line-height:1.45;font-variant-numeric:tabular-nums}
+/* a value that is a sentence rather than a figure wants no tabular numerals */
+.mfield-value.prose{font-variant-numeric:normal}
+.mfield-value.weak{color:var(--warning);font-weight:600}
+.threshold-note{
+  background:var(--bg-default);border:1px solid var(--divider);
+  border-radius:var(--radius-control);padding:5px var(--card-pad);
+  font-size:0.8125rem;line-height:1.40;color:var(--text-secondary);
 }
 
 /* ---- drill-down ------------------------------------------------------------ */
@@ -581,7 +625,7 @@ body{
   <section class="state">
     <p class="state-label">State 1 of 4 · phone · 390 × 844</p>
     <h2 class="state-title">Canonical dashboard</h2>
-    <p class="state-note">Reading order is the answer order: <em>did he do it</em> (FR-28 unstarted vs completed) → <em>is it getting better</em> (one dashboard-level sparkline) → <em>what do I work on</em> (Mastery by Topic, weakest first).</p>
+    <p class="state-note">Reading order is the answer order: <em>did he do it</em> (FR-28 unstarted vs completed) → <em>is it getting better</em> (one dashboard-level sparkline) → <em>what do I work on</em> (Mastery by Topic, weakest first). Mastery is a list of <strong>cards</strong> here, not a table: below 1200px every data table in the product lays its rows out as cards (UX-DR44), so each topic states all six of its facts as labeled fields instead of squeezing six columns into 360px or hiding four of them from the eye.</p>
 
     <div class="states-row">
       <div class="phone">
@@ -651,91 +695,166 @@ body{
 
             <!-- ranked Mastery by Topic, weakest first (Q12b) -->
             <section class="card flush" aria-labelledby="s1-mastery">
-              <table class="mtable">
-                <caption id="s1-mastery">Mastery by topic · weakest first</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Topic</th>
-                    <th scope="col" class="num">Mastery</th>
-                    <th scope="col"><span class="sr" style="position:absolute;left:-9999px">Comparative bar</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>
-                      <a class="rowlink" href="#state-2">
-                        <span class="topic">division with remainders</span>
-                        <span class="meta">5 answered · <span class="skip">3 unanswered</span></span>
-                        <span class="weakflag">
-                          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
-                          Weak area
-                        </span>
-                      </a>
-                    </td>
-                    <td class="pct weak">40%</td>
-                    <td class="barcell"><span class="bar"><i class="weak" style="width:40%"></i></span></td>
-                  </tr>
-                  <tr>
-                    <td>
-                      <a class="rowlink" href="#state-2">
-                        <span class="topic">multi-step word problems</span>
-                        <span class="meta">25 answered</span>
-                        <span class="weakflag">
-                          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
-                          Weak area
-                        </span>
-                      </a>
-                    </td>
-                    <td class="pct weak">52%</td>
-                    <td class="barcell"><span class="bar"><i class="weak" style="width:52%"></i></span></td>
-                  </tr>
-                  <tr>
-                    <td>
-                      <a class="rowlink" href="#state-2">
-                        <span class="topic">equivalent fractions</span>
-                        <span class="meta">12 answered · <span class="skip">1 unanswered</span></span>
-                        <span class="weakflag">
-                          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
-                          Weak area
-                        </span>
-                      </a>
-                    </td>
-                    <td class="pct weak">58%</td>
-                    <td class="barcell"><span class="bar"><i class="weak" style="width:58%"></i></span></td>
-                  </tr>
-                  <tr class="threshold"><td colspan="3">Weak area threshold — below 60% mastery, once Noah has answered at least 5 questions on the topic</td></tr>
-                  <tr>
-                    <td>
-                      <a class="rowlink" href="#state-2">
-                        <span class="topic">decimal place value</span>
-                        <span class="meta">14 answered · <span class="skip">2 unanswered</span></span>
-                      </a>
-                    </td>
-                    <td class="pct">71%</td>
-                    <td class="barcell"><span class="bar"><i style="width:71%"></i></span></td>
-                  </tr>
-                  <tr>
-                    <td>
-                      <a class="rowlink" href="#state-2">
-                        <span class="topic">area and perimeter</span>
-                        <span class="meta">21 answered</span>
-                      </a>
-                    </td>
-                    <td class="pct">86%</td>
-                    <td class="barcell"><span class="bar"><i style="width:86%"></i></span></td>
-                  </tr>
-                  <tr>
-                    <td>
-                      <a class="rowlink" href="#state-2">
-                        <span class="topic">rounding to the nearest hundred</span>
-                        <span class="meta">13 answered</span>
-                      </a>
-                    </td>
-                    <td class="pct">92%</td>
-                    <td class="barcell"><span class="bar"><i style="width:92%"></i></span></td>
-                  </tr>
-                </tbody>
-              </table>
+              <p class="mcards-caption" id="s1-mastery">Mastery by topic · weakest first</p>
+              <ul class="mcards" role="list" aria-label="Mastery by topic · weakest first">
+                <li class="mcard">
+                  <div class="mcard-head">
+                    <a class="mcard-title" href="#state-2">division with remainders</a>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">How much is right</span>
+                    <div class="mcard-reading">
+                      <span class="mfield-value weak">40% of 5 answered</span>
+                      <span class="bar" aria-hidden="true"><i class="weak" style="width:40%"></i></span>
+                    </div>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Questions answered</span>
+                    <span class="mfield-value">5</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Left blank</span>
+                    <span class="mfield-value">3</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Practice tests</span>
+                    <span class="mfield-value">3</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Status</span>
+                    <span class="weakflag"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg> Weak area</span>
+                  </div>
+                </li>
+                <li class="mcard">
+                  <div class="mcard-head">
+                    <a class="mcard-title" href="#state-2">multi-step word problems</a>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">How much is right</span>
+                    <div class="mcard-reading">
+                      <span class="mfield-value weak">52% of 25 answered</span>
+                      <span class="bar" aria-hidden="true"><i class="weak" style="width:52%"></i></span>
+                    </div>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Questions answered</span>
+                    <span class="mfield-value">25</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Left blank</span>
+                    <span class="mfield-value prose">Nothing left blank</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Practice tests</span>
+                    <span class="mfield-value">5</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Status</span>
+                    <span class="weakflag"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg> Weak area</span>
+                  </div>
+                </li>
+                <li class="mcard">
+                  <div class="mcard-head">
+                    <a class="mcard-title" href="#state-2">equivalent fractions</a>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">How much is right</span>
+                    <div class="mcard-reading">
+                      <span class="mfield-value weak">58% of 12 answered</span>
+                      <span class="bar" aria-hidden="true"><i class="weak" style="width:58%"></i></span>
+                    </div>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Questions answered</span>
+                    <span class="mfield-value">12</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Left blank</span>
+                    <span class="mfield-value">1</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Practice tests</span>
+                    <span class="mfield-value">4</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Status</span>
+                    <span class="weakflag"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg> Weak area</span>
+                  </div>
+                </li>
+                <li class="mcard">
+                  <div class="mcard-head">
+                    <a class="mcard-title" href="#state-2">decimal place value</a>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">How much is right</span>
+                    <div class="mcard-reading">
+                      <span class="mfield-value">71% of 14 answered</span>
+                      <span class="bar" aria-hidden="true"><i style="width:71%"></i></span>
+                    </div>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Questions answered</span>
+                    <span class="mfield-value">14</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Left blank</span>
+                    <span class="mfield-value">2</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Practice tests</span>
+                    <span class="mfield-value">4</span>
+                  </div>
+                </li>
+                <li class="mcard">
+                  <div class="mcard-head">
+                    <a class="mcard-title" href="#state-2">area and perimeter</a>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">How much is right</span>
+                    <div class="mcard-reading">
+                      <span class="mfield-value">86% of 21 answered</span>
+                      <span class="bar" aria-hidden="true"><i style="width:86%"></i></span>
+                    </div>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Questions answered</span>
+                    <span class="mfield-value">21</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Left blank</span>
+                    <span class="mfield-value prose">Nothing left blank</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Practice tests</span>
+                    <span class="mfield-value">5</span>
+                  </div>
+                </li>
+                <li class="mcard">
+                  <div class="mcard-head">
+                    <a class="mcard-title" href="#state-2">rounding to the nearest hundred</a>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">How much is right</span>
+                    <div class="mcard-reading">
+                      <span class="mfield-value">92% of 13 answered</span>
+                      <span class="bar" aria-hidden="true"><i style="width:92%"></i></span>
+                    </div>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Questions answered</span>
+                    <span class="mfield-value">13</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Left blank</span>
+                    <span class="mfield-value prose">Nothing left blank</span>
+                  </div>
+                  <div class="mfield">
+                    <span class="mfield-label">Practice tests</span>
+                    <span class="mfield-value">3</span>
+                  </div>
+                </li>
+              </ul>
+              <p class="threshold-note">Weak area threshold — below 60% mastery, once Noah has answered at least 5 questions on the topic</p>
               <p class="tablefoot">Mastery counts answered questions only. Unanswered questions are listed separately and are not scored as wrong.</p>
             </section>
 
@@ -951,7 +1070,7 @@ body{
   <section class="state">
     <p class="state-label">State 4 of 4 · tablet · 1024 × 768</p>
     <h2 class="state-title">Dashboard — tablet layout</h2>
-    <p class="state-note">One of only two screens granted a breakpoint-specific layout. The wider viewport does not scale the phone layout up: the answering context (summary + trend) moves into a fixed left column so it stays on screen while the table is read, and the table's stacked sub-line is promoted into real columns — answered, unanswered, weak-area flag, and a per-topic bar with room to be read.</p>
+    <p class="state-note">One of only two screens granted a breakpoint-specific layout. The wider viewport does not scale the phone layout up: the answering context (summary + trend) moves into a fixed left column so it stays on screen while the mastery list is read. The list itself is still cards — <strong>every table in the product is a list of cards below 1200px and the table it is today at 1200px and above (UX-DR44)</strong> — and Mastery stays one column at every width below that cutoff, because weakest-first is the answer the list gives and two columns would turn that into a reading order a parent has to reconstruct.</p>
 
     <div class="tablet">
       <div class="cam" aria-hidden="true"><i></i></div>
@@ -1013,86 +1132,167 @@ body{
           </div>
 
           <section class="card flush" aria-labelledby="s4-mastery">
-            <table class="mtable t-mtable">
-              <caption id="s4-mastery">Mastery by topic · weakest first</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Topic</th>
-                  <th scope="col" class="num">Mastery</th>
-                  <th scope="col">&nbsp;</th>
-                  <th scope="col" class="num">Answered</th>
-                  <th scope="col" class="num">Unanswered</th>
-                  <th scope="col">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><a class="rowlink" href="#state-2"><span class="topic">division with remainders</span></a></td>
-                  <td class="pct weak">40%</td>
-                  <td class="barcell"><span class="bar"><i class="weak" style="width:40%"></i></span></td>
-                  <td class="colcount">5</td>
-                  <td class="colskip"><span class="has">3</span></td>
-                  <td class="colflag">
-                    <span class="weakflag">
-                      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
-                      Weak area
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <td><a class="rowlink" href="#state-2"><span class="topic">multi-step word problems</span></a></td>
-                  <td class="pct weak">52%</td>
-                  <td class="barcell"><span class="bar"><i class="weak" style="width:52%"></i></span></td>
-                  <td class="colcount">25</td>
-                  <td class="colskip"><span class="none">—</span></td>
-                  <td class="colflag">
-                    <span class="weakflag">
-                      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
-                      Weak area
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <td><a class="rowlink" href="#state-2"><span class="topic">equivalent fractions</span></a></td>
-                  <td class="pct weak">58%</td>
-                  <td class="barcell"><span class="bar"><i class="weak" style="width:58%"></i></span></td>
-                  <td class="colcount">12</td>
-                  <td class="colskip"><span class="has">1</span></td>
-                  <td class="colflag">
-                    <span class="weakflag">
-                      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg>
-                      Weak area
-                    </span>
-                  </td>
-                </tr>
-                <tr class="threshold"><td colspan="6">Weak area threshold — below 60% mastery, once Noah has answered at least 5 questions on the topic</td></tr>
-                <tr>
-                  <td><a class="rowlink" href="#state-2"><span class="topic">decimal place value</span></a></td>
-                  <td class="pct">71%</td>
-                  <td class="barcell"><span class="bar"><i style="width:71%"></i></span></td>
-                  <td class="colcount">14</td>
-                  <td class="colskip"><span class="has">2</span></td>
-                  <td class="colflag"></td>
-                </tr>
-                <tr>
-                  <td><a class="rowlink" href="#state-2"><span class="topic">area and perimeter</span></a></td>
-                  <td class="pct">86%</td>
-                  <td class="barcell"><span class="bar"><i style="width:86%"></i></span></td>
-                  <td class="colcount">21</td>
-                  <td class="colskip"><span class="none">—</span></td>
-                  <td class="colflag"></td>
-                </tr>
-                <tr>
-                  <td><a class="rowlink" href="#state-2"><span class="topic">rounding to the nearest hundred</span></a></td>
-                  <td class="pct">92%</td>
-                  <td class="barcell"><span class="bar"><i style="width:92%"></i></span></td>
-                  <td class="colcount">13</td>
-                  <td class="colskip"><span class="none">—</span></td>
-                  <td class="colflag"></td>
-                </tr>
-              </tbody>
-            </table>
-            <p class="tablefoot">Mastery counts answered questions only. Unanswered questions are listed separately and are not scored as wrong.</p>
+            <p class="mcards-caption" id="s4-mastery">Mastery by topic · weakest first</p>
+            <ul class="mcards" role="list" aria-label="Mastery by topic · weakest first">
+              <li class="mcard">
+                <div class="mcard-head">
+                  <a class="mcard-title" href="#state-2">division with remainders</a>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">How much is right</span>
+                  <div class="mcard-reading">
+                    <span class="mfield-value weak">40% of 5 answered</span>
+                    <span class="bar" aria-hidden="true"><i class="weak" style="width:40%"></i></span>
+                  </div>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Questions answered</span>
+                  <span class="mfield-value">5</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Left blank</span>
+                  <span class="mfield-value">3</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Practice tests</span>
+                  <span class="mfield-value">3</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Status</span>
+                  <span class="weakflag"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg> Weak area</span>
+                </div>
+              </li>
+              <li class="mcard">
+                <div class="mcard-head">
+                  <a class="mcard-title" href="#state-2">multi-step word problems</a>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">How much is right</span>
+                  <div class="mcard-reading">
+                    <span class="mfield-value weak">52% of 25 answered</span>
+                    <span class="bar" aria-hidden="true"><i class="weak" style="width:52%"></i></span>
+                  </div>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Questions answered</span>
+                  <span class="mfield-value">25</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Left blank</span>
+                  <span class="mfield-value prose">Nothing left blank</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Practice tests</span>
+                  <span class="mfield-value">5</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Status</span>
+                  <span class="weakflag"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg> Weak area</span>
+                </div>
+              </li>
+              <li class="mcard">
+                <div class="mcard-head">
+                  <a class="mcard-title" href="#state-2">equivalent fractions</a>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">How much is right</span>
+                  <div class="mcard-reading">
+                    <span class="mfield-value weak">58% of 12 answered</span>
+                    <span class="bar" aria-hidden="true"><i class="weak" style="width:58%"></i></span>
+                  </div>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Questions answered</span>
+                  <span class="mfield-value">12</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Left blank</span>
+                  <span class="mfield-value">1</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Practice tests</span>
+                  <span class="mfield-value">4</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Status</span>
+                  <span class="weakflag"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 1.4 15.2 14H0.8L8 1.4Zm0 4.1a.85.85 0 0 0-.85.9l.2 3.2a.65.65 0 0 0 1.3 0l.2-3.2A.85.85 0 0 0 8 5.5Zm0 5.6a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"/></svg> Weak area</span>
+                </div>
+              </li>
+              <li class="mcard">
+                <div class="mcard-head">
+                  <a class="mcard-title" href="#state-2">decimal place value</a>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">How much is right</span>
+                  <div class="mcard-reading">
+                    <span class="mfield-value">71% of 14 answered</span>
+                    <span class="bar" aria-hidden="true"><i style="width:71%"></i></span>
+                  </div>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Questions answered</span>
+                  <span class="mfield-value">14</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Left blank</span>
+                  <span class="mfield-value">2</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Practice tests</span>
+                  <span class="mfield-value">4</span>
+                </div>
+              </li>
+              <li class="mcard">
+                <div class="mcard-head">
+                  <a class="mcard-title" href="#state-2">area and perimeter</a>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">How much is right</span>
+                  <div class="mcard-reading">
+                    <span class="mfield-value">86% of 21 answered</span>
+                    <span class="bar" aria-hidden="true"><i style="width:86%"></i></span>
+                  </div>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Questions answered</span>
+                  <span class="mfield-value">21</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Left blank</span>
+                  <span class="mfield-value prose">Nothing left blank</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Practice tests</span>
+                  <span class="mfield-value">5</span>
+                </div>
+              </li>
+              <li class="mcard">
+                <div class="mcard-head">
+                  <a class="mcard-title" href="#state-2">rounding to the nearest hundred</a>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">How much is right</span>
+                  <div class="mcard-reading">
+                    <span class="mfield-value">92% of 13 answered</span>
+                    <span class="bar" aria-hidden="true"><i style="width:92%"></i></span>
+                  </div>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Questions answered</span>
+                  <span class="mfield-value">13</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Left blank</span>
+                  <span class="mfield-value prose">Nothing left blank</span>
+                </div>
+                <div class="mfield">
+                  <span class="mfield-label">Practice tests</span>
+                  <span class="mfield-value">3</span>
+                </div>
+              </li>
+            </ul>
+            <p class="threshold-note">Weak area threshold — below 60% mastery, once Noah has answered at least 5 questions on the topic</p>
+              <p class="tablefoot">Mastery counts answered questions only. Unanswered questions are listed separately and are not scored as wrong.</p>
           </section>
 
         </main>

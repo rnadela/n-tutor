@@ -14,6 +14,7 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import { ChevronDown, Users } from 'lucide-react';
 import { RowActions } from '@/components/RowActions';
+import { CardField, CardList, TableCard, TableOnDesktop } from '@/components/TableCards';
 import { adminCopy } from '@/copy/admin';
 import type { AccountConsumption, AccountTier, ParentAccountSummary } from '@/lib/admin-api';
 import { dateOnly, inZone, limitLabel } from '@/lib/consumption-format';
@@ -50,12 +51,57 @@ export interface ParentAccountTableProps {
   onAssignTier: (account: ParentAccountSummary, tier: AccountTier) => Promise<boolean>;
 }
 
-function ConsumptionPanel({ consumption }: { consumption: AccountConsumption }) {
-  const rows = [
+/** The three allowances, with the reading each one is at. */
+function allowanceRows(consumption: AccountConsumption) {
+  return [
     [adminCopy.accounts.uploadAllowance, consumption.allowances.upload],
     [adminCopy.accounts.generationAllowance, consumption.allowances.generation],
     [adminCopy.accounts.explanationAllowance, consumption.allowances.explanation],
   ] as const;
+}
+
+/**
+ * The window the allowances are counted in, and the zone it is computed in.
+ *
+ * `suffix` is empty in the table's panel and `-card` in the card's, so a spec
+ * counting one layout is never handed the sum.
+ */
+function PeriodSummary({
+  consumption,
+  suffix,
+}: {
+  consumption: AccountConsumption;
+  suffix: string;
+}) {
+  return (
+    <Box sx={{ display: 'grid', gap: `${density.gap / 2}px`, pt: `${density.gap / 2}px` }}>
+      <Typography component="p" sx={tabular}>
+        {`${adminCopy.accounts.studentProfileLimitLabel}: ${limitLabel(
+          consumption.studentProfileLimit,
+        )}`}
+      </Typography>
+      <Typography component="p" sx={tabular}>
+        {`${adminCopy.accounts.periodStartLabel}: ${inZone(
+          consumption.periodStart,
+          consumption.timezone,
+        )}`}
+      </Typography>
+      <Typography component="p" sx={tabular} data-testid={`reset-at${suffix}`}>
+        {`${adminCopy.accounts.resetLabel}: ${inZone(consumption.resetAt, consumption.timezone)}`}
+      </Typography>
+      <Typography
+        component="p"
+        sx={{ color: 'text.secondary' }}
+        data-testid={`consumption-zone${suffix}`}
+      >
+        {`${adminCopy.accounts.timezoneLabel}: ${consumption.timezone}`}
+      </Typography>
+    </Box>
+  );
+}
+
+function ConsumptionPanel({ consumption }: { consumption: AccountConsumption }) {
+  const rows = allowanceRows(consumption);
 
   return (
     <Box
@@ -107,26 +153,35 @@ function ConsumptionPanel({ consumption }: { consumption: AccountConsumption }) 
           </TableBody>
         </Table>
 
-        <Box sx={{ display: 'grid', gap: `${density.gap / 2}px`, pt: `${density.gap / 2}px` }}>
-          <Typography component="p" sx={tabular}>
-            {`${adminCopy.accounts.studentProfileLimitLabel}: ${limitLabel(
-              consumption.studentProfileLimit,
-            )}`}
-          </Typography>
-          <Typography component="p" sx={tabular}>
-            {`${adminCopy.accounts.periodStartLabel}: ${inZone(
-              consumption.periodStart,
-              consumption.timezone,
-            )}`}
-          </Typography>
-          <Typography component="p" sx={tabular} data-testid="reset-at">
-            {`${adminCopy.accounts.resetLabel}: ${inZone(consumption.resetAt, consumption.timezone)}`}
-          </Typography>
-          <Typography component="p" sx={{ color: 'text.secondary' }}>
-            {`${adminCopy.accounts.timezoneLabel}: ${consumption.timezone}`}
-          </Typography>
-        </Box>
+        <PeriodSummary consumption={consumption} suffix="" />
       </Box>
+    </Box>
+  );
+}
+
+/**
+ * The same consumption reading inside a card, as a labeled field list.
+ *
+ * **Not a nested table.** A two-column table inside a card that is itself one
+ * column wide at 360px is the squeeze this layout exists to end; each allowance
+ * is its own labeled field instead, carrying the identical sentence.
+ */
+function ConsumptionCardFields({ consumption }: { consumption: AccountConsumption }) {
+  return (
+    <Box sx={{ display: 'grid', gap: `${density.gap}px` }}>
+      <Typography component="h4" sx={{ ...typeRoles.label, color: 'text.secondary' }}>
+        {adminCopy.accounts.consumptionHeading}
+      </Typography>
+      {allowanceRows(consumption).map(([label, reading]) => (
+        <Box key={label} data-testid="allowance-field" data-allowance={label}>
+          <CardField
+            label={label}
+            value={adminCopy.accounts.usageOfLimit(reading.used, limitLabel(reading.limit))}
+            tabular
+          />
+        </Box>
+      ))}
+      <PeriodSummary consumption={consumption} suffix="-card" />
     </Box>
   );
 }
@@ -134,6 +189,93 @@ function ConsumptionPanel({ consumption }: { consumption: AccountConsumption }) 
 export function ParentAccountTable(props: ParentAccountTableProps) {
   const { accounts, expandedId, consumption, consumptionLoading, consumptionError, pendingIds } =
     props;
+
+  /**
+   * The disclosure, in whichever layout the row is drawn in.
+   *
+   * One action, and a chevron says "expand" standing alone — so it is the row's
+   * only icon, with the word in its tooltip rather than in the cell (UX-DR43).
+   * The disclosure state and target ride on the button itself; only the target's
+   * `id` differs by layout, because an `aria-controls` pointing at an `id` that
+   * appears twice points at whichever came first.
+   */
+  function consumptionToggle(account: ParentAccountSummary, idSuffix: string) {
+    const expanded = expandedId === account.id;
+    return (
+      <RowActions
+        menuLabel={adminCopy.rowActionsLabel(account.email)}
+        actions={[
+          {
+            key: 'consumption',
+            label: expanded
+              ? adminCopy.accounts.hideConsumption
+              : adminCopy.accounts.showConsumption,
+            ariaLabel: adminCopy.consumptionToggleLabel(account.email),
+            selfEvident: true,
+            expanded,
+            controls: `consumption-${account.id}${idSuffix}`,
+            icon: (
+              <Box
+                component="span"
+                sx={(theme) => ({
+                  display: 'inline-flex',
+                  transform: expanded ? 'rotate(180deg)' : 'none',
+                  transition: theme.transitions.create('transform'),
+                })}
+              >
+                <ChevronDown size={16} aria-hidden="true" />
+              </Box>
+            ),
+            onClick: () => props.onToggleConsumption(account),
+          },
+        ]}
+      />
+    );
+  }
+
+  /**
+   * What the expanded disclosure holds: the error, the wait, or the reading.
+   *
+   * Error first: a failed read must not sit forever on "Loading…", which is what
+   * checking `loading` alone would leave on screen.
+   */
+  function consumptionBody(
+    account: ParentAccountSummary,
+    reading: (c: AccountConsumption) => React.ReactNode,
+  ) {
+    if (consumptionError) {
+      return (
+        <Box
+          sx={{
+            display: 'grid',
+            gap: `${density.gap}px`,
+            justifyItems: 'start',
+            py: `${density.gap}px`,
+          }}
+        >
+          <Alert severity="error" variant="outlined">
+            {consumptionError}
+          </Alert>
+          <Button
+            type="button"
+            variant="contained"
+            onClick={() => props.onRetryConsumption(account)}
+          >
+            {adminCopy.accounts.retry}
+          </Button>
+        </Box>
+      );
+    }
+    if (consumptionLoading || !consumption) {
+      // No `role` here: the page already owns one live region, and a second
+      // competes with it.
+      return <Typography component="p">{adminCopy.accounts.loadingConsumption}</Typography>;
+    }
+    // `consumption` is non-null past the guard above, so the reading is built
+    // here rather than at the two call sites: a ternary there could never yield
+    // anything but the panel, and would render an empty disclosure if it did.
+    return reading(consumption);
+  }
 
   if (accounts.length === 0) {
     return (
@@ -188,7 +330,7 @@ export function ParentAccountTable(props: ParentAccountTableProps) {
           </Box>
         </Box>
 
-        <Box sx={{ overflowX: 'auto' }}>
+        <TableOnDesktop>
           <Table
             size="small"
             aria-labelledby="accounts-heading"
@@ -238,41 +380,7 @@ export function ParentAccountTable(props: ParentAccountTableProps) {
                       <TableCell sx={tabular}>
                         {dateOnly(account.createdAt, account.timezone)}
                       </TableCell>
-                      <TableCell>
-                        {/* One action, and a chevron says "expand" standing
-                            alone — so it is the row's only icon, with the word
-                            in its tooltip rather than in the cell (UX-DR43).
-                            The disclosure state and target ride on the button
-                            itself, exactly as they did on the text control. */}
-                        <RowActions
-                          menuLabel={adminCopy.rowActionsLabel(account.email)}
-                          actions={[
-                            {
-                              key: 'consumption',
-                              label: expanded
-                                ? adminCopy.accounts.hideConsumption
-                                : adminCopy.accounts.showConsumption,
-                              ariaLabel: adminCopy.consumptionToggleLabel(account.email),
-                              selfEvident: true,
-                              expanded,
-                              controls: `consumption-${account.id}`,
-                              icon: (
-                                <Box
-                                  component="span"
-                                  sx={(theme) => ({
-                                    display: 'inline-flex',
-                                    transform: expanded ? 'rotate(180deg)' : 'none',
-                                    transition: theme.transitions.create('transform'),
-                                  })}
-                                >
-                                  <ChevronDown size={16} aria-hidden="true" />
-                                </Box>
-                              ),
-                              onClick: () => props.onToggleConsumption(account),
-                            },
-                          ]}
-                        />
-                      </TableCell>
+                      <TableCell>{consumptionToggle(account, '')}</TableCell>
                     </TableRow>
                     {expanded && (
                       <TableRow>
@@ -280,38 +388,9 @@ export function ParentAccountTable(props: ParentAccountTableProps) {
                           colSpan={ACCOUNT_COLUMNS.length}
                           id={`consumption-${account.id}`}
                         >
-                          {/* Error first: a failed read must not sit forever on
-                            "Loading…", which is what checking `loading` alone
-                            would leave on screen. */}
-                          {consumptionError ? (
-                            <Box
-                              sx={{
-                                display: 'grid',
-                                gap: `${density.gap}px`,
-                                justifyItems: 'start',
-                                py: `${density.gap}px`,
-                              }}
-                            >
-                              <Alert severity="error" variant="outlined">
-                                {consumptionError}
-                              </Alert>
-                              <Button
-                                type="button"
-                                variant="contained"
-                                onClick={() => props.onRetryConsumption(account)}
-                              >
-                                {adminCopy.accounts.retry}
-                              </Button>
-                            </Box>
-                          ) : consumptionLoading || !consumption ? (
-                            // No `role` here: the page already owns one live
-                            // region, and a second competes with it.
-                            <Typography component="p">
-                              {adminCopy.accounts.loadingConsumption}
-                            </Typography>
-                          ) : (
-                            <ConsumptionPanel consumption={consumption} />
-                          )}
+                          {consumptionBody(account, (reading) => (
+                            <ConsumptionPanel consumption={reading} />
+                          ))}
                         </TableCell>
                       </TableRow>
                     )}
@@ -320,7 +399,52 @@ export function ParentAccountTable(props: ParentAccountTableProps) {
               })}
             </TableBody>
           </Table>
-        </Box>
+        </TableOnDesktop>
+
+        {/* The same accounts below the desktop breakpoint: the email is the card's
+          title, every other column a labeled field, and the consumption reading
+          expands inside the card rather than across six columns of nothing. */}
+        <CardList label={adminCopy.accounts.title} testId="account-cards">
+          {accounts.map((account) => (
+            <TableCard
+              key={account.id}
+              title={account.email}
+              actions={consumptionToggle(account, '-card')}
+              testId="account-card"
+              dataAttributes={{ 'data-email': account.email }}
+            >
+              <CardField
+                label={adminCopy.accounts.nameColumn}
+                value={account.displayName ?? adminCopy.accounts.noName}
+              />
+              {/* The select carries its own accessible name, which names the
+                account: the column header alone cannot tell rows apart. */}
+              <CardField
+                label={adminCopy.accounts.tierColumn}
+                value={
+                  <TierSelect
+                    account={account}
+                    disabled={pendingIds.has(account.id)}
+                    onAssign={(tier) => props.onAssignTier(account, tier)}
+                  />
+                }
+              />
+              <CardField label={adminCopy.accounts.timezoneColumn} value={account.timezone} />
+              <CardField
+                label={adminCopy.accounts.createdColumn}
+                value={dateOnly(account.createdAt, account.timezone)}
+                tabular
+              />
+              {expandedId === account.id && (
+                <Box id={`consumption-${account.id}-card`}>
+                  {consumptionBody(account, (reading) => (
+                    <ConsumptionCardFields consumption={reading} />
+                  ))}
+                </Box>
+              )}
+            </TableCard>
+          ))}
+        </CardList>
       </CardContent>
     </Card>
   );
