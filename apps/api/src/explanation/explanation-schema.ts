@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AiFakeFailure } from '../ai/ai-config.js';
-import { RichText } from '../extraction/rich-text.js';
+import { GeneratedRichText } from '../extraction/rich-text.js';
 
 /**
  * The shape an Explanation must come back in: the JSON schema `zodTextFormat`
@@ -8,7 +8,10 @@ import { RichText } from '../extraction/rich-text.js';
  * the fake transport's payload is parsed against, so both transports are held to
  * one contract.
  *
- * **It reuses `RichText` rather than declaring a string.** An Explanation talks
+ * **It reuses `GeneratedRichText` rather than declaring a string.** The
+ * narrowed name — text and fractions, no figures — because nothing asks the
+ * explaining model to draw and Story 4.8 owns the figure-bearing paths. An
+ * Explanation talks
  * about fractions — that is most of what it is for — and a fraction that arrives
  * as `"1/2"` has already lost the reading "one half" that a child listening to the
  * page needs. One segment array, one parser, one renderer (AD-32): asking the
@@ -29,7 +32,7 @@ import { RichText } from '../extraction/rich-text.js';
  */
 export const ExplanationPayload = z.object({
   /** The explanation prose, as rich-text segments. */
-  body: RichText,
+  body: GeneratedRichText,
 });
 
 export type ExplanationPayload = z.infer<typeof ExplanationPayload>;

@@ -2613,3 +2613,11 @@ source_spec: `spec-3-8-plain-language-check-step.md`
 severity: low
 reason: page.spec.tsx slices PAGE_SOURCE and asserts the handler text contains 'leave();' and not 'setError', which would still pass if the branch's condition were inverted or deleted. No e2e test in e2e/tests/parent-capture.spec.ts supplies a session-ending cause to any of the screen's reads (the only mocked allowance failure is a plain 500, which is not session-ending). page.spec.tsx never renders CapturePage itself with mocked fetches — it only does static source-text assertions and renders small subcomponents via renderToStaticMarkup — so this is a pre-existing limitation of the test architecture, not something this story introduced or worsened for its one new read.
 status: open
+
+### DW-328: Extraction bounds figures per rich-text field (MAX_FIGURES, MAX_FIGURE_BYTES) but not per document, so a payload with many questions could still persist several megabytes of figure SVG in one
+origin: spec-deferred 9a894c26216a
+location: apps/api/src/extraction/extraction-payload.ts
+source_spec: `spec-3-9-figures-in-extraction.md`
+severity: medium
+reason: `requireBoundedRichText` in `apps/api/src/extraction/extraction-payload.ts` sums figure bytes within one rich-text field only; nothing in `validateExtractionPayload` sums figure bytes across every question and context body in a document, and `MAX_SEGMENTS` bounds segment count, not figure byte weight.
+status: open

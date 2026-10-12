@@ -1,4 +1,4 @@
-import { isRichText, plainTextOf, type RichText } from '../extraction/rich-text.js';
+import { parseRichText, plainTextOf, type RichText } from '../extraction/rich-text.js';
 import { MAX_EXPLANATION_LENGTH } from './explanation-policy.js';
 import type { ExplanationPayload } from './explanation-schema.js';
 
@@ -29,9 +29,11 @@ export class ExplanationPayloadInvalid extends Error {
 /**
  * The body held no usable segments.
  *
- * `isRichText` is what decides that, so this covers an empty array, an array of
- * blanks, and a fraction with a zero denominator alike — all three are a model
- * that claimed to have written an explanation and did not.
+ * `parseRichText` is what decides that, so this covers an empty array, an array
+ * of blanks, and a fraction with a zero denominator alike — all three are a
+ * model that claimed to have written an explanation and did not. A figure the
+ * sanitizer refuses lands here too, for the same reason and with the same
+ * answer: ask again, store nothing.
  */
 export const EXPLANATION_EMPTY = 'The payload holds no explanation.';
 
@@ -53,14 +55,24 @@ export const EXPLANATION_REPEATS_REMOVED = 'The payload repeats an explanation a
  * Length is measured over the **plain rendering**, not over the JSON: a fraction
  * is one idea however many keys carry it, and counting the encoding would make
  * the ceiling depend on how the prose happened to be segmented.
+ *
+ * The body is **normalized, not merely checked**: `parseRichText` rewrites what
+ * it is given (AD-32), so the value returned here — and stored — is its output
+ * and never the payload's own copy. The explanation wire cannot carry a figure
+ * today (`GeneratedRichText`); this is what holds the line for the build in
+ * which it can.
  */
 export function validateExplanationPayload(
   payload: ExplanationPayload,
   removed: readonly string[] = [],
 ): RichText {
   // The shape parsed; whether it says anything is this pass's question.
-  if (!isRichText(payload.body)) throw new ExplanationPayloadInvalid(EXPLANATION_EMPTY);
-  const body = payload.body as RichText;
+  let body: RichText;
+  try {
+    body = parseRichText(payload.body);
+  } catch {
+    throw new ExplanationPayloadInvalid(EXPLANATION_EMPTY);
+  }
   const text = plainTextOf(body);
   if (text.length > MAX_EXPLANATION_LENGTH) {
     throw new ExplanationPayloadInvalid(EXPLANATION_TOO_LONG);

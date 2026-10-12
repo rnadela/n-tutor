@@ -33,6 +33,13 @@ import {
   type EditedQuestion,
 } from './practice-test-payload.js';
 import { weightedTopicFloor, weightingFor } from './practice-test-policy.js';
+import { PracticeTestPayload } from './practice-test-schema.js';
+
+/** A figure as a model would write it, and the only form that may be stored. */
+const FIGURE_RAW =
+  '<svg viewBox="0 0 10 10" width="200" height="200"><circle cx="5" cy="5" r="4" fill="#ff0000" stroke="black"/></svg>';
+const FIGURE_SANITIZED =
+  '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="currentColor" stroke="currentColor"/></svg>';
 
 const text = (value: string) => [{ kind: 'text', value }];
 
@@ -534,6 +541,50 @@ describe('weighted topic floor', () => {
   });
 });
 
+describe('a figure on the generation wire', () => {
+  /**
+   * Narrowed on purpose until Story 4.8.
+   *
+   * Nothing instructs a generating model to draw, 4.8 owns the prompt work and
+   * the draft surface that would show a figure, and the draft-edit path
+   * round-trips every field through `plainTextOf` → `richTextFromPlainText`,
+   * which cannot read a figure back and would delete one silently. So the wire
+   * refuses one outright rather than accepting a segment this build would lose.
+   */
+  it('is refused by the schema, so it never reaches the post-hoc pass', () => {
+    const parsed = PracticeTestPayload.safeParse({
+      questions: [
+        {
+          format: 'ShortAnswer',
+          prompt: [{ kind: 'figure', svg: FIGURE_SANITIZED, alt: 'A circle' }],
+          choices: [],
+          answer: text('A circle'),
+          topics: ['Shapes'],
+        },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('takes text and fractions, which is everything generation does emit', () => {
+    const parsed = PracticeTestPayload.safeParse({
+      questions: [
+        {
+          format: 'ShortAnswer',
+          prompt: [
+            { kind: 'text', value: 'Half of six is ' },
+            { kind: 'fraction', whole: null, numerator: 6, denominator: 2 },
+          ],
+          choices: [],
+          answer: text('Three'),
+          topics: ['Fractions'],
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
 describe('an edited question', () => {
   /** The same helper as above, typed, so an override is checked rather than cast. */
   const seg = (value: string): RichText => [{ kind: 'text', value }];
@@ -557,6 +608,51 @@ describe('an edited question', () => {
 
   it('takes an edit that leaves the invariants intact', () => {
     expect(() => validateEditedQuestion(edited(), ORDINALS)).not.toThrow();
+  });
+
+  it('stores the sanitized figure, never the one it was handed', () => {
+    // The edit path takes a `RichText` directly rather than through the wire
+    // schema, so a figure is reachable here whatever the generation schema
+    // admits — and the value written is the one this returns.
+    const prompt: RichText = [
+      { kind: 'text', value: 'What shape? ' },
+      { kind: 'figure', svg: FIGURE_RAW, alt: '  A circle  ' },
+    ];
+    const stored = validateEditedQuestion(edited({ prompt }), ORDINALS);
+    expect(stored.prompt).toEqual([
+      { kind: 'text', value: 'What shape? ' },
+      { kind: 'figure', svg: FIGURE_SANITIZED, alt: 'A circle' },
+    ]);
+  });
+
+  it('sanitizes a figure in an option body the same way', () => {
+    const choices = [
+      {
+        ordinal: 1,
+        body: [{ kind: 'figure' as const, svg: FIGURE_RAW, alt: 'A circle' }],
+        isCorrect: true,
+      },
+      { ordinal: 2, body: seg('Five'), isCorrect: false },
+      { ordinal: 3, body: seg('Six'), isCorrect: false },
+    ];
+    const stored = validateEditedQuestion(edited({ choices }), ORDINALS);
+    expect(stored.choices[0]!.body).toEqual([
+      { kind: 'figure', svg: FIGURE_SANITIZED, alt: 'A circle' },
+    ]);
+  });
+
+  it('refuses an edit whose figure the sanitizer does not admit', () => {
+    const prompt: RichText = [
+      {
+        kind: 'figure',
+        svg: '<svg viewBox="0 0 2 2"><script>alert(1)</script><circle cx="1" cy="1" r="1"/></svg>',
+        alt: 'A circle',
+      },
+    ];
+    expect(() => validateEditedQuestion(edited({ prompt }), ORDINALS)).toThrow(
+      EditedQuestionInvalid,
+    );
+    expect(() => validateEditedQuestion(edited({ prompt }), ORDINALS)).toThrow(RICH_TEXT_INVALID);
   });
 
   it('refuses an edit that leaves no option correct', () => {

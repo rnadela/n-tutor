@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AiFakeFailure } from '../ai/ai-config.js';
-import { RichText } from '../extraction/rich-text.js';
+import { GeneratedRichText } from '../extraction/rich-text.js';
 import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-policy.js';
 
 /**
@@ -17,15 +17,19 @@ import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-p
  * lives in `practice-test-payload.ts`, where it is actually enforced. A limit
  * written here would be one the API silently drops.
  *
- * `RichText` is reused from `extraction` rather than forked: a fraction in a
- * generated question is the same structure as a fraction read off a page, and
- * two spellings of it would be two renderings and two spoken alternatives.
+ * `GeneratedRichText` is reused from `extraction` rather than forked: a
+ * fraction in a generated question is the same structure as a fraction read off
+ * a page, and two spellings of it would be two renderings and two spoken
+ * alternatives. It is the *narrowed* name — text and fractions, no figures —
+ * because nothing asks a generating model to draw and the draft-edit path's
+ * plain-text round trip would silently delete a figure it did. Story 4.8 owns
+ * widening it.
  */
 
 export const QuestionFormat = z.enum(['MultipleChoice', 'FillInTheBlank', 'ShortAnswer']);
 
 export const GeneratedChoicePayload = z.object({
-  body: RichText,
+  body: GeneratedRichText,
   /**
    * Whether this is the right answer. Exactly one of a question's choices may
    * say so, and that is checked in code afterwards — a model told to flag one
@@ -36,7 +40,7 @@ export const GeneratedChoicePayload = z.object({
 
 export const GeneratedQuestionPayload = z.object({
   format: QuestionFormat,
-  prompt: RichText,
+  prompt: GeneratedRichText,
   /** The options, for a MultipleChoice question; empty for every other format. */
   choices: z.array(GeneratedChoicePayload),
   /**
@@ -45,7 +49,7 @@ export const GeneratedQuestionPayload = z.object({
    * `answer: null`, which is the only way "absent" survives strict Structured
    * Outputs and keeps one spelling of it.
    */
-  answer: RichText.nullable(),
+  answer: GeneratedRichText.nullable(),
   /** Raw labels, as written. Canonicalization is Epic 7's (AD-11). */
   topics: z.array(z.string()),
 });

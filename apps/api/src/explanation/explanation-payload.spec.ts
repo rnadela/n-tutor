@@ -7,7 +7,13 @@ import {
   validateExplanationPayload,
 } from './explanation-payload.js';
 import { EXPLANATION_FAILED, MAX_EXPLANATION_LENGTH } from './explanation-policy.js';
-import { fakeExplanationPayload } from './explanation-schema.js';
+import { ExplanationPayload, fakeExplanationPayload } from './explanation-schema.js';
+
+/** A figure as a model would write it, and the only form that may be stored. */
+const FIGURE_RAW =
+  '<svg viewBox="0 0 10 10" width="200" height="200"><circle cx="5" cy="5" r="4" fill="#ff0000" stroke="black"/></svg>';
+const FIGURE_SANITIZED =
+  '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="currentColor" stroke="currentColor"/></svg>';
 
 /**
  * The post-hoc pass and the two figures around it.
@@ -112,7 +118,9 @@ describe('a replacement for an explanation a parent removed', () => {
 describe('what the fake transport answers with', () => {
   it('writes a usable explanation that names the question it is about', () => {
     const payload = fakeExplanationPayload({ ordinal: 7, failure: 'none' });
-    expect(validateExplanationPayload(payload)).toBe(payload.body);
+    // Equal, not identical: the pass normalizes (AD-32), so it answers with
+    // its own array rather than the payload's.
+    expect(validateExplanationPayload(payload)).toEqual(payload.body);
     expect(JSON.stringify(payload.body)).toContain('question 7');
   });
 
@@ -122,7 +130,7 @@ describe('what the fake transport answers with', () => {
     const firstText = first.body
       .map((segment) => ('value' in segment ? segment.value : ''))
       .join('');
-    expect(validateExplanationPayload(second, [firstText])).toBe(second.body);
+    expect(validateExplanationPayload(second, [firstText])).toEqual(second.body);
     expect(JSON.stringify(second.body)).toContain('question 7');
   });
 
@@ -154,5 +162,57 @@ describe('the failure sentence', () => {
     for (const forbidden of [/sorry/iu, /!/u, /error/iu, /timeout/iu, /provider/iu, /model/iu]) {
       expect(EXPLANATION_FAILED).not.toMatch(forbidden);
     }
+  });
+});
+
+describe('a figure in an explanation', () => {
+  /**
+   * Narrowed on purpose until Story 4.8: nothing asks the explaining model to
+   * draw, and the explanation prompt says nothing about figures.
+   */
+  it('is refused by the wire schema, so it never reaches this pass', () => {
+    expect(
+      ExplanationPayload.safeParse({
+        body: [{ kind: 'figure', svg: FIGURE_SANITIZED, alt: 'A circle' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      ExplanationPayload.safeParse({
+        body: [
+          { kind: 'text', value: 'Half of six is ' },
+          { kind: 'fraction', whole: null, numerator: 6, denominator: 2 },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('is stored sanitized if one ever reaches the pass anyway', () => {
+    // Defence in depth, not a substitute for the narrowed wire: the body that
+    // is returned — and stored — is `parseRichText`'s output, so the day 4.8
+    // widens the schema no raw model markup is persisted by this path.
+    //
+    // Cast at the boundary because the wire type no longer admits a figure;
+    // that is exactly the condition being simulated.
+    const body = [
+      { kind: 'text' as const, value: 'The shape is ' },
+      { kind: 'figure' as const, svg: FIGURE_RAW, alt: '  A circle  ' },
+    ];
+    expect(validateExplanationPayload({ body } as unknown as ExplanationPayload)).toEqual([
+      { kind: 'text', value: 'The shape is ' },
+      { kind: 'figure', svg: FIGURE_SANITIZED, alt: 'A circle' },
+    ]);
+  });
+
+  it('rejects a body whose figure the sanitizer does not admit', () => {
+    const body = [
+      {
+        kind: 'figure' as const,
+        svg: '<svg viewBox="0 0 2 2"><script>alert(1)</script><circle cx="1" cy="1" r="1"/></svg>',
+        alt: 'A circle',
+      },
+    ];
+    expect(() => validateExplanationPayload({ body } as unknown as ExplanationPayload)).toThrow(
+      EXPLANATION_EMPTY,
+    );
   });
 });

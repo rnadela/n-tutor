@@ -12,6 +12,10 @@ import type { RichTextSegment } from './parent-api';
  * One table checked against both sides, so the two are pinned to each other by
  * behaviour rather than by either one's source text.
  */
+/** A figure exactly as the API stores it, sanitized. */
+const FIGURE_SVG =
+  '<svg viewBox="0 0 10 10"><path d="M0 5A5 5 0 0 1 10 5" fill="none" stroke="currentColor"/></svg>';
+
 const PLAIN_RENDERINGS: [RichTextSegment[], string][] = [
   [[{ kind: 'text', value: 'Half of four is two.' }], 'Half of four is two.'],
   [[{ kind: 'fraction', whole: null, numerator: 1, denominator: 2 }], '1/2'],
@@ -36,6 +40,15 @@ const PLAIN_RENDERINGS: [RichTextSegment[], string][] = [
     'Add 1 1/8 to 3/8.',
   ],
   [[], ''],
+  [[{ kind: 'figure', svg: FIGURE_SVG, alt: 'A half-circle' }], '[Figure: A half-circle]'],
+  [
+    [
+      { kind: 'text', value: 'What shape? ' },
+      { kind: 'figure', svg: FIGURE_SVG, alt: 'A half-circle' },
+      { kind: 'text', value: ' Name it.' },
+    ],
+    'What shape? [Figure: A half-circle] Name it.',
+  ],
 ];
 
 const SOURCE = readFileSync(path.resolve(import.meta.dirname, 'rich-text.ts'), 'utf8');
@@ -107,5 +120,30 @@ describe('the direction this module runs in', () => {
     expect(SOURCE).not.toContain('document');
     expect(SOURCE).not.toContain('window');
     expect(SOURCE).not.toContain("'use client'");
+  });
+});
+
+describe('the figure projection', () => {
+  it('renders a figure as its text alternative, in place', () => {
+    // Grading, dedupe, the explanation prompt and the topic prompts all work
+    // on this string alone, so a figure projecting to nothing would turn
+    // "what shape is this?" into "what shape is?".
+    expect(plainTextOf([{ kind: 'figure', svg: FIGURE_SVG, alt: 'A circle' }])).toBe(
+      '[Figure: A circle]',
+    );
+  });
+
+  it('is worded byte-identically to the API projection, in mixed fields too', () => {
+    // Byte-identical and not merely similar: Story 4.8 has to recover the
+    // segments from this string, and it can only do that against one wording.
+    const mixed: RichTextSegment[] = [
+      { kind: 'text', value: 'Shade ' },
+      { kind: 'fraction', whole: null, numerator: 1, denominator: 2 },
+      { kind: 'text', value: ' of ' },
+      { kind: 'figure', svg: FIGURE_SVG, alt: 'A rectangle in four parts' },
+      { kind: 'text', value: '.' },
+    ];
+    expect(plainTextOf(mixed)).toBe('Shade 1/2 of [Figure: A rectangle in four parts].');
+    expect(plainTextOf(mixed)).toBe(apiPlainTextOf(mixed));
   });
 });

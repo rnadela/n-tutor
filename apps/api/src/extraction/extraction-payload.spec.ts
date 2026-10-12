@@ -32,8 +32,17 @@ import {
   fakeExtractionPayload,
   fakeQuestionsPerPage,
 } from './extraction-schema.js';
+import { MAX_FIGURE_BYTES, MAX_FIGURES } from './extraction-payload.js';
+import type { RichText } from './rich-text.js';
+import { MAX_FIGURE_SVG_BYTES, figureSvgByteLength } from './svg-figure.js';
 
-const text = (value: string) => [{ kind: 'text' as const, value }];
+/**
+ * Typed as `RichText` rather than as its own literal, so a figure segment is
+ * assignable everywhere a text one is and `pnpm typecheck` actually sees a
+ * figure inside a payload. A cast here would have hidden the thing the figure
+ * cases are about.
+ */
+const text = (value: string): RichText => [{ kind: 'text', value }];
 
 /** A three-page document that passes every rule, varied one field per test. */
 function valid() {
@@ -499,5 +508,187 @@ describe("the fake transport's density knob", () => {
     expect(() => fakeExtractionPayload({ imageCount: 2, failure: 'none' })).toThrow(
       /AI_FAKE_QUESTIONS_PER_PAGE must be a positive whole number/,
     );
+  });
+});
+
+describe('a figure inside a rich-text field', () => {
+  const RAW =
+    '<svg viewBox="0 0 10 10" width="200" height="200"><circle cx="5" cy="5" r="4" fill="#ff0000" stroke="black"/></svg>';
+  const SANITIZED =
+    '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="currentColor" stroke="currentColor"/></svg>';
+  const figure = (svg: string, alt: string): RichText => [{ kind: 'figure', svg, alt }];
+
+  it('stores the sanitized SVG, never the one the model wrote', () => {
+    // The whole reason the three storage sites switched from guard-then-store
+    // to store-what-the-parse-returns: a guard would have persisted `RAW`.
+    const payload = valid();
+    payload.questions[0]!.prompt = figure(RAW, 'A circle');
+    const document = validateExtractionPayload(payload, ORDINALS);
+    expect(document.questions[0]!.prompt).toEqual([
+      { kind: 'figure', svg: SANITIZED, alt: 'A circle' },
+    ]);
+  });
+
+  it('leaves a question carrying a figure usable', () => {
+    const payload = valid();
+    payload.questions[0]!.prompt = figure(RAW, 'A circle');
+    expect(validateExtractionPayload(payload, ORDINALS).questions[0]!.usable).toBe(true);
+  });
+
+  it('sanitizes a figure in a choice and in a context body the same way', () => {
+    const payload = valid();
+    payload.questions[0]!.choices = [figure(RAW, 'A circle'), text('B')];
+    payload.contexts[0]!.body = figure(RAW, 'A number line');
+    const document = validateExtractionPayload(payload, ORDINALS);
+    expect(document.questions[0]!.choices[0]).toEqual([
+      { kind: 'figure', svg: SANITIZED, alt: 'A circle' },
+    ]);
+    expect(document.contexts[0]!.body).toEqual([
+      { kind: 'figure', svg: SANITIZED, alt: 'A number line' },
+    ]);
+  });
+
+  it('rejects the whole payload when a figure is outside the sanitizer grammar', () => {
+    const hostile =
+      '<svg viewBox="0 0 1 1"><script>alert(1)</script><circle cx="1" cy="1" r="1"/></svg>';
+    for (const mutate of [
+      (payload: ReturnType<typeof valid>) => {
+        payload.questions[0]!.prompt = figure(hostile, 'A circle');
+      },
+      (payload: ReturnType<typeof valid>) => {
+        payload.questions[0]!.choices = [figure(hostile, 'A circle'), text('B')];
+      },
+      (payload: ReturnType<typeof valid>) => {
+        payload.contexts[0]!.body = figure(hostile, 'A circle');
+      },
+    ]) {
+      const fault = rejectionOf(mutate);
+      // One rejection reason and no new failure kind: a figure fault routes as
+      // an `UpstreamFault` exactly like every other post-hoc rejection (AD-30).
+      expect(fault).toBeInstanceOf(ExtractionPayloadInvalid);
+      expect(fault.message).toBe(RICH_TEXT_INVALID);
+    }
+  });
+
+  it('rejects a blank text alternative as a content fault', () => {
+    expect(
+      rejectionOf((payload) => {
+        payload.questions[0]!.prompt = figure(RAW, '   ');
+      }).message,
+    ).toBe(RICH_TEXT_INVALID);
+  });
+
+  it('refuses an SVG larger than a drawn shape can plausibly be', () => {
+    const padded = `<svg viewBox="0 0 2 2"><path d="${'M0 0'.repeat(MAX_FIGURE_SVG_BYTES)}"/></svg>`;
+    expect(
+      rejectionOf((payload) => {
+        payload.questions[0]!.prompt = figure(padded, 'A long path');
+      }).message,
+      // The ceiling is judged on what arrived, so the honest reason survives
+      // rather than the sanitizer's own byte cap reporting a content fault.
+    ).toBe(PAYLOAD_TOO_LARGE);
+  });
+
+  it('reports an oversize figure the same way whether the cap is seen on input or on escaping', () => {
+    // The ceiling above is judged on what arrived. But a figure whose raw
+    // bytes are under the cap can still grow past it once the sanitizer
+    // escapes it for storage — that case is caught deeper, inside
+    // `parseRichText`, and must still read as the same oversize-figure fault
+    // rather than falling into the generic content-fault catch-all.
+    const quotes = '"'.repeat(4_000);
+    const grows = `<svg viewBox="0 0 2 2"><circle cx="1" cy="1" r="1"/><path d='${quotes}'/></svg>`;
+    expect(figureSvgByteLength(grows)).toBeLessThan(MAX_FIGURE_SVG_BYTES);
+    expect(
+      rejectionOf((payload) => {
+        payload.questions[0]!.prompt = figure(grows, 'A long path');
+      }).message,
+    ).toBe(PAYLOAD_TOO_LARGE);
+  });
+
+  it('refuses a text alternative longer than a page could hold', () => {
+    expect(
+      rejectionOf((payload) => {
+        payload.questions[0]!.prompt = figure(RAW, 'x'.repeat(MAX_TEXT_LENGTH + 1));
+      }).message,
+    ).toBe(PAYLOAD_TOO_LARGE);
+  });
+
+  it('refuses more figures in one field than a printed question could carry', () => {
+    // One figure's byte cap bounds nothing that matters on its own:
+    // `MAX_SEGMENTS` figures of 16 KB is megabytes in a single prompt.
+    expect(
+      rejectionOf((payload) => {
+        payload.questions[0]!.prompt = Array.from({ length: MAX_FIGURES + 1 }, () => ({
+          kind: 'figure' as const,
+          svg: RAW,
+          alt: 'A circle',
+        }));
+      }).message,
+    ).toBe(PAYLOAD_TOO_LARGE);
+  });
+
+  it('refuses more drawing in one field than the byte budget allows', () => {
+    // Under the figure count, over the budget: many middling figures are the
+    // case the count alone does not catch.
+    const padding = 'M0 0'.repeat(2_500);
+    const wide = `<svg viewBox="0 0 2 2"><path d="${padding}"/></svg>`;
+    expect(figureSvgByteLength(wide)).toBeLessThan(MAX_FIGURE_SVG_BYTES);
+    expect(figureSvgByteLength(wide) * MAX_FIGURES).toBeGreaterThan(MAX_FIGURE_BYTES);
+    expect(
+      rejectionOf((payload) => {
+        payload.questions[0]!.prompt = Array.from({ length: MAX_FIGURES }, () => ({
+          kind: 'figure' as const,
+          svg: wide,
+          alt: 'A long path',
+        }));
+      }).message,
+    ).toBe(PAYLOAD_TOO_LARGE);
+  });
+
+  it('refuses a byte budget only sanitizing escapes past, even under the raw check', () => {
+    // Each figure is individually under the per-figure cap both raw and
+    // escaped, and the field's *raw* total stays under `MAX_FIGURE_BYTES` —
+    // only once every figure is sanitized does the field's real total cross
+    // it. The pre-sanitize raw-byte check in `requireBoundedRichText` cannot
+    // see this; it is caught re-summing the sanitized form afterward.
+    const quotes = '"'.repeat(1_500);
+    const inflatesOnEscape = `<svg viewBox="0 0 2 2"><circle cx="1" cy="1" r="1"/><path d='${quotes}'/></svg>`;
+    expect(figureSvgByteLength(inflatesOnEscape) * MAX_FIGURES).toBeLessThan(MAX_FIGURE_BYTES);
+    expect(
+      rejectionOf((payload) => {
+        payload.questions[0]!.prompt = Array.from({ length: MAX_FIGURES }, () => ({
+          kind: 'figure' as const,
+          svg: inflatesOnEscape,
+          alt: 'Quoted path',
+        }));
+      }).message,
+    ).toBe(PAYLOAD_TOO_LARGE);
+  });
+
+  it('stores a trimmed text alternative, because it is read out loud', () => {
+    const payload = valid();
+    payload.questions[0]!.prompt = figure(RAW, '  A circle\n');
+    const stored = validateExtractionPayload(payload, ORDINALS).questions[0]!.prompt[0];
+    expect(stored).toMatchObject({ alt: 'A circle' });
+  });
+
+  it('refuses a text alternative holding a character nothing could speak', () => {
+    expect(
+      rejectionOf((payload) => {
+        payload.questions[0]!.prompt = figure(RAW, 'A circle\u0007');
+      }).message,
+    ).toBe(RICH_TEXT_INVALID);
+  });
+
+  it('does not make a question that depends on unreadable content usable', () => {
+    // A figure is content, not an answer to "could this page be read": the
+    // dependency is still the fact `usable` is computed from.
+    const payload = valid();
+    payload.questions[0]!.pageOrdinal = 3;
+    payload.questions[0]!.dependsOnUninterpretable = true;
+    payload.questions[0]!.prompt = figure(RAW, 'A circle');
+    payload.pages[2]!.interpretable = true;
+    const document = validateExtractionPayload(payload, ORDINALS);
+    expect(document.questions[0]!.usable).toBe(false);
   });
 });

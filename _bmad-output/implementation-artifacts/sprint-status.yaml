@@ -62,7 +62,7 @@ development_status:
   3-6-thin-extraction-warning: done
   3-7-upload-stepper: done
   3-8-plain-language-check-step: done
-  3-9-figures-in-extraction: backlog
+  3-9-figures-in-extraction: done
   epic-3-retrospective: optional
 
   epic-4: in-progress

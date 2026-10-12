@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { isRichText, parseRichText, plainTextOf, richTextFromPlainText } from './rich-text.js';
+import {
+  RICH_TEXT_FIGURE_ALT_EMPTY,
+  RICH_TEXT_FIGURE_ALT_INVALID,
+  isRichText,
+  parseRichText,
+  plainTextOf,
+  richTextFromPlainText,
+} from './rich-text.js';
+
+/** A legible printed circle, exactly as a model would write it. */
+const CIRCLE =
+  '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="black"/></svg>';
+const SANITIZED_CIRCLE =
+  '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="currentColor"/></svg>';
+
+const figure = (svg: string, alt: string) => [{ kind: 'figure' as const, svg, alt }];
 
 describe('parsing', () => {
   it('takes a run of plain text', () => {
@@ -45,6 +60,72 @@ describe('parsing', () => {
   it('refuses a plain string, which is the shape AD-32 exists to prevent', () => {
     expect(isRichText('1/2')).toBe(false);
     expect(isRichText([{ kind: 'latex', value: '\\frac{1}{2}' }])).toBe(false);
+  });
+});
+
+describe('a figure', () => {
+  it('comes back with its SVG rewritten, so the parse is a normalizer and not a guard', () => {
+    // The point of sanitizing here rather than at a call site: the value a
+    // caller stores is this one, whatever it handed in.
+    const rich = parseRichText(figure(CIRCLE, 'A circle'));
+    expect(rich).toEqual([{ kind: 'figure', svg: SANITIZED_CIRCLE, alt: 'A circle' }]);
+    expect(rich[0]).not.toMatchObject({ svg: CIRCLE });
+  });
+
+  it('refuses a blank or whitespace-only text alternative', () => {
+    // It is the figure's only spoken form and the only form `plainTextOf` can
+    // project; without it the drawing is unreachable to anything but a screen.
+    expect(() => parseRichText(figure(CIRCLE, ''))).toThrow(RICH_TEXT_FIGURE_ALT_EMPTY);
+    expect(() => parseRichText(figure(CIRCLE, '   '))).toThrow(RICH_TEXT_FIGURE_ALT_EMPTY);
+  });
+
+  it('refuses a text alternative carrying a bidi-override or zero-width character', () => {
+    // A right-to-left override or a zero-width joiner can make an `aria-label`
+    // or the plain-text projection read differently than it is stored — the
+    // same unspeakable-character concern a C0 control already refuses.
+    expect(() => parseRichText(figure(CIRCLE, 'A circle‮'))).toThrow(
+      RICH_TEXT_FIGURE_ALT_INVALID,
+    );
+    expect(() => parseRichText(figure(CIRCLE, 'A​circle'))).toThrow(
+      RICH_TEXT_FIGURE_ALT_INVALID,
+    );
+  });
+
+  it('refuses an SVG the sanitizer does not admit, through the same one parse', () => {
+    for (const svg of [
+      '<svg viewBox="0 0 1 1"><script>alert(1)</script><circle cx="1" cy="1" r="1"/></svg>',
+      '<svg viewBox="0 0 1 1"><circle cx="1" cy="1" r="1" onload="x()"/></svg>',
+      '<svg viewBox="0 0 1 1"><circle cx="1" cy="1" r="1" stroke="url(#grad)"/></svg>',
+      '<svg><circle cx="1" cy="1" r="1"/></svg>',
+      '[A half-circle figure is shown.]',
+    ]) {
+      expect(() => parseRichText(figure(svg, 'A shape'))).toThrow();
+      expect(isRichText(figure(svg, 'A shape'))).toBe(false);
+    }
+  });
+
+  it('is content, so a field holding only a figure is not an unfilled field', () => {
+    expect(isRichText(figure(CIRCLE, 'A circle'))).toBe(true);
+  });
+
+  it('renders as its text alternative, in place, in order', () => {
+    expect(
+      plainTextOf([
+        { kind: 'text', value: 'What shape? ' },
+        { kind: 'figure', svg: SANITIZED_CIRCLE, alt: 'A half-circle' },
+      ]),
+    ).toBe('What shape? [Figure: A half-circle]');
+    expect(plainTextOf(figure(SANITIZED_CIRCLE, 'A circle'))).toBe('[Figure: A circle]');
+  });
+
+  it('cannot survive the plain-text round trip, which Story 4.8 closes', () => {
+    // Asserted rather than left implicit so 4.8 inherits a named problem: this
+    // is the exact line that must change when the draft-edit path stops
+    // round-tripping fields through plain text.
+    const rich = parseRichText(figure(CIRCLE, 'A circle'));
+    expect(richTextFromPlainText(plainTextOf(rich))).toEqual([
+      { kind: 'text', value: '[Figure: A circle]' },
+    ]);
   });
 });
 

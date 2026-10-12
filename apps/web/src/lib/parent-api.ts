@@ -275,16 +275,24 @@ export interface GenerationTopicsView {
 }
 
 /**
- * A run of generated text, or a fraction as structure (AD-32).
+ * A run of generated text, a fraction as structure, or a drawn figure (AD-32).
  *
  * Structure and never the glyph `"1/2"`: a spoken alternative cannot be
  * recovered from a glyph, so the numerator and the denominator travel apart
  * and `RichText` is the one component that decides how they are drawn. Nothing
  * in this app builds a fraction string of its own.
+ *
+ * A figure's `svg` has already been sanitized by the API's allowlist parse on
+ * the way into storage, and `RichText` re-parses it through the browser's
+ * mirror of that parser before drawing anything anyway: neither side trusts the
+ * other, and this read casts stored JSON rather than re-validating it, so a row
+ * written by an older build arrives here unvetted. `alt` is the figure's only
+ * spoken form and is never empty.
  */
 export type RichTextSegment =
   | { kind: 'text'; value: string }
-  | { kind: 'fraction'; whole: number | null; numerator: number; denominator: number };
+  | { kind: 'fraction'; whole: number | null; numerator: number; denominator: number }
+  | { kind: 'figure'; svg: string; alt: string };
 
 /**
  * One row of Pending drafts, exactly as the API states it.

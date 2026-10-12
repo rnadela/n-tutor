@@ -1,5 +1,5 @@
 import type { QuestionFormat } from '../generated/prisma/enums.js';
-import { isRichText, plainTextOf, type RichText } from '../extraction/rich-text.js';
+import { parseRichText, plainTextOf, type RichText } from '../extraction/rich-text.js';
 import { normalizeTopicLabel, type GenerationWeighting } from './practice-test-policy.js';
 import { PracticeTestPayload } from './practice-test-schema.js';
 
@@ -153,12 +153,27 @@ export function normalizePrompt(text: string): string {
     .trim();
 }
 
-/** A rich-text field that is valid *and* within this module's ceilings. */
-function validRichText(value: unknown): value is RichText {
-  if (!isRichText(value)) return false;
-  const rich = value as RichText;
-  if (rich.length > MAX_SEGMENTS) return false;
-  return plainTextOf(rich).length <= MAX_TEXT_LENGTH;
+/**
+ * A rich-text field normalized for storage, within this module's ceilings — or
+ * `null`, which every caller turns into its own refusal.
+ *
+ * **Normalized, not merely checked.** `parseRichText` rewrites what it is given
+ * (AD-32): it trims a figure's text alternative and replaces a figure's SVG
+ * with the sanitizer's own output. A guard that returned the value as received
+ * would persist model-authored markup that nothing had rewritten — the exact
+ * shape Story 3.9 exists to remove — so the caller stores *this* value and
+ * never its own copy. The generation wire cannot carry a figure today
+ * (`GeneratedRichText`), and this holds the line for the build in which it can.
+ */
+function normalizedRichText(value: unknown): RichText | null {
+  let rich: RichText;
+  try {
+    rich = parseRichText(value);
+  } catch {
+    return null;
+  }
+  if (rich.length > MAX_SEGMENTS) return null;
+  return plainTextOf(rich).length <= MAX_TEXT_LENGTH ? rich : null;
 }
 
 function refuse(message: string): never {
@@ -198,9 +213,9 @@ export function validateGenerationPayload(
     const format = question.format as QuestionFormat;
     produced.set(format, (produced.get(format) ?? 0) + 1);
 
-    if (!validRichText(question.prompt)) refuse(RICH_TEXT_INVALID);
+    const prompt = normalizedRichText(question.prompt) ?? refuse(RICH_TEXT_INVALID);
 
-    const normalized = normalizePrompt(plainTextOf(question.prompt));
+    const normalized = normalizePrompt(plainTextOf(prompt));
     // Post-hoc, never hoped for: the prompt asked the model not to copy, and
     // this is what makes the rule hold when it does anyway.
     if (normalized === '') refuse(PROMPT_EMPTY);
@@ -226,28 +241,27 @@ export function validateGenerationPayload(
       const bodies = new Set<string>();
       let correct = 0;
       question.choices.forEach((choice, choiceIndex) => {
-        if (!validRichText(choice.body)) refuse(RICH_TEXT_INVALID);
-        const key = normalizePrompt(plainTextOf(choice.body));
+        const body = normalizedRichText(choice.body) ?? refuse(RICH_TEXT_INVALID);
+        const key = normalizePrompt(plainTextOf(body));
         // A repeated option is either two right answers or a distractor that
         // is not one; either way the question cannot be graded honestly.
         if (key === '') refuse(CHOICE_BODY_EMPTY);
         if (bodies.has(key)) refuse(CHOICES_NOT_DISTINCT);
         bodies.add(key);
         if (choice.isCorrect) correct += 1;
-        choices.push({ ordinal: choiceIndex + 1, body: choice.body, isCorrect: choice.isCorrect });
+        choices.push({ ordinal: choiceIndex + 1, body, isCorrect: choice.isCorrect });
       });
       if (correct !== 1) refuse(ONE_CORRECT_CHOICE_REQUIRED);
     } else {
       if (question.choices.length > 0) refuse(CHOICES_FORBIDDEN);
       if (question.answer === null) refuse(ANSWER_REQUIRED);
-      if (!validRichText(question.answer)) refuse(RICH_TEXT_INVALID);
-      answer = question.answer;
+      answer = normalizedRichText(question.answer) ?? refuse(RICH_TEXT_INVALID);
     }
 
     questions.push({
       ordinal: index + 1,
       format,
-      prompt: question.prompt,
+      prompt,
       answer,
       choices,
       topics,
@@ -342,8 +356,8 @@ export function validateEditedQuestion(
   edited: EditedQuestion,
   storedOrdinals: readonly number[],
 ): EditedQuestion {
-  if (!validRichText(edited.prompt)) refuseEdit(RICH_TEXT_INVALID);
-  if (normalizePrompt(plainTextOf(edited.prompt)) === '') refuseEdit(PROMPT_EMPTY);
+  const prompt = normalizedRichText(edited.prompt) ?? refuseEdit(RICH_TEXT_INVALID);
+  if (normalizePrompt(plainTextOf(prompt)) === '') refuseEdit(PROMPT_EMPTY);
 
   if (edited.format === 'MultipleChoice') {
     // The flagged option is the answer. A second copy of it in the answer
@@ -359,21 +373,25 @@ export function validateEditedQuestion(
     }
 
     const bodies = new Set<string>();
+    const choices: EditedChoice[] = [];
     let correct = 0;
     for (const choice of edited.choices) {
-      if (!validRichText(choice.body)) refuseEdit(RICH_TEXT_INVALID);
-      const key = normalizePrompt(plainTextOf(choice.body));
+      const body = normalizedRichText(choice.body) ?? refuseEdit(RICH_TEXT_INVALID);
+      const key = normalizePrompt(plainTextOf(body));
       if (key === '') refuseEdit(CHOICE_BODY_EMPTY);
       if (bodies.has(key)) refuseEdit(CHOICES_NOT_DISTINCT);
       bodies.add(key);
       if (choice.isCorrect) correct += 1;
+      choices.push({ ordinal: choice.ordinal, body, isCorrect: choice.isCorrect });
     }
     if (correct !== 1) refuseEdit(ONE_CORRECT_CHOICE_REQUIRED);
-    return edited;
+    // Returned rebuilt rather than as it came in: the caller writes what this
+    // returns, so every field it writes is one `parseRichText` normalized.
+    return { ...edited, prompt, answer: null, choices };
   }
 
   if (edited.choices.length > 0) refuseEdit(CHOICES_FORBIDDEN);
   if (edited.answer === null) refuseEdit(ANSWER_REQUIRED);
-  if (!validRichText(edited.answer)) refuseEdit(RICH_TEXT_INVALID);
-  return edited;
+  const answer = normalizedRichText(edited.answer) ?? refuseEdit(RICH_TEXT_INVALID);
+  return { ...edited, prompt, answer, choices: [] };
 }

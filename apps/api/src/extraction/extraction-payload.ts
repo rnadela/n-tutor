@@ -6,7 +6,8 @@ import {
   QuestionFormat,
   UninterpretableKind,
 } from './extraction-schema.js';
-import { type RichText, isRichText } from './rich-text.js';
+import { RichText as RichTextSchema, type RichText, parseRichText } from './rich-text.js';
+import { FIGURE_SVG_TOO_LARGE, MAX_FIGURE_SVG_BYTES, figureSvgByteLength } from './svg-figure.js';
 
 /**
  * The deterministic post-hoc pass (AD-30): a schema-valid payload is not a
@@ -78,6 +79,17 @@ export const MAX_REGIONS = 200;
 export const MAX_CHOICES = 26;
 export const MAX_TOPICS = 20;
 export const MAX_SEGMENTS = 200;
+/**
+ * How many figures one field may hold, and how many bytes of drawing in total.
+ *
+ * `MAX_FIGURE_SVG_BYTES` bounds one figure; on its own it bounds nothing that
+ * matters, because `MAX_SEGMENTS` figures of 16 KB is over three megabytes in a
+ * single question prompt. A printed question needs a figure or two — a diagram
+ * and perhaps a number line — so the count is where the absurd starts, and the
+ * byte budget is the backstop for many small ones.
+ */
+export const MAX_FIGURES = 4;
+export const MAX_FIGURE_BYTES = 32 * 1024;
 export const MAX_TEXT_LENGTH = 5_000;
 export const MAX_LABEL_LENGTH = 200;
 
@@ -227,12 +239,86 @@ export function validateExtractionPayload(
 
 // --- Internals -----------------------------------------------------------
 
-/** The two ceilings a rich-text field has, neither expressible on the wire. */
+/**
+ * The one way a rich-text field becomes a field this document stores.
+ *
+ * Not a guard. `parseRichText` is a normalizer — it rewrites every figure's SVG
+ * through the sanitizer — so the value that goes into the normalized document
+ * has to be the one it *returns*. A call site that checked and then stored its
+ * own copy would persist unsanitized model-authored markup, which is precisely
+ * the shape this story exists to remove.
+ *
+ * The ceilings are judged on the field as it arrived, before sanitizing, so an
+ * oversize figure is `PAYLOAD_TOO_LARGE` — the honest reason — rather than the
+ * `RICH_TEXT_INVALID` the sanitizer's own byte cap would otherwise report.
+ * Sanitizing can only grow a figure's bytes (escaping), never shrink them, so
+ * the per-figure cap re-checked below on the sanitized form also re-covers
+ * the field's aggregate `MAX_FIGURE_BYTES` budget on the sanitized total —
+ * the raw-byte sum above is not the last word on it.
+ */
+function richTextForStorage(value: unknown): RichText {
+  const shaped = RichTextSchema.safeParse(value);
+  if (!shaped.success) throw new ExtractionPayloadInvalid(RICH_TEXT_INVALID);
+  requireBoundedRichText(shaped.data);
+  let normalized: RichText;
+  try {
+    normalized = parseRichText(shaped.data);
+  } catch (cause) {
+    // Every refusal `parseRichText` makes is the same post-hoc content fault
+    // (AD-30): an empty field, a zero denominator, a blank text alternative, a
+    // figure outside the sanitizer's grammar. One rejection reason and no new
+    // failure kind, so a figure fault routes exactly like every other one —
+    // except the one case the raw-byte check above cannot see: a figure under
+    // the raw cap whose canonical (escaped) form grows past it. That is still
+    // an oversize figure, so it is reported the same way an oversize figure
+    // caught above would be, not as a generic content fault.
+    if (cause instanceof Error && cause.message === FIGURE_SVG_TOO_LARGE) {
+      throw new ExtractionPayloadInvalid(PAYLOAD_TOO_LARGE);
+    }
+    throw new ExtractionPayloadInvalid(RICH_TEXT_INVALID);
+  }
+  requireBoundedFigureTotal(normalized);
+  return normalized;
+}
+
+/**
+ * The raw-byte sum in `requireBoundedRichText` cannot see sanitization's own
+ * escaping growth, and no single figure's cap catches a total that only goes
+ * over `MAX_FIGURE_BYTES` once every figure in the field has been escaped.
+ * Re-summing the sanitized form is what actually enforces that aggregate.
+ */
+function requireBoundedFigureTotal(rich: RichText): void {
+  let figureBytes = 0;
+  for (const segment of rich) {
+    if (segment.kind !== 'figure') continue;
+    figureBytes += figureSvgByteLength(segment.svg);
+    if (figureBytes > MAX_FIGURE_BYTES) throw new ExtractionPayloadInvalid(PAYLOAD_TOO_LARGE);
+  }
+}
+
+/** The ceilings a rich-text field has, none of them expressible on the wire. */
 function requireBoundedRichText(rich: RichText): void {
   if (rich.length > MAX_SEGMENTS) throw new ExtractionPayloadInvalid(PAYLOAD_TOO_LARGE);
+  let figures = 0;
+  let figureBytes = 0;
   for (const segment of rich) {
     if (segment.kind === 'text' && segment.value.length > MAX_TEXT_LENGTH) {
       throw new ExtractionPayloadInvalid(PAYLOAD_TOO_LARGE);
+    }
+    // A figure costs two things: the sentence it is read out as, bounded like
+    // any other text, and the markup it is drawn from, bounded in bytes beside
+    // `MAX_PAGE_BYTES` because one glyph can be four of them.
+    if (segment.kind === 'figure') {
+      figures += 1;
+      figureBytes += figureSvgByteLength(segment.svg);
+      if (
+        segment.alt.length > MAX_TEXT_LENGTH ||
+        figureSvgByteLength(segment.svg) > MAX_FIGURE_SVG_BYTES ||
+        figures > MAX_FIGURES ||
+        figureBytes > MAX_FIGURE_BYTES
+      ) {
+        throw new ExtractionPayloadInvalid(PAYLOAD_TOO_LARGE);
+      }
     }
   }
 }
@@ -257,12 +343,10 @@ function normalizeContexts(
     if (context.endPageOrdinal < context.startPageOrdinal) {
       throw new ExtractionPayloadInvalid(CONTEXT_RANGE_INVALID);
     }
-    if (!isRichText(context.body)) throw new ExtractionPayloadInvalid(RICH_TEXT_INVALID);
-    requireBoundedRichText(context.body);
     return {
       ordinal: index + 1,
       kind: context.kind,
-      body: context.body,
+      body: richTextForStorage(context.body),
       startPageOrdinal: context.startPageOrdinal,
       endPageOrdinal: context.endPageOrdinal,
     };
@@ -331,13 +415,8 @@ function normalizeQuestion(
     throw new ExtractionPayloadInvalid(CHOICES_FORBIDDEN);
   }
 
-  if (!isRichText(question.prompt)) throw new ExtractionPayloadInvalid(RICH_TEXT_INVALID);
-  requireBoundedRichText(question.prompt);
-  const choices = question.choices.map((choice) => {
-    if (!isRichText(choice)) throw new ExtractionPayloadInvalid(RICH_TEXT_INVALID);
-    requireBoundedRichText(choice);
-    return choice;
-  });
+  const prompt = richTextForStorage(question.prompt);
+  const choices = question.choices.map((choice) => richTextForStorage(choice));
 
   let contextOrdinal: number | null = null;
   if (question.contextId !== null) {
@@ -357,7 +436,7 @@ function normalizeQuestion(
     ordinal: index + 1,
     pageOrdinal: question.pageOrdinal,
     format: question.format,
-    prompt: question.prompt,
+    prompt,
     choices,
     topics: topics.map((topic) => ({ label: topic.label.trim(), confidence: topic.confidence })),
     confidence: question.confidence,

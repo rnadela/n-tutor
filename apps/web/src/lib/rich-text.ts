@@ -19,13 +19,16 @@ import type { RichTextSegment } from './parent-api';
  *
  * A mixed number renders with a space between the whole part and the fraction,
  * which is how it is written on paper; a bare fraction renders as
- * `numerator/denominator`. Both match the API's `plainTextOf` exactly, which is
- * what makes an untouched save a no-op on the stored segments.
+ * `numerator/denominator`. A figure renders as `[Figure: <alt>]`. All three
+ * match the API's `plainTextOf` exactly, which is what makes an untouched save
+ * a no-op on the stored segments — and the figure one matters most, because the
+ * server's inverse cannot read a figure back out of that text yet (Story 4.8).
  */
 export function plainTextOf(segments: readonly RichTextSegment[]): string {
   return segments
     .map((segment) => {
       if (segment.kind === 'text') return segment.value;
+      if (segment.kind === 'figure') return `[Figure: ${segment.alt}]`;
       const fraction = `${segment.numerator}/${segment.denominator}`;
       return segment.whole === null ? fraction : `${segment.whole} ${fraction}`;
     })
