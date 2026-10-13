@@ -9,6 +9,7 @@ import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
 import { BookOpen, GraduationCap, Lock } from 'lucide-react';
+import { ColorModeSwitch } from '@/components/ColorModeSwitch';
 import { InstallBanner } from '@/components/InstallBanner';
 import { studentCopy } from '@/copy/student';
 import { PracticeTestList } from './_components/PracticeTestList';
@@ -320,21 +321,34 @@ export default function StudentModePage() {
           {/* A client-side link on purpose: leaving Student Mode means
                 reaching the PIN gate, never anything past it. */}
           <Divider sx={{ mt: `${comfortableDensity.gap}px` }} />
-          <Button
-            startIcon={<Lock size={18} aria-hidden="true" />}
-            color="inherit"
-            component={NextLink}
-            href="/parent/pin"
-            variant="text"
-            // Crossing into the parent surface is the other mode-gate crossing AD-26
-            // clears the client-held answers on. Done on the way out rather than on
-            // the way in, because the parent side has no profile to key a sweep by —
-            // and `clearAll`, for the same reason: past this gate nobody is a child.
-            onClick={() => clearAll(attemptStorage())}
-            sx={{ minHeight: comfortableDensity.tapTarget, justifySelf: 'start' }}
+          {/* Student Mode's one placement for the light/dark switch, beside the
+              way out rather than up in a header this surface does not have.
+              The Attempt deliberately carries neither. */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: `${comfortableDensity.gap}px`,
+              justifySelf: 'start',
+            }}
           >
-            {studentCopy.parent}
-          </Button>
+            <Button
+              startIcon={<Lock size={18} aria-hidden="true" />}
+              color="inherit"
+              component={NextLink}
+              href="/parent/pin"
+              variant="text"
+              // Crossing into the parent surface is the other mode-gate crossing AD-26
+              // clears the client-held answers on. Done on the way out rather than on
+              // the way in, because the parent side has no profile to key a sweep by —
+              // and `clearAll`, for the same reason: past this gate nobody is a child.
+              onClick={() => clearAll(attemptStorage())}
+              sx={{ minHeight: comfortableDensity.tapTarget }}
+            >
+              {studentCopy.parent}
+            </Button>
+            <ColorModeSwitch />
+          </Box>
         </Box>
       )}
     </Box>

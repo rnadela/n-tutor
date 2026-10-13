@@ -2829,3 +2829,43 @@ source_spec: `spec-2-3-default-subject-seed.md`
 severity: low
 reason: `e2e/prepare.mts` runs the seed, then `e2e/global-setup.ts` TRUNCATEs `subject_grade_level`, `subject` and `grade_level` so every E2E run starts from an empty taxonomy its own fixtures build. The seeded defaults are therefore pinned at the integration tier (`runSeed` and `seedDefaultSubjects` specs) and never through the Admin screen. Changing the truncation would destabilise every taxonomy fixture, so it is a separate decision.
 status: open
+
+### DW-355: Student home's switch sits inside the loaded-session branch, so a device whose three reads are failing has no way to change mode on the one Student Mode screen that carries the control.
+origin: spec-deferred 529e37cd6491
+location: apps/web/src/app/student/page.tsx
+source_spec: `spec-1-10-color-mode-switch.md`
+severity: low
+reason: `student/page.tsx` renders the switch in the block after the `<Divider>`, alongside the Parent View link; the loading and error branches render an alert and neither control. Arguably correct — UX-DR45 states the placement relative to the Parent View link, which is also absent there — but nothing decides whether a student looking at an error should still be able to pick a theme.
+status: open
+
+### DW-356: `ColorModeMeta`'s re-sync after a client-side navigation is pinned only by a source-text spec, because no browser assertion can distinguish it today.
+origin: spec-deferred 219fe6021289
+location: apps/web/src/theme/ColorModeMeta.spec.ts
+source_spec: `spec-1-10-color-mode-switch.md`
+severity: low
+reason: A client-side nav re-emits the root `viewport` metadata, which restores the device-scoped pair — and because `brandInk.light` and `brandInk.dark` are the same value, that pair is byte-identical to the chosen one. `ColorModeMeta.spec.ts` therefore asserts the dependency list and the call, not the effect. The e2e case becomes a real one with no edit on the day the two token values diverge.
+status: open
+
+### DW-357: A corrupt or foreign `mui-mode` value in storage leaves the switch as a permanent placeholder with no in-app way back.
+origin: spec-deferred 380cf8a3f695
+location: apps/web/src/lib/color-mode.ts
+source_spec: `spec-1-10-color-mode-switch.md`
+severity: low
+reason: `effectiveScheme` returns `null` for any `mode` outside `light | dark | system`, which is the right answer for the unresolved case and the wrong shape for a tampered one: the control disappears instead of falling back to the device preference. Needs someone to have written the value by hand on the same origin, so it is not reachable through the app.
+status: open
+
+### DW-358: The `colorToken` tokens.ts parser is now duplicated verbatim in two e2e specs instead of living in `e2e/fixtures.ts`.
+origin: spec-deferred bd1cf679759c
+location: e2e/tests/color-mode.spec.ts
+source_spec: `spec-1-10-color-mode-switch.md`
+severity: low
+reason: `color-mode.spec.ts` and `pwa-installability.spec.ts` carry the same regex, comment and signature. A reformat of `brandInk` across lines breaks both, and the fixtures module is where every other shared e2e helper lives.
+status: open
+
+### DW-359: The positional half of UX-DR45 is asserted for one of four placements, and the switch-plus-action header cluster is pasted into three files.
+origin: spec-deferred c97e52a07de0
+location: apps/web/src/app/admin/_components/AdminChrome.tsx
+source_spec: `spec-1-10-color-mode-switch.md`
+severity: low
+reason: Parent View's "before the exit" is asserted geometrically; Admin's "before Sign out", the auth header's "top-right" and Student home's "beside the Parent View link" are asserted only by presence. The same `display: flex` / `alignItems: center` / `gap` wrapper is repeated in `AdminChrome.tsx`, `ParentSidebarChrome.tsx` and `student/page.tsx`, each restating the ordering rule in prose rather than sharing it.
+status: open

@@ -47,6 +47,13 @@ export const metadata: Metadata = {
  *
  * The manifest carries the same light value — a manifest has room for one
  * colour and is read before the device's preference is known.
+ *
+ * This pair is the *device's* answer, and it is only the first answer. It is
+ * server-evaluated and not reactive, so once a family has chosen a mode in-app
+ * `ColorModeMeta` — mounted inside `ThemeRegistry` — rewrites both of these
+ * tags' `content` to the chosen scheme's ink. Both, rather than appending a
+ * third media-less tag: a browser applies the first `theme-color` whose `media`
+ * matches, and these two are emitted at the top of the head.
  */
 export const viewport: Viewport = {
   themeColor: [

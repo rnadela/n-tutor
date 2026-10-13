@@ -63,6 +63,27 @@ export const commonCopy = {
     /** The way out, on every variant. */
     dismiss: 'Dismiss',
   },
+  /**
+   * The light/dark switch's every word, and the **one place the wording is
+   * decided** (AD-32: no user-facing literal inside a module that renders).
+   *
+   * Each label describes **the next press**, not the state showing: an
+   * icon-only control's accessible name is the only thing telling somebody what
+   * will happen, and "Dark mode" could as easily mean "dark mode is on". The
+   * same string is the accessible name and the tooltip, so the two cannot
+   * drift.
+   *
+   * Neutral enough for all four placements: a parent's console, an operator's,
+   * a sign-in form and a child's home screen all get this sentence, because the
+   * control does the identical thing on each and a per-surface rewording would
+   * be four vocabularies for one button.
+   */
+  colorMode: {
+    /** Shown while light is in effect — pressing it goes dark. */
+    toDark: 'Switch to dark mode',
+    /** Shown while dark is in effect — pressing it goes light. */
+    toLight: 'Switch to light mode',
+  },
   destructive: {
     /** Names exactly what will be destroyed — never "this item" (UX-DR27). */
     title: (subject: string) => `Delete ${subject}?`,

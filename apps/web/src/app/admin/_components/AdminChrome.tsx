@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import NextLink from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { ColorModeSwitch } from '@/components/ColorModeSwitch';
 import { adminCopy } from '@/copy/admin';
 import { clearToken } from '@/lib/admin-api';
 import { density } from '@/theme/tokens';
@@ -398,18 +399,24 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
               {pageTitle(pathname)}
             </Typography>
           </Box>
-          <Button
-            type="button"
-            variant="text"
-            color="inherit"
-            startIcon={<LogOut size={18} aria-hidden="true" />}
-            onClick={() => {
-              clearToken();
-              router.replace('/admin/login');
-            }}
-          >
-            {adminCopy.nav.signOut}
-          </Button>
+          {/* The same corner as Parent View's, in the same order: the
+              light/dark switch, then the consequential control (UX-DR45). An
+              operator gets the identical button a family does. */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}>
+            <ColorModeSwitch />
+            <Button
+              type="button"
+              variant="text"
+              color="inherit"
+              startIcon={<LogOut size={18} aria-hidden="true" />}
+              onClick={() => {
+                clearToken();
+                router.replace('/admin/login');
+              }}
+            >
+              {adminCopy.nav.signOut}
+            </Button>
+          </Box>
         </Box>
         <Box
           sx={{

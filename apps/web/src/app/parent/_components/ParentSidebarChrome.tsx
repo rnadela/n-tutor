@@ -30,8 +30,10 @@ import {
 import NextLink from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BackToStudentMode } from './BackToStudentMode';
+import { ColorModeSwitch } from '@/components/ColorModeSwitch';
 import { InstallBanner } from '@/components/InstallBanner';
 import { parentCopy } from '@/copy/parent';
+import { colorModeSwitchShown } from '@/lib/color-mode';
 import { installBannerSurface } from '@/lib/install-banner';
 import { density } from '@/theme/tokens';
 
@@ -556,9 +558,17 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
               </Box>
             </Typography>
           </Box>
-          {/* The toggle out of Parent View, at the header's top-right corner
-              on every screen — never inside the nav list it sits above. */}
-          <BackToStudentMode />
+          {/* The header's top-right cluster: the light/dark switch, then the
+              toggle out of Parent View — never inside the nav list it sits
+              above. The switch comes first because the exit is the
+              consequential one, and a consequential control belongs at the
+              end (UX-DR45). The capture screen inherits this very header, so
+              the switch is gated by route rather than left to leak over a
+              live viewfinder. */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}>
+            {colorModeSwitchShown(pathname) ? <ColorModeSwitch /> : null}
+            <BackToStudentMode />
+          </Box>
         </Box>
         <Box
           sx={{
