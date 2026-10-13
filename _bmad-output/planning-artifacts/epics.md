@@ -106,6 +106,7 @@ FR-33: A parent can delete a Source Test's Page Images ahead of expiry, delete a
 FR-31: The system assigns every Parent Account an Account Tier (Free/Plus/Family/Internal, Admin-assigned, Free by default, no self-serve upgrade) and enforces its Student Profile limit and its Upload/Generation/Explanation Allowances per the §5.3 tier table. The three counters are tracked separately and enforced independently; each allowance is consumed only on successful production of the artifact, never on request or failed attempt; an FR-39 regeneration never consumes an Explanation Allowance unit at any tier. All three reset atomically on the calendar-month boundary in the Parent Account's own stored timezone. Reaching an allowance hard-blocks the operation with a message naming the tier, usage, and reset date; AI grading is never blocked by any allowance; Explanation generation is capped per the tier table while reading an already-generated Explanation is never capped. A parent can see all three counters (usage, limit, reset date) on the Allowances surface without hitting the cap; the Explanation counter additionally appears on the Analytics dashboard.
 
 FR-41: The web app is installable to a device's home screen with its own name, icon, and standalone window on browsers that support installation. When the app is running in a browser tab (not installed) on a browser that supports installing it, a dismissible banner invites the person to install it — with a one-tap install action where the browser provides one, or brief add-to-home-screen instructions where it does not (iOS/iPadOS Safari). Dismissing hides the banner for the rest of that browser session. In Student Mode the banner appears on the Home screen only; in Parent View it appears on every screen except the camera capture view. It never appears once the app is running installed, and never on a browser that cannot install the app. Installing does not change any capability, permission, or offline behavior: FR-36 remains the only offline behavior.
+FR-42: Every surface — Student Mode, Parent View, Admin, and the sign-in pages — shows one control that switches the app between light and dark mode. Until it is used on a device, the app follows that device's light/dark preference. Once used, the chosen mode applies on that device to every surface and every later visit, regardless of the device preference, and is restored before the first paint. The choice is stored on the device only, is not part of the Parent Account, and survives sign-out and mode switching. The browser's theme color follows the mode in effect. The switch changes appearance only.
 
 ### NonFunctional Requirements
 
@@ -248,6 +249,7 @@ UX-DR42: Implement the Install Banner: a single, compact, dismissible banner at 
 UX-DR43: Implement table row actions as one shared pattern: each row action is an icon-only button, and only a self-evident icon (Rename = pencil, Delete = trash, expand/collapse = chevron) may stand alone. Any other action goes in a per-row action menu (⋮) whose items show icon and label together. A row shows at most 2 icons, and the ⋮ counts as one. When a row has more than 2 actions, all of them go in the menu and the ⋮ is the only icon. Every icon button and every ⋮ trigger has an accessible name that includes the row's object ("Rename Grade 3", "Actions for Grade 3"), a tooltip showing the action name on hover and focus, and the surface's tap-target floor. Destructive menu items are set apart by a divider and the error color.
 
 UX-DR44: Implement data tables as cards below desktop: below the `lg` breakpoint (1200px) every data table renders as a list of cards, and only at `lg` and above as a table. The switch is CSS-only (no viewport hook), so there is no layout swap after first paint, and the hidden layout is out of the accessibility tree. Each card is a flat, divider-bordered surface at the surface's card padding: the row's identifying value as the card title, the row actions (UX-DR43) at the card's top-right, and every other column as a labeled field (label in caption, value in body, tabular figures for numbers). Cards stack in one column on phones and two columns from `sm` (600px), except ranked lists, which stay one column so the rank reads top to bottom. The card list is a real list, each card named by its title. Nothing a table shows is dropped from its card.
+UX-DR45: Implement the color mode switch as one shared control: an icon-only button showing a sun or moon icon, placed in each surface's header at the top-right (Parent View before the exit control, Admin before Sign out, the sign-in pages top-right) and on the Student home beside the Parent View link. Its accessible name states what pressing it does ("Switch to dark mode" / "Switch to light mode"), a tooltip shows the same text on hover and focus, and it meets the surface's tap-target floor. Pressing it applies the other mode at once, with no reload and no animation beyond the motion policy (UX-DR37). It is not shown inside the camera capture view or inside an in-progress Attempt.
 
 ### FR Coverage Map
 
@@ -296,12 +298,13 @@ FR-32: Epic 8 - Page Image 90-day expiry
 FR-33: Epic 8 - Parent-initiated deletion (image/profile/account)
 FR-31: Epic 9 - Account Tier + three-allowance enforcement
 FR-41: Epic 10 - Installable app (PWA) + install banner
+FR-42: Epic 1 - Light / dark mode switch (per device)
 
 ## Epic List
 
 ### Epic 1: Parent Accounts, PINs & Student Profiles
 Parent can sign up, sign in, secure Parent View behind a PIN, create and manage Student Profiles, and the device can switch safely between Student Mode and Parent View, including idle expiry and uncommitted-work recovery.
-**FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-34, FR-35
+**FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-34, FR-35, FR-42
 
 ### Epic 2: Admin Content Governance
 Admin can configure the Subject/Grade Level taxonomy and assign Account Tiers, providing the reference data every later epic depends on.
@@ -343,9 +346,9 @@ A family can install n-tutor to the home screen of their tablet or phone and ope
 
 Parent can sign up, sign in, secure Parent View behind a PIN, create and manage Student Profiles, and the device can switch safely between Student Mode and Parent View, including idle expiry and uncommitted-work recovery.
 
-**FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-34, FR-35
+**FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-34, FR-35, FR-42
 **Relevant NFRs:** NFR7 (hashed creds/TLS), NFR8 (server-side authz), NFR9 (Parent View server-enforced time bound)
-**Relevant UX-DRs:** UX-DR1, UX-DR2, UX-DR3, UX-DR5, UX-DR6, UX-DR7, UX-DR9, UX-DR10, UX-DR11, UX-DR12, UX-DR13, UX-DR23, UX-DR26, UX-DR27, UX-DR28, UX-DR30, UX-DR31, UX-DR33, UX-DR36, UX-DR37 (design system foundation, Story 1.7), UX-DR43 (table row actions, Story 1.8), UX-DR44 (cards below desktop, Story 1.9)
+**Relevant UX-DRs:** UX-DR1, UX-DR2, UX-DR3, UX-DR5, UX-DR6, UX-DR7, UX-DR9, UX-DR10, UX-DR11, UX-DR12, UX-DR13, UX-DR23, UX-DR26, UX-DR27, UX-DR28, UX-DR30, UX-DR31, UX-DR33, UX-DR36, UX-DR37 (design system foundation, Story 1.7), UX-DR43 (table row actions, Story 1.8), UX-DR44 (cards below desktop, Story 1.9), UX-DR45 (color mode switch, Story 1.10)
 
 ### Story 1.1: Parent Account Sign-Up & Sign-In
 
@@ -591,6 +594,44 @@ So that every value is readable without columns crushing together.
 
 **Given** the change
 **Then** unit specs cover the card layout; a Playwright E2E checks each affected screen at 390px (cards, no horizontal scroll) and 1280px (table); `mockups/key-analytics.html` phone and tablet frames are updated to cards; and a visual pass in light and dark mode shows no clipped or overlapping field at 360px, 768px, and 1180px
+
+### Story 1.10: Light / Dark Mode Switch
+
+As a parent, student, or operator,
+I want to switch the app between light and dark mode,
+So that I can use the theme that suits the room without changing my device's settings.
+
+**Acceptance Criteria:**
+
+**Given** a device on which the switch has never been used
+**When** any surface loads
+**Then** the app shows the mode matching the device's light/dark preference, exactly as today
+
+**Given** the shared color mode switch (UX-DR45)
+**When** it is pressed
+**Then** the app changes to the other mode at once, without a reload
+**And** the button's icon, accessible name, and tooltip change to describe the next press ("Switch to light mode" while dark is showing, and the reverse)
+
+**Given** a mode was chosen with the switch
+**When** the page reloads, the person opens another surface (Student Mode ↔ Parent View, Admin, sign-in), signs out, or returns later on the same device
+**Then** the chosen mode is in effect from the first paint, with no flash of the other mode
+**And** a later change to the device's light/dark preference does not override it
+
+**Given** each surface
+**Then** the switch appears in the Parent View header top-right before the exit control, in the Admin header before Sign out, on the sign-in pages top-right, and on the Student home beside the Parent View link
+**And** it does not appear inside the camera capture view or inside an in-progress Attempt
+
+**Given** a chosen mode
+**Then** the document's `theme-color` matches that mode's `brandInk` token, so the browser and installed-app title bar match the page
+
+**Given** the nested surface theme providers (Parent, Admin, Student, Auth) and `InitColorSchemeScript`
+**Then** all of them read and write one shared stored mode, so a choice made on one surface applies on every other
+
+**Given** the switch's labels
+**Then** they live in the `copy/` modules (UX-DR31), and the switch is a real button reachable by keyboard and meeting the surface's tap-target floor (UX-DR30, UX-DR10)
+
+**Given** the change
+**Then** a unit spec covers the toggle, the label change, and persistence; a Playwright E2E covers: light device preference → switch to dark → reload (dark) → another surface (dark) → device preference emulated dark while light is chosen (stays light); existing contrast specs pass unchanged
 
 ## Epic 2: Admin Content Governance
 

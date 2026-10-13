@@ -153,6 +153,7 @@ Every FR in this document and the §4 feature it belongs to. FR numbers are stab
 | FR-33 | Parent-initiated deletion | §4.9 |
 | FR-31 | Account Tier enforcement | §4.10 Account Tiers and Allowance Enforcement |
 | FR-41 | Installable app and install nudge | §4.11 Installable App |
+| FR-42 | Light / dark mode switch | §4.12 Color Mode |
 
 ## 4. Features
 
@@ -880,6 +881,16 @@ The web app is installable to a device's home screen with its own name, icon, an
 - Added 2026-10-11 via Sprint Change Proposal (`sprint-change-proposal-2026-10-11.md`). Installed name is `n-tutor`.
 - On iOS/iPadOS the installed app has storage separate from Safari: the family signs in once more inside it, and an Attempt in progress in Safari does not carry over. Keeping the banner off every Student Mode screen but Home prevents installing mid-Attempt.
 
+### 4.12 Color Mode
+
+#### FR-42: Light / dark mode switch
+
+Every surface — Student Mode, Parent View, Admin, and the sign-in pages — shows one control that switches the app between light and dark mode. Until it is used on a device, the app follows that device's light/dark preference. Once used, the chosen mode applies on that device to every surface and every later visit, regardless of the device preference, and is restored before the first paint (no flash of the other mode). The choice is stored on the device only: it is not part of the Parent Account, does not follow a person to another device, and is not cleared by sign-out or by switching between Student Mode and Parent View. The browser's theme color follows the mode in effect. The switch changes appearance only, never capability or content.
+
+**Notes:**
+- Added 2026-10-13 via Sprint Change Proposal (`sprint-change-proposal-2026-10-13-color-mode-switch.md`).
+- Two options only (light, dark). There is deliberately no "follow device" option once a choice has been made.
+
 ## 5. Constraints and Guardrails
 
 ### 5.1 Safety
@@ -930,7 +941,7 @@ Mobile-first responsive web application. Single codebase, no app store, camera a
 
 **Dark mode ships in v0**, on both Student Mode and Parent View. Every design token has a dark counterpart, and every contrast pair required by §10.1 is verified in both modes rather than in light only. This is scope, not polish: the study session this product exists for happens in the evening, often on a tablet in a dim room, and a light-only app is the wrong tool at the hour it is most used.
 
-Dark mode carries **no functional requirement of its own** — it adds no capability, state, user-visible choice, or behavior that differs between the two modes — so it is enforced as a §10.1 accessibility obligation and listed in §9.1 as scope that must be planned for, rather than as an FR.
+The mode follows the device's light/dark preference until the person chooses one in the app; that choice is FR-42. Beyond that choice, dark mode adds no capability, state, or behavior that differs between the two modes, so its visual obligations (token completeness, contrast in both modes) are enforced through §10.1 and listed in §9.1.
 
 ### 6.2 Inherited technical constraint
 
@@ -987,7 +998,7 @@ One line per capability, each naming the requirements that define it. This is an
 - Parent Account with email/password auth, one Parent PIN, and multiple Student Profiles — FR-1, FR-2, FR-3.
 - Student Mode / Parent View switching, with a silent Parent View idle timeout and full restoration of uncommitted parent work — FR-4, FR-34, FR-35.
 - Account Tiers with three separate allowances and a Student Profile limit, Admin-assigned, reset monthly in the account's own timezone, hard-blocking at cap, with a parent-facing Allowances surface — FR-31, FR-30a, §5.3.
-- **Dark mode** across Student Mode and Parent View, with contrast verified in both — §6.1, §10.1. Carried as an accessibility obligation rather than an FR.
+- **Dark mode** across every surface, with contrast verified in both modes and an in-app light/dark switch remembered per device — FR-42, §6.1, §10.1.
 - Multi-page photo upload from camera or photo library, with library selection as a first-class path when the camera is unavailable, plus reorder, retake, delete, and a pre-generation legibility check — FR-5, FR-6, FR-8.
 - Subject and Grade Level classification of a Source Test from the Admin taxonomy — FR-7, FR-30.
 - Extraction of the Source Test, including cross-page context such as a reading passage shared by later questions, persisted for reuse, with a thin-Extraction warning before generation — FR-9, FR-9a.
