@@ -248,6 +248,17 @@ components:
     unansweredGlyph: 'hollow'
     answeredBackground: '{state.tintSelected}'
     answeredBackgroundDark: '{state.tintSelectedDark}'
+  results-map-cell:
+    role: control
+    radius: '{rounded.control}'
+    minTapTarget: '{spacing.tap-target.student}'   # parent surface: '{spacing.tap-target.parent}'
+    border: '1px solid {colors.divider}'
+    labelType: '{typography.label}'
+    stateGlyph: '{components.grade-state-marker.*.glyph} in {components.grade-state-marker.*.frame}'
+    stateColor: '{components.grade-state-marker.*.color}'
+    currentBorder: '2px solid {colors.primary}'
+    currentBackground: '{state.tintSelected}'
+    currentBackgroundDark: '{state.tintSelectedDark}'
   mastery-row:
     role: control
     height: '{spacing.density.compact.row-height}'
@@ -590,6 +601,8 @@ Visual specs only; behavior lives in `EXPERIENCE.md`. Each entry reads **role �
 **Explanation panel** — paper role, inline beneath its answer-key row. Square, body in `{typography.explanation-body}`. Contains its own loading, error, at-cap, and **suppressed** states, plus the flag affordances. The inline expand and the first three of those states are drawn in [`mockups/key-results.html`](mockups/key-results.html); the suppressed state is not yet drawn in any mock. **Exception — the suppressed state (FR-39) is designed behavior, not a failure:** a flat `{components.explanation-panel.suppressedFill}` region carrying the removal statement in `{components.explanation-panel.suppressedType}` at `{components.explanation-panel.suppressedTextColor}`, with **no `{colors.error}` anywhere**, no error or warning glyph, no retry control, and no grade-state icon frame borrowed from `{components.grade-state-marker}`. It reads like the expired Page Image tile and for the same reason — a person decided this, nothing broke. **Second exception, and the reason the type token differs from the panel's own body face:** the removal statement is product voice, so it is set in the sans dashboard face, while everything else this panel ever holds is generated content in Literata. The face is the reader's cue that the app is speaking, not the explanation.
 
 **Question map cell** — control role, test surface. `{rounded.control}`, minimum 48px under `density.comfortable`, divider border. Answered is a **filled** glyph plus the word; unanswered is a **hollow** glyph plus the word. Exception: never fill alone, never color alone. Drawn in [`mockups/key-take-test.html`](mockups/key-take-test.html) alongside the test-taking surface and the submit-with-gaps confirmation.
+
+**Results map cell** — control role, Results and Attempt detail. Same geometry as the question map cell, but the glyph is the Question's **grade-state glyph inside its grade-state frame** from `{components.grade-state-marker}`, and the accessible name carries the fixed grade label. Current Question: 2px primary border plus tinted ground — never tint alone. Exception: the cell carries no left rule and no visible label (the frame + glyph + accessible label + legend are its carriers at this size); the full four-carrier marker stays on the answer-key row beside it.
 
 **Mastery row** — control role, Analytics. At `lg` and above, a table row: `{spacing.density.compact.row-height}` 40px, divider-bottom, no shadow. Below `lg`, a `{components.table-card}` carrying the same content, one column, in rank order. Topic name in `{typography.table-cell}`; percentage in tabular figures; inline bar with `{colors.divider}` track, `{colors.success}` fill above threshold and `{colors.warning}` fill for a Weak Area; the Weak Area marker is `{components.weak-area-marker}`. The ranked table, the Topic drill-down, the weighted-regenerate cost block, the empty state, and the tablet layout are drawn in [`mockups/key-analytics.html`](mockups/key-analytics.html).
 

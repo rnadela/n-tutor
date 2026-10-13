@@ -78,7 +78,7 @@ development_status:
   4-9-figure-placement: done
   epic-4-retrospective: optional
 
-  epic-5: done
+  epic-5: in-progress
   5-1-student-s-test-list: done
   5-2-answering-a-question: done
   5-3-attempt-resilience-interruption-offline: done
@@ -86,6 +86,7 @@ development_status:
   5-5-grading-engine-four-grade-states: done
   5-6-results-answer-key: done
   5-7-retaking-a-practice-test: done
+  5-8-paged-answer-key: backlog
   epic-5-retrospective: optional
 
   epic-6: done

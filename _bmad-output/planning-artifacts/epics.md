@@ -251,6 +251,7 @@ UX-DR43: Implement table row actions as one shared pattern: each row action is a
 UX-DR44: Implement data tables as cards below desktop: below the `lg` breakpoint (1200px) every data table renders as a list of cards, and only at `lg` and above as a table. The switch is CSS-only (no viewport hook), so there is no layout swap after first paint, and the hidden layout is out of the accessibility tree. Each card is a flat, divider-bordered surface at the surface's card padding: the row's identifying value as the card title, the row actions (UX-DR43) at the card's top-right, and every other column as a labeled field (label in caption, value in body, tabular figures for numbers). Cards stack in one column on phones and two columns from `sm` (600px), except ranked lists, which stay one column so the rank reads top to bottom. The card list is a real list, each card named by its title. Nothing a table shows is dropped from its card.
 UX-DR45: Implement the color mode switch as one shared control: an icon-only button showing a sun or moon icon, placed in each surface's header at the top-right (Parent View before the exit control, Admin before Sign out, the sign-in pages top-right) and on the Student home beside the Parent View link. Its accessible name states what pressing it does ("Switch to dark mode" / "Switch to light mode"), a tooltip shows the same text on hover and focus, and it meets the surface's tap-target floor. Pressing it applies the other mode at once, with no reload and no animation beyond the motion policy (UX-DR37). It is not shown inside the camera capture view or inside an in-progress Attempt.
 UX-DR46: Implement navigation below desktop as one shared bottom navigation bar. Below the `lg` breakpoint (1200px) — phones and tablets in either orientation, in a browser tab or installed — Parent View, Student Mode, and Admin each show a bar fixed to the bottom of the viewport; at `lg` and above they keep the sidebar and show no bar. The switch is CSS-only (no layout swap after first paint). Tabs: Parent View — Home, Upload, Drafts, Attempts, More (More opens the full grouped destination list); Student Mode — Home, Results, Parent View (the PIN gate); Admin — Overview, Taxonomy, Accounts, Flagged, Topics. Every tab shows icon and label together; the current tab is marked by color, weight, and an indicator (never color alone) and carries `aria-current="page"`; the bar is a `nav` landmark with an accessible name; each tab meets the surface's tap-target floor (44px Parent/Admin, 48px Student). The bar sits on `background-paper` with a 1px top divider and no shadow, and pads by the device safe-area insets (`viewport-fit=cover`). Content and snackbars sit above it, never under it. Tab changes are client-side and unanimated. The bar is absent on the PIN gate, the Admin sign-in, the sign-in pages, inside an Attempt and its results, while the camera viewfinder is open, and while a text field has focus on a touch device. Below `lg` the header hamburger is removed; the header keeps the page title, the color mode switch, and the surface's exit control.
+UX-DR47: Present the answer key (student Results and parent Attempt detail) one Question at a time, mirroring Take Test (UX-DR34, UX-DR39): the score header stays above; below it one answer-key row with its explanation and grade controls; Previous/Next as the linear path (also on the Left/Right arrow keys, except while typing in a field or with a modifier held) with a "Question N of M" position; and a results map as the escape hatch — a persistent rail from `md` up and an overlay opened by its own control below `md`. Each results-map cell is a real button showing the ordinal and the Question's grade-state glyph in its frame (UX-DR17 carriers: frame, glyph, fixed label as the accessible name, color never alone), marks the current Question with `aria-current`, and carries a newly-graded mark where the row does. The map uses grade vocabulary only, never Answered/Not answered. The current Question is kept in the URL (`?q=<ordinal>`, replaced not pushed); entry with no or an invalid `q` lands on Question 1. Paging keeps every row's panel state and makes no additional reads. No animation on page turn; focus moves to the Question heading and the position is announced.
 
 ### FR Coverage Map
 
@@ -1170,7 +1171,7 @@ So that the question reads top to bottom instead of the picture sitting beside t
 Student can take a released Practice Test — answering, navigating, surviving interruption and offline gaps — submit it, and see a graded result with an answer key.
 
 **FRs covered:** FR-16, FR-17, FR-18, FR-19, FR-20, FR-36, FR-21, FR-22, FR-23, FR-37
-**Relevant UX-DRs:** UX-DR14 (Practice Test card), UX-DR15 (Question container), UX-DR17 (Grade-state marker), UX-DR19 (Answer-key row), UX-DR20 (Question map), UX-DR24 (Smart fraction field, flagged risk), UX-DR32 (WCAG AA + 4 hard cases), UX-DR34 (Take Test responsive layout), UX-DR39 (linear nav + map escape hatch)
+**Relevant UX-DRs:** UX-DR14 (Practice Test card), UX-DR15 (Question container), UX-DR17 (Grade-state marker), UX-DR19 (Answer-key row), UX-DR20 (Question map), UX-DR24 (Smart fraction field, flagged risk), UX-DR32 (WCAG AA + 4 hard cases), UX-DR34 (Take Test responsive layout), UX-DR39 (linear nav + map escape hatch), UX-DR47 (paged answer key + results map, Story 5.8)
 
 ### Story 5.1: Student's Test List
 
@@ -1306,6 +1307,46 @@ So that I can practice again.
 
 **Given** a single-Attempt Practice Test
 **Then** one score is shown with no first/latest framing
+
+### Story 5.8: Paged Answer Key with Results Map
+
+As a student (and as a parent reviewing an Attempt),
+I want to step through the answer key one Question at a time with a map of every Question's grade,
+So that I can find and review the ones I got wrong without scrolling an endless page.
+
+**Acceptance Criteria:**
+
+**Given** a submitted Attempt's results (student) or Attempt detail (parent)
+**When** it loads
+**Then** the score header is shown, followed by exactly one answer-key row (Question 1 by default) with its grade and explanation controls, a "Question N of M" position, and Previous/Next controls; Previous is disabled on the first Question and Next on the last
+
+**Given** keyboard focus is not in a text field, select or editable region and no modifier key is held
+**When** I press Left or Right arrow
+**Then** it acts as Previous or Next, and does nothing at the matching end; while typing in a dispute or grade-review field, arrow keys move the caret only
+
+**Given** the results map (UX-DR47)
+**Then** it lists every Question in original order as a button showing the ordinal and its grade-state glyph in its frame, with the fixed grade label in its accessible name, the current Question marked with `aria-current`, a legend of the grade states present, and no Answered/Not-answered wording; pressing a cell shows that Question
+
+**Given** a viewport at `md` or above
+**Then** the results map is a persistent rail beside the Question; below `md` it is an overlay opened by its own control and closed on jump, exactly as on Take Test
+
+**Given** the current Question changes
+**Then** the URL's `q` parameter is replaced with its ordinal (no new history entry), focus moves to the Question heading, the position is announced, and nothing animates
+**And** opening the screen with a valid `?q=` shows that Question; a missing or invalid one shows Question 1
+
+**Given** an explanation opened, a dispute started, or a grade review in progress on one Question
+**When** I move to another Question and back
+**Then** that state is still there, and no request was made by the page turn itself
+
+**Given** the parent's Grade disputes and Explanation flags lists
+**When** an entry is opened
+**Then** Attempt detail opens on that entry's Question
+
+**Given** the student's Retake control and the parent's back-to-list link
+**Then** they are visible below the pager on every Question
+
+**Given** the change
+**Then** it meets the Accessibility Floor in light and dark mode (hidden rows are not exposed to assistive technology), its copy lives in `copy/student` and `copy/parent`, Take Test's question map is unchanged, unit specs cover the pager (bounds, `q` parsing, focus, arrow keys and their text-field/modifier exclusions) and the results map (four states, current, accessible names, legend), and Playwright covers both surfaces at 390×844 (overlay) and 1280×800 (rail), including a deep link from Grade disputes
 
 ## Epic 6: Explanations & Grade Disputes
 
