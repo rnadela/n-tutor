@@ -319,3 +319,24 @@ describe('whose work stays on the device', () => {
     }
   });
 });
+
+describe('the way out of Student Mode on Home', () => {
+  it('is hidden below `lg`, where the bottom bar carries the same crossing', () => {
+    // Two ways out side by side would be two controls for one crossing. The
+    // choice is a `display` breakpoint, never a width hook (UX-DR44).
+    expect(CODE).toContain("display: { xs: 'none', lg: 'inline-flex' }");
+    expect(CODE).not.toMatch(/useMediaQuery|matchMedia|window\.inner/u);
+    expect(CODE).not.toContain('@media');
+  });
+
+  it('still clears the client-held answers when it is the control used', () => {
+    expect(CODE).toContain('onClick={() => clearAll(attemptStorage())}');
+  });
+
+  it('leaves the light/dark switch ungated: it is Student Mode’s only placement', () => {
+    const cluster = CODE.slice(CODE.indexOf('<ColorModeSwitch'));
+    expect(cluster).not.toContain('display:');
+    const gates = CODE.match(/display: \{ xs: 'none'/gu) ?? [];
+    expect(gates).toHaveLength(1);
+  });
+});

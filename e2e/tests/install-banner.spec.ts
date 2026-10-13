@@ -222,10 +222,14 @@ test.describe('the install banner on Parent View', () => {
     // And it stays gone across a reload in that tab, even though the stand-in
     // offers again on every load: accepting is a dismissal that lasts the
     // session, on top of the held event being dropped.
+    //
+    // The reload lands on the PIN gate, because a reload destroys the elevation
+    // (AD-18) — and the gate is a Parent View screen, so it carries the banner
+    // when there is one to carry. Waited on by the gate's own heading rather
+    // than `/parent`'s: that one is painted and then redirected away from, so
+    // catching it at all is a race this assertion does not need to run.
     await page.reload();
-    await expect(
-      page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Enter your PIN', level: 1 })).toBeVisible();
     await expect(banner(page)).toHaveCount(0);
   });
 
@@ -243,10 +247,14 @@ test.describe('the install banner on Parent View', () => {
 
     // `sessionStorage` outlives a reload in the same tab, which is the whole
     // point of the dismissal lasting the session rather than the render.
+    //
+    // Waited on by the PIN gate's own heading, for the reason the case above
+    // states: a reload destroys the elevation (AD-18), so `/parent` is painted
+    // and then redirected away from, and catching that paint is a race this
+    // assertion does not need to run. The gate is a Parent View screen, so it
+    // carries the banner when there is one to carry.
     await page.reload();
-    await expect(
-      page.getByRole('heading', { name: 'Parent View', level: 1, exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Enter your PIN', level: 1 })).toBeVisible();
     await expect(banner(page)).toHaveCount(0);
 
     // A new context is a new session, and nothing about the dismissal was kept

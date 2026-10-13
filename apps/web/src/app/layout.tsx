@@ -56,6 +56,13 @@ export const metadata: Metadata = {
  * matches, and these two are emitted at the top of the head.
  */
 export const viewport: Viewport = {
+  /**
+   * Lets the page draw into the display's cutouts, which is the only thing that
+   * makes `env(safe-area-inset-*)` resolve to anything: without it iOS reports
+   * 0 for every inset, and the bottom navigation bar would sit under the home
+   * indicator with nothing padding it clear.
+   */
+  viewportFit: 'cover',
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: colorTokens.brandInk.light },
     { media: '(prefers-color-scheme: dark)', color: colorTokens.brandInk.dark },

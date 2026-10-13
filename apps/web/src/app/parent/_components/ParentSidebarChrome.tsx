@@ -7,7 +7,6 @@ import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import {
   BarChart3,
@@ -18,7 +17,7 @@ import {
   GraduationCap,
   Home,
   KeyRound,
-  Menu,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Scale,
@@ -30,9 +29,12 @@ import {
 import NextLink from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BackToStudentMode } from './BackToStudentMode';
+import { BottomNav, type BottomNavItem } from '@/components/BottomNav';
 import { ColorModeSwitch } from '@/components/ColorModeSwitch';
 import { InstallBanner } from '@/components/InstallBanner';
 import { parentCopy } from '@/copy/parent';
+import { barOffsetCss, bottomNavShown } from '@/lib/bottom-nav';
+import { CaptureOpenProvider, useCaptureOpen } from '@/lib/capture-open';
 import { colorModeSwitchShown } from '@/lib/color-mode';
 import { installBannerSurface } from '@/lib/install-banner';
 import { density } from '@/theme/tokens';
@@ -103,6 +105,108 @@ export const NAV_GROUPS: NavGroup[] = [
 ];
 
 const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
+
+/**
+ * The destination behind an href, or a thrown error naming the href that is no
+ * longer there.
+ *
+ * The bottom bar is a second *view* of `NAV_GROUPS` and never a second list of
+ * destinations, so each tab's icon and href are looked up rather than written
+ * out. A route renamed in the sidebar and forgotten here is caught by
+ * `ParentSidebarChrome.spec.tsx`, which resolves every tab against `NAV_GROUPS`
+ * — the throw below is the backstop behind that, not the first line of defence:
+ * `NAV_GROUPS` is built from `parentCopy` rather than from literal types, so
+ * there is no union for the compiler to check an href against. It fires during
+ * module evaluation, which blanks Parent View rather than failing a build.
+ */
+function navDestination(href: string): NavItem {
+  const found = NAV_ITEMS.find((item) => item.href === href);
+  if (found === undefined) {
+    throw new Error(`No Parent View destination for the bottom-navigation tab ${href}.`);
+  }
+  return found;
+}
+
+/**
+ * The four tabs, plus how each one claims a route.
+ *
+ * Home is `exact` — `/parent` as a prefix would be current on every Parent View
+ * screen there is. The three lists are `prefix`, so reading one draft still
+ * reads as standing in Drafts. Everything else in `NAV_GROUPS` is behind More.
+ */
+export const PARENT_TABS: readonly BottomNavItem[] = (
+  [
+    ['/parent', parentCopy.parentView.bottomNav.home, 'exact'],
+    ['/parent/capture', parentCopy.parentView.bottomNav.upload, 'prefix'],
+    ['/parent/drafts', parentCopy.parentView.bottomNav.drafts, 'prefix'],
+    ['/parent/attempts', parentCopy.parentView.bottomNav.attempts, 'prefix'],
+  ] as const
+).map(([href, label, match]) => ({ href, label, match, icon: navDestination(href).icon }));
+
+/**
+ * Whether the bar is on screen below `lg`: the route carries it *and* no live
+ * viewfinder is up.
+ *
+ * One rule, read by the bar and by the room the content leaves for it — two
+ * opinions would be a camera screen with a bar's worth of dead space under it,
+ * or a list whose last row sat behind a bar that was there after all.
+ */
+function barIsOnScreen(pathname: string, captureOpen: boolean): boolean {
+  return bottomNavShown(pathname) && !captureOpen;
+}
+
+/**
+ * Parent View's bar, mounted inside `CaptureOpenProvider` so it can hear
+ * whether a live viewfinder is on screen — the one visibility input no pathname
+ * carries. A separate component because a provider's own render cannot read it.
+ */
+function ParentBottomNav({ pathname, onMore }: { pathname: string; onMore: () => void }) {
+  const captureOpen = useCaptureOpen();
+  if (!barIsOnScreen(pathname, captureOpen)) return null;
+  return (
+    <BottomNav
+      pathname={pathname}
+      items={PARENT_TABS}
+      ariaLabel={parentCopy.parentView.bottomNav.label}
+      density={density}
+      more={{
+        label: parentCopy.parentView.bottomNav.more,
+        icon: MoreHorizontal,
+        onPress: onMore,
+      }}
+    />
+  );
+}
+
+/**
+ * The screen's own content box, and the room it leaves under its last row.
+ *
+ * Its own component for `ParentBottomNav`'s reason: the clearance follows
+ * whether the bar is *on screen*, which includes the viewfinder's state, and
+ * the shell that provides that state cannot read it in its own render.
+ */
+function ParentContent({ pathname, children }: { pathname: string; children: React.ReactNode }) {
+  const captureOpen = useCaptureOpen();
+  // Room under the last row for the fixed bar, the device's own bottom inset,
+  // and a gutter between the two — only where the bar is actually on screen,
+  // and only below `lg`, where it is.
+  const clearance = barIsOnScreen(pathname, captureOpen)
+    ? { xs: barOffsetCss, lg: `${density.sectionMargin}px` }
+    : `${density.sectionMargin}px`;
+  return (
+    <Box
+      sx={{
+        flexGrow: 1,
+        bgcolor: 'background.default',
+        paddingBlock: `${density.sectionMargin}px`,
+        paddingInline: `${density.cardPadding}px`,
+        paddingBottom: clearance,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
 
 /** The current screen's own name, for the header's left side. Falls back to
  * the app name for a destination the sidebar does not list (there is none
@@ -275,9 +379,6 @@ function NavList({
 export function ParentSidebarChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const theme = useTheme();
-  // Below `md` there is no room for a 240px sidebar beside any usable content
-  // width, so the nav moves into a drawer opened from the header instead.
-  const isNarrow = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -349,12 +450,14 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
     );
   }
 
-  const railCollapsed = collapsed && !isNarrow;
+  // No `isNarrow` term: below `lg` the sidebar is not on screen at all, so
+  // there is no width at which a remembered collapse means nothing.
+  const railCollapsed = collapsed;
   const place = locate(pathname);
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      {isNarrow ? (
+    <CaptureOpenProvider>
+      <Box sx={{ display: 'flex', minHeight: '100vh' }}>
         <Drawer
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
@@ -392,11 +495,17 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             <NavList pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
           </Box>
         </Drawer>
-      ) : (
+        {/*
+          Rendered beside the drawer rather than instead of it, and hidden by a
+          `display` breakpoint. A width hook would draw the narrow layout first
+          on every device and swap after hydration — the reflow UX-DR44 exists
+          to forbid. One hidden subtree buys a stable first paint.
+        */}
         <Box
           component="nav"
           aria-label={parentCopy.parentView.title}
           sx={{
+            display: { xs: 'none', lg: 'flex' },
             width: railCollapsed ? RAIL_WIDTH : SIDEBAR_WIDTH,
             flexShrink: 0,
             // Pinned to the viewport, so the brand, every destination and the rail
@@ -405,7 +514,6 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             top: 0,
             height: '100vh',
             alignSelf: 'flex-start',
-            display: 'flex',
             flexDirection: 'column',
             borderRight: '1px solid',
             borderColor: 'divider',
@@ -483,105 +591,92 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             </IconButton>
           </Tooltip>
         </Box>
-      )}
-      <Box
-        component="main"
-        sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
-      >
         <Box
-          component="header"
-          sx={{
-            // Pinned, so the way out of Parent View at its right-hand end stays
-            // reachable however far down a long screen the parent has read.
-            position: 'sticky',
-            top: 0,
-            zIndex: theme.zIndex.appBar,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: `${density.gap}px`,
-            minHeight: density.tapTarget + density.gap,
-            px: `${density.cardPadding}px`,
-            borderBottom: '1px solid',
-            borderColor: 'divider',
-            bgcolor: 'background.paper',
-          }}
+          component="main"
+          sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px`, minWidth: 0 }}>
-            {isNarrow ? (
-              <IconButton
-                onClick={() => setDrawerOpen(true)}
-                aria-label={parentCopy.parentView.menuToggle}
-                sx={{ width: density.tapTarget, height: density.tapTarget }}
-              >
-                <Menu size={20} aria-hidden="true" />
-              </IconButton>
-            ) : null}
-            <Typography
-              component="p"
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: `${density.gap / 2}px`,
-                minWidth: 0,
-                whiteSpace: 'nowrap',
-              }}
+          <Box
+            component="header"
+            sx={{
+              // Pinned, so the way out of Parent View at its right-hand end stays
+              // reachable however far down a long screen the parent has read.
+              position: 'sticky',
+              top: 0,
+              zIndex: theme.zIndex.appBar,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: `${density.gap}px`,
+              minHeight: density.tapTarget + density.gap,
+              px: `${density.cardPadding}px`,
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              bgcolor: 'background.paper',
+            }}
+          >
+            <Box
+              sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px`, minWidth: 0 }}
             >
-              {place.group !== undefined && (
-                <>
-                  <Box
-                    component="span"
-                    sx={{
-                      color: 'text.secondary',
-                      display: { xs: 'none', sm: 'inline' },
-                    }}
-                  >
-                    {place.group}
-                  </Box>
-                  <Box
-                    component="span"
-                    aria-hidden="true"
-                    sx={{
-                      color: 'text.secondary',
-                      display: { xs: 'none', sm: 'inline-flex' },
-                    }}
-                  >
-                    <ChevronRight size={16} />
-                  </Box>
-                </>
-              )}
-              <Box
-                component="span"
-                sx={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}
+              <Typography
+                component="p"
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: `${density.gap / 2}px`,
+                  minWidth: 0,
+                  whiteSpace: 'nowrap',
+                }}
               >
-                {place.label}
-              </Box>
-            </Typography>
-          </Box>
-          {/* The header's top-right cluster: the light/dark switch, then the
+                {place.group !== undefined && (
+                  <>
+                    <Box
+                      component="span"
+                      sx={{
+                        color: 'text.secondary',
+                        display: { xs: 'none', sm: 'inline' },
+                      }}
+                    >
+                      {place.group}
+                    </Box>
+                    <Box
+                      component="span"
+                      aria-hidden="true"
+                      sx={{
+                        color: 'text.secondary',
+                        display: { xs: 'none', sm: 'inline-flex' },
+                      }}
+                    >
+                      <ChevronRight size={16} />
+                    </Box>
+                  </>
+                )}
+                <Box
+                  component="span"
+                  sx={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {place.label}
+                </Box>
+              </Typography>
+            </Box>
+            {/* The header's top-right cluster: the light/dark switch, then the
               toggle out of Parent View — never inside the nav list it sits
               above. The switch comes first because the exit is the
               consequential one, and a consequential control belongs at the
               end (UX-DR45). The capture screen inherits this very header, so
               the switch is gated by route rather than left to leak over a
               live viewfinder. */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}>
-            {colorModeSwitchShown(pathname) ? <ColorModeSwitch /> : null}
-            <BackToStudentMode />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px` }}>
+              {colorModeSwitchShown(pathname) ? <ColorModeSwitch /> : null}
+              <BackToStudentMode />
+            </Box>
           </Box>
+          <ParentContent pathname={pathname}>
+            {installBanner}
+            {children}
+          </ParentContent>
         </Box>
-        <Box
-          sx={{
-            flexGrow: 1,
-            bgcolor: 'background.default',
-            paddingBlock: `${density.sectionMargin}px`,
-            paddingInline: `${density.cardPadding}px`,
-          }}
-        >
-          {installBanner}
-          {children}
-        </Box>
+        <ParentBottomNav pathname={pathname} onMore={() => setDrawerOpen(true)} />
       </Box>
-    </Box>
+    </CaptureOpenProvider>
   );
 }

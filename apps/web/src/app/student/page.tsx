@@ -343,7 +343,14 @@ export default function StudentModePage() {
               // the way in, because the parent side has no profile to key a sweep by —
               // and `clearAll`, for the same reason: past this gate nobody is a child.
               onClick={() => clearAll(attemptStorage())}
-              sx={{ minHeight: comfortableDensity.tapTarget }}
+              sx={{
+                minHeight: comfortableDensity.tapTarget,
+                // Below `lg` the bottom bar carries this crossing instead, so a
+                // second copy of it here would be two ways out side by side.
+                // The light/dark switch beside it is Student Mode's only
+                // placement for it and stays at every width.
+                display: { xs: 'none', lg: 'inline-flex' },
+              }}
             >
               {studentCopy.parent}
             </Button>

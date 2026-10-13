@@ -212,6 +212,17 @@ export const gradeStateMarker = {
   Ungraded: { frame: 'square', border: 'dotted', glyph: '⋯', rule: 'dotted', color: 'info' },
 } as const satisfies Record<GradeState, GradeStateMarker>;
 
+/**
+ * The bottom navigation bar's own geometry, from DESIGN.md's `bottom-nav`
+ * block (`height: 56px`, `currentCarrier: … a 3px indicator bar`).
+ *
+ * One figure in one place: three shells mount the bar, and the shared snackbar
+ * and every scrollable screen offset themselves by its height. If any of them
+ * held its own copy of 56 they could disagree, and the disagreement would read
+ * as a row of a list sitting half under the navigation.
+ */
+export const bottomNav = { height: 56, indicator: 3 } as const;
+
 /** MUI's 8px base, named. No component writes a raw spacing number (UX-DR9). */
 export const spacing = {
   base: 8,

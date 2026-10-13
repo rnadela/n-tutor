@@ -242,8 +242,30 @@ export const parentCopy = {
      */
     settings: 'Settings and account deletion',
     loading: 'Loading Parent View…',
-    /** The hamburger toggle that opens the nav drawer on a narrow screen. */
-    menuToggle: 'Open Parent View menu',
+    /**
+     * The bottom navigation bar below `lg`, and the short words it carries.
+     *
+     * Short nouns rather than the sidebar's sentences: the sidebar has a 240px
+     * column to say "Pending practice tests" in, a tab has a fifth of a phone.
+     * They are the same destinations all the same — every href and icon is read
+     * from `NAV_GROUPS`, and only these labels are new.
+     */
+    bottomNav: {
+      /**
+       * The landmark's accessible name.
+       *
+       * Deliberately not "Parent View sections": the sidebar's landmark is
+       * named "Parent View", and a name that contained it would make every
+       * by-name reference to the sidebar ambiguous while both are on screen.
+       */
+      label: 'Parent sections',
+      home: 'Home',
+      upload: 'Upload',
+      drafts: 'Drafts',
+      attempts: 'Attempts',
+      /** Everything the four tabs do not name; opens the full grouped list. */
+      more: 'More',
+    },
     /** Section headers grouping the sidebar's destinations by what they're
      * about, not by when they shipped. */
     navGroups: {

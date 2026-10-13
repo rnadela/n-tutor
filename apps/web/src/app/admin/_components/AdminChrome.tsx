@@ -3,18 +3,15 @@
 import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import {
   BookOpen,
   Flag,
   LayoutGrid,
   LogOut,
-  Menu,
   PanelLeftClose,
   PanelLeftOpen,
   ShieldCheck,
@@ -24,9 +21,11 @@ import {
 } from 'lucide-react';
 import NextLink from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { BottomNav, type BottomNavItem } from '@/components/BottomNav';
 import { ColorModeSwitch } from '@/components/ColorModeSwitch';
 import { adminCopy } from '@/copy/admin';
 import { clearToken } from '@/lib/admin-api';
+import { barOffsetCss, bottomNavShown } from '@/lib/bottom-nav';
 import { density } from '@/theme/tokens';
 
 const SIDEBAR_WIDTH = 240;
@@ -53,18 +52,73 @@ export interface NavItem {
  * Every Admin destination, in one list the sidebar and the `/admin` landing both
  * read — so the two can never offer different ways in.
  */
-export const NAV_ITEMS: NavItem[] = [
+export const NAV_ITEMS = [
   { href: '/admin/taxonomy', label: adminCopy.nav.taxonomy, icon: BookOpen },
   { href: '/admin/accounts', label: adminCopy.nav.accounts, icon: Users },
   { href: '/admin/flagged-explanations', label: adminCopy.nav.flaggedExplanations, icon: Flag },
   { href: '/admin/topics', label: adminCopy.nav.topics, icon: Tags },
-];
+] as const satisfies readonly NavItem[];
 
 /** The current screen's own name, for the header's left side. Falls back to
  * the app name for a destination the sidebar does not list. */
 /** The landing, ahead of the destinations it links to. */
-const OVERVIEW_ITEM: NavItem = { href: '/admin', label: adminCopy.nav.overview, icon: LayoutGrid };
-const SIDEBAR_ITEMS: NavItem[] = [OVERVIEW_ITEM, ...NAV_ITEMS];
+const OVERVIEW_ITEM = {
+  href: '/admin',
+  label: adminCopy.nav.overview,
+  icon: LayoutGrid,
+} as const satisfies NavItem;
+export const SIDEBAR_ITEMS = [OVERVIEW_ITEM, ...NAV_ITEMS] as const satisfies readonly NavItem[];
+
+/**
+ * Every href the sidebar names, as a type.
+ *
+ * Derived from `SIDEBAR_ITEMS` rather than written out, so the label table
+ * below is checked against the destinations that actually exist.
+ */
+type AdminHref = (typeof SIDEBAR_ITEMS)[number]['href'];
+
+/**
+ * Each destination's short tab word, keyed by the href the sidebar already
+ * names it with.
+ *
+ * The bar is a second *view* of `SIDEBAR_ITEMS` and not a second list: order,
+ * hrefs and icons all come from there, and only the word is new — "Subjects"
+ * where a 240px column has room for "Subjects & Grade Levels".
+ *
+ * Keyed by `AdminHref`, so a destination added to or renamed in the sidebar
+ * with no word here fails `typecheck` — a missing key and, for the old href,
+ * an excess one. The throw below stays as the backstop behind that, for the
+ * case the compiler cannot see: it fires during module evaluation, so it blanks
+ * the console rather than failing a build.
+ */
+const ADMIN_TAB_LABELS = {
+  '/admin': adminCopy.bottomNav.overview,
+  '/admin/taxonomy': adminCopy.bottomNav.taxonomy,
+  '/admin/accounts': adminCopy.bottomNav.accounts,
+  '/admin/flagged-explanations': adminCopy.bottomNav.flaggedExplanations,
+  '/admin/topics': adminCopy.bottomNav.topics,
+} as const satisfies Record<AdminHref, string>;
+
+/**
+ * The five tabs: every `SIDEBAR_ITEMS` entry, in its order, and no overflow
+ * action — five destinations fit across a phone, so a "More" would hide nothing
+ * and the drawer behind it would be dead code.
+ *
+ * `/admin` is `exact`; as a prefix the Overview tab would be current on every
+ * Admin screen there is.
+ */
+export const ADMIN_TABS: readonly BottomNavItem[] = SIDEBAR_ITEMS.map((item) => {
+  const label: string | undefined = ADMIN_TAB_LABELS[item.href];
+  if (label === undefined) {
+    throw new Error(`No bottom-navigation label for the Admin destination ${item.href}.`);
+  }
+  return {
+    href: item.href,
+    icon: item.icon,
+    label,
+    match: item.href === '/admin' ? 'exact' : 'prefix',
+  };
+});
 
 function pageTitle(pathname: string): string {
   return SIDEBAR_ITEMS.find((item) => item.href === pathname)?.label ?? adminCopy.appName;
@@ -170,10 +224,6 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const theme = useTheme();
   const onLoginScreen = pathname === '/admin/login';
-  // Below `md` there is no room for a 240px sidebar beside any usable content
-  // width, so the nav moves into a drawer opened from the header instead.
-  const isNarrow = useMediaQuery(theme.breakpoints.down('md'));
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
   // Read the remembered rail state after mount rather than from `useState`'s
@@ -201,13 +251,6 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
     });
   }
 
-  // A route change is the drawer's own job finishing — closing it here means
-  // every nav link works as "navigate and close" without each one wiring that
-  // up itself.
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
-
   // The sign-in screen itself: nothing is authenticated yet, so a sidebar
   // naming every Admin destination has no business being on screen before
   // credentials are entered.
@@ -230,131 +273,100 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const railCollapsed = collapsed && !isNarrow;
+  // No `isNarrow` term: below `lg` the sidebar is not on screen at all, so
+  // there is no width at which a remembered collapse means nothing.
+  const railCollapsed = collapsed;
+  // Asked rather than re-decided: the sign-in branch has already returned
+  // above, and deferring to the shared rule keeps the Admin console from
+  // holding a second opinion about where the bar may appear.
+  const routeCarriesBottomNav = bottomNavShown(pathname);
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      {isNarrow ? (
-        <Drawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          aria-label={adminCopy.appName}
-          ModalProps={{ keepMounted: true }}
-          sx={{ '& .MuiDrawer-paper': { width: SIDEBAR_WIDTH, boxSizing: 'border-box' } }}
+      <Box
+        component="nav"
+        aria-label={adminCopy.appName}
+        sx={{
+          // Hidden by a `display` breakpoint and never by a width hook: a hook
+          // would draw the narrow layout first on every device and swap after
+          // hydration, which is the reflow UX-DR44 exists to forbid.
+          display: { xs: 'none', lg: 'flex' },
+          width: railCollapsed ? RAIL_WIDTH : SIDEBAR_WIDTH,
+          flexShrink: 0,
+          // Pinned to the viewport, so the brand, every destination and the rail
+          // toggle stay in view down a long page; its own list scrolls if it has to.
+          position: 'sticky',
+          top: 0,
+          height: '100vh',
+          alignSelf: 'flex-start',
+          flexDirection: 'column',
+          borderRight: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          px: `${density.cardPadding}px`,
+          py: `${density.sectionMargin}px`,
+          transition: theme.transitions.create('width', {
+            duration: theme.transitions.duration.shortest,
+          }),
+          overflowX: 'hidden',
+          overflowY: 'auto',
+        }}
+      >
+        <Typography
+          component="p"
+          sx={{
+            fontWeight: 700,
+            fontSize: '0.875rem',
+            px: railCollapsed ? 0 : `${density.gap}px`,
+            pb: `${density.gap * 1.5}px`,
+            mb: `${density.gap * 1.5}px`,
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            display: 'flex',
+            justifyContent: railCollapsed ? 'center' : 'flex-start',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
         >
-          <Box
-            component="nav"
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              px: `${density.cardPadding}px`,
-              py: `${density.sectionMargin}px`,
-            }}
-          >
-            <Typography
-              component="p"
-              sx={{
-                fontWeight: 700,
-                fontSize: '0.875rem',
-                px: `${density.gap}px`,
-                pb: `${density.gap * 1.5}px`,
-                mb: `${density.gap * 1.5}px`,
-                borderBottom: '1px solid',
-                borderColor: 'divider',
-                display: 'flex',
-                alignItems: 'center',
-                gap: `${density.gap}px`,
-              }}
+          {railCollapsed ? (
+            <ShieldCheck size={20} aria-label={adminCopy.appName} />
+          ) : (
+            <Box
+              component="span"
+              sx={{ display: 'inline-flex', alignItems: 'center', gap: `${density.gap}px` }}
             >
               <ShieldCheck size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
               {adminCopy.appName}
-            </Typography>
-            <NavList pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
-          </Box>
-        </Drawer>
-      ) : (
-        <Box
-          component="nav"
-          aria-label={adminCopy.appName}
-          sx={{
-            width: railCollapsed ? RAIL_WIDTH : SIDEBAR_WIDTH,
-            flexShrink: 0,
-            // Pinned to the viewport, so the brand, every destination and the rail
-            // toggle stay in view down a long page; its own list scrolls if it has to.
-            position: 'sticky',
-            top: 0,
-            height: '100vh',
-            alignSelf: 'flex-start',
-            display: 'flex',
-            flexDirection: 'column',
-            borderRight: '1px solid',
-            borderColor: 'divider',
-            bgcolor: 'background.paper',
-            px: `${density.cardPadding}px`,
-            py: `${density.sectionMargin}px`,
-            transition: theme.transitions.create('width', {
-              duration: theme.transitions.duration.shortest,
-            }),
-            overflowX: 'hidden',
-            overflowY: 'auto',
-          }}
+            </Box>
+          )}
+        </Typography>
+        <Box sx={{ flexGrow: 1 }}>
+          <NavList pathname={pathname} collapsed={railCollapsed} />
+        </Box>
+        {/* The rail's own toggle, pinned under the destinations rather than
+              inside them — it changes how the nav looks, not where it goes. */}
+        <Tooltip
+          title={collapsed ? adminCopy.nav.expandSidebar : adminCopy.nav.collapseSidebar}
+          placement="right"
         >
-          <Typography
-            component="p"
+          <IconButton
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? adminCopy.nav.expandSidebar : adminCopy.nav.collapseSidebar}
             sx={{
-              fontWeight: 700,
-              fontSize: '0.875rem',
-              px: railCollapsed ? 0 : `${density.gap}px`,
-              pb: `${density.gap * 1.5}px`,
-              mb: `${density.gap * 1.5}px`,
-              borderBottom: '1px solid',
-              borderColor: 'divider',
-              display: 'flex',
-              justifyContent: railCollapsed ? 'center' : 'flex-start',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
+              alignSelf: railCollapsed ? 'center' : 'flex-end',
+              width: density.tapTarget,
+              height: density.tapTarget,
             }}
           >
-            {railCollapsed ? (
-              <ShieldCheck size={20} aria-label={adminCopy.appName} />
+            {collapsed ? (
+              <PanelLeftOpen size={20} aria-hidden="true" />
             ) : (
-              <Box
-                component="span"
-                sx={{ display: 'inline-flex', alignItems: 'center', gap: `${density.gap}px` }}
-              >
-                <ShieldCheck size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
-                {adminCopy.appName}
-              </Box>
+              <PanelLeftClose size={20} aria-hidden="true" />
             )}
-          </Typography>
-          <Box sx={{ flexGrow: 1 }}>
-            <NavList pathname={pathname} collapsed={railCollapsed} />
-          </Box>
-          {/* The rail's own toggle, pinned under the destinations rather than
-              inside them — it changes how the nav looks, not where it goes. */}
-          <Tooltip
-            title={collapsed ? adminCopy.nav.expandSidebar : adminCopy.nav.collapseSidebar}
-            placement="right"
-          >
-            <IconButton
-              onClick={toggleCollapsed}
-              aria-label={collapsed ? adminCopy.nav.expandSidebar : adminCopy.nav.collapseSidebar}
-              sx={{
-                alignSelf: railCollapsed ? 'center' : 'flex-end',
-                width: density.tapTarget,
-                height: density.tapTarget,
-              }}
-            >
-              {collapsed ? (
-                <PanelLeftOpen size={20} aria-hidden="true" />
-              ) : (
-                <PanelLeftClose size={20} aria-hidden="true" />
-              )}
-            </IconButton>
-          </Tooltip>
-        </Box>
-      )}
+          </IconButton>
+        </Tooltip>
+      </Box>
       <Box
         component="main"
         sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
@@ -378,15 +390,6 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px`, minWidth: 0 }}>
-            {isNarrow ? (
-              <IconButton
-                onClick={() => setDrawerOpen(true)}
-                aria-label={adminCopy.nav.menuToggle}
-                sx={{ width: density.tapTarget, height: density.tapTarget }}
-              >
-                <Menu size={20} aria-hidden="true" />
-              </IconButton>
-            ) : null}
             <Typography
               component="p"
               sx={{
@@ -424,11 +427,25 @@ export function AdminChrome({ children }: { children: React.ReactNode }) {
             bgcolor: 'background.default',
             paddingBlock: `${density.sectionMargin}px`,
             paddingInline: `${density.cardPadding}px`,
+            // Room under the last row of a long table for the fixed bar, the
+            // device's own bottom inset, and a gutter between the two.
+            paddingBottom: routeCarriesBottomNav
+              ? { xs: barOffsetCss, lg: `${density.sectionMargin}px` }
+              : `${density.sectionMargin}px`,
           }}
         >
           {children}
         </Box>
       </Box>
+      {/* No `more`: the five tabs are every Admin destination there is. */}
+      {routeCarriesBottomNav ? (
+        <BottomNav
+          pathname={pathname}
+          items={ADMIN_TABS}
+          ariaLabel={adminCopy.bottomNav.label}
+          density={density}
+        />
+      ) : null}
     </Box>
   );
 }

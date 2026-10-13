@@ -45,9 +45,25 @@ export const adminCopy = {
      */
     topics: 'Topics',
     signOut: 'Sign out',
-    menuToggle: 'Open Admin menu',
     collapseSidebar: 'Collapse menu',
     expandSidebar: 'Expand menu',
+  },
+
+  /**
+   * The bottom navigation bar below `lg`, and the short words it carries.
+   *
+   * One tab per `SIDEBAR_ITEMS` entry and no overflow action: five destinations
+   * fit across a phone, so the console needs nothing hidden behind a "More".
+   * The hrefs and icons are the sidebar's own; only these labels are new.
+   */
+  bottomNav: {
+    /** The landmark's accessible name. */
+    label: 'Admin sections',
+    overview: 'Overview',
+    taxonomy: 'Subjects',
+    accounts: 'Accounts',
+    flaggedExplanations: 'Flagged',
+    topics: 'Topics',
   },
 
   /**

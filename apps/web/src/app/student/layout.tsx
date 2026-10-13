@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box';
+import { StudentBottomNav } from './_components/StudentBottomNav';
 import { StudentThemeProvider } from './_components/StudentThemeProvider';
 import { comfortableDensity } from '@/theme/tokens';
 
@@ -25,6 +26,13 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       >
         {children}
       </Box>
+      {/*
+        Outside the `main` landmark: the bar is chrome, not content. It brings
+        its own clearance with it — this layout is a server component and knows
+        no pathname, so a bottom padding stated here would also end the Attempt
+        a bar's height early, on the one screen that carries no bar.
+      */}
+      <StudentBottomNav />
     </StudentThemeProvider>
   );
 }

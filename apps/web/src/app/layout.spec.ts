@@ -16,6 +16,12 @@ const CODE = SOURCE.split('\n')
   .filter((line) => !/^\s*(\*|\/\/|\/\*|\{\/\*)/u.test(line))
   .join('\n');
 
+describe('safe-area insets', () => {
+  it('declares viewport-fit=cover, the one thing that makes env(safe-area-inset-*) resolve on iOS', () => {
+    expect(viewport.viewportFit).toBe('cover');
+  });
+});
+
 describe('the colour the browser paints its own chrome', () => {
   it('states one theme colour per scheme, both from the tokens', () => {
     // A single value would leave a dark-mode device wearing the light accent,

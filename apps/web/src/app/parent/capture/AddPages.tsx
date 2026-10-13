@@ -6,6 +6,7 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { Camera, ImagePlus } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
+import { useReportCaptureOpen } from '@/lib/capture-open';
 import { ACCEPTED_IMAGE_TYPES, splitSelection } from '@/lib/library-selection';
 import { density, focusRing } from '@/theme/tokens';
 import { CameraViewfinder } from './CameraViewfinder';
@@ -119,6 +120,16 @@ export function AddPages({
    * had already been replaced — or miss the one that had.
    */
   const streamRef = useRef<MediaStream | null>(null);
+  /**
+   * Tells Parent View's shell when a live viewfinder is on screen, so the bottom
+   * navigation bar gets out of the camera's way.
+   *
+   * Reported rather than re-derived: the shell knows the pathname, and
+   * `/parent/capture` carries the bar like any other screen — the viewfinder is
+   * the only thing on it that must not have navigation over it, and its state
+   * lives here.
+   */
+  useReportCaptureOpen(open && status === 'ready');
   /**
    * Whether this component is still mounted, and which open request is still
    * wanted.

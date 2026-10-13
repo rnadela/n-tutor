@@ -735,6 +735,19 @@ export const studentCopy = {
   },
   /** The one control out of Student Mode. It leads to the PIN, never past it. */
   parent: 'Parent',
+  /**
+   * The bottom navigation bar below `lg`, and the short words it carries.
+   *
+   * Two tabs and no more: Home, and the way across to the parent side — which
+   * leads to the PIN and never past it, exactly like the link it replaces on
+   * Home. Nothing about an Attempt is named here; the Attempt carries no bar.
+   */
+  bottomNav: {
+    /** The landmark's accessible name. */
+    label: 'Student sections',
+    home: 'Home',
+    parent: 'Parent',
+  },
   notBound: 'This device is not set up for a student yet.',
   failed: 'Your practice could not be loaded.',
   retry: 'Try again',

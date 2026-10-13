@@ -2869,3 +2869,59 @@ source_spec: `spec-1-10-color-mode-switch.md`
 severity: low
 reason: Parent View's "before the exit" is asserted geometrically; Admin's "before Sign out", the auth header's "top-right" and Student home's "beside the Parent View link" are asserted only by presence. The same `display: flex` / `alignItems: center` / `gap` wrapper is repeated in `AdminChrome.tsx`, `ParentSidebarChrome.tsx` and `student/page.tsx`, each restating the ordering rule in prose rather than sharing it.
 status: open
+
+### DW-360: No screen in the app mounts `AppSnackbar`, so the bar offset this story added to it cannot be exercised end to end.
+origin: spec-deferred 39f509267197
+location: apps/web/src/components/Snackbar.tsx:109
+source_spec: `spec-10-4-bottom-navigation.md`
+severity: medium
+reason: `grep -rn "AppSnackbar" apps/web/src e2e` matches only the component's own definition and the render inside `components/primitives.spec.tsx`, which renders it outside a router — so `liftedOverBar` is always false there. The offset is therefore pinned only by a source-text assertion in `components/Snackbar.spec.tsx`, which would pass on a broken `calc()` or an `sx` key that loses to MUI's specificity. Closing it means either mounting the snackbar where messages are actually raised (not this story's scope) or accepting a prop-injected pathname so the lift can be asserted over the emitted stylesheet.
+status: open
+
+### DW-361: Several shell-level rules are pinned by matching the implementation's own source text, which passes on code that is textually right and behaviourally wrong.
+origin: spec-deferred 582fc84f56fe
+location: apps/web/src/app/parent/_components/ParentSidebarChrome.spec.tsx
+source_spec: `spec-10-4-bottom-navigation.md`
+severity: medium
+reason: `apps/web` runs vitest with `environment: 'node'` and ships no DOM testing library, a repo-wide convention older than this story (`ParentSidebarChrome.spec.tsx`, `page.spec.tsx`, `layout.spec.ts` all read source). The consequence here is that the Parent shell's viewfinder suppression and both chromes' breakpoint/padding wiring are asserted as strings; the pure rules underneath them (`bottomNavShown`, `barIsOnScreen`, `reportCaptureOpen`, `typingAfterFocusChange`) are executed, but the wiring that calls them is not. Adding a jsdom (or browser-mode) project to `apps/web/vitest.config.ts` is the real fix and is a decision for the workspace, not for one story.
+status: open
+
+### DW-362: Playwright declares only a fine-pointer desktop project, so the rule that hides the bar while a text field has focus on a touch device is never exercised in a browser.
+origin: spec-deferred c0c10aca8182
+location: playwright.config.ts:28
+source_spec: `spec-10-4-bottom-navigation.md`
+severity: low
+reason: `playwright.config.ts` has one project, `devices['Desktop Chrome']`, with no `hasTouch`/`isMobile`, so `(pointer: coarse)` never matches and the `focusin`/`focusout` branch is dead under E2E — including in the new `bottom-nav.spec.ts` cases that do fill text fields at 390x844. The predicates are unit-tested; the wiring is not. A touch-emulating project (or one `test.use({ hasTouch: true, isMobile: true })` block) would close it for every surface at once.
+status: open
+
+### DW-363: No test exercises the viewfinder-open signal reaching the bottom bar or the snackbar end to end; each half is only driven in isolation.
+origin: spec-deferred a82306d3f881
+location: apps/web/src/app/parent/capture/AddPages.tsx:132
+source_spec: `spec-10-4-bottom-navigation.md`
+severity: medium
+reason: `capture-open.spec.ts` drives only the pure `reportCaptureOpen(report, open)` helper, never `AddPages.tsx` or the `CaptureOpenProvider` wiring. `ParentSidebarChrome.spec.tsx` and `Snackbar.spec.tsx` assert `useCaptureOpen()` only as a source-text match. No e2e spec opens the camera on `/parent/capture` and asserts the bar or a snackbar actually responds. This is not new to this story — the repo has no `getUserMedia`/camera mocking anywhere in `playwright.config.ts` or existing e2e specs, so the viewfinder itself was already untestable in a real browser before this story added a new consumer of its open state. Closing it means adding camera-stream mocking to the E2E harness, which is bigger than one story.
+status: open
+
+### DW-364: The bottom bar's "More" button has no `aria-haspopup`/`aria-expanded`, so assistive-tech users get no advance notice that it opens a drawer rather than acting in place.
+origin: spec-deferred 0a94bd441117
+location: apps/web/src/components/BottomNav.tsx:340-355
+source_spec: `spec-10-4-bottom-navigation.md`
+severity: low
+reason: `apps/web/src/components/BottomNav.tsx` renders `more` as a plain `<button>` with `onClick={more.onPress}` and no disclosure attributes. The intent-contract's accessibility language ("Accessibility Floor holds in both schemes") is about colour-scheme contrast, not interaction-pattern disclosure, so this was never in scope for this story, but it is a real usability gap on the one new overflow trigger the story introduces.
+status: open
+
+### DW-365: `navDestination()` in Parent View's shell is only a runtime module-evaluation throw with no React error boundary around it, so a broken href blanks the whole Parent View import rather than failing a
+origin: spec-deferred 4b17cd32c4ba
+location: apps/web/src/app/parent/_components/ParentSidebarChrome.tsx:109-128
+source_spec: `spec-10-4-bottom-navigation.md`
+severity: low
+reason: `ParentSidebarChrome.tsx:109-128`'s own comment documents this asymmetry and names the reason: `NAV_GROUPS` is built from `parentCopy` rather than literal types, so there is no union for the compiler to check an href against; the throw is an acknowledged backstop, not an oversight. Closing it fully means giving the copy module literal route types, which is a cross-cutting change to `copy/parent.ts`'s shape, not a fix local to this story.
+status: open
+
+### DW-366: The bottom bar's coarse-pointer check runs once on mount and never re-evaluates, so a hybrid device whose pointer capability changes after first paint (e.g. a mouse attached to a touch tablet) keeps
+origin: spec-deferred 5c758cfffe7c
+location: apps/web/src/components/BottomNav.tsx:183-201
+source_spec: `spec-10-4-bottom-navigation.md`
+severity: low
+reason: `apps/web/src/components/BottomNav.tsx:183-201`'s effect calls `coarsePointer()` once inside a `useEffect` with an empty dependency array; nothing re-subscribes to `matchMedia('(pointer: coarse)')` changes. This is a narrow, rare-hardware edge case with no existing precedent elsewhere in the shells for reactive pointer-type tracking.
+status: open
