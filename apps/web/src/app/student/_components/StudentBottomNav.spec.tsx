@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BottomNav } from '@/components/BottomNav';
 import { STUDENT_TABS } from './StudentBottomNav';
 import { studentCopy } from '@/copy/student';
-import { bottomNavShown } from '@/lib/bottom-nav';
+import { bottomNavShown, tabIsCurrent } from '@/lib/bottom-nav';
 import { studentTheme } from '@/theme/theme';
 import { comfortableDensity, density } from '@/theme/tokens';
 
@@ -41,22 +41,32 @@ function css(markup: string): string {
   return sheet;
 }
 
-describe('Student Mode’s two tabs', () => {
-  it('are Home and the way across to the parent side, and nothing else', () => {
-    // No Results tab and no `/student/results`: that is Story 10.5.
-    expect(STUDENT_TABS.map((tab) => tab.href)).toEqual(['/student', '/parent/pin']);
-    expect(CODE).not.toContain('/student/results');
+describe('Student Mode’s three tabs', () => {
+  it('are Home, the finished tests and the way across to the parent side', () => {
+    expect(STUDENT_TABS.map((tab) => tab.href)).toEqual([
+      '/student',
+      '/student/results',
+      '/parent/pin',
+    ]);
   });
 
   it('take their words from the copy module', () => {
     expect(STUDENT_TABS.map((tab) => tab.label)).toEqual([
       studentCopy.bottomNav.home,
+      studentCopy.bottomNav.results,
       studentCopy.bottomNav.parent,
     ]);
     expect(CODE).not.toMatch(/label: '/u);
   });
 
-  it('lets Home claim only Home', () => {
+  it('leaves nothing behind on the way to Results, which is inside Student Mode', () => {
+    // Only the crossing out of Student Mode clears the client-held answers.
+    const results = STUDENT_TABS.find((tab) => tab.href === '/student/results');
+    expect(results?.onPress).toBeUndefined();
+    expect(CODE.match(/onPress/gu)).toHaveLength(1);
+  });
+
+  it('lets each tab claim only its own screen', () => {
     expect(STUDENT_TABS.every((tab) => tab.match === 'exact')).toBe(true);
   });
 
@@ -67,7 +77,7 @@ describe('Student Mode’s two tabs', () => {
     expect(STUDENT_TABS.find((tab) => tab.href === '/parent/pin')?.onPress).toBeTypeOf('function');
   });
 
-  it('renders both destinations as real links with their labels', () => {
+  it('renders all three destinations as real links with their labels', () => {
     const markup = render('/student');
     expect(markup).toContain('aria-label="Student sections"');
     for (const tab of STUDENT_TABS) {
@@ -117,6 +127,15 @@ describe('where Student Mode’s bar does not appear', () => {
 
   it('is present on Home', () => {
     expect(bottomNavShown('/student')).toBe(true);
+  });
+
+  it('is present on the Results screen, which is an ordinary Student Mode route', () => {
+    expect(bottomNavShown('/student/results')).toBe(true);
+    // And the tab reads as current there, and only there.
+    expect(tabIsCurrent('/student/results', { href: '/student/results', match: 'exact' })).toBe(
+      true,
+    );
+    expect(tabIsCurrent('/student', { href: '/student/results', match: 'exact' })).toBe(false);
   });
 });
 

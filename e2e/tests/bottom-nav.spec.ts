@@ -292,7 +292,7 @@ test.describe('the bottom navigation bar', () => {
     await expect(bar(page)).toHaveCount(0);
   });
 
-  test('is Student Mode’s two tabs, in place of Home’s own exit link', async ({ page }) => {
+  test('is Student Mode’s three tabs, in place of Home’s own exit link', async ({ page }) => {
     const grade = await createGradeLevelFixture('Grade');
     await page.setViewportSize(PHONE);
     await signUpAndEnterParentView(page);
@@ -313,17 +313,34 @@ test.describe('the bottom navigation bar', () => {
 
     const studentBar = page.getByRole('navigation', { name: 'Student sections' });
     await expect(studentBar).toBeVisible();
-    await expect(studentBar.getByRole('link')).toHaveText(['Home', 'Parent']);
+    await expect(studentBar.getByRole('link')).toHaveText(['Home', 'Results', 'Parent']);
     await expect(studentBar.getByRole('link', { name: 'Home' })).toHaveAttribute(
       'aria-current',
       'page',
     );
     // Student Mode's own 48px floor, not the console's 44.
-    for (const label of ['Home', 'Parent']) {
+    for (const label of ['Home', 'Results', 'Parent']) {
       const box = await studentBar.getByRole('link', { name: label }).boundingBox();
       expect(box, label).not.toBeNull();
       expect(box!.height, label).toBeGreaterThanOrEqual(48);
     }
+
+    // The Results tab: an ordinary Student Mode destination, reached without a
+    // full load, carrying the bar with the tab now reading as current. This
+    // child has finished nothing, so the screen says what will appear here.
+    await studentBar.getByRole('link', { name: 'Results' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Your finished tests', level: 1 }),
+    ).toBeVisible();
+    await expect(studentBar.getByRole('link', { name: 'Results' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(page.getByTestId('student-results-empty')).toBeVisible();
+    await expect(studentBar).toBeVisible();
+
+    await page.goBack();
+    await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
 
     // Home's own way out is hidden below `lg`: the tab carries that crossing,
     // and two controls for one crossing is one too many. The light/dark switch
@@ -333,9 +350,19 @@ test.describe('the bottom navigation bar', () => {
     ).toBeHidden();
     await expect(page.getByRole('button', { name: /Switch to (dark|light) mode/u })).toBeVisible();
 
+    // And Home's own link to the finished tests is the same way round: below
+    // `lg` the tab carries it, so the link is not there to be a second copy.
+    await expect(
+      page.locator('main').getByRole('link', { name: 'Results', exact: true }),
+    ).toBeHidden();
+
     await page.setViewportSize(DESKTOP);
     await expect(
       page.locator('main').getByRole('link', { name: 'Parent', exact: true }),
+    ).toBeVisible();
+    // At and above `lg` there is no bar, so Home carries the way to Results.
+    await expect(
+      page.locator('main').getByRole('link', { name: 'Results', exact: true }),
     ).toBeVisible();
     await expect(page.getByTestId('bottom-nav')).toBeHidden();
 

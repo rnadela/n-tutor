@@ -1,7 +1,7 @@
 'use client';
 
 import Box from '@mui/material/Box';
-import { GraduationCap, Lock } from 'lucide-react';
+import { ClipboardCheck, GraduationCap, Lock } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { BottomNav, type BottomNavItem } from '@/components/BottomNav';
 import { studentCopy } from '@/copy/student';
@@ -10,22 +10,29 @@ import { attemptStorage, clearAll } from '@/lib/attempt-store';
 import { comfortableDensity } from '@/theme/tokens';
 
 /**
- * Student Mode's two tabs: where the practice is, and the way across to the
- * parent side.
+ * Student Mode's three tabs: where the practice is, what has been finished, and
+ * the way across to the parent side.
  *
- * Home is `exact` — nothing else under `/student` carries the bar, but a prefix
- * would still be a claim this tab has no business making. The parent tab leads
- * to the PIN and never past it, exactly like the link it replaces on Home, and
- * clears the client-held answers on the way out for the same reason that link
- * does (AD-26): past that gate nobody is a child.
- *
- * There is no Results tab and no `/student/results` route — that is Story 10.5.
+ * Every tab is `exact` — the Attempt under `/student/tests` carries no bar at
+ * all, but a prefix would still be a claim these tabs have no business making.
+ * Results sits between the other two because that is the order they are reached
+ * in, and it carries no `onPress`: it is an ordinary Student Mode destination,
+ * so nothing is being left behind on the way there. The parent tab leads to the
+ * PIN and never past it, exactly like the link it replaces on Home, and clears
+ * the client-held answers on the way out for the same reason that link does
+ * (AD-26): past that gate nobody is a child.
  */
 export const STUDENT_TABS: readonly BottomNavItem[] = [
   {
     href: '/student',
     label: studentCopy.bottomNav.home,
     icon: GraduationCap,
+    match: 'exact',
+  },
+  {
+    href: '/student/results',
+    label: studentCopy.bottomNav.results,
+    icon: ClipboardCheck,
     match: 'exact',
   },
   {

@@ -8,7 +8,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
-import { BookOpen, GraduationCap, Lock } from 'lucide-react';
+import { BookOpen, ClipboardCheck, GraduationCap, Lock } from 'lucide-react';
 import { ColorModeSwitch } from '@/components/ColorModeSwitch';
 import { InstallBanner } from '@/components/InstallBanner';
 import { studentCopy } from '@/copy/student';
@@ -353,6 +353,23 @@ export default function StudentModePage() {
               }}
             >
               {studentCopy.parent}
+            </Button>
+            {/* The Results screen, reachable from Home at the widths where the
+                bar does not exist. Gated for the same reason as the way out
+                beside it: below `lg` the Results tab is this control, and two
+                controls for one destination is one too many. */}
+            <Button
+              startIcon={<ClipboardCheck size={18} aria-hidden="true" />}
+              color="inherit"
+              component={NextLink}
+              href="/student/results"
+              variant="text"
+              sx={{
+                minHeight: comfortableDensity.tapTarget,
+                display: { xs: 'none', lg: 'inline-flex' },
+              }}
+            >
+              {studentCopy.resultsList.link}
             </Button>
             <ColorModeSwitch />
           </Box>

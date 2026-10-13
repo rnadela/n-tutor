@@ -336,7 +336,55 @@ describe('the way out of Student Mode on Home', () => {
   it('leaves the light/dark switch ungated: it is Student Mode’s only placement', () => {
     const cluster = CODE.slice(CODE.indexOf('<ColorModeSwitch'));
     expect(cluster).not.toContain('display:');
+    // Two gated controls now: the way out, and the way to the finished tests.
+    // Both are carried by a tab below `lg`; the switch is carried by neither.
     const gates = CODE.match(/display: \{ xs: 'none'/gu) ?? [];
-    expect(gates).toHaveLength(1);
+    expect(gates).toHaveLength(2);
+  });
+});
+
+describe('the way to the finished tests on Home', () => {
+  it('sits in the same cluster as the way out, and leads to the Results screen', () => {
+    expect(CODE).toContain('href="/student/results"');
+    const cluster = CODE.slice(
+      CODE.indexOf('href="/parent/pin"'),
+      CODE.indexOf('<ColorModeSwitch'),
+    );
+    expect(cluster).toContain('href="/student/results"');
+  });
+
+  it('is hidden below `lg`, where the Results tab carries the same destination', () => {
+    const link = CODE.slice(CODE.indexOf('href="/student/results"'));
+    expect(link.slice(0, link.indexOf('</Button>'))).toContain(
+      "display: { xs: 'none', lg: 'inline-flex' }",
+    );
+    expect(CODE).not.toMatch(/useMediaQuery|matchMedia|window\.inner/u);
+  });
+
+  it('takes its word from the copy module, and leaves nothing behind', () => {
+    expect(CODE).toContain('{studentCopy.resultsList.link}');
+    // Student Mode is not being left, so there is nothing to clear on the way.
+    const link = CODE.slice(CODE.indexOf('href="/student/results"'));
+    expect(link.slice(0, link.indexOf('</Button>'))).not.toContain('clearAll');
+  });
+
+  it('sizes itself from the comfortable tokens like every other control here', () => {
+    const link = CODE.slice(CODE.indexOf('href="/student/results"'));
+    expect(link.slice(0, link.indexOf('</Button>'))).toContain('comfortableDensity.tapTarget');
+  });
+});
+
+describe('what Home’s list still is (FR-16)', () => {
+  it('is one flat list, handed over exactly as the server sent it', () => {
+    // The Results screen filters; Home does not. Completed tests stay on Home.
+    expect(CODE).toMatch(/<PracticeTestList\s+tests=\{tests\}/u);
+    expect(CODE).not.toContain('completedTests');
+    expect(CODE).not.toContain('student-results');
+  });
+
+  it('adds no second heading over the list and no grouping of any kind', () => {
+    const headings = CODE.match(/component="h2"/gu) ?? [];
+    expect(headings).toHaveLength(1);
+    expect(CODE).toContain('studentCopy.practiceTestsTitle');
   });
 });

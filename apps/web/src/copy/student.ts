@@ -736,16 +736,46 @@ export const studentCopy = {
   /** The one control out of Student Mode. It leads to the PIN, never past it. */
   parent: 'Parent',
   /**
+   * The screen that lists only the practice tests this child has finished.
+   *
+   * **A separate block from `results` above, which belongs to one Attempt's answer
+   * key.** The two screens say different things — one lists finished tests, the
+   * other reads a single run back — and sharing a block would leave them one
+   * rename apart from saying each other's words.
+   *
+   * Second person, no exclamation mark and no figure, like everything else here:
+   * every number on this screen arrives from the API through the row.
+   */
+  resultsList: {
+    /** The page's own `h1`. */
+    heading: 'Your finished tests',
+    /**
+     * Nothing is finished yet, said as what will appear and how to make it appear
+     * rather than as a bare absence — an empty screen tells a child nothing about
+     * whether anything is wrong.
+     */
+    empty: 'You have not finished a practice test yet. When you finish one, it will show up here.',
+    loading: 'Loading…',
+    /** This screen's own read, named rather than Home's generic failure. */
+    failed: 'Your finished tests could not be loaded.',
+    /** The link on Home that leads here, and the bar's own word for it. */
+    link: 'Results',
+    /** The way back, rendered only where there is no bar to carry it. */
+    backToPractice: 'Back to your practice',
+  },
+  /**
    * The bottom navigation bar below `lg`, and the short words it carries.
    *
-   * Two tabs and no more: Home, and the way across to the parent side — which
-   * leads to the PIN and never past it, exactly like the link it replaces on
+   * Three tabs: Home, the finished tests, and the way across to the parent side —
+   * which leads to the PIN and never past it, exactly like the link it replaces on
    * Home. Nothing about an Attempt is named here; the Attempt carries no bar.
    */
   bottomNav: {
     /** The landmark's accessible name. */
     label: 'Student sections',
     home: 'Home',
+    /** Inside Student Mode, so nothing is left behind on the way there. */
+    results: 'Results',
     parent: 'Parent',
   },
   notBound: 'This device is not set up for a student yet.',

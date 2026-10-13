@@ -1021,7 +1021,15 @@ export async function seedGradedTopicFixture(
   subjectId: string,
   /** The canonical Topic a parent reads in the table, and the raw label beside it. */
   topic: { name: string; rawLabel: string },
-): Promise<{ topicId: string; sourceTestId: string }> {
+  /**
+   * How long ago the one run was handed in. Defaulted, so every existing caller
+   * is unchanged — and nameable, because the student-scoped list states its
+   * finished band most recently submitted first, and two papers handed in at the
+   * same instant make "newest first" a claim nothing could tell apart.
+   */
+  options: { submittedMinutesAgo?: number } = {},
+): Promise<{ topicId: string; sourceTestId: string; practiceTestId: string }> {
+  const submittedMinutesAgo = options.submittedMinutesAgo ?? 10;
   const client = new Client({ connectionString: e2eDatabaseUrl() });
   await client.connect();
   try {
@@ -1103,9 +1111,11 @@ export async function seedGradedTopicFixture(
       `INSERT INTO "attempt"
          ("id", "practiceTestId", "parentAccountId", "studentProfileId", "ordinal",
           "startedAt", "submittedAt", "expired", "createdAt", "updatedAt")
-       VALUES ($1, $2, $3, $4, 1, now() - interval '20 minutes', now() - interval '10 minutes',
+       VALUES ($1, $2, $3, $4, 1,
+               now() - make_interval(mins => $5::int) - interval '10 minutes',
+               now() - make_interval(mins => $5::int),
                false, now(), now())`,
-      [attemptId, practiceTestId, parentAccountId, studentProfileId],
+      [attemptId, practiceTestId, parentAccountId, studentProfileId, submittedMinutesAgo],
     );
 
     // Question 1 answered wrong, Question 2 left blank — no `answer` row at all, which
@@ -1168,7 +1178,82 @@ export async function seedGradedTopicFixture(
       [randomUUID(), studentProfileId, topicId],
     );
 
-    return { topicId, sourceTestId };
+    return { topicId, sourceTestId, practiceTestId };
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * A released practice test nobody has sat yet: the `NotStarted` row.
+ *
+ * `seedGradedTopicFixture`'s counterpart, and deliberately much less: no
+ * extraction, no Topic and no Attempt, because the only claim it exists to
+ * support is "a test that is not finished is not on the Results screen". Seeded
+ * rather than generated for the same reason its sibling is — driving
+ * upload-extract-generate-release through the browser would spend minutes of
+ * provider calls to make one row exist.
+ */
+export async function seedReleasedPracticeTestFixture(
+  parentEmail: string,
+  displayName: string,
+  subjectId: string,
+): Promise<{ practiceTestId: string }> {
+  const client = new Client({ connectionString: e2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const account = await client.query<{ id: string }>(
+      'SELECT "id" FROM "parent_account" WHERE "email" = $1',
+      [parentEmail],
+    );
+    const parentAccountId = account.rows[0]!.id;
+    const profile = await client.query<{ id: string; gradeLevelId: string }>(
+      'SELECT "id", "gradeLevelId" FROM "student_profile" WHERE "parentAccountId" = $1 AND "displayName" = $2',
+      [parentAccountId, displayName],
+    );
+    const studentProfileId = profile.rows[0]!.id;
+    const gradeLevelId = profile.rows[0]!.gradeLevelId;
+
+    const sourceTestId = randomUUID();
+    await client.query(
+      `INSERT INTO "source_test"
+         ("id", "parentAccountId", "studentProfileId", "status", "expiresAt", "submittedAt",
+          "subjectId", "gradeLevelId", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, 'Submitted'::source_test_status, now() + interval '1 day', now(), $4, $5, now(), now())`,
+      [sourceTestId, parentAccountId, studentProfileId, subjectId, gradeLevelId],
+    );
+
+    const generationJobId = randomUUID();
+    await client.query(
+      `INSERT INTO "generation_job"
+         ("id", "parentAccountId", "sourceTestId", "studentProfileId", "requestedCount",
+          "producedCount", "status", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, 1, 1, 'Succeeded'::generation_job_status, now(), now())`,
+      [generationJobId, parentAccountId, sourceTestId, studentProfileId],
+    );
+
+    const practiceTestId = randomUUID();
+    await client.query(
+      `INSERT INTO "practice_test"
+         ("id", "parentAccountId", "sourceTestId", "studentProfileId", "generationJobId",
+          "status", "ordinal", "questionCount", "chargedAt", "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, 'Released'::practice_test_status, 1, 1, now(), now(), now())`,
+      [practiceTestId, parentAccountId, sourceTestId, studentProfileId, generationJobId],
+    );
+
+    await client.query(
+      `INSERT INTO "practice_test_question"
+         ("id", "practiceTestId", "ordinal", "format", "prompt", "answer", "createdAt")
+       VALUES ($1, $2, 1, 'ShortAnswer'::question_format, $3::jsonb, $4::jsonb, now())`,
+      [
+        randomUUID(),
+        practiceTestId,
+        JSON.stringify([{ kind: 'text', value: 'What is a third of nine?' }]),
+        JSON.stringify([{ kind: 'text', value: '3' }]),
+      ],
+    );
+
+    return { practiceTestId };
   } finally {
     await client.end();
   }

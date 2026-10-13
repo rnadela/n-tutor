@@ -2925,3 +2925,43 @@ source_spec: `spec-10-4-bottom-navigation.md`
 severity: low
 reason: `apps/web/src/components/BottomNav.tsx:183-201`'s effect calls `coarsePointer()` once inside a `useEffect` with an empty dependency array; nothing re-subscribes to `matchMedia('(pointer: coarse)')` changes. This is a narrow, rare-hardware edge case with no existing precedent elsewhere in the shells for reactive pointer-type tracking.
 status: open
+
+### DW-367: Everything the Results screen does at runtime is pinned only by regex over its own source text, so a change that keeps the spelling and breaks the behaviour ships green.
+origin: spec-deferred 21ada995333b
+location: apps/web/src/app/student/results/page.spec.tsx
+source_spec: `spec-10-5-student-results-tab.md`
+severity: medium
+reason: `apps/web` runs vitest with `environment: 'node'` and no DOM, a repo-wide convention older than this story, so `app/student/results/page.spec.tsx` reads the page as a string. A reviewer moved the stale-request guard below its setter — killing it — and all 19 tests still passed, because the assertion counts occurrences of the guard's text, not its position. The same holds for the unbound-device routing, the retry that re-issues both reads, and the silent run-read failure: none is executed by any test. The new `e2e/tests/student-results.spec.ts` closes the rendered-rows and ordering half of this; the error, loading and retry paths remain source-text only. Closing it means either a jsdom environment for this route or extracting the load/settle logic into a framework-free module with the reads injected.
+status: open
+
+### DW-368: `studentCopy.resultsList.failed` is effectively unreachable, so a failed list read shows Home's generic sentence instead of the screen's own.
+origin: spec-deferred 334441b6d873
+location: apps/web/src/app/student/results/page.tsx
+source_spec: `spec-10-5-student-results-tab.md`
+severity: medium
+reason: `setTestsError(cause instanceof Error ? cause.message : resultsList.failed)` — and `parentApi.call()` always rejects with a `ParentApiError extends Error` whose message is either the server's or the `studentCopy.failed` string handed to the call site. The `instanceof Error` branch therefore always wins. Student Home has the identical shape, so this is a pattern rather than a slip, and fixing it properly means letting a call site state its own failure sentence in `parent-api.ts` — which this story's boundaries put out of scope.
+status: open
+
+### DW-369: The Results route imports `deviceIsUnbound` from Home's page module, coupling one route file to another.
+origin: spec-deferred 89dc1c6a451d
+location: apps/web/src/app/student/results/page.tsx
+source_spec: `spec-10-5-student-results-tab.md`
+severity: low
+reason: `import { deviceIsUnbound } from '../page'` pulls Home's module (and its import graph) into the Results route's client chunk unless the bundler tree-shakes it. The helper is framework-free and belongs beside `student-results.ts` in `@/lib`. Directed by this story's intent contract, so moving it is a spec-level change rather than a patch.
+status: open
+
+### DW-370: Swapping the loading alert for the empty state announces nothing, and pressing Retry drops keyboard focus to the body.
+origin: spec-deferred 89fa4259a7d5
+location: apps/web/src/app/student/results/page.tsx
+source_spec: `spec-10-5-student-results-tab.md`
+severity: low
+reason: The loading `Alert` carries `role="status"`; the empty-state `Box` that replaces it carries no live region, so a screen-reader user hears "Loading…" and then silence. Retry calls `load()`, which clears `testsError`, which unmounts the alert the focused button lives in, and nothing moves focus to the replacement. Student Home has both behaviours too, so the fix belongs to both screens at once.
+status: open
+
+### DW-371: A read that rejects with an unbound device after the child has already left the screen still routes them to sign-in.
+origin: spec-deferred 14faaec07986
+location: apps/web/src/app/student/results/page.tsx
+source_spec: `spec-10-5-student-results-tab.md`
+severity: low
+reason: The `requestId` ref guards staleness within the screen but nothing cancels on unmount, so a late `notBound` rejection from either read can fire `router.replace('/auth/sign-in')` from whatever screen the child moved to. Student Home carries the same hazard, which is why this is filed rather than patched here.
+status: open
