@@ -250,6 +250,7 @@ UX-DR43: Implement table row actions as one shared pattern: each row action is a
 
 UX-DR44: Implement data tables as cards below desktop: below the `lg` breakpoint (1200px) every data table renders as a list of cards, and only at `lg` and above as a table. The switch is CSS-only (no viewport hook), so there is no layout swap after first paint, and the hidden layout is out of the accessibility tree. Each card is a flat, divider-bordered surface at the surface's card padding: the row's identifying value as the card title, the row actions (UX-DR43) at the card's top-right, and every other column as a labeled field (label in caption, value in body, tabular figures for numbers). Cards stack in one column on phones and two columns from `sm` (600px), except ranked lists, which stay one column so the rank reads top to bottom. The card list is a real list, each card named by its title. Nothing a table shows is dropped from its card.
 UX-DR45: Implement the color mode switch as one shared control: an icon-only button showing a sun or moon icon, placed in each surface's header at the top-right (Parent View before the exit control, Admin before Sign out, the sign-in pages top-right) and on the Student home beside the Parent View link. Its accessible name states what pressing it does ("Switch to dark mode" / "Switch to light mode"), a tooltip shows the same text on hover and focus, and it meets the surface's tap-target floor. Pressing it applies the other mode at once, with no reload and no animation beyond the motion policy (UX-DR37). It is not shown inside the camera capture view or inside an in-progress Attempt.
+UX-DR46: Implement navigation below desktop as one shared bottom navigation bar. Below the `lg` breakpoint (1200px) — phones and tablets in either orientation, in a browser tab or installed — Parent View, Student Mode, and Admin each show a bar fixed to the bottom of the viewport; at `lg` and above they keep the sidebar and show no bar. The switch is CSS-only (no layout swap after first paint). Tabs: Parent View — Home, Upload, Drafts, Attempts, More (More opens the full grouped destination list); Student Mode — Home, Results, Parent View (the PIN gate); Admin — Overview, Taxonomy, Accounts, Flagged, Topics. Every tab shows icon and label together; the current tab is marked by color, weight, and an indicator (never color alone) and carries `aria-current="page"`; the bar is a `nav` landmark with an accessible name; each tab meets the surface's tap-target floor (44px Parent/Admin, 48px Student). The bar sits on `background-paper` with a 1px top divider and no shadow, and pads by the device safe-area insets (`viewport-fit=cover`). Content and snackbars sit above it, never under it. Tab changes are client-side and unanimated. The bar is absent on the PIN gate, the Admin sign-in, the sign-in pages, inside an Attempt and its results, while the camera viewfinder is open, and while a text field has focus on a touch device. Below `lg` the header hamburger is removed; the header keeps the page title, the color mode switch, and the surface's exit control.
 
 ### FR Coverage Map
 
@@ -339,8 +340,8 @@ Every Parent Account's Upload, Generation, and Explanation Allowances are tracke
 **FRs covered:** FR-31
 
 ### Epic 10: Installable App (PWA)
-A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can, and the app's palette matches the icon they tapped.
-**FRs covered:** FR-41
+A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can, and the app's palette matches the icon they tapped, and it navigates like an app with a bottom tab bar on phones and tablets.
+**FRs covered:** FR-41, FR-16 (Student Results screen, Story 10.5)
 
 ## Epic 1: Parent Accounts, PINs & Student Profiles
 
@@ -1695,10 +1696,10 @@ So that I can plan ahead of hitting a cap.
 
 ## Epic 10: Installable App (PWA)
 
-A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can, and the app's palette matches the icon they tapped.
+A family can install n-tutor to the home screen of their tablet or phone and open it in one tap, and the app gently tells them that they can, and the app's palette matches the icon they tapped, and it navigates like an app with a bottom tab bar on phones and tablets.
 
-**FRs covered:** FR-41
-**Relevant UX-DRs:** UX-DR42, UX-DR5 (self-hosted assets, no runtime CDN), UX-DR1, UX-DR2, UX-DR3, UX-DR17 (Story 10.3)
+**FRs covered:** FR-41, FR-16 (Student Results screen, Story 10.5)
+**Relevant UX-DRs:** UX-DR42, UX-DR5 (self-hosted assets, no runtime CDN), UX-DR1, UX-DR2, UX-DR3, UX-DR17 (Story 10.3), UX-DR46 (bottom navigation, Stories 10.4–10.5)
 
 ### Story 10.1: Web App Manifest, Icons & Minimal Service Worker
 
@@ -1795,3 +1796,77 @@ So that the installed app feels like one product.
 
 **Given** Student Mode, Parent View, Admin, and camera capture, in light and dark
 **Then** a visual pass shows no surface left on an old palette value, and the existing unit and E2E suites pass
+
+### Story 10.4: Bottom Navigation Below Desktop
+
+As a parent, student, or operator on a phone or tablet,
+I want the app's main destinations in a tab bar at the bottom of the screen,
+So that I can move around with my thumb and the installed app feels like a native one.
+
+**Acceptance Criteria:**
+
+**Given** a viewport narrower than `lg` (1200px) on Parent View, Student Mode, or Admin
+**When** any screen that carries the bar loads
+**Then** a bottom navigation bar (UX-DR46) is fixed to the bottom of the viewport, and no sidebar or header hamburger is shown
+**And** at `lg` and above the existing sidebar shows and the bar does not, with no layout swap after first paint (CSS-only switch)
+
+**Given** Parent View below `lg`
+**Then** the bar's tabs are Home (`/parent`), Upload (`/parent/capture`), Drafts (`/parent/drafts`), Attempts (`/parent/attempts`), and More
+**And** More opens the existing destination drawer listing every Parent View destination in its groups, and More is the current tab on any route not under the other four
+**And** the header keeps the page title, the color mode switch, and the exit to Student Mode
+
+**Given** Admin below `lg`
+**Then** the bar's tabs are Overview, Taxonomy, Accounts, Flagged, and Topics, and the header keeps the color mode switch and Sign out
+
+**Given** Student Mode below `lg`
+**Then** the bar's tabs are Home and Parent View (the PIN gate), and the Home screen's own "Parent View" link is not shown, because the tab replaces it (Story 10.5 adds Results)
+**And** at `lg` and above the Home screen's "Parent View" link is shown as today
+
+**Given** any tab
+**When** it is pressed
+**Then** navigation is client-side (a Next `<Link>`), so Parent View stays elevated and no PIN is asked again (AD-18)
+**And** the current tab shows icon and label in the primary color at bold weight with an indicator, carries `aria-current="page"`, and every tab meets the surface's tap-target floor
+
+**Given** the PIN gate, the Admin sign-in, the sign-in pages, any `/student/tests/*` route, an open camera viewfinder, or a focused text field on a touch device
+**Then** the bar is not shown
+
+**Given** a phone with a home indicator or a display cutout, in a browser tab or installed
+**Then** the root viewport declares `viewport-fit=cover`, the bar pads by `env(safe-area-inset-bottom/left/right)`, and no tab sits under the home indicator
+
+**Given** a long list on any surface below `lg`
+**When** scrolled to the end
+**Then** its last item is fully visible above the bar, and any snackbar appears above the bar
+
+**Given** the bar's labels
+**Then** they live in the `copy/` modules (UX-DR31); the bar is a `nav` landmark with an accessible name; it meets the Accessibility Floor in light and dark mode
+
+**Given** the change
+**Then** unit specs cover `BottomNav` (current tab, More callback) and `bottomNavShown`; a Playwright E2E at 390×844, 820×1180, and 1180×820 shows the bar, navigates by tab on Parent View without a PIN re-prompt, opens More, and confirms the bar is absent on the PIN gate and inside an Attempt; at 1280×800 it confirms the sidebar and no bar; existing unit and E2E suites pass
+
+### Story 10.5: Student Results Tab
+
+As a student,
+I want a Results tab that lists the tests I've finished,
+So that I can go back to an answer key without scrolling past everything I haven't started.
+
+**Acceptance Criteria:**
+
+**Given** Student Mode below `lg`
+**Then** the bottom bar's tabs are Home, Results, and Parent View, in that order
+
+**Given** the Results screen (`/student/results`)
+**When** it loads
+**Then** it lists only the bound Student Profile's completed Practice Tests, newest first, each with its Subject and state exactly as on Home (same row component), and tapping one opens its results
+**And** it reads the existing student endpoints only, with no new API and no profile id in the request
+
+**Given** no completed Practice Tests
+**Then** the Results screen shows an empty state that says what will appear here and how (finish a test), never a bare absence
+
+**Given** Home
+**Then** its flat list is unchanged and still includes completed Practice Tests (FR-16)
+
+**Given** a viewport at `lg` or above
+**Then** the Results screen is reachable from a link on Student Home beside the Parent View link, so it is not a narrow-only screen
+
+**Given** the change
+**Then** the Results screen meets the Accessibility Floor in light and dark mode, its copy lives in `copy/student`, a unit spec covers the completed-only filter, the newest-first order, and the empty state, and the E2E from Story 10.4 is extended to open Results from the bar

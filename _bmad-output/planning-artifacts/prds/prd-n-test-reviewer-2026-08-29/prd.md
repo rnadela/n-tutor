@@ -432,6 +432,7 @@ A student can see their *released* and *completed* Practice Tests as a single fl
   *Why:* A finished test is how a student returns to its answer key and Explanations (FR-23).
 - **This is a decision with a recorded remedy, not an unconditional prohibition.** If the list becomes unusable in practice, the preferred remedy is a **bounded tail — every unstarted Practice Test plus the last 3–5 completed ones** — and explicitly *not* date-based expiry, which would take a test away on a calendar boundary that means nothing to the child holding it. *Revisit condition:* evidence from real accounts that the list length is costing students the ability to find the test they want.
 - Three conditions are distinguishable on the list: a *released* Practice Test with no Attempt yet, a *released* Practice Test with an Attempt in progress, and a *completed* Practice Test.
+- Student Mode also offers a **Results** screen listing only this Student Profile's *completed* Practice Tests, newest first, each opening its results (FR-23). It is an additional view, not a replacement: the flat list above is unchanged and still includes every completed Practice Test. *Why:* below desktop width, Student Mode carries a bottom navigation bar (UX-DR46), and a student returning to an answer key should not have to scroll past every unstarted test to reach it. *(Added 2026-10-13 via `sprint-change-proposal-2026-10-13-bottom-nav.md`.)*
 
 #### FR-17: Answering Questions by format
 
@@ -937,7 +938,7 @@ The Explanation Allowance counts **newly generated** Explanations only. What is 
 
 ### 6.1 Platform
 
-Mobile-first responsive web application. Single codebase, no app store, camera access via the browser. Must be usable on a phone held one-handed in a kitchen and on a family tablet. Desktop is supported but not optimized. **The web app is installable to the home screen as a Progressive Web App (FR-41), so a family reaches it in one tap; installing changes how the app is opened, not what it does.** Native apps are explicitly v2+.
+Mobile-first responsive web application. Single codebase, no app store, camera access via the browser. Must be usable on a phone held one-handed in a kitchen and on a family tablet. Desktop is supported but not optimized. **The web app is installable to the home screen as a Progressive Web App (FR-41), so a family reaches it in one tap; installing changes how the app is opened, not what it does.** Below desktop width (phones and tablets in either orientation), every signed-in surface navigates through a bottom tab bar within thumb reach, as an installed app is expected to; at desktop width it uses a sidebar. Native apps are explicitly v2+.
 
 **Dark mode ships in v0**, on both Student Mode and Parent View. Every design token has a dark counterpart, and every contrast pair required by §10.1 is verified in both modes rather than in light only. This is scope, not polish: the study session this product exists for happens in the evening, often on a tablet in a dim room, and a light-only app is the wrong tool at the hour it is most used.
 

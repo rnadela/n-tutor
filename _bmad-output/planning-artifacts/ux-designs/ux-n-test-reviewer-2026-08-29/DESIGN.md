@@ -335,6 +335,20 @@ components:
     background: '{colors.background-paper}'
     border: '1px solid {colors.divider}'
     elevation: 0
+  bottom-nav:
+    role: chrome
+    height: 56px
+    safeAreaPadding: 'env(safe-area-inset-bottom), env(safe-area-inset-left), env(safe-area-inset-right)'
+    background: '{colors.background-paper}'
+    borderTop: '1px solid {colors.divider}'
+    elevation: 0
+    minTapTarget: '{spacing.tap-target.*} per surface (student 48px, parent/admin 44px)'
+    label: '{typography.caption}'
+    colorIdle: '{colors.text-secondary}'
+    colorCurrent: '{colors.primary-*} of the surface'
+    currentCarrier: 'color, bold weight, and a 3px indicator bar — never color alone'
+    breakpoint: 'below lg (1200px); CSS-only switch'
+    animation: none
   timer-display:
     type: '{typography.timer}'
     numerals: 'tabular-nums'
@@ -580,6 +594,8 @@ Visual specs only; behavior lives in `EXPERIENCE.md`. Each entry reads **role �
 **Mastery row** — control role, Analytics. At `lg` and above, a table row: `{spacing.density.compact.row-height}` 40px, divider-bottom, no shadow. Below `lg`, a `{components.table-card}` carrying the same content, one column, in rank order. Topic name in `{typography.table-cell}`; percentage in tabular figures; inline bar with `{colors.divider}` track, `{colors.success}` fill above threshold and `{colors.warning}` fill for a Weak Area; the Weak Area marker is `{components.weak-area-marker}`. The ranked table, the Topic drill-down, the weighted-regenerate cost block, the empty state, and the tablet layout are drawn in [`mockups/key-analytics.html`](mockups/key-analytics.html).
 
 **Table card** — control role when the row opens something, paper role otherwise; every data table below `lg`. `{rounded.control}`, `{colors.background-paper}` on a 1px `{colors.divider}` border, no shadow, `{spacing.density.*.card-padding}` for its surface. Title: the row's identifying value in `{typography.card-title}`. Row actions top-right, under the same rules as on a table row. Every other column is a field: label in `{typography.caption}` at `{colors.text-secondary}`, value in `{typography.table-cell}`, numbers in tabular figures. Fields wrap as label-over-value; they never sit side by side so tightly that a value truncates. Cards sit `{spacing.density.*.gap}` apart: one column below `sm`, two from `sm`, one always for ranked lists.
+
+**Bottom navigation** — chrome role; Parent View, Student Mode, Admin below `lg`. Flat `{colors.background-paper}` with a 1px `{colors.divider}` top border, no shadow — the same boundary rule as every other surface. Icon above label for every tab, label always visible. The current tab is marked three ways: the surface primary color on icon and label, bold weight, and a short indicator bar — never color alone. Uses each surface's own tap-target floor (`{spacing.tap-target.student}` in Student Mode). Pads by the safe-area insets so nothing sits under a home indicator. No hide-on-scroll and no transition between tabs, under the motion policy.
 
 **Trend sparkline** — control role, Analytics dashboard level. 2px `{colors.secondary}` stroke on a 1px `{colors.divider}` baseline, 40px tall, 120px minimum width, no fill, no gradient, **no draw-in animation**. Every plotted Attempt carries a 2px filled dot so the point count is countable rather than inferred from line length; the endpoint value is printed in `{typography.caption}` with tabular figures. Exception: one line only — there are no per-Topic sparklines.
 
