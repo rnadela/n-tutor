@@ -8,7 +8,7 @@ import type { GradeState } from '@/lib/parent-api';
  * read its own field — two spellings of the app's name is exactly what
  * `commonCopy.appName` exists to prevent.
  */
-const APP_NAME = 'n-tutor';
+const APP_NAME = 'N-Tutor';
 
 /**
  * Copy shared by the primitives in `src/components`, and the only place it
