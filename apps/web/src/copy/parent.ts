@@ -181,7 +181,6 @@ export const parentCopy = {
     lockedUnknown: 'Parent View is locked. Try again later.',
     notElevated: 'Parent View needs the PIN again.',
     failed: 'The PIN could not be saved. Check the details and try again.',
-    back: 'Back to Parent View',
   },
 
   parentView: {
@@ -279,6 +278,8 @@ export const parentCopy = {
      * icon-only strip. */
     collapseSidebar: 'Collapse menu',
     expandSidebar: 'Expand menu',
+    /** The header's back button, naming the screen it goes up to. */
+    backTo: (label: string) => `Back to ${label}`,
 
     /**
      * Leaving Parent View is handing the device to a child, so the control
@@ -410,7 +411,6 @@ export const parentCopy = {
     deleteFailed: 'The profile could not be deleted. Nothing was removed. Try again.',
 
     failed: 'That change could not be saved. Try again.',
-    back: 'Back to Parent View',
   },
   /**
    * The Settings screen, and the account-level data actions that had no home
@@ -521,7 +521,6 @@ export const parentCopy = {
       return `${destroyed} This cannot be undone, and nothing can be recovered afterwards.`;
     },
     deleteAccountFailed: 'The account could not be deleted. Nothing was removed. Try again.',
-    back: 'Back to Parent View',
   },
   /**
    * The page-management strip, before a Source Test is submitted.
@@ -958,7 +957,6 @@ export const parentCopy = {
     addFailed: 'That page could not be added. Try again with another photo.',
     /** Nothing was kept and nothing was spent, so it may simply be tried again. */
     submitFailed: 'The pages could not be saved. Try again.',
-    back: 'Back to Parent View',
   },
   generate: {
     title: 'Generate practice tests',
@@ -971,7 +969,6 @@ export const parentCopy = {
     loading: 'Loading…',
     loadFailed: 'This upload could not be opened. Try again.',
     retry: 'Try again',
-    back: 'Back to the upload',
 
     countLegend: 'How many practice tests',
     /** The radio label. One figure, handed in — nothing counts here. */
@@ -1139,8 +1136,6 @@ export const parentCopy = {
     /** A draft that is no longer there. The way back is offered beside it. */
     notFound: 'That practice test could not be found.',
     retry: 'Try again',
-    backToParentView: 'Back to Parent View',
-    backToList: 'Back to the pending practice tests',
 
     /**
      * Which draft of its job this is, from the two figures the server supplies.
@@ -1356,8 +1351,6 @@ export const parentCopy = {
     empty: 'This student has not handed in a practice test yet.',
     listFailed: 'The finished practice tests could not be listed. Try again.',
     retry: 'Try again',
-    backToParentView: 'Back to Parent View',
-    backToList: 'Back to the finished practice tests',
 
     /** Which run of its practice test this is. The server supplies the figure. */
     run: (ordinal: number) => `Run ${ordinal}`,
@@ -1779,7 +1772,6 @@ export const parentCopy = {
      */
     profilesFailed: 'The students could not be listed. Try again.',
     retry: 'Try again',
-    backToParentView: 'Back to Parent View',
     /** Which run and which question a report points at. Both figures the server's. */
     where: (runOrdinal: number, questionOrdinal: number) =>
       `Run ${runOrdinal}, question ${questionOrdinal}`,
@@ -1850,7 +1842,6 @@ export const parentCopy = {
      */
     profilesFailed: 'The students could not be listed. Try again.',
     retry: 'Try again',
-    backToParentView: 'Back to Parent View',
     /** Which run and which question a dispute points at. Both figures the server's. */
     where: (runOrdinal: number, questionOrdinal: number) =>
       `Run ${runOrdinal}, question ${questionOrdinal}`,
@@ -1923,7 +1914,6 @@ export const parentCopy = {
      */
     profilesFailed: 'The students could not be listed. Try again.',
     retry: 'Try again',
-    backToParentView: 'Back to Parent View',
 
     /** What is waiting, and what is done — the whole list, in one sentence. */
     activityTitle: 'Practice tests',
@@ -2088,8 +2078,6 @@ export const parentCopy = {
    * below is denominated in practice tests, which is the only unit this product spends.
    */
   topicDrillDown: {
-    /** The way back, naming the place rather than the action. */
-    back: 'Back to the topics',
     loading: 'Loading\u2026',
     /** The drill-down read failed. Its own sentence, never a platform string. */
     loadFailed: 'This topic could not be opened. Try again.',

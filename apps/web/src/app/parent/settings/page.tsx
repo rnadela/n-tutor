@@ -2,15 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
-import { ArrowLeft, ShieldAlert, Trash2 } from 'lucide-react';
+import { ShieldAlert, Trash2 } from 'lucide-react';
 import { DestructiveConfirmDialog } from '@/components/Dialog';
 import { parentCopy } from '@/copy/parent';
 import type { AccountConsumption } from '@/lib/consumption-format';
@@ -343,16 +341,6 @@ export default function SettingsPage() {
           }}
         />
       )}
-
-      {/* Client-side, so the provider holding the token stays mounted. */}
-      <Link
-        component={NextLink}
-        href="/parent"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-        {parentCopy.settings.back}
-      </Link>
     </Box>
   );
 }

@@ -270,11 +270,6 @@ describe('what the topic drill-down screen does', () => {
     }
     expect(CODE).toContain('parentCopy.topicDrillDown.');
   });
-
-  it('has a way back that does not depend on any read', () => {
-    expect(CODE).toContain('href="/parent/analytics"');
-    expect(CODE).toContain('parentCopy.topicDrillDown.back');
-  });
 });
 
 describe('the drill-down’s copy', () => {

@@ -104,11 +104,10 @@ describe('the draft review screen', () => {
     expect(PAGE_SOURCE).toContain("router.replace('/parent/pin')");
   });
 
-  it('treats a 404 as a state with a way back, not as a crash', () => {
+  it('treats a 404 as a state, not as a crash', () => {
     expect(PAGE_SOURCE).toContain('cause.status === 404');
     expect(PAGE_SOURCE).toContain('setMissing(true)');
     expect(PAGE_SOURCE).toContain('parentCopy.drafts.notFound');
-    expect(PAGE_SOURCE).toContain('href="/parent/drafts"');
   });
 
   it('prefers the server own sentence on a 4xx it did author', () => {

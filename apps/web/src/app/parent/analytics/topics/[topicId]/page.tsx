@@ -2,13 +2,11 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { AnswerKeyRow, type AnswerKeyRowLabels } from '@/components/AnswerKeyRow';
 import { Addressed, AddressProvider } from '@/components/Address';
@@ -34,7 +32,7 @@ import {
   targetSentence,
 } from '@/lib/topic-drill-down';
 import { density, rounded, typeRoles } from '@/theme/tokens';
-import { ArrowLeft, Sprout } from 'lucide-react';
+import { Sprout } from 'lucide-react';
 
 /** The query parameter the selected student arrives in, from the Mastery table's link. */
 const STUDENT_PARAM = 'student';
@@ -693,14 +691,6 @@ export default function ParentTopicDrillDownPage() {
       <Suspense fallback={null}>
         <TopicDrillDown />
       </Suspense>
-      <Link
-        component={NextLink}
-        href="/parent/analytics"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-        {parentCopy.topicDrillDown.back}
-      </Link>
     </Box>
   );
 }

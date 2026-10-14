@@ -156,12 +156,11 @@ describe('a parent reading one handed-in run', () => {
     expect(PAGE_SOURCE).not.toMatch(/attemptExplanations[\s\S]{0,400}attemptExplanations/u);
   });
 
-  it('states a refusal as the one sentence, with the way back beside it', () => {
+  it('states a refusal as the one sentence', () => {
     // A foreign, unknown or still-open Attempt is one sentence from the API, and this
     // screen does not try to tell them apart.
     expect(PAGE_SOURCE).toContain('cause.status === 404');
     expect(PAGE_SOURCE).toContain('parentCopy.attempts.notFound');
-    expect(PAGE_SOURCE).toContain('parentCopy.attempts.backToList');
   });
 
   it('ends Parent View only on the guard’s own refusal, on either read', () => {
@@ -276,9 +275,7 @@ describe('a parent reading one handed-in run', () => {
     // (UX-DR34/39/47), so a hidden row's `announce` is dropped rather than forwarded: a
     // reader paged away before an adjustment or a regeneration settled must not hear an
     // outcome sentence for a Question that is no longer on screen.
-    expect(CODE.match(/announce=\{paging\.hidden \? noopAnnounce : announce\}/gu)).toHaveLength(
-      2,
-    );
+    expect(CODE.match(/announce=\{paging\.hidden \? noopAnnounce : announce\}/gu)).toHaveLength(2);
   });
 
   // --- Story 5.8: one Question at a time, with the rest mounted and hidden ---
@@ -294,13 +291,11 @@ describe('a parent reading one handed-in run', () => {
     expect(CODE).toContain('useSearchParams()');
   });
 
-  it('keeps the heading and the way back outside the boundary', () => {
-    // So a parent always has both, even while the reads are in flight or after they
-    // failed — and the way back sits below the pager, which puts it under every
-    // Question rather than only under the last one.
+  it('keeps the heading outside the boundary', () => {
+    // So a parent always has it, even while the reads are in flight or after they
+    // failed. The way back is the shell header's, above every state.
     const shell = CODE.slice(CODE.indexOf('export default function ParentAttemptDetailPage()'));
     expect(shell).toContain('parentCopy.attempts.detailTitle');
-    expect(shell).toContain('parentCopy.attempts.backToList');
     expect(shell).toContain('<Suspense fallback={null}>');
     // And the live region stays inside it, because the state that feeds it does.
     expect(shell).not.toContain('aria-live');

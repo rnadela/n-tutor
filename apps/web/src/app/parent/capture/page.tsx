@@ -2,17 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Link from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { ArrowLeft, FileImage, Info, Lock } from 'lucide-react';
+import { FileImage, Info, Lock } from 'lucide-react';
 import { PrimaryButton } from '@/components/Button';
 import { ConfirmDestructiveDialog } from '@/components/Dialog';
 import { useAnnounce } from '@/components/LiveRegion';
@@ -1559,16 +1557,6 @@ export default function CapturePage() {
           }}
         />
       )}
-
-      {/* Client-side, so the provider holding the token stays mounted. */}
-      <Link
-        component={NextLink}
-        href="/parent"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-        {parentCopy.capture.back}
-      </Link>
     </Box>
   );
 }

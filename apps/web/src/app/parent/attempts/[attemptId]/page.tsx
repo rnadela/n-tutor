@@ -3,13 +3,10 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { Route } from 'next';
-import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
-import { ArrowLeft } from 'lucide-react';
 import type { AnswerKeyMapLabels } from '@/components/AnswerKeyMap';
 import { AnswerKeyPager, type AnswerKeyPagerLabels } from '@/components/AnswerKeyPager';
 import { AnswerKeyRow, type AnswerKeyRowLabels } from '@/components/AnswerKeyRow';
@@ -660,14 +657,6 @@ export default function ParentAttemptDetailPage() {
       <Suspense fallback={null}>
         <ParentAttemptDetail />
       </Suspense>
-      <Link
-        component={NextLink}
-        href="/parent/attempts"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-        {parentCopy.attempts.backToList}
-      </Link>
     </Box>
   );
 }

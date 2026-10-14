@@ -8,12 +8,10 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Link from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import {
-  ArrowLeft,
   ArrowRight,
   CircleCheck,
   FileQuestion,
@@ -494,15 +492,6 @@ export default function ParentGradeDisputesPage() {
           </Box>
         ))
       )}
-
-      <Link
-        component={NextLink}
-        href="/parent"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-        {parentCopy.disputes.backToParentView}
-      </Link>
     </Box>
   );
 }

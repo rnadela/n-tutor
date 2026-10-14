@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -10,12 +9,11 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Divider from '@mui/material/Divider';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import Link from '@mui/material/Link';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { ArrowLeft, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
 import { NETWORK_STATUS, ParentApiError, parentApi, type AuthPolicy } from '@/lib/parent-api';
@@ -247,15 +245,6 @@ export default function ChangePinPage() {
           </Button>
         </CardContent>
       </Card>
-      {/* Client-side, so the provider holding the token stays mounted. */}
-      <Link
-        component={NextLink}
-        href="/parent"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-        {parentCopy.pin.back}
-      </Link>
     </Box>
   );
 }

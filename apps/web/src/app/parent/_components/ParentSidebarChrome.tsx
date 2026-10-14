@@ -9,6 +9,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import {
+  ArrowLeft,
   BarChart3,
   CheckCircle2,
   ChevronRight,
@@ -26,6 +27,7 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
+import type { Route } from 'next';
 import NextLink from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BackToStudentMode } from './BackToStudentMode';
@@ -250,6 +252,30 @@ function locate(pathname: string): { group?: string; label: string } {
 }
 
 /**
+ * Where the header's back button goes: one level up the Parent View tree, or
+ * `null` on Parent View's own home, which has nowhere above it.
+ *
+ * Up the hierarchy rather than back through history, so the button lands in the
+ * same place however the parent arrived — a deep link, a reload and a tab press
+ * included. A drill-down goes to the screen it continues (generating continues
+ * an upload); anything else walks up its path to the nearest destination the
+ * sidebar lists, so `/parent/pin/change` skips the PIN gate and lands on home.
+ */
+export function backTarget(pathname: string): NavItem | null {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/u, '') : pathname;
+  if (path === '/parent' || !path.startsWith('/parent/')) return null;
+  const drillDown = DRILL_DOWN_PARENTS.find(([prefix]) => path.startsWith(prefix));
+  if (drillDown !== undefined) return navDestination(drillDown[1]);
+  let up = path;
+  while (up !== '/parent') {
+    up = up.slice(0, up.lastIndexOf('/'));
+    const found = NAV_ITEMS.find((item) => item.href === up);
+    if (found !== undefined) return found;
+  }
+  return navDestination('/parent');
+}
+
+/**
  * The destination list, shared between the permanent desktop sidebar and the
  * mobile drawer so the two never drift into two different navigations.
  *
@@ -454,6 +480,7 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
   // there is no width at which a remembered collapse means nothing.
   const railCollapsed = collapsed;
   const place = locate(pathname);
+  const back = backTarget(pathname);
 
   return (
     <CaptureOpenProvider>
@@ -617,6 +644,23 @@ export function ParentSidebarChrome({ children }: { children: React.ReactNode })
             <Box
               sx={{ display: 'flex', alignItems: 'center', gap: `${density.gap}px`, minWidth: 0 }}
             >
+              {/* The one way up, at the top-left corner a native app puts it — every
+                  screen below home carries it here rather than a link of its own at
+                  the foot of the page. Client-side, so the provider holding the
+                  elevation bearer stays mounted. */}
+              {back !== null ? (
+                <Tooltip title={parentCopy.parentView.backTo(back.label)}>
+                  <IconButton
+                    component={NextLink}
+                    href={back.href as Route}
+                    aria-label={parentCopy.parentView.backTo(back.label)}
+                    edge="start"
+                    sx={{ width: density.tapTarget, height: density.tapTarget, flexShrink: 0 }}
+                  >
+                    <ArrowLeft size={20} aria-hidden="true" />
+                  </IconButton>
+                </Tooltip>
+              ) : null}
               <Typography
                 component="p"
                 sx={{

@@ -81,7 +81,6 @@ describe('the pending drafts list', () => {
   it('navigates client-side, so the in-memory elevation bearer survives', () => {
     expect(PAGE_SOURCE).toContain("'use client'");
     expect(PAGE_SOURCE).toContain('component={DraftLink}');
-    expect(PAGE_SOURCE).toContain('component={NextLink}');
   });
 
   it('sends a parent with no token in memory back to the PIN', () => {

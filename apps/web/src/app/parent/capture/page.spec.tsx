@@ -1834,9 +1834,11 @@ describe('the two controls that move between the steps', () => {
     expect(next).toContain(
       `aria-label="${parentCopy.capture.steps.nextTo(parentCopy.capture.steps.check)}"`,
     );
-    // Neither name collides with the "Back to Parent View" link, which leaves
-    // the screen altogether.
-    expect(parentCopy.capture.steps.backTo('Details')).not.toContain(parentCopy.capture.back);
+    // Neither name collides with the header's "Back to Parent View" button,
+    // which leaves the screen altogether.
+    expect(parentCopy.capture.steps.backTo('Details')).not.toContain(
+      parentCopy.parentView.backTo(parentCopy.parentView.title),
+    );
     // And each name contains the word printed on the button, or voice control
     // cannot reach the button by what it reads (WCAG 2.5.3, Label in Name).
     expect(parentCopy.capture.steps.backTo('Details')).toContain(parentCopy.capture.steps.back);
@@ -1934,12 +1936,11 @@ describe('which step the screen shows', () => {
     for (const step of CAPTURE_STEPS) {
       expect(PAGE_SOURCE).toContain(`{step === '${step}' &&`);
     }
-    // The error Alert, the delete confirmation and the link off the screen are
-    // outside the stepper: none of them belongs to a step.
+    // The error Alert and the delete confirmation are outside the stepper:
+    // neither belongs to a step.
     const stepped = PAGE_SOURCE.indexOf("{step === 'details' &&");
     expect(PAGE_SOURCE.indexOf('role="alert"')).toBeLessThan(stepped);
     expect(PAGE_SOURCE.indexOf('<ConfirmDestructiveDialog')).toBeGreaterThan(stepped);
-    expect(PAGE_SOURCE.indexOf('parentCopy.capture.back')).toBeGreaterThan(stepped);
   });
 
   it('moves focus to the new step’s heading, which is focusable only programmatically', () => {

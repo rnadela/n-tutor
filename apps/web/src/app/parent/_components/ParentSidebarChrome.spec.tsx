@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { installBannerSurface } from '@/lib/install-banner';
 import { bottomNavShown } from '@/lib/bottom-nav';
 import { parentCopy } from '@/copy/parent';
-import { NAV_GROUPS, PARENT_TABS } from './ParentSidebarChrome';
+import { NAV_GROUPS, PARENT_TABS, backTarget } from './ParentSidebarChrome';
 
 const SOURCE = readFileSync(path.resolve(import.meta.dirname, 'ParentSidebarChrome.tsx'), 'utf8');
 
@@ -171,5 +171,48 @@ describe('Parent View’s bottom navigation', () => {
     expect(CODE).toContain('{ xs: barOffsetCss, lg: `${density.sectionMargin}px` }');
     // And by the section margin alone where no bar is on screen.
     expect(CODE).toMatch(/: `\$\{density\.sectionMargin\}px`;/u);
+  });
+});
+
+describe('Parent View’s back button', () => {
+  it('has nowhere to go from home', () => {
+    expect(backTarget('/parent')).toBeNull();
+    expect(backTarget('/parent/')).toBeNull();
+    expect(backTarget('/student')).toBeNull();
+  });
+
+  it('goes up to home from every top-level destination', () => {
+    for (const href of [
+      '/parent/students',
+      '/parent/capture',
+      '/parent/drafts',
+      '/parent/attempts',
+      '/parent/explanation-flags',
+      '/parent/grade-disputes',
+      '/parent/analytics',
+      '/parent/settings',
+    ]) {
+      expect(backTarget(href)?.href).toBe('/parent');
+    }
+  });
+
+  it('skips the PIN gate on the way up from changing the PIN', () => {
+    expect(backTarget('/parent/pin/change')?.href).toBe('/parent');
+  });
+
+  it('goes up from a drill-down to the list it was opened from', () => {
+    expect(backTarget('/parent/drafts/abc')?.href).toBe('/parent/drafts');
+    expect(backTarget('/parent/attempts/abc')?.href).toBe('/parent/attempts');
+    expect(backTarget('/parent/analytics/topics/abc')?.href).toBe('/parent/analytics');
+    expect(backTarget('/parent/generate/abc')?.href).toBe('/parent/capture');
+  });
+
+  it('names where it goes, and sits in the header ahead of the screen’s name', () => {
+    expect(parentCopy.parentView.backTo(parentCopy.parentView.title)).toBe('Back to Parent View');
+    const header = CODE.slice(CODE.indexOf('component="header"'));
+    expect(header.indexOf('aria-label={parentCopy.parentView.backTo(back.label)}')).toBeGreaterThan(
+      -1,
+    );
+    expect(header.indexOf('backTo(back.label)')).toBeLessThan(header.indexOf('{place.label}'));
   });
 });

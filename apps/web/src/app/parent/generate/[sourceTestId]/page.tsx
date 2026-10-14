@@ -13,7 +13,6 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import FormLabel from '@mui/material/FormLabel';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
-import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { ORDER_HEADING_ID, PageStrip } from '@/app/parent/capture/PageStrip';
 import { PrimaryButton } from '@/components/Button';
@@ -41,7 +40,7 @@ import {
 } from '@/lib/practice-test-count';
 import { applyIfCurrent, endsParentView } from '@/lib/parent-view';
 import { density, rounded } from '@/theme/tokens';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 /** The count fieldset's own label, named once and pointed at by the group. */
 const COUNT_LEGEND_ID = 'generate-count-legend';
@@ -894,18 +893,6 @@ export default function GeneratePage() {
           </Typography>
         )}
       </AppDialog>
-
-      {/* A client-side link, not a reload: the elevation bearer lives in this
-          browser's memory alone (AD-18), so a full navigation would land the
-          parent back on the PIN gate rather than on the upload. */}
-      <Link
-        component={NextLink}
-        href="/parent/capture"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-        {parentCopy.generate.back}
-      </Link>
     </Box>
   );
 }

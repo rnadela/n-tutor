@@ -471,7 +471,7 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     // which would make a navigation indistinguishable from an expiry. Leaving the run and
     // coming back to it through the list is a fresh read of both screens either way, which
     // is the whole of what "it outlived the screen it was made on" needs.
-    await page.getByRole('link', { name: 'Back to the finished practice tests' }).click();
+    await page.getByRole('link', { name: 'Back to Practice tests a student has finished' }).click();
     await page.getByRole('link', { name: 'Back to Parent View' }).click();
     await expect(parentViewHeading(page)).toBeVisible();
     await page

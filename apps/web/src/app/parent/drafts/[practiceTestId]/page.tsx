@@ -2,19 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import NextLink from 'next/link';
 import type { Route } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import { ArrowLeft, CircleCheck, Pencil, Send, Trash2 } from 'lucide-react';
+import { CircleCheck, Pencil, Send, Trash2 } from 'lucide-react';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
 import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import FormLabel from '@mui/material/FormLabel';
-import Link from '@mui/material/Link';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
 import Typography from '@mui/material/Typography';
@@ -1495,17 +1493,6 @@ export default function DraftReviewPage() {
               : parentCopy.drafts.discardBody(studentName)}
         </Typography>
       </AppDialog>
-
-      {/* Client-side, so the provider holding the elevation bearer survives the
-          navigation. Offered in every state, including the missing one. */}
-      <Link
-        component={NextLink}
-        href="/parent/drafts"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifySelf: 'start' }}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-        {parentCopy.drafts.backToList}
-      </Link>
     </Box>
   );
 }
