@@ -253,7 +253,8 @@ function locate(pathname: string): { group?: string; label: string } {
 
 /**
  * Where the header's back button goes: one level up the Parent View tree, or
- * `null` on Parent View's own home, which has nowhere above it.
+ * `null` on a bottom-bar tab's own screen — the way a native app leaves the
+ * arrow off a tab root, since the tab bar is already the way between them.
  *
  * Up the hierarchy rather than back through history, so the button lands in the
  * same place however the parent arrived — a deep link, a reload and a tab press
@@ -263,7 +264,8 @@ function locate(pathname: string): { group?: string; label: string } {
  */
 export function backTarget(pathname: string): NavItem | null {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/u, '') : pathname;
-  if (path === '/parent' || !path.startsWith('/parent/')) return null;
+  if (!path.startsWith('/parent/')) return null;
+  if (PARENT_TABS.some((tab) => tab.href === path)) return null;
   const drillDown = DRILL_DOWN_PARENTS.find(([prefix]) => path.startsWith(prefix));
   if (drillDown !== undefined) return navDestination(drillDown[1]);
   let up = path;

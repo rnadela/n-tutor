@@ -472,7 +472,12 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     // coming back to it through the list is a fresh read of both screens either way, which
     // is the whole of what "it outlived the screen it was made on" needs.
     await page.getByRole('link', { name: 'Back to Practice tests a student has finished' }).click();
-    await page.getByRole('link', { name: 'Back to Parent View' }).click();
+    // The list is a tab root, which carries no back arrow — home is reached the way a
+    // tab root's neighbours are, through the navigation.
+    await page
+      .getByRole('navigation', { name: 'Parent View' })
+      .getByRole('link', { name: 'Parent View', exact: true })
+      .click();
     await expect(parentViewHeading(page)).toBeVisible();
     await page
       .getByRole('navigation', { name: 'Parent View' })

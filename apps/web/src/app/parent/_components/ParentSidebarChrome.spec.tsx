@@ -175,18 +175,17 @@ describe('Parent View’s bottom navigation', () => {
 });
 
 describe('Parent View’s back button', () => {
-  it('has nowhere to go from home', () => {
-    expect(backTarget('/parent')).toBeNull();
-    expect(backTarget('/parent/')).toBeNull();
+  it('is left off every bottom-bar tab’s own screen, as on a native tab root', () => {
+    for (const tab of PARENT_TABS) {
+      expect(backTarget(tab.href)).toBeNull();
+      expect(backTarget(`${tab.href}/`)).toBeNull();
+    }
     expect(backTarget('/student')).toBeNull();
   });
 
-  it('goes up to home from every top-level destination', () => {
+  it('goes up to home from every destination behind More', () => {
     for (const href of [
       '/parent/students',
-      '/parent/capture',
-      '/parent/drafts',
-      '/parent/attempts',
       '/parent/explanation-flags',
       '/parent/grade-disputes',
       '/parent/analytics',
