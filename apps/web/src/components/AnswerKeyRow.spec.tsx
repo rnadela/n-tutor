@@ -331,6 +331,65 @@ describe('what one answer-key row shows a child', () => {
     expect(code).not.toMatch(/commonCopy/u);
   });
 
+  // --- Story 5.8: one of twenty, with the other nineteen still mounted ----
+
+  it('renders the `hidden` attribute, so a held-back row leaves the accessible tree', () => {
+    const shown = renderToStaticMarkup(
+      createElement(
+        ThemeProvider,
+        { theme: studentTheme },
+        createElement(AnswerKeyRow, { row: row(), labels: STUDENT_LABELS, hidden: false }),
+      ),
+    );
+    expect(shown).not.toMatch(/<li[^>]*\shidden/u);
+
+    const held = renderToStaticMarkup(
+      createElement(
+        ThemeProvider,
+        { theme: studentTheme },
+        createElement(AnswerKeyRow, { row: row(), labels: STUDENT_LABELS, hidden: true }),
+      ),
+    );
+    expect(held).toMatch(/<li[^>]*\shidden/u);
+    // The content is still rendered: that is the whole point — an open explanation, a
+    // loaded panel and a half-typed objection survive a page turn because the row was
+    // never unmounted. `hidden` is what keeps it out of the accessible tree meanwhile.
+    expect(held).toContain(studentCopy.results.question(3));
+  });
+
+  it('hides a `hidden` row on screen too, against its own `display: grid`', () => {
+    // The `sx` `display: 'grid'` beats the UA stylesheet's `[hidden] { display: none }`,
+    // so without the explicit rule the attribute would take the row out of the
+    // accessible tree while leaving it visible — the worst of both.
+    const source = readFileSync(path.resolve(import.meta.dirname, 'AnswerKeyRow.tsx'), 'utf8');
+    expect(source).toContain("'&[hidden]': { display: 'none' }");
+  });
+
+  it('draws a separator between two visible rows and none beside a lone one', () => {
+    // The stacked drill-down behaves exactly as it always did; a paged surface shows one
+    // row, which has nothing above it to be separated from.
+    const source = readFileSync(path.resolve(import.meta.dirname, 'AnswerKeyRow.tsx'), 'utf8');
+    expect(source).toContain("'&:not([hidden]) + &:not([hidden])': { borderTop: '1px solid'");
+    expect(source).not.toMatch(/'& \+ &': \{ borderTop/u);
+  });
+
+  it('keeps the heading at h4 and makes it a landing place, not a tab stop', () => {
+    const markup = render(row());
+    expect(markup).toContain('<h4');
+    expect(markup).toContain('tabindex="-1"');
+    expect(markup).not.toContain('<h3');
+    expect(markup).not.toContain('<h2');
+  });
+
+  it('is a whole row with neither new prop passed, as the drill-down renders it', () => {
+    // Both are optional precisely so the analytics drill-down — a filtered subset of
+    // evidence across several runs, which is a list and not a paper to page — keeps
+    // stacking every row without knowing a pager exists.
+    const stacked = render(row());
+    expect(stacked).not.toMatch(/<li[^>]*\shidden/u);
+    expect(stacked).toContain(studentCopy.results.question(3));
+  });
+
   it('renders the same layout about a child in the third person', () => {
     // Same markup, same five carriers, different person: what makes one component
     // serve both surfaces rather than two components drifting apart.

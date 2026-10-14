@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
+  answerKeyRow,
+  showQuestion,
   countAttemptsFor,
   drawOnPracticeTestFixture,
   createGradeLevelFixture,
@@ -367,11 +369,17 @@ test.describe('handing an Attempt in', () => {
     expect(statesOnScreen).toEqual(statesFromTable);
     // The blank rows say so on their own row, and the answered one carries its
     // verdict — each as the literal label, as real text.
-    const firstRow = page.locator('[data-testid="answer-key-row"]').first();
-    await expect(firstRow.getByTestId('grade-state-label')).toHaveText('Correct');
-    await expect(
-      page.locator('[data-testid="answer-key-row"]').nth(1).getByTestId('grade-state-label'),
-    ).toHaveText('Unanswered');
+    // Addressed by **ordinal** and reached by an explicit page turn: since Story 5.8
+    // one Question is on screen at a time, so "the first row in the DOM" is no longer
+    // "the Question the child is looking at".
+    const answered = await showQuestion(page, 1);
+    await expect(answered.getByTestId('grade-state-label')).toHaveText('Correct');
+    const beforeTurn = requests.length;
+    const blank = await showQuestion(page, 2);
+    await expect(blank.getByTestId('grade-state-label')).toHaveText('Unanswered');
+    // The turn fired nothing at the wire: every row arrived in the one read, so
+    // paging cannot bill a second provider call.
+    expect(requests).toHaveLength(beforeTurn);
 
     // --- Student Home reads Completed --------------------------------------
     await page.goto('/student');
@@ -734,10 +742,8 @@ test.describe('a released test with a figure in it', () => {
     // The answer key renders beneath the handed-in panel, with no further press.
     await expect(page.getByTestId('attempt-results')).toBeVisible();
 
-    const row = page.locator(
-      `[data-testid="answer-key-row"][data-ordinal="${drawn.questionOrdinal}"]`,
-    );
-    await expect(row).toBeVisible();
+    // Paged to, by ordinal: the pictured Question is not necessarily Question 1.
+    const row = await showQuestion(page, drawn.questionOrdinal);
     await expect(row.getByRole('img', { name: drawn.promptAlt })).toBeVisible();
     // `first()`: the pictured option is both the answer the child gave and the
     // right one, so the row draws it in each labelled slot.
@@ -833,9 +839,27 @@ test.describe('what the results say in the states a hand-in cannot produce', () 
     await expect(gap).toContainText('may go up');
     // The row says it on its own row too, so a row read alone is never silent.
     const ungradedRow = page.locator('[data-testid="answer-key-row"][data-state="Ungraded"]');
+    // Still exactly one row in the paper, whichever Question is on screen: every row
+    // stays mounted and only one of them is shown.
     await expect(ungradedRow).toHaveCount(1);
-    await expect(ungradedRow.getByTestId('answer-key-row-ungraded')).toBeVisible();
-    await expect(ungradedRow.getByTestId('grade-state-label')).toHaveText('Not graded yet');
+    const ungraded = await showQuestion(
+      page,
+      Number(await ungradedRow.getAttribute('data-ordinal')),
+    );
+    await expect(ungraded.getByTestId('answer-key-row-ungraded')).toBeVisible();
+    await expect(ungraded.getByTestId('grade-state-label')).toHaveText('Not graded yet');
+    // And the results map says the same thing about it, in the grade vocabulary: the
+    // cell carries the ungraded state and the legend names it.
+    await expect(
+      page
+        .getByTestId('answer-key-map-rail')
+        .locator('[data-testid="answer-key-map-cell"][data-state="Ungraded"]'),
+    ).toHaveCount(1);
+    await expect(
+      page.getByTestId('answer-key-map-legend').locator('[data-state="Ungraded"]').first(),
+      // `toContainText`, because the entry carries its `aria-hidden` glyph beside the
+      // word — which is the whole point: the state is never the word alone.
+    ).toContainText('Not graded yet');
     // Which test this is, for a child arriving from history rather than a hand-in.
     await expect(page.getByTestId('attempt-results-test')).toHaveText(
       'Submit Subject · 3 questions',
@@ -874,6 +898,53 @@ test.describe('what the results say in the states a hand-in cannot produce', () 
     // Nothing correct and nothing blank, so the meta line is absent rather than
     // reading `0 not correct · 0 unanswered`.
     await expect(page.getByTestId('attempt-results-meta')).toHaveCount(0);
+
+    // **And the pager still pages every row.** Zero *gradable* Questions is not zero
+    // Questions: the header states the gap, and the paper is still a paper to turn.
+    await expect(page.locator('[data-testid="answer-key-row"]')).toHaveCount(2);
+    await expect(page.getByTestId('answer-key-position')).toHaveText('Question 1 of 2');
+    const ungradedRail = page.getByTestId('answer-key-map-rail');
+    await expect(ungradedRail.locator('[data-testid="answer-key-map-cell"]')).toHaveCount(2);
+    // One state on this paper, so one legend entry — a legend naming `Correct` here
+    // would describe a state the reader cannot see.
+    await expect(ungradedRail.locator('[data-testid="answer-key-map-legend-entry"]')).toHaveCount(
+      1,
+    );
+    await expect(ungradedRail.locator('[data-testid="answer-key-map-legend-entry"]')).toContainText(
+      'Not graded yet',
+    );
+    // No figure reaches the map: the score is the header's one sentence, and here there
+    // is not even one of those.
+    await expect(ungradedRail).not.toContainText(/%|out of/u);
+    const second = await showQuestion(page, 2);
+    await expect(second.getByTestId('answer-key-row-ungraded')).toBeVisible();
+    await expect(page.getByTestId('answer-key-position')).toHaveText('Question 2 of 2');
+
+    // --- No Questions at all: nothing to page, and no position about nothing -
+    await page.unroute(RESULTS_ROUTE);
+    await page.route(RESULTS_ROUTE, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          craftedResults([], { correct: 0, denominator: 0, excludedUngraded: 0 }),
+        ),
+      });
+    });
+    await page.reload();
+    await expect(page.getByTestId('take-test-handed-in')).toBeVisible();
+    await expect(page.getByTestId('attempt-results-score')).toHaveText(
+      'There is nothing to score yet. Nothing on this test has been graded.',
+    );
+    // `Question 0 of 0` over an empty map and an empty legend is a position about
+    // nothing, so there is none of it — and no pager at all.
+    await expect(page.getByTestId('attempt-results-no-questions')).toHaveCount(1);
+    await expect(page.getByTestId('answer-key-pager')).toHaveCount(0);
+    await expect(page.getByTestId('answer-key-position')).toHaveCount(0);
+    await expect(page.getByTestId('answer-key-map')).toHaveCount(0);
+    await expect(page.locator('[data-testid="answer-key-row"]')).toHaveCount(0);
+    // The way to another run is still there, under a paper with nothing on it.
+    await expect(page.getByTestId('take-test-retake')).toBeVisible();
   });
 
   test('says a Question was just graded, and announces it in the words it shows', async ({
@@ -914,13 +985,17 @@ test.describe('what the results say in the states a hand-in cannot produce', () 
     await expect.poll(() => reads).toBe(1);
     await expect(liveRegion(page)).toHaveText(sentence);
     // The row itself says so too, in words rather than by a highlight.
-    const newly = page.locator('[data-testid="answer-key-row"][data-ordinal="2"]');
+    const newly = await showQuestion(page, 2);
     await expect(newly.getByTestId('answer-key-row-newly-graded')).toHaveText('Just graded.');
+    await expect(answerKeyRow(page, 1).getByTestId('answer-key-row-newly-graded')).toHaveCount(0);
+    // The map marks the same Question, and marks only it.
     await expect(
-      page
-        .locator('[data-testid="answer-key-row"][data-ordinal="1"]')
-        .getByTestId('answer-key-row-newly-graded'),
-    ).toHaveCount(0);
+      page.getByTestId('answer-key-map-rail').locator('[data-newly-graded="true"]'),
+    ).toHaveCount(1);
+    // The page turn announced where the reader is, in the words the line displays.
+    await expect(liveRegion(page)).toHaveText('Question 2 of 2');
+    // And it fired no request at all: the rows were already in hand.
+    await expect.poll(() => reads).toBe(1);
     // A perfect paper, so no `0 not correct · 0 unanswered` line.
     await expect(page.getByTestId('attempt-results-meta')).toHaveCount(0);
     await expect(page.getByTestId('attempt-results-score')).toHaveText('You got 2 out of 2 right.');

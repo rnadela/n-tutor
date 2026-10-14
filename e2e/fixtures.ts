@@ -1,8 +1,61 @@
 import { randomUUID } from 'node:crypto';
-import type { Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import { e2eDatabaseUrl } from './database';
 import { lastMailTo, resetLinkFrom } from './mail-sink';
+
+/**
+ * One answer-key row, by the **stored ordinal** the paged surfaces page by.
+ *
+ * Since Story 5.8 both Attempt surfaces show one Question at a time, with every other
+ * row mounted and carrying `hidden`. So `.first()` and `.nth(n)` no longer mean "the
+ * Question on screen": a deep link from a Grade dispute lands on Question 7, and the
+ * first row in the DOM is still Question 1. Every assertion about a particular Question
+ * addresses it by its ordinal, which is the number the child was shown while they
+ * worked — the one figure that is stable across runs, reads and page turns.
+ */
+export function answerKeyRow(page: Page, ordinal: number): Locator {
+  return page.locator(`[data-testid="answer-key-row"][data-ordinal="${ordinal}"]`);
+}
+
+/**
+ * Turns the paged answer key to one Question and hands back its row.
+ *
+ * **Through whichever form of the results map is actually on screen.** The rail is
+ * `display: none` below the `md` key, so clicking it at a phone viewport would hang on an
+ * element that is never going to be visible; below `md` the way to a Question is the
+ * overlay's own opener. Playwright's Desktop Chrome is wider than `md`, but several
+ * suites resize to 390px mid-test, and a helper that only worked at one width would make
+ * every one of those a timeout nobody could read.
+ *
+ * **Gated on the `hidden` attribute and not on visibility.** `isVisible()` is also
+ * `false` for a row that has merely not rendered yet, which would send this clicking
+ * before the answer key had arrived; `toHaveCount(1)` waits for the row to exist and the
+ * attribute then says exactly whether it is the Question on screen.
+ *
+ * A page turn fires no request — the rows all arrived in the one read — so there is
+ * nothing to wait for but the row.
+ */
+export async function showQuestion(page: Page, ordinal: number): Promise<Locator> {
+  const row = answerKeyRow(page, ordinal);
+  await expect(row).toHaveCount(1);
+  if ((await row.getAttribute('hidden')) === null) return row;
+
+  const cell = `[data-testid="answer-key-map-cell"][data-ordinal="${ordinal}"]`;
+  const rail = page.getByTestId('answer-key-map-rail');
+  if (await rail.isVisible()) {
+    await rail.locator(cell).click();
+  } else {
+    await page.getByTestId('answer-key-map-open').click();
+    const overlay = page.getByRole('dialog');
+    await expect(overlay).toBeVisible();
+    await overlay.locator(cell).click();
+    // The jump closes it, which is what makes the row reachable at all below `md`.
+    await expect(overlay).toHaveCount(0);
+  }
+  await expect(row).toBeVisible();
+  return row;
+}
 
 /**
  * The accessible name of a row's `⋮` trigger, which both copy modules author

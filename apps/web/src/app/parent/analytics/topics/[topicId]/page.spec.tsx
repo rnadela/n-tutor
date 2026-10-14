@@ -148,6 +148,20 @@ describe('what the topic drill-down screen does', () => {
     expect(CODE).not.toMatch(/mastery!?\.value\s*[<>]/u);
   });
 
+  it('stacks every row and pages none of them', () => {
+    // **Story 5.8 deliberately stopped here.** The two Attempt surfaces page one
+    // Question at a time because they are one paper read in order; this is a filtered
+    // subset of evidence across several runs, which is a list. So it passes neither
+    // `hidden` nor `headingRef`, imports no pager, and renders the rows in one `ul` as
+    // it always has — which is also why both of `AnswerKeyRow`'s new props are
+    // optional rather than required.
+    expect(CODE).toContain('<AnswerKeyRow');
+    expect(CODE).toContain('role="list"');
+    expect(CODE).not.toMatch(/AnswerKeyPager|AnswerKeyMap|QuestionGrid/u);
+    expect(CODE).not.toMatch(/\shidden(=|\}|\s|$)|headingRef/mu);
+    expect(CODE).not.toMatch(/answer-key-paging|QUESTION_PARAM/u);
+  });
+
   it('skips no heading rank: one h1, and h2 for every section under it', () => {
     // `AnswerKeyRow` heads each row at `h4` under these, so an `h3` here would make the
     // rows siblings of the section they belong to — and an outline that lies is worse

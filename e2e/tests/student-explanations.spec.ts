@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createGradeLevelFixture, createSubjectFixture, uniqueParentEmail } from '../fixtures';
+import {
+  answerKeyRow,
+  createGradeLevelFixture,
+  createSubjectFixture,
+  showQuestion,
+  uniqueParentEmail,
+} from '../fixtures';
 
 /**
  * Asking why, end to end.
@@ -177,8 +183,11 @@ test.describe('asking why an answer is the answer', () => {
 
     const rows = page.locator('[data-testid="answer-key-row"]');
     await expect(rows).toHaveCount(total);
-    const firstRow = rows.first();
-    const secondRow = rows.nth(1);
+    // Addressed by **ordinal**, not by position: since Story 5.8 one Question is on
+    // screen at a time and the others are mounted and hidden, so a page turn is part
+    // of reaching the second one.
+    const firstRow = answerKeyRow(page, 1);
+    const secondRow = answerKeyRow(page, 2);
 
     // --- Nothing is asked for until somebody presses -----------------------
     // The first ask bills a provider call. A screen that prefetched would bill one
@@ -232,6 +241,10 @@ test.describe('asking why an answer is the answer', () => {
     // is forced at the wire rather than by breaking the server, so the case is
     // about what the screen does with it and nothing else.
     await page.route('**/explanation', (route) => route.abort());
+    const asksBeforeTurn = asks.length;
+    await showQuestion(page, 2);
+    // The turn asked for nothing: the rows were all in the one read already.
+    expect(asks).toHaveLength(asksBeforeTurn);
     const secondControl = secondRow.getByTestId('explain-control');
     await secondControl.focus();
     await expect(secondControl).toBeFocused();
@@ -250,6 +263,15 @@ test.describe('asking why an answer is the answer', () => {
     await expect(page.getByTestId('attempt-results-score')).toBeVisible();
     await expect(rows).toHaveCount(total);
     await expect(firstRow.getByTestId('explain-body')).toHaveText(prose);
+    // And paging back to it shows it still open, with its prose, having asked
+    // nothing: the rows were never unmounted, only hidden.
+    const asksBeforeReturn = asks.length;
+    await showQuestion(page, 1);
+    await expect(firstRow.getByTestId('explain-body')).toBeVisible();
+    await expect(firstRow.getByTestId('explain-body')).toHaveText(prose);
+    expect(asks).toHaveLength(asksBeforeReturn);
+    await showQuestion(page, 2);
+    expect(asks).toHaveLength(asksBeforeReturn);
 
     // The retry is a person pressing, and it is the only thing that asks again.
     const retry = secondRow.getByTestId('explain-retry');
@@ -291,8 +313,9 @@ test.describe('asking why an answer is the answer', () => {
 
     await sitAndHandIn(page);
     const rows = page.locator('[data-testid="answer-key-row"]');
-    const firstRow = rows.first();
-    const secondRow = rows.nth(1);
+    const firstRow = answerKeyRow(page, 1);
+    const secondRow = answerKeyRow(page, 2);
+    await expect(rows.first()).toBeVisible();
 
     // --- At the cap: the plan is spent, and it is the plan that is spent ----
     const capSentence =
@@ -317,6 +340,11 @@ test.describe('asking why an answer is the answer', () => {
 
     // --- With no connection: nothing is even sent --------------------------
     await page.unroute('**/explanation');
+    // Paged **before** the connection goes: `?q=` is written with a client-side
+    // `router.replace`, and a soft navigation is one of the things a dropped connection
+    // takes away. What this case is about is a press with no connection, so the
+    // Question is reached while there still is one.
+    await showQuestion(page, 2);
     await page.context().setOffline(true);
     const before = asks.length;
     await secondRow.getByTestId('explain-control').click();

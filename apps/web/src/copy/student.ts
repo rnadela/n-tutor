@@ -377,6 +377,74 @@ export const studentCopy = {
      */
     retakeFailed: 'Your retake could not be started.',
     /**
+     * Everything the paged answer key says: where the child is, the two ways to move,
+     * and the results map they can jump from.
+     *
+     * **Deliberately not `takeTest.counter` / `back` / `next` / `cellState` reused.**
+     * The take-test vocabulary is progress-only and is pinned by its own spec to carry
+     * no grade word at all — `AttemptResults.spec.tsx` asserts that
+     * `JSON.stringify(studentCopy.takeTest)` matches none of `unanswered`, `correct`,
+     * `wrong`, `score` or `grade`. The results vocabulary is grade-only: a cell here
+     * says `Correct` or `Not graded yet`, which is exactly the word the other one may
+     * never say. Sharing one block would make those two bans a single mutable object,
+     * and the first reword would silently take a grade word back into a screen read
+     * while the child is still working. Two vocabularies for two moments.
+     *
+     * Second person, no exclamation mark, no error code, and no figure written into a
+     * sentence: every number is handed in.
+     */
+    pager: {
+      /** Where the child is in the answer key. Both figures are handed in. */
+      position: (ordinal: number, total: number) => `Question ${ordinal} of ${total}`,
+      previous: 'Previous',
+      next: 'Next',
+      /** The overlay's opener, below `md`. The rail needs none: it is already there. */
+      openMap: 'All your questions',
+      closeMap: 'Close',
+      /** The results map's own heading, in both the rail and the overlay. */
+      mapHeading: 'All your questions',
+      /**
+       * One map cell's whole spoken sentence.
+       *
+       * The grade label is handed in from `commonCopy.gradeState`, which is the one
+       * place the four literals exist — so a cell cannot come to say a different word
+       * for a state than the row it jumps to. The current cell says so in words as
+       * well as through `aria-current`, and a Question this read judged says that too:
+       * the mark drawn in the cell is `aria-hidden`, so the sentence is the only
+       * account of it a reader gets.
+       */
+      cellState: (ordinal: number, gradeLabel: string, current: boolean, newlyGraded: boolean) =>
+        `Question ${ordinal}, ${gradeLabel}${newlyGraded ? ', just graded' : ''}${
+          current ? ', you are here' : ''
+        }`,
+      /**
+       * The mark drawn in a cell this read judged.
+       *
+       * A glyph rather than a word because a cell is 48px of paper, and
+       * `aria-hidden` because the sentence above already says it. Never a colour and
+       * never a highlight: the one fact that changed since last time has to be
+       * something the cell *says*.
+       */
+      cellNewlyGraded: '+',
+      /**
+       * One legend entry, on the fixed literal for the state it is about.
+       *
+       * The label passes straight through rather than being decorated, so the legend,
+       * the cell's sentence and the row's own marker are three readings of one string.
+       * It is a function all the same, because the figure-free sentence is this
+       * module's to state and a caller that assembled it would be a second author.
+       */
+      legendEntry: (gradeLabel: string) => gradeLabel,
+      /**
+       * Announced on every page turn, and **the same words the position line shows**.
+       *
+       * One pair of figures, one sentence, so what is spoken and what is read cannot
+       * come apart. Politely: a page the child turned themselves is not news that has
+       * to interrupt.
+       */
+      positionAnnouncement: (ordinal: number, total: number) => `Question ${ordinal} of ${total}`,
+    },
+    /**
      * Everything the explain panel says, and the only place any of it is written.
      *
      * Four rules hold this group together, and they are the same four the panel's

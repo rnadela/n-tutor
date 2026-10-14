@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
+import type { AnswerKeyMapLabels } from '@/components/AnswerKeyMap';
+import { AnswerKeyPager, type AnswerKeyPagerLabels } from '@/components/AnswerKeyPager';
 import { AnswerKeyRow, type AnswerKeyRowLabels } from '@/components/AnswerKeyRow';
 import { useAnnounce } from '@/components/LiveRegion';
 import { studentCopy } from '@/copy/student';
+import { ordinalFromQuery } from '@/lib/answer-key-paging';
 import { parentApi, type AttemptResultsView } from '@/lib/parent-api';
 import { scoreChangeOf } from '@/lib/grade-dispute';
 import { newlyGradedCount, summaryOf } from '@/lib/results-summary';
@@ -38,6 +41,31 @@ const STUDENT_ROW_LABELS: AnswerKeyRowLabels = {
   // disputed too — a parent may set a mark their child never objected to — which is why it
   // is a row label and not part of the dispute control's own region.
   rowParentAdjusted: studentCopy.results.dispute.reviewed,
+};
+
+/**
+ * The words the child reads on the pager and on the results map.
+ *
+ * Built here from `studentCopy.results.pager`, once, for the reason the row labels
+ * above are: the pager and the map state no person of their own, so the parent's
+ * Attempt detail renders the identical controls about their child instead of to them.
+ * Module-level, because a fresh object per render would be a new prop identity on every
+ * render of a long paper.
+ */
+const STUDENT_PAGER_LABELS: AnswerKeyPagerLabels = {
+  position: studentCopy.results.pager.position,
+  previous: studentCopy.results.pager.previous,
+  next: studentCopy.results.pager.next,
+  openMap: studentCopy.results.pager.openMap,
+  closeMap: studentCopy.results.pager.closeMap,
+  positionAnnouncement: studentCopy.results.pager.positionAnnouncement,
+};
+
+const STUDENT_MAP_LABELS: AnswerKeyMapLabels = {
+  heading: studentCopy.results.pager.mapHeading,
+  cellState: studentCopy.results.pager.cellState,
+  cellNewlyGraded: studentCopy.results.pager.cellNewlyGraded,
+  legendEntry: studentCopy.results.pager.legendEntry,
 };
 
 /**
@@ -107,9 +135,28 @@ const EMPTY_SUPPRESSION: ReadonlySet<string> = new Set<string>();
  */
 export function AttemptResults({
   attemptId,
+  requestedQuestion,
+  onNavigate,
   footer,
 }: {
   attemptId: string;
+  /**
+   * Which Question the address bar asks for, exactly as it was written there.
+   *
+   * **The raw value, and not a clamped ordinal**, because the list of Questions a `?q=`
+   * can legally name is *this read's* rows and nothing else. The page read the released
+   * paper; this read is every Question the Attempt presented and the marking judged, and
+   * nothing in either type says the two lists agree. A page that clamped against its own
+   * copy would make a Question this key holds unreachable, and the pager would then
+   * report an ordinal the page clamped straight back — the two fighting over the URL.
+   *
+   * **This component still owns no routing.** It reads nothing from the address bar and
+   * writes nothing to it: the page hands the string in and this reports the resolved
+   * ordinal back out through `onNavigate`.
+   */
+  requestedQuestion: string | null;
+  /** Reported on every page turn, and on the clamp. The page decides what the URL does. */
+  onNavigate(ordinal: number): void;
   /**
    * Rendered after the rows, once there are rows.
    *
@@ -214,6 +261,28 @@ export function AttemptResults({
     // cannot come apart.
     announce(studentCopy.results.newlyGradedAnnouncement(resolved));
   }, [results, announce]);
+
+  /**
+   * The stored ordinals of this run, which `?q=` is resolved against.
+   *
+   * Empty until the read lands, which is what the guard in the effect below is for:
+   * resolving against nothing would answer 0 and write a Question that does not exist.
+   */
+  const ordinals = useMemo(() => (results?.questions ?? []).map((row) => row.ordinal), [results]);
+  /**
+   * Which Question is shown, clamped by the one function that decides it.
+   *
+   * Missing, empty, non-numeric, zero, negative and out of range all resolve to the
+   * first Question, silently — there is nothing a child could do about a malformed
+   * address bar, and an alert about one would be the screen complaining about itself.
+   */
+  const shownOrdinal = ordinalFromQuery(requestedQuestion, ordinals);
+  /** The clamp, reported up so the address bar says what the screen shows. */
+  useEffect(() => {
+    if (ordinals.length === 0) return;
+    if (requestedQuestion === String(shownOrdinal)) return;
+    onNavigate(shownOrdinal);
+  }, [ordinals, requestedQuestion, shownOrdinal, onNavigate]);
 
   if (error !== null) {
     return (
@@ -380,63 +449,108 @@ export function AttemptResults({
       >
         {studentCopy.results.questionsHeading}
       </Typography>
-      <Box
-        component="ul"
-        role="list"
-        sx={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid' }}
-      >
-        {results.questions.map((row) => (
-          <AnswerKeyRow
-            key={row.questionId}
-            row={row}
-            // The child's own words. The row states no person of its own, which is
-            // what lets the parent's Attempt detail render this same layout about
-            // their child instead of to them.
-            labels={STUDENT_ROW_LABELS}
-            // The row's own `grade` slot, before the explanation: a mark is what the
-            // row is about, and asking why is a thing done afterwards. Handed as a
-            // slot for the same reason `explain` is — neither this component nor the
-            // row gains a notion of disputing, and a failed objection cannot take the
-            // answer key down.
-            //
-            // **No third read.** The reported state is a field on the row that
-            // arrived with the answer key, and a press answers the whole refreshed
-            // view — so nothing here asks per Question and nothing asks per press
-            // beyond the press itself.
-            grade={
-              <DisputePanel
-                attemptId={results.attemptId}
-                questionId={row.questionId}
-                ordinal={row.ordinal}
-                disputed={row.disputed}
-                // The API answers the whole view, so the screen re-renders from one
-                // response rather than patching a row — which is what keeps the score
-                // and the rows describing the same read.
-                onDisputed={setResults}
-              />
-            }
-            // Handed to the row as a slot, so neither this component nor the row
-            // gains a notion of explaining: all the state, the press, the request
-            // and the four outcomes live in `ExplainPanel`, which is what keeps the
-            // one-read invariant above literally true and keeps the row hookless.
-            explain={
-              <ExplainPanel
-                attemptId={results.attemptId}
-                questionId={row.questionId}
-                ordinal={row.ordinal}
-                // Per row, off the one attempt-scoped read. `false` while that read is in
-                // flight or after it failed, which draws the control and leaves the refusal
-                // to the API's serve-time check.
-                suppressed={suppressed.has(row.questionId)}
-              />
-            }
+      {/* One Question at a time, with **every** row still mounted and all but one
+          carrying `hidden` (UX-DR34/39/47). The literal map below is unchanged: every
+          row is still mapped, in the order the server gave them, and nothing filters
+          or slices — only one of them is visible. Unmounting the others would throw
+          away an open explanation, a half-typed objection and a loaded panel, and the
+          rows are already in the one response, so holding them costs nothing.
+
+          The pager makes **no request**: a page turn is a state change over the read
+          this component already has, which is what keeps the two-reads invariant above
+          literally true.
+
+          **Guarded on there being rows at all.** An Attempt that presented no Question
+          has nothing to page: the pager would say `Question 0 of 0` over an empty map
+          and an empty legend, which is a position about nothing. The header above
+          already says what there is to say, so this renders the empty list the stacked
+          version always did and leaves the figure out of it. */}
+      {results.questions.length === 0 ? (
+        <>
+          <Box
+            component="ul"
+            role="list"
+            sx={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid' }}
+            data-testid="attempt-results-no-questions"
           />
-        ))}
-      </Box>
-      {/* Whatever the page put here, after everything this component owns. The
-          control that opens another run is the **page's**, because only the page
-          holds the run state a retake replaces. */}
-      {footer}
+          {footer}
+        </>
+      ) : (
+        <AnswerKeyPager
+          currentOrdinal={shownOrdinal}
+          onNavigate={onNavigate}
+          // The surface's own live region, as a callback. The pager latches its
+          // announcement on the ordinal, so the position sentence and the newly-graded
+          // sentence are two distinct states and neither suppresses the other — the
+          // latch above keys on the response object, which a page turn never changes.
+          announce={announce}
+          labels={STUDENT_PAGER_LABELS}
+          mapLabels={STUDENT_MAP_LABELS}
+          // The page's own control, through this component's slot and into the pager's:
+          // visible under every Question rather than only under the last one.
+          footer={footer}
+          items={results.questions.map((row) => ({
+            key: row.questionId,
+            questionId: row.questionId,
+            ordinal: row.ordinal,
+            state: row.state,
+            newlyGraded: row.newlyGraded,
+            render: (paging) => (
+              <AnswerKeyRow
+                {...paging}
+                row={row}
+                // The child's own words. The row states no person of its own, which is
+                // what lets the parent's Attempt detail render this same layout about
+                // their child instead of to them.
+                labels={STUDENT_ROW_LABELS}
+                // The row's own `grade` slot, before the explanation: a mark is what the
+                // row is about, and asking why is a thing done afterwards. Handed as a
+                // slot for the same reason `explain` is — neither this component nor the
+                // row gains a notion of disputing, and a failed objection cannot take the
+                // answer key down.
+                //
+                // **No third read.** The reported state is a field on the row that
+                // arrived with the answer key, and a press answers the whole refreshed
+                // view — so nothing here asks per Question and nothing asks per press
+                // beyond the press itself.
+                grade={
+                  <DisputePanel
+                    attemptId={results.attemptId}
+                    questionId={row.questionId}
+                    ordinal={row.ordinal}
+                    disputed={row.disputed}
+                    // The API answers the whole view, so the screen re-renders from one
+                    // response rather than patching a row — which is what keeps the score
+                    // and the rows describing the same read.
+                    onDisputed={setResults}
+                    // A press begun on an off-screen row still lands, but the shared live
+                    // region must not narrate it while another Question is shown.
+                    hidden={paging.hidden}
+                  />
+                }
+                // Handed to the row as a slot, so neither this component nor the row
+                // gains a notion of explaining: all the state, the press, the request
+                // and the four outcomes live in `ExplainPanel`, which is what keeps the
+                // one-read invariant above literally true and keeps the row hookless.
+                explain={
+                  <ExplainPanel
+                    attemptId={results.attemptId}
+                    questionId={row.questionId}
+                    ordinal={row.ordinal}
+                    // Per row, off the one attempt-scoped read. `false` while that read is
+                    // in flight or after it failed, which draws the control and leaves the
+                    // refusal to the API's serve-time check.
+                    suppressed={suppressed.has(row.questionId)}
+                    // Same reason as `DisputePanel`'s: an off-screen row's outcome must not
+                    // speak over the Question actually shown.
+                    hidden={paging.hidden}
+                  />
+                }
+              />
+            ),
+          }))}
+        />
+      )}
     </Box>
   );
 }

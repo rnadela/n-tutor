@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import type { Route } from 'next';
 import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -9,9 +10,12 @@ import Button from '@mui/material/Button';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import { ArrowLeft } from 'lucide-react';
+import type { AnswerKeyMapLabels } from '@/components/AnswerKeyMap';
+import { AnswerKeyPager, type AnswerKeyPagerLabels } from '@/components/AnswerKeyPager';
 import { AnswerKeyRow, type AnswerKeyRowLabels } from '@/components/AnswerKeyRow';
 import { parentCopy } from '@/copy/parent';
 import { useElevation } from '@/lib/elevation';
+import { QUESTION_PARAM, ordinalFromQuery } from '@/lib/answer-key-paging';
 import { explanationsByQuestion } from '@/lib/explanation-review';
 import { scoreChangeOf } from '@/lib/grade-dispute';
 import {
@@ -50,6 +54,19 @@ import { density, typeRoles } from '@/theme/tokens';
 const NOTHING_EXPLAINED: readonly ParentExplanationView[] = [];
 
 /**
+ * Where a hidden row's outcome sentence goes: nowhere.
+ *
+ * `GradeReview` and `ExplanationReview` stay mounted on every row, hidden or not
+ * (UX-DR34/39/47), so an adjustment or a regeneration begun on one Question can settle
+ * while a parent has since turned the page to another. The shared live region has no way
+ * to say which Question a sentence was about, so an announcement from an off-screen row
+ * would read as if it came from the one on screen. Dropping it costs nothing real: the
+ * row's own state — the mark, the flag, the failure string — is still there, unchanged,
+ * the next time that Question is shown.
+ */
+function noopAnnounce(): void {}
+
+/**
  * The empty slot list every row is handed until the retained-work read answers.
  *
  * Module-level rather than a fresh `[]` per render: it is the initial state and the reset,
@@ -70,6 +87,29 @@ const PARENT_ROW_LABELS: AnswerKeyRowLabels = {
   // The parent's own words for the same fact the child's screen states differently: they
   // set the mark. A sentence on the row, never a sixth colour on the state's five carriers.
   rowParentAdjusted: parentCopy.attempts.override.rowParentAdjusted,
+};
+
+/**
+ * The words a parent reads on the pager and on the results map.
+ *
+ * Built here from `parentCopy.attempts.pager`, in the third person about their child,
+ * and handed to the same two components the child's results screen renders: the
+ * controls are shared and the person is a parameter, exactly as the row's are.
+ */
+const PARENT_PAGER_LABELS: AnswerKeyPagerLabels = {
+  position: parentCopy.attempts.pager.position,
+  previous: parentCopy.attempts.pager.previous,
+  next: parentCopy.attempts.pager.next,
+  openMap: parentCopy.attempts.pager.openMap,
+  closeMap: parentCopy.attempts.pager.closeMap,
+  positionAnnouncement: parentCopy.attempts.pager.positionAnnouncement,
+};
+
+const PARENT_MAP_LABELS: AnswerKeyMapLabels = {
+  heading: parentCopy.attempts.pager.mapHeading,
+  cellState: parentCopy.attempts.pager.cellState,
+  cellNewlyGraded: parentCopy.attempts.pager.cellNewlyGraded,
+  legendEntry: parentCopy.attempts.pager.legendEntry,
 };
 
 /**
@@ -102,9 +142,10 @@ const PARENT_ROW_LABELS: AnswerKeyRowLabels = {
  * Attempt is one sentence from the API, and this screen states it with the way back
  * beside it.
  */
-export default function ParentAttemptDetailPage() {
+function ParentAttemptDetail() {
   const router = useRouter();
   const params = useParams<{ attemptId: string }>();
+  const search = useSearchParams();
   const attemptId = params.attemptId;
   const { elevation, clearElevation } = useElevation();
   const token = elevation?.token ?? null;
@@ -328,15 +369,46 @@ export default function ParentAttemptDetailPage() {
    */
   const scoreChange = results === null ? null : scoreChangeOf(results.score, results.originalScore);
 
-  return (
-    <Box
-      component="section"
-      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 1.5}px` }}
-    >
-      <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
-        {parentCopy.attempts.detailTitle}
-      </Typography>
+  // --- Which Question is on screen ---------------------------------------
 
+  /** The stored ordinals of this run, which `?q=` is clamped against. */
+  const ordinals = useMemo(() => (results?.questions ?? []).map((row) => row.ordinal), [results]);
+  /**
+   * The Question the screen shows, clamped by the one function that decides it.
+   *
+   * Missing, empty, non-numeric, zero, negative and out of range all resolve to the
+   * first Question, silently: a parent who followed a stale link gets the paper rather
+   * than an error line, and the effect below writes the resolved figure back.
+   */
+  const shownOrdinal = ordinalFromQuery(search.get(QUESTION_PARAM), ordinals);
+  /**
+   * The one write, and it is a **replace**.
+   *
+   * Back returns to the Grade disputes list a parent came from rather than walking
+   * twenty Questions backwards — and it is client-side, which is what keeps the
+   * provider holding the elevation bearer mounted (AD-18). A document navigation here
+   * would drop Parent View and ask for the PIN again. `scroll: false` because the pager
+   * has just put focus on the Question's heading, and scrolling to the top would undo
+   * that.
+   */
+  const showQuestion = useCallback(
+    (ordinal: number) => {
+      const next = new URLSearchParams(search.toString());
+      next.set(QUESTION_PARAM, String(ordinal));
+      router.replace(`/parent/attempts/${attemptId}?${next.toString()}` as Route, {
+        scroll: false,
+      });
+    },
+    [router, attemptId, search],
+  );
+  useEffect(() => {
+    if (ordinals.length === 0) return;
+    if (search.get(QUESTION_PARAM) === String(shownOrdinal)) return;
+    showQuestion(shownOrdinal);
+  }, [ordinals, search, shownOrdinal, showQuestion]);
+
+  return (
+    <>
       {/* One region for this surface. Every outcome is announced with the same words
           the row shows. */}
       <Box
@@ -444,83 +516,150 @@ export default function ParentAttemptDetailPage() {
             >
               {parentCopy.attempts.questionsHeading}
             </Typography>
-            <Box
-              component="ul"
-              role="list"
-              sx={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid' }}
-            >
-              {results.questions.map((row) => (
-                <AnswerKeyRow
-                  key={row.questionId}
-                  row={row}
-                  // The parent's own words, about their child and never to them.
-                  labels={PARENT_ROW_LABELS}
-                  // The mark, its evidence and the one remedy — in the row's own `grade`
-                  // slot, beneath the Question it is about and above anything that was
-                  // explained about it. The row stays hookless and gains no notion of
-                  // adjusting; every press, state and sentence lives in the region itself.
-                  //
-                  // **Unlike `explain`, this needs no read to have settled.** Everything it
-                  // draws arrived on the answer key: the recorded mark, the reason, the
-                  // dispute and the adjustment are all fields on this row. So there is no
-                  // window in which it could state something untrue about the child, and no
-                  // second failure for the screen to report.
-                  grade={
-                    token === null ? null : (
-                      <GradeReview
-                        attemptId={results.attemptId}
-                        row={row}
-                        studentProfileId={results.studentProfileId}
-                        // The screen's one read, filtered per row by its own scope. Handed
-                        // down rather than made per row: fifteen Questions would otherwise
-                        // be fifteen identical account-scoped reads on mount.
-                        retainedSlots={retainedSlots}
-                        token={token}
-                        announce={announce}
-                        onAdjusted={setResults}
-                        onElevationLost={leave}
-                      />
-                    )
-                  }
-                  // Beneath the Question it is about (UX-DR16), in the row's own
-                  // slot: the row stays hookless and gains no notion of explaining,
-                  // and every press, state and sentence lives in the region itself.
-                  //
-                  // **No region at all while the prose read has failed.** An absent
-                  // Explanation and an Explanation that could not be read look
-                  // identical from inside the region — both are `undefined` — and the
-                  // sentence it would draw is "the student did not ask about this
-                  // question", which is a claim about the child that a screen whose
-                  // read failed is in no position to make, repeated once per row. The
-                  // one true sentence is the screen's, stated above with its Retry.
-                  //
-                  // **Nothing renders until the prose read has actually settled.**
-                  // While it is still in flight, an absent Explanation and one that
-                  // simply has not arrived yet look identical from inside the region —
-                  // rendering early would draw "the student did not ask" about a
-                  // Question whose prose is still on its way.
-                  explain={
-                    token === null || proseError !== null || !proseLoaded ? null : (
-                      <ExplanationReview
-                        attemptId={results.attemptId}
-                        questionId={row.questionId}
-                        ordinal={row.ordinal}
-                        explanations={byQuestion.get(row.questionId) ?? NOTHING_EXPLAINED}
-                        token={token}
-                        announce={announce}
-                        onFlagged={onFlagged}
-                        onGenerations={onGenerations}
-                        onElevationLost={leave}
-                      />
-                    )
-                  }
-                />
-              ))}
-            </Box>
+            {/* One Question at a time, with **every** row still mounted and all but one
+                carrying `hidden` (UX-DR34/39/47). Nothing slices the array, and that is
+                the design rather than an optimisation: `ExplanationReview` holds nine
+                pieces of purely local state with no persistence — four of them failure
+                strings a parent may not have read yet — and `GradeReview` holds a pick
+                and a half-typed decision. Unmounting the others would make a parent who
+                paged away mid-decision lose it silently.
+
+                The pager makes **no request**: a page turn is a state change over the
+                three reads this screen already made, so nothing was added to learn
+                where a parent is.
+
+                **Guarded on there being rows at all.** A run that presented no Question
+                has nothing to page: the pager would read `Question 0 of 0` over an empty
+                map and an empty legend, which is a position about nothing. The score and
+                the excluded count above already say what there is to say, so this
+                renders the empty list the stacked version always did. */}
+            {results.questions.length === 0 ? (
+              <Box
+                component="ul"
+                role="list"
+                sx={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid' }}
+                data-testid="parent-attempt-no-questions"
+              />
+            ) : (
+              <AnswerKeyPager
+                currentOrdinal={shownOrdinal}
+                onNavigate={showQuestion}
+                // This surface's own live region, already shared with grade-override and
+                // flag outcome sentences — which is exactly why the pager takes a
+                // callback rather than reaching for a region of its own, and why its
+                // announcement is latched on the ordinal so neither clobbers the other.
+                announce={announce}
+                labels={PARENT_PAGER_LABELS}
+                mapLabels={PARENT_MAP_LABELS}
+                items={results.questions.map((row) => ({
+                  key: row.questionId,
+                  questionId: row.questionId,
+                  ordinal: row.ordinal,
+                  state: row.state,
+                  newlyGraded: row.newlyGraded,
+                  render: (paging) => (
+                    <AnswerKeyRow
+                      {...paging}
+                      row={row}
+                      // The parent's own words, about their child and never to them.
+                      labels={PARENT_ROW_LABELS}
+                      // The mark, its evidence and the one remedy — in the row's own `grade`
+                      // slot, beneath the Question it is about and above anything that was
+                      // explained about it. The row stays hookless and gains no notion of
+                      // adjusting; every press, state and sentence lives in the region itself.
+                      //
+                      // **Unlike `explain`, this needs no read to have settled.** Everything it
+                      // draws arrived on the answer key: the recorded mark, the reason, the
+                      // dispute and the adjustment are all fields on this row. So there is no
+                      // window in which it could state something untrue about the child, and no
+                      // second failure for the screen to report.
+                      grade={
+                        token === null ? null : (
+                          <GradeReview
+                            attemptId={results.attemptId}
+                            row={row}
+                            studentProfileId={results.studentProfileId}
+                            // The screen's one read, filtered per row by its own scope. Handed
+                            // down rather than made per row: fifteen Questions would otherwise
+                            // be fifteen identical account-scoped reads on mount.
+                            retainedSlots={retainedSlots}
+                            token={token}
+                            announce={paging.hidden ? noopAnnounce : announce}
+                            onAdjusted={setResults}
+                            onElevationLost={leave}
+                          />
+                        )
+                      }
+                      // Beneath the Question it is about (UX-DR16), in the row's own
+                      // slot: the row stays hookless and gains no notion of explaining,
+                      // and every press, state and sentence lives in the region itself.
+                      //
+                      // **No region at all while the prose read has failed.** An absent
+                      // Explanation and an Explanation that could not be read look
+                      // identical from inside the region — both are `undefined` — and the
+                      // sentence it would draw is "the student did not ask about this
+                      // question", which is a claim about the child that a screen whose
+                      // read failed is in no position to make, repeated once per row. The
+                      // one true sentence is the screen's, stated above with its Retry.
+                      //
+                      // **Nothing renders until the prose read has actually settled.**
+                      // While it is still in flight, an absent Explanation and one that
+                      // simply has not arrived yet look identical from inside the region —
+                      // rendering early would draw "the student did not ask" about a
+                      // Question whose prose is still on its way.
+                      explain={
+                        token === null || proseError !== null || !proseLoaded ? null : (
+                          <ExplanationReview
+                            attemptId={results.attemptId}
+                            questionId={row.questionId}
+                            ordinal={row.ordinal}
+                            explanations={byQuestion.get(row.questionId) ?? NOTHING_EXPLAINED}
+                            token={token}
+                            announce={paging.hidden ? noopAnnounce : announce}
+                            onFlagged={onFlagged}
+                            onGenerations={onGenerations}
+                            onElevationLost={leave}
+                          />
+                        )
+                      }
+                    />
+                  ),
+                }))}
+              />
+            )}
           </>
         )
       )}
+    </>
+  );
+}
 
+/**
+ * The route's shell: the column, the heading, the way back, and the screen behind a
+ * `Suspense`.
+ *
+ * The body is its own component behind `Suspense` because `useSearchParams` opts a
+ * route out of static prerendering otherwise — and which Question is shown arrives as a
+ * query parameter, which is the whole reason it is read at all. The same shape the topic
+ * drill-down uses, for the same reason.
+ *
+ * The heading and the way back are **outside** the boundary, so a parent always has both
+ * even while the reads are in flight or after they failed — and the way back sits below
+ * the pager, which means it is there under every Question rather than only under the
+ * last one.
+ */
+export default function ParentAttemptDetailPage() {
+  return (
+    <Box
+      component="section"
+      sx={{ maxWidth: 840, mx: 'auto', display: 'grid', gap: `${density.gap * 1.5}px` }}
+    >
+      <Typography component="h1" sx={{ fontSize: 20, fontWeight: 700 }}>
+        {parentCopy.attempts.detailTitle}
+      </Typography>
+      <Suspense fallback={null}>
+        <ParentAttemptDetail />
+      </Suspense>
       <Link
         component={NextLink}
         href="/parent/attempts"

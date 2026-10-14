@@ -155,7 +155,15 @@ describe('the list of what a child has reported', () => {
   it('links each report to the Attempt that carries the explanation, by its own id', () => {
     // The decision is made next to the prose it is about, and deciding without having read
     // the explanation is the one thing this feature must not make easy.
-    expect(PAGE_SOURCE).toContain('attemptHref(entry.attemptId)');
+    // And at the Question itself, since Story 5.8: the ordinal was already on the wire
+    // for the "where" sentence beside the entry, so pointing the link at it cost no read
+    // and no field. Omitted entirely when the stored Question no longer resolves.
+    // `attemptHref` is `answer-key-paging.ts`'s own export, not a local copy — the
+    // Grade disputes list writes the identical link, and its body (including the
+    // `questionOrdinal === null` omission) is asserted there, not here.
+    expect(PAGE_SOURCE).toContain("import { attemptHref } from '@/lib/answer-key-paging'");
+    expect(PAGE_SOURCE).toContain('attemptHref(entry.attemptId, entry.questionOrdinal)');
+    expect(CODE).not.toContain('q=null');
     expect(PAGE_SOURCE).toContain('parentCopy.flags.open');
     // And nothing is persisted to a browser storage API on the way there.
     expect(CODE).not.toMatch(/localStorage|sessionStorage/u);

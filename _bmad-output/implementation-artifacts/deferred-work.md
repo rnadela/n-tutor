@@ -2965,3 +2965,19 @@ source_spec: `spec-10-5-student-results-tab.md`
 severity: low
 reason: The `requestId` ref guards staleness within the screen but nothing cancels on unmount, so a late `notBound` rejection from either read can fire `router.replace('/auth/sign-in')` from whatever screen the child moved to. Student Home carries the same hazard, which is why this is filed rather than patched here.
 status: open
+
+### DW-372: Two Playwright suites still expect the old lower-case PWA name and fail on every run.
+origin: spec-deferred cb588fdf76f6
+location: e2e/tests/pwa-installability.spec.ts:75
+source_spec: `spec-5-8-paged-answer-key.md`
+severity: medium
+reason: `e2e/tests/pwa-installability.spec.ts:75-76,121` and `e2e/tests/install-banner.spec.ts:95,302` assert the name `n-tutor`, which commit def4249 changed to `N-Tutor` in `apps/web/src/copy/common.ts`. Three failures, present before this story's baseline revision and untouched by it.
+status: open
+
+### DW-373: Two rows sharing the same stored ordinal resolve to the same pager position: the second is unreachable by map click, `?q=`, or Previous/Next.
+origin: spec-deferred 536c57670e99
+location: apps/web/src/components/AnswerKeyPager.tsx:142,284-292
+source_spec: `spec-5-8-paged-answer-key.md`
+severity: low
+reason: `AnswerKeyPager`'s own doc comment (`apps/web/src/components/AnswerKeyPager.tsx:84-94`) resolves the shown Question by `items.findIndex(ordinal === currentOrdinal)` and `jumpTo` resolves a map cell's ordinal the same way — both intentionally take the first match, because the stored ordinal is "the only unit the URL can carry". The type `AnswerKeyRowView` does not promise ordinals are distinct, and the Spec Change Log already treats one such ordinal (`0`, the analytics drill-down's vanished-Question marker) as never reaching these paged surfaces. A genuine duplicate within `grading-results.ts` output would still make the second row permanently unreachable by any address, with no test exercising that input. Raised by review and left open: fixing it would mean keying the URL by something other than the stored ordinal, which conflicts with this story's own boundary ("selected by matching row.ordinal, never by array position") and with the no-API/no-wire-change constraint, so it is a
+status: open

@@ -135,7 +135,163 @@ test.describe('the Results screen', () => {
     // And a row opens that test's own results, which is where a finished test's
     // results already lived.
     await firstRow.getByRole('link').click();
-    await expect(page).toHaveURL(new RegExp(`/student/tests/${newer.practiceTestId}$`, 'u'));
+    // The answer key's own `?q=` is written by a replace as the results land, so the
+    // route is the test's with the shown Question named on it.
+    await expect(page).toHaveURL(new RegExp(`/student/tests/${newer.practiceTestId}\\?q=1$`, 'u'));
     await expect(page.getByRole('heading', { name: 'Your results', level: 2 })).toBeVisible();
+  });
+
+  test('pages the answer key one Question at a time, at both viewports', async ({ page }) => {
+    const grade = await createGradeLevelFixture('Results Paging Grade');
+    const subject = await createSubjectFixture('Results Paging', grade.id);
+    const email = await signUpWithOneChild(page, grade.name);
+    // Three Questions, graded wrong, blank and right — so the results map has three of
+    // the four grade states on it and no state is vacuously satisfied.
+    const seeded = await seedGradedTopicFixture(email, 'Noah', subject.id, {
+      name: 'paged fractions',
+      rawLabel: 'Paged Fractions',
+    });
+
+    await page.getByRole('button', { name: 'Back to Student Mode' }).click();
+    await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
+
+    // Every call the browser makes, counted at the wire: "a page turn fires nothing" is
+    // a claim about the network, and a screen assertion would be green either way.
+    const calls: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/api/')) calls.push(request.url());
+    });
+
+    // --- From `md` up: the map is a persistent rail ------------------------
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/student/tests/${seeded.practiceTestId}`);
+    await expect(page.getByTestId('attempt-results')).toBeVisible({ timeout: 30_000 });
+
+    // No `q` on arrival, so the clamp names the first Question — written by a replace.
+    await expect(page).toHaveURL(/\?q=1$/u);
+    const rows = page.locator('[data-testid="answer-key-row"]');
+    await expect(rows).toHaveCount(3);
+    // **Every row is mounted and all but one are hidden.** That is what preserves an
+    // open panel across a turn, and `hidden` is what keeps the other two out of the
+    // assistive-technology tree meanwhile.
+    const visibleRows = page.locator('[data-testid="answer-key-row"]:not([hidden])');
+    await expect(visibleRows).toHaveCount(1);
+    await expect(visibleRows).toHaveAttribute('data-ordinal', '1');
+    await expect(page.getByTestId('answer-key-position')).toHaveText('Question 1 of 3');
+    // The score header is above the pager, stated once.
+    await expect(page.getByTestId('attempt-results-score')).toBeVisible();
+    await expect(page.getByTestId('attempt-results-score')).toHaveCount(1);
+    // The retake control is below the pager, under every Question.
+    await expect(page.getByTestId('take-test-retake')).toBeVisible();
+
+    // The rail is on screen and the overlay's opener is not — decided by CSS at the
+    // breakpoint, never by a JS media query.
+    const rail = page.getByTestId('answer-key-map-rail');
+    await expect(rail).toBeVisible();
+    await expect(page.getByTestId('answer-key-map-open')).toBeHidden();
+
+    // The map: one real button per Question, in order, the current one marked, each
+    // carrying its grade state — and a legend of exactly the states that are present.
+    const cells = rail.locator('[data-testid="answer-key-map-cell"]');
+    await expect(cells).toHaveCount(3);
+    expect(
+      await cells.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-ordinal'))),
+    ).toEqual(['1', '2', '3']);
+    await expect(rail.locator('[aria-current="true"]')).toHaveCount(1);
+    const states = await cells.evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute('data-state')),
+    );
+    const legend = rail.locator('[data-testid="answer-key-map-legend-entry"]');
+    await expect(legend).toHaveCount(new Set(states).size);
+    // Grade vocabulary only: not one word of the progress map's, and no percentage.
+    await expect(rail).not.toContainText(/\bAnswered\b|Not answered|%/u);
+
+    // --- Previous and Next, and where they stop ----------------------------
+    await expect(page.getByTestId('answer-key-previous')).toBeDisabled();
+    await expect(page.getByTestId('answer-key-next')).toBeEnabled();
+
+    const beforeTurns = calls.length;
+    await page.getByTestId('answer-key-next').click();
+    await expect(page).toHaveURL(/\?q=2$/u);
+    await expect(page.getByTestId('answer-key-position')).toHaveText('Question 2 of 3');
+    await expect(visibleRows).toHaveAttribute('data-ordinal', '2');
+    // Focus lands on that Question's own heading, and the position is announced in the
+    // very words the line displays.
+    await expect(page.locator('[data-testid="answer-key-row"][data-ordinal="2"] h4')).toBeFocused();
+    await expect(page.locator('[role="status"][aria-atomic="true"]')).toHaveText('Question 2 of 3');
+    await expect(page.getByTestId('answer-key-previous')).toBeEnabled();
+
+    // --- Arrow keys, outside a text field ----------------------------------
+    // There is no text entry anywhere on this surface, so "the caret moves and the page
+    // does not turn" is asserted where it can be: `shouldPageOnKey` in
+    // `apps/web/src/lib/answer-key-paging.spec.ts`, over every excluded tag.
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(/\?q=3$/u);
+    await expect(page.getByTestId('answer-key-next')).toBeDisabled();
+    // At the end it does nothing, and a held modifier is the browser's.
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(/\?q=3$/u);
+    await page.keyboard.press('Shift+ArrowLeft');
+    await expect(page).toHaveURL(/\?q=3$/u);
+    await page.keyboard.press('ArrowLeft');
+    await expect(page).toHaveURL(/\?q=2$/u);
+
+    // **Not one of those turns asked the server for anything.** Paging is a state
+    // change over the one read, so it can never bill a provider call.
+    expect(calls).toHaveLength(beforeTurns);
+
+    // --- The address bar is the carrier, and it survives a reload ----------
+    await page.reload();
+    await expect(page.getByTestId('attempt-results')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('answer-key-position')).toHaveText('Question 2 of 3');
+    await expect(visibleRows).toHaveAttribute('data-ordinal', '2');
+
+    // A junk or out-of-range `q` opens the first Question and is replaced, silently:
+    // no alert, no error line.
+    for (const raw of ['99', 'abc', '0', '-2', '']) {
+      await page.goto(`/student/tests/${seeded.practiceTestId}?q=${raw}`);
+      await expect(page.getByTestId('attempt-results')).toBeVisible({ timeout: 30_000 });
+      await expect(page).toHaveURL(/\?q=1$/u);
+      await expect(page.getByTestId('answer-key-position')).toHaveText('Question 1 of 3');
+      await expect(page.getByTestId('attempt-results-error')).toHaveCount(0);
+    }
+
+    // Back is a way off the screen rather than a walk back through the paper: every
+    // position was written with a replace, so however many Questions were turned, one
+    // press returns to where the child came from.
+    await page.goto('/student');
+    await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
+    await page.goto(`/student/tests/${seeded.practiceTestId}`);
+    await expect(page.getByTestId('attempt-results')).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('answer-key-next').click();
+    await expect(page).toHaveURL(/\?q=2$/u);
+    await page.getByTestId('answer-key-next').click();
+    await expect(page).toHaveURL(/\?q=3$/u);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/student$/u);
+
+    // --- Below `md`: the map is an overlay, closed on a jump ---------------
+    await page.goto(`/student/tests/${seeded.practiceTestId}`);
+    await expect(page.getByTestId('attempt-results')).toBeVisible({ timeout: 30_000 });
+    await page.setViewportSize(PHONE);
+    await expect(page.getByTestId('answer-key-map-rail')).toBeHidden();
+    const opener = page.getByTestId('answer-key-map-open');
+    await expect(opener).toBeVisible();
+    await opener.click();
+
+    const overlay = page.getByRole('dialog');
+    await expect(overlay).toBeVisible();
+    // While it is up, an arrow key moves nothing: its cells are the way to a Question,
+    // and a page turning behind a modal would move the thing being chosen from.
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(/\?q=1$/u);
+    await overlay.locator('[data-testid="answer-key-map-cell"][data-ordinal="3"]').click();
+    // The jump closed it and the Question changed, with focus on its heading.
+    await expect(overlay).toHaveCount(0);
+    await expect(page).toHaveURL(/\?q=3$/u);
+    await expect(page.getByTestId('answer-key-position')).toHaveText('Question 3 of 3');
+    await expect(page.locator('[data-testid="answer-key-row"][data-ordinal="3"] h4')).toBeFocused();
+    // And the retake control is still there, under the last Question as under the first.
+    await expect(page.getByTestId('take-test-retake')).toBeVisible();
   });
 });

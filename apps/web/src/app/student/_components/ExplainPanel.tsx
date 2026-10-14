@@ -15,6 +15,9 @@ import { comfortableDensity, typeRoles, rounded } from '@/theme/tokens';
 import { Flag, Lightbulb } from 'lucide-react';
 import { deviceIsUnbound } from '../page';
 
+/** Swapped in for `announce` while this row's Question is paged away. */
+function noopAnnounce(): void {}
+
 /**
  * One Question's explanation, as an inline disclosure beneath its own row.
  *
@@ -52,6 +55,7 @@ export function ExplainPanel({
   questionId,
   ordinal,
   suppressed,
+  hidden,
 }: {
   attemptId: string;
   questionId: string;
@@ -71,9 +75,20 @@ export function ExplainPanel({
    * is charged. That is exactly why the API's check is at serve time and not a cache key.
    */
   suppressed: boolean;
+  /**
+   * Whether this row's `AnswerKeyRow` currently carries the `hidden` attribute.
+   *
+   * Every row stays mounted so a press begun off-screen still lands, but the live
+   * region is shared across every Question — so a sentence resolving for a Question
+   * that is not the one shown would narrate the wrong row. Suppressing the
+   * announcement (not the outcome itself: the sentence still renders on the row)
+   * is the same fix the parent's `GradeReview`/`ExplanationReview` already apply.
+   */
+  hidden?: boolean;
 }) {
   const router = useRouter();
-  const { announce } = useAnnounce();
+  const { announce: liveAnnounce } = useAnnounce();
+  const announce = hidden ? noopAnnounce : liveAnnounce;
   const [open, setOpen] = useState(false);
   /**
    * What the panel is showing.

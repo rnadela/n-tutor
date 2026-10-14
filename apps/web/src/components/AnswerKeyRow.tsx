@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import { RichText } from '@/components/RichText';
@@ -135,6 +135,8 @@ export function AnswerKeyRow({
   labels,
   grade,
   explain,
+  hidden,
+  headingRef,
 }: {
   row: AnswerKeyRowView;
   /** Every word this row says. Required, so neither surface can inherit the other's. */
@@ -154,11 +156,35 @@ export function AnswerKeyRow({
    */
   grade?: ReactNode;
   explain?: ReactNode;
+  /**
+   * Whether this row is one of the ones a pager is holding off screen.
+   *
+   * **Optional, and absent means stacked.** The analytics drill-down renders every row
+   * at once and passes neither this nor `headingRef`, which is why both are optional
+   * rather than required: a filtered subset of evidence across several runs is a list,
+   * not a paper to page through.
+   *
+   * The attribute does two jobs at once — it takes the row out of the
+   * assistive-technology tree *and*, with the `sx` rule below, off the screen — so a
+   * hidden row is hidden in both senses or in neither.
+   */
+  hidden?: boolean;
+  /**
+   * Where a pager's focus lands when it turns to this Question.
+   *
+   * Handed to the existing `h4` rather than to the row, because a heading is what a
+   * reader needs read out on arrival: "Question 7, Short answer" says what moved and
+   * where to. The heading is focusable only programmatically — it is a landing place,
+   * not a stop on the way through the page — which is the same pattern Take Test uses
+   * for its handed-in heading.
+   */
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const marker = gradeStateMarker[row.state];
   return (
     <Box
       component="li"
+      hidden={hidden}
       // `listStyle: 'none'` strips list semantics in Safari/VoiceOver along with the
       // item count, which is what tells a child how much paper there is. Put back by
       // hand, as `PracticeTestRow` does.
@@ -169,7 +195,15 @@ export function AnswerKeyRow({
         gridTemplateColumns: `${GRADE_RULE_WIDTH}px 1fr`,
         columnGap: `${comfortableDensity.gap}px`,
         paddingBlock: `${comfortableDensity.gap * 1.5}px`,
-        '& + &': { borderTop: '1px solid', borderColor: 'divider' },
+        // **The `sx` `display: 'grid'` above beats the UA stylesheet's
+        // `[hidden] { display: none }`**, so without this line the attribute would take
+        // a row out of the accessible tree while leaving it on screen — the worst of
+        // both. Stated here rather than by the pager, because the rule exists to undo
+        // this component's own `display`.
+        '&[hidden]': { display: 'none' },
+        // A lone visible row has no row above it to be separated from, and the stacked
+        // drill-down behaves exactly as it always did.
+        '&:not([hidden]) + &:not([hidden])': { borderTop: '1px solid', borderColor: 'divider' },
       }}
       data-testid="answer-key-row"
       data-state={row.state}
@@ -201,7 +235,16 @@ export function AnswerKeyRow({
               section it belongs to, and an outline that lies is worse than no
               outline. The visual type role is unchanged — level is structure and
               `typeRoles.label` is size. */}
-          <Typography component="h4" sx={{ ...typeRoles.label }} data-testid="answer-key-ordinal">
+          {/* `tabIndex={-1}` so a pager can put focus here on a page turn, and so a
+              reader tabbing through the row never stops on a heading that is not a
+              control. The level is unchanged: it is still `h4`. */}
+          <Typography
+            component="h4"
+            tabIndex={-1}
+            ref={headingRef}
+            sx={{ ...typeRoles.label }}
+            data-testid="answer-key-ordinal"
+          >
             {/* What kind of question this was, beside its number. The words are the
                 caller's: the student surface passes the same three literals the
                 child was shown while they worked, so the word for a format cannot

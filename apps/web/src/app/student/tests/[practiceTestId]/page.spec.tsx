@@ -25,8 +25,20 @@ describe('what sends a child away from Take Test', () => {
     // Student Mode taken away. Four reads now share the rule — the test, the
     // session, the Attempt start and the hand-in — and each acts on it identically.
     const replaces = CODE.match(/router\.replace\('\/auth\/sign-in'\)/gu) ?? [];
-    expect(CODE.match(/router\.replace/gu)).toHaveLength(replaces.length);
     expect(CODE.match(/deviceIsUnbound\(cause\)/gu)).toHaveLength(replaces.length);
+    // One other `router.replace` exists and it goes **nowhere**: Story 5.8 writes the
+    // answer key's `?q=` back onto this very route, with `{ scroll: false }`. It is a
+    // replace and not a push precisely so Back still leaves the results rather than
+    // walking the Questions backwards, and it is the only one.
+    // Two others exist and both go **nowhere**: Story 5.8 writes the answer key's `?q=`
+    // back onto this very route, and takes it off again when a retake starts. Both are
+    // replaces and not pushes, precisely so Back still leaves the results rather than
+    // walking the Questions backwards.
+    expect(CODE.match(/router\.replace/gu)).toHaveLength(replaces.length + 2);
+    expect(CODE).toContain(
+      'router.replace(`/student/tests/${practiceTestId}?${next.toString()}` as Route',
+    );
+    expect(CODE).toContain('scroll: false');
     // And nothing else in the file navigates anywhere at all.
     expect(CODE).not.toMatch(/router\.(push|back|forward)/u);
   });
@@ -788,6 +800,73 @@ describe('opening another run at a finished test', () => {
     expect(done).toContain('comfortableDensity.tapTarget');
     // No count-up, no reveal, no celebration, no badge, no streak, no personal best.
     expect(done).not.toMatch(/animate|transition|confetti|badge|streak|celebrat/iu);
+  });
+});
+
+describe('the answer key’s `?q=`, which this page owns', () => {
+  it('reads the parameter behind a Suspense boundary, as the drill-down does', () => {
+    // `useSearchParams` opts a route out of static prerendering otherwise, and which
+    // Question the answer key shows arrives as a query parameter.
+    expect(CODE).toContain('<Suspense fallback={null}>');
+    expect(CODE).toContain('<TakeTestScreen />');
+    expect(CODE).toContain('export default function TakeTestPage()');
+    expect(CODE).toContain('function TakeTestScreen()');
+    expect(CODE).toContain('useSearchParams()');
+  });
+
+  it('hands the parameter through without clamping it, because the rows are not its', () => {
+    // Which Questions a `?q=` can legally name is the **answer key's** read and not this
+    // one's: a row whose stored Question could no longer be read keeps its place with
+    // `ordinal: 0`, so the two lists may genuinely differ. A clamp here would make a
+    // Question the key holds unreachable, and the two clamps would fight over the URL.
+    expect(CODE).toContain('const requestedQuestion = search.get(QUESTION_PARAM)');
+    expect(CODE).toContain('requestedQuestion={requestedQuestion}');
+    expect(CODE).not.toContain('ordinalFromQuery');
+  });
+
+  it('writes the ordinal the answer key reports back, with a replace', () => {
+    // Back leaves the results rather than walking twenty Questions backwards.
+    expect(CODE).toContain('next.set(QUESTION_PARAM, String(ordinal))');
+    expect(CODE).toContain('onNavigate={showQuestion}');
+    expect(CODE).not.toMatch(/router\.push/u);
+  });
+
+  it('hands the answer key the parameter and takes back the ordinal', () => {
+    const done = regionOf("if (submitState === 'done') {", 'if (loading ||');
+    expect(done).toContain('requestedQuestion={requestedQuestion}');
+    expect(done).toContain('onNavigate={showQuestion}');
+  });
+
+  it('takes the Question back off the route when a retake starts', () => {
+    // A retake is a different paper's answer key. The parameter names a Question of the
+    // run that just ended, and leaving it there would open the next hand-in mid-paper —
+    // on a Question the child has not sat, which the clamp cannot catch because the
+    // figure is a perfectly legal ordinal.
+    expect(CODE).toContain('next.delete(QUESTION_PARAM)');
+    const handler = regionOf('const retake = useCallback(', 'const handedInHeading');
+    expect(handler).toContain('clearQuestion()');
+    // A replace, like the write: a run that is over is not a place to go back to.
+    const clear = regionOf('const clearQuestion = useCallback(', 'const remaining =');
+    expect(clear).toContain('router.replace(route as Route, { scroll: false })');
+    expect(clear).not.toMatch(/router\.push/u);
+  });
+
+  it('stores nothing about where the reader is: the URL is the only carrier', () => {
+    const paging = regionOf('const requestedQuestion = search.get(', 'const remaining =');
+    expect(paging).not.toMatch(/attemptStorage|writeAttemptState|localStorage|sessionStorage/u);
+  });
+
+  it('changes nothing about Take Test’s own map, controls or counter', () => {
+    // The paged answer key is a different screen state. The progress map, Back/Next and
+    // the counter are untouched, and their cases above still pass.
+    expect(CODE).toContain(
+      '<QuestionMap progress={progress} currentIndex={index} onJump={jumpTo} />',
+    );
+    expect(CODE).toContain('studentCopy.takeTest.counter(question.ordinal, total)');
+    expect(CODE).toContain('data-testid="take-test-back"');
+    expect(CODE).toContain('data-testid="take-test-next"');
+    // And the results vocabulary never leaks into the working screen's controls.
+    expect(CODE).not.toMatch(/studentCopy\.results\.pager/u);
   });
 });
 

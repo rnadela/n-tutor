@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createGradeLevelFixture, createSubjectFixture, uniqueParentEmail } from '../fixtures';
+import {
+  answerKeyRow,
+  createGradeLevelFixture,
+  createSubjectFixture,
+  showQuestion,
+  uniqueParentEmail,
+} from '../fixtures';
 
 /**
  * A child raising a hand about an explanation, a parent deciding about it, and an operator
@@ -200,16 +206,21 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
     const childRows = page.locator('[data-testid="answer-key-row"]');
     await expect(childRows).toHaveCount(total);
 
+    // Paged to by **ordinal**: since Story 5.8 one Question is on screen at a time and
+    // the rest are mounted and hidden, so reaching the second one is a page turn.
     const prose: string[] = [];
-    for (const at of [0, 1]) {
-      const row = childRows.nth(at);
+    for (const ordinal of [1, 2]) {
+      const row = await showQuestion(page, ordinal);
       await row.getByTestId('explain-control').click();
       await expect(row.getByTestId('explain-body')).toBeVisible({ timeout: 30_000 });
       prose.push((await row.getByTestId('explain-body').innerText()).trim());
-      expect(prose[at]!.length).toBeGreaterThan(0);
+      expect(prose[ordinal - 1]!.length).toBeGreaterThan(0);
     }
 
-    const first = childRows.first();
+    const first = await showQuestion(page, 1);
+    // Paging away and back left the first explanation exactly where it was: the rows are
+    // never unmounted, only hidden, so an open panel survives a turn.
+    await expect(first.getByTestId('explain-body')).toHaveText(prose[0]!);
     // What reporting does, said before it is pressed: a grown-up will read it, and nothing
     // on this screen changes.
     await expect(first.getByTestId('explain-flag-note')).toContainText(
@@ -241,15 +252,19 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
     // The second Question's explanation, reported the same way — this is the one the parent
     // will dismiss, so that "confirmed reaches the operator" and "dismissed does not" are
     // told apart by the decision and not by which Question it was.
-    await childRows.nth(1).getByTestId('explain-flag').click();
-    await expect(childRows.nth(1).getByTestId('explain-flagged')).toBeVisible();
-    await expect(childRows.nth(1).getByTestId('explain-body')).toHaveText(prose[1]!);
+    const second = await showQuestion(page, 2);
+    await second.getByTestId('explain-flag').click();
+    await expect(second.getByTestId('explain-flagged')).toBeVisible();
+    await expect(second.getByTestId('explain-body')).toHaveText(prose[1]!);
     expect(studentFlagCalls).toHaveLength(2);
 
     // --- And it survives a reload, which is the only proof it was written ---
     await page.reload();
     await expect(page.getByTestId('attempt-results')).toBeVisible({ timeout: 30_000 });
-    const afterReload = page.locator('[data-testid="answer-key-row"]').first();
+    // `?q=` rode through the reload, so the screen comes back on the Question it was
+    // left on — Question 2. The first one is reached the way anything is: by paging.
+    await expect(page.getByTestId('answer-key-position')).toHaveText(`Question 2 of ${total}`);
+    const afterReload = await showQuestion(page, 1);
     await afterReload.getByTestId('explain-control').click();
     await expect(afterReload.getByTestId('explain-flagged')).toBeVisible({ timeout: 30_000 });
     await expect(afterReload.getByTestId('explain-body')).toHaveText(prose[0]!);
@@ -293,8 +308,11 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
     ).toBeVisible();
     const attemptUrl = page.url();
 
-    const parentRows = page.locator('[data-testid="answer-key-row"]');
-    const firstReview = parentRows.first().getByTestId('explanation-review');
+    // **It landed on that entry's Question**, not at the top of the paper: the oldest
+    // report is the one about Question 1, and the link carried its ordinal.
+    await expect(page.getByTestId('answer-key-position')).toHaveText(`Question 1 of ${total}`);
+    await expect(page.locator('[data-testid="answer-key-row"]')).toHaveCount(total);
+    const firstReview = answerKeyRow(page, 1).getByTestId('explanation-review');
     await expect(firstReview).toHaveAttribute('data-student-state', 'awaiting');
     // The same paragraph the child read, beneath the same Question, never a dialog and
     // never a route of its own (UX-DR16).
@@ -332,7 +350,7 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
     await expect(firstReview.getByTestId('explanation-body')).toHaveText(prose[0]!);
 
     // --- Dismiss the second ------------------------------------------------
-    const secondReview = parentRows.nth(1).getByTestId('explanation-review');
+    const secondReview = (await showQuestion(page, 2)).getByTestId('explanation-review');
     await expect(secondReview).toHaveAttribute('data-student-state', 'awaiting');
     await secondReview.getByTestId('explanation-dismiss').click();
     await expect(secondReview).toHaveAttribute('data-student-state', 'dismissed');
@@ -357,12 +375,11 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
       .last()
       .getByRole('link', { name: 'Read the explanation' })
       .click();
-    const reloaded = page.locator('[data-testid="answer-key-row"]');
-    await expect(reloaded.first().getByTestId('explanation-review')).toHaveAttribute(
+    await expect(answerKeyRow(page, 1).getByTestId('explanation-review')).toHaveAttribute(
       'data-student-state',
       'confirmed',
     );
-    await expect(reloaded.nth(1).getByTestId('explanation-review')).toHaveAttribute(
+    await expect(answerKeyRow(page, 2).getByTestId('explanation-review')).toHaveAttribute(
       'data-student-state',
       'dismissed',
     );
@@ -385,13 +402,14 @@ test.describe('a child saying an explanation is wrong, and what a parent does ab
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
     await openChildResults(page);
 
-    const backOnChild = page.locator('[data-testid="answer-key-row"]');
-    for (const at of [0, 1]) {
-      const row = backOnChild.nth(at);
+    for (const ordinal of [1, 2]) {
+      const row = await showQuestion(page, ordinal);
       await row.getByTestId('explain-control').click();
       // Byte for byte what they read before either decision: confirming suppressed nothing
       // and dismissing changed nothing. Story 6.4 owns suppression and it has not happened.
-      await expect(row.getByTestId('explain-body')).toHaveText(prose[at]!, { timeout: 30_000 });
+      await expect(row.getByTestId('explain-body')).toHaveText(prose[ordinal - 1]!, {
+        timeout: 30_000,
+      });
       await expect(row.getByTestId('explain-flagged')).toBeVisible();
     }
     // And no decision reached the child on any surface — a dismissal in particular is

@@ -269,7 +269,107 @@ describe('a parent reading one handed-in run', () => {
   it('announces an override through the one region it already owns', () => {
     // One surface, one region: `GradeReview` takes `announce` rather than reaching for one.
     expect(CODE.match(/aria-live/gu)).toHaveLength(1);
-    expect(CODE.match(/announce=\{announce\}/gu)).toHaveLength(2);
+    // The pager's own position sentence goes straight through, since Story 5.8 — the same
+    // region rather than a second one of its own.
+    expect(CODE.match(/announce=\{announce\}/gu)).toHaveLength(1);
+    // The grade region and the explanation region are mounted on every row, hidden or not
+    // (UX-DR34/39/47), so a hidden row's `announce` is dropped rather than forwarded: a
+    // reader paged away before an adjustment or a regeneration settled must not hear an
+    // outcome sentence for a Question that is no longer on screen.
+    expect(CODE.match(/announce=\{paging\.hidden \? noopAnnounce : announce\}/gu)).toHaveLength(
+      2,
+    );
+  });
+
+  // --- Story 5.8: one Question at a time, with the rest mounted and hidden ---
+
+  it('reads `?q=` behind a Suspense boundary, as its sibling drill-down does', () => {
+    // `useSearchParams` opts a route out of static prerendering otherwise, and which
+    // Question is shown arrives as a query parameter — which is the whole reason it is
+    // read at all.
+    expect(CODE).toContain('<Suspense fallback={null}>');
+    expect(CODE).toContain('<ParentAttemptDetail />');
+    expect(CODE).toContain('export default function ParentAttemptDetailPage()');
+    expect(CODE).toContain('function ParentAttemptDetail()');
+    expect(CODE).toContain('useSearchParams()');
+  });
+
+  it('keeps the heading and the way back outside the boundary', () => {
+    // So a parent always has both, even while the reads are in flight or after they
+    // failed — and the way back sits below the pager, which puts it under every
+    // Question rather than only under the last one.
+    const shell = CODE.slice(CODE.indexOf('export default function ParentAttemptDetailPage()'));
+    expect(shell).toContain('parentCopy.attempts.detailTitle');
+    expect(shell).toContain('parentCopy.attempts.backToList');
+    expect(shell).toContain('<Suspense fallback={null}>');
+    // And the live region stays inside it, because the state that feeds it does.
+    expect(shell).not.toContain('aria-live');
+  });
+
+  it('clamps the parameter with the one pure function that decides it', () => {
+    expect(CODE).toContain("from '@/lib/answer-key-paging'");
+    expect(CODE).toContain('ordinalFromQuery(search.get(QUESTION_PARAM), ordinals)');
+    // Against this run's stored ordinals, never an array position: a row whose stored
+    // Question could no longer be read carries `ordinal: 0` and keeps its place.
+    expect(CODE).toContain('(results?.questions ?? []).map((row) => row.ordinal)');
+  });
+
+  it('writes the Question back with a client-side replace, never a push', () => {
+    // Back returns to the Grade disputes list a parent came from rather than walking
+    // twenty Questions backwards — and client-side, because a document navigation would
+    // drop the provider holding the elevation bearer and ask for the PIN again (AD-18).
+    expect(CODE).toContain('next.set(QUESTION_PARAM, String(ordinal))');
+    expect(CODE).toContain('scroll: false');
+    expect(CODE).not.toMatch(/router\.push|window\.location/u);
+  });
+
+  it('pages one Question at a time with every row still mounted', () => {
+    // `ExplanationReview` holds nine pieces of purely local state with no persistence,
+    // four of them failure strings a parent may not have read. Slicing the array would
+    // unmount them and a parent who paged away mid-decision would lose it silently.
+    expect(CODE).toContain('<AnswerKeyPager');
+    expect(CODE).toContain('items={results.questions.map((row) => ({');
+    expect(CODE).toContain('{...paging}');
+    expect(CODE).not.toMatch(/\.slice\(/u);
+    // The two regions stay in the row's own slots, with their guards verbatim.
+    expect(CODE).toContain('token === null || proseError !== null || !proseLoaded ? null : (');
+    expect(CODE).toContain('<GradeReview');
+    expect(CODE).toContain('<ExplanationReview');
+  });
+
+  it('pages nothing for a run that presented no Question at all', () => {
+    // `Question 0 of 0` over an empty map and an empty legend is a position about
+    // nothing. The score and the excluded count above already say what there is to say.
+    expect(CODE).toContain('results.questions.length === 0 ? (');
+    expect(CODE).toContain('data-testid="parent-attempt-no-questions"');
+  });
+
+  it('adds no read for paging: the three reads this screen made are still its three', () => {
+    expect(CODE.match(/parentApi\./gu)).toHaveLength(3);
+  });
+
+  it('hands the pager the parent’s own words, in the third person', () => {
+    expect(CODE).toContain('labels={PARENT_PAGER_LABELS}');
+    expect(CODE).toContain('mapLabels={PARENT_MAP_LABELS}');
+    expect(CODE).toContain('position: parentCopy.attempts.pager.position');
+    expect(CODE).not.toMatch(/studentCopy/u);
+    // Two blocks, deliberately duplicated: a shared one would have to pick a person,
+    // and the one it picked would be the one the other surface shipped by mistake.
+    expect(parentCopy.attempts.pager.mapHeading).not.toBe(studentCopy.results.pager.mapHeading);
+    expect(parentCopy.attempts.pager.cellState(1, 'Correct', true, false)).not.toBe(
+      studentCopy.results.pager.cellState(1, 'Correct', true, false),
+    );
+  });
+
+  it('says a cell’s whole sentence about the child, never to them', () => {
+    const pager = parentCopy.attempts.pager;
+    expect(pager.position(2, 12)).toBe('Question 2 of 12');
+    expect(pager.positionAnnouncement(2, 12)).toBe(pager.position(2, 12));
+    expect(pager.cellState(3, 'Correct', true, false)).toContain('shown now');
+    expect(pager.cellState(3, 'Correct', false, true)).toContain('just graded');
+    expect(pager.cellState(3, 'Correct', true, false)).not.toMatch(/\byou\b/iu);
+    // No percentage and no tally: the score is the header's one figure (FR-37).
+    expect(JSON.stringify(pager)).not.toMatch(/%|out of|score/iu);
   });
 
   it('gives the row the parent’s own word for a mark they set', () => {

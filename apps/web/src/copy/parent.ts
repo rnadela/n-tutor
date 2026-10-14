@@ -1409,6 +1409,49 @@ export const parentCopy = {
     rowUngraded: 'This one has not been graded yet.',
     rowNewlyGraded: 'Just graded.',
 
+    /**
+     * Everything the paged answer key says, in the **third** person about the child.
+     *
+     * **Deliberately duplicated rather than shared with `studentCopy.results.pager`**,
+     * for exactly the reason `AnswerKeyRowLabels` is required rather than defaulted: a
+     * shared block would have to pick a person, and the one it picked would be the one
+     * the other surface shipped by mistake. A parent addressed as their own child is a
+     * bug nothing else on this screen would catch, and the two blocks are read side by
+     * side precisely so the difference is visible.
+     *
+     * The grade labels are **not** restated here. They are `commonCopy.gradeState`'s,
+     * shared between the surfaces on purpose, and this block takes one as a parameter.
+     */
+    pager: {
+      /** Which Question is on screen. Both figures are the caller's. */
+      position: (ordinal: number, total: number) => `Question ${ordinal} of ${total}`,
+      previous: 'Previous',
+      next: 'Next',
+      /** The overlay's opener, below `md`. The rail needs none: it is already there. */
+      openMap: 'All the questions',
+      closeMap: 'Close',
+      /** The results map's own heading, in both the rail and the overlay. */
+      mapHeading: 'All the questions',
+      /**
+       * One map cell's whole spoken sentence, about the child and never to them.
+       *
+       * The grade label is handed in from `commonCopy.gradeState`, the one place the
+       * four literals exist, so a cell cannot say a different word for a state than
+       * the row it jumps to. The cell's drawn mark is `aria-hidden`, which makes this
+       * sentence the only account a reader gets of a Question this read judged.
+       */
+      cellState: (ordinal: number, gradeLabel: string, current: boolean, newlyGraded: boolean) =>
+        `Question ${ordinal}, ${gradeLabel}${newlyGraded ? ', just graded' : ''}${
+          current ? ', shown now' : ''
+        }`,
+      /** The mark drawn in a cell this read judged. A glyph, because a cell is 44px. */
+      cellNewlyGraded: '+',
+      /** One legend entry, on the fixed literal for the state it is about. */
+      legendEntry: (gradeLabel: string) => gradeLabel,
+      /** Announced on every page turn, in the same words the position line shows. */
+      positionAnnouncement: (ordinal: number, total: number) => `Question ${ordinal} of ${total}`,
+    },
+
     /** The inline region beneath a row, headed as what it is. */
     explanationHeading: 'What the student was told',
     /**

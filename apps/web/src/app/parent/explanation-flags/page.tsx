@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NextLink, { type LinkProps } from 'next/link';
-import type { Route } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -23,6 +22,7 @@ import {
   Users,
 } from 'lucide-react';
 import { parentCopy } from '@/copy/parent';
+import { attemptHref } from '@/lib/answer-key-paging';
 import { useElevation } from '@/lib/elevation';
 import {
   parentApi,
@@ -33,14 +33,8 @@ import {
 import { applyIfCurrent, endsParentView, readableInstant } from '@/lib/parent-view';
 import { density, rounded } from '@/theme/tokens';
 
-/**
- * The Attempt a report points at, typed against the app's generated route table rather
- * than left as a bare string — exactly as the runs list does it: a detail screen reached
- * by a URL this file invented would 404 in the browser rather than at compile time.
- */
-function attemptHref(attemptId: string): Route<`/parent/attempts/${string}`> {
-  return `/parent/attempts/${attemptId}`;
-}
+// `attemptHref` (the Attempt link, `?q=` appended when the Question is known) is
+// `answer-key-paging.ts`'s — the Grade disputes list writes the identical link.
 
 /**
  * `NextLink`, pinned to the Attempt route.
@@ -453,7 +447,7 @@ export default function ParentExplanationFlagsPage() {
                         the navigation. */}
                     <Button
                       component={AttemptLink}
-                      href={attemptHref(entry.attemptId)}
+                      href={attemptHref(entry.attemptId, entry.questionOrdinal)}
                       variant={entry.disposition === null ? 'contained' : 'outlined'}
                       endIcon={<ArrowRight size={16} aria-hidden="true" />}
                       sx={{

@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import type { Route } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -20,6 +21,7 @@ import {
   writeAttemptState,
   type AttemptStorage,
 } from '@/lib/attempt-store';
+import { QUESTION_PARAM } from '@/lib/answer-key-paging';
 import { armPending, submitDecision, takePending } from '@/lib/attempt-submit';
 import {
   ParentApiError,
@@ -88,9 +90,10 @@ const CONFIRM_NOTE_ID = 'take-test-confirm-note';
  * split is written here. The Question column stays capped at the 34rem measure
  * at every width; the rail takes the surplus (UX-DR15/34).
  */
-export default function TakeTestPage() {
+function TakeTestScreen() {
   const router = useRouter();
   const params = useParams<{ practiceTestId: string }>();
+  const search = useSearchParams();
   const practiceTestId = params.practiceTestId;
 
   const [test, setTest] = useState<StudentPracticeTestView | null>(null);
@@ -489,6 +492,56 @@ export default function TakeTestPage() {
    */
   const blanks = useMemo(() => notAnswered(questions, answers), [questions, answers]);
 
+  // --- The answer key's `?q=`, which is this page's only routing work ----
+  //
+  // The page reads the parameter and writes it back, and **does not clamp it**: which
+  // Questions a `?q=` can legally name is the answer key's own read, not this one's. The
+  // two are separate reads of separate lists — this one is the released paper, the key's
+  // is every Question the Attempt actually presented and the marking actually judged —
+  // and nothing in either type says the two agree. A clamp here would make a Question the
+  // key holds unreachable, and the key's pager would then report an ordinal this page
+  // clamped straight back, so the two would fight over the URL.
+
+  /** The parameter exactly as the address bar has it, handed through untouched. */
+  const requestedQuestion = search.get(QUESTION_PARAM);
+  /**
+   * The one write, and it is a **replace**.
+   *
+   * Browser Back leaves the results rather than walking twenty Questions backwards,
+   * which is what a child pressing it actually means. `scroll: false` because the
+   * Question is already where the reader is looking and the pager has just put focus on
+   * its heading — scrolling to the top would undo that.
+   */
+  const showQuestion = useCallback(
+    (ordinal: number) => {
+      const next = new URLSearchParams(search.toString());
+      next.set(QUESTION_PARAM, String(ordinal));
+      router.replace(`/student/tests/${practiceTestId}?${next.toString()}` as Route, {
+        scroll: false,
+      });
+    },
+    [router, practiceTestId, search],
+  );
+  /**
+   * Takes the parameter back off the route, for a run that is over.
+   *
+   * **A retake is a different paper's answer key.** The parameter names a Question of
+   * the run that just ended, and leaving it there would open the next hand-in's results
+   * mid-paper — on Question 7 of a run the child has not sat yet, which the clamp cannot
+   * catch because 7 is a perfectly legal ordinal. A replace, like the write: a retake is
+   * not a place to go back to.
+   */
+  const clearQuestion = useCallback(() => {
+    const next = new URLSearchParams(search.toString());
+    next.delete(QUESTION_PARAM);
+    const query = next.toString();
+    const route =
+      query === ''
+        ? `/student/tests/${practiceTestId}`
+        : `/student/tests/${practiceTestId}?${query}`;
+    router.replace(route as Route, { scroll: false });
+  }, [router, practiceTestId, search]);
+
   /**
    * How much time is left, computed from the server's instants through the offset.
    *
@@ -858,6 +911,9 @@ export default function TakeTestPage() {
         setAutoSubmitting(false);
         setWaitingForOnline(false);
         setSubmittedAttemptToClear(null);
+        // The new run's answer key is not the old one's, so the Question named on the
+        // route goes with the run that is over.
+        clearQuestion();
         // Refs are not state. A deadline already acted on belongs to the run that is
         // over, and the previous reading the warning crossings are measured against
         // belongs to its clock.
@@ -874,7 +930,7 @@ export default function TakeTestPage() {
         setRetakeNote(cause instanceof Error ? cause.message : studentCopy.results.retakeFailed);
       },
     );
-  }, [practiceTestId, retaking, router]);
+  }, [practiceTestId, retaking, router, clearQuestion]);
 
   /** The handed-in heading, focused on arrival so the move is never silent. */
   const handedInHeading = useRef<HTMLHeadingElement | null>(null);
@@ -947,6 +1003,12 @@ export default function TakeTestPage() {
         {attempt !== null && (
           <AttemptResults
             attemptId={attempt.id}
+            // The `?q=` round trip is the page's, so `AttemptResults` still owns no
+            // routing: it is handed the parameter as written and reports back the
+            // ordinal it resolved — the clamp and the turn alike — and this file turns
+            // that into a replace.
+            requestedQuestion={requestedQuestion}
+            onNavigate={showQuestion}
             // Passed in rather than owned there: `AttemptResults` keeps its own read
             // and its own failure and gains no notion of a second run, because the run
             // state a retake replaces is this page's.
@@ -1328,5 +1390,24 @@ export default function TakeTestPage() {
         </Typography>
       </AppDialog>
     </Box>
+  );
+}
+
+/**
+ * The route's shell: the screen behind a `Suspense`.
+ *
+ * The body is its own component behind `Suspense` because `useSearchParams` opts a
+ * route out of static prerendering otherwise — and the answer key's Question arrives as
+ * a query parameter, which is the whole reason it is read at all. The same shape the
+ * topic drill-down uses, for the same reason.
+ *
+ * Nothing is rendered outside the boundary: unlike the parent's screens this one has no
+ * standing heading or way back of its own — every state it can be in draws its own.
+ */
+export default function TakeTestPage() {
+  return (
+    <Suspense fallback={null}>
+      <TakeTestScreen />
+    </Suspense>
   );
 }

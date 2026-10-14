@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { commonCopy } from '@/copy/common';
 import { studentCopy } from '@/copy/student';
 
 const SOURCE = readFileSync(path.resolve(import.meta.dirname, 'AttemptResults.tsx'), 'utf8');
@@ -196,6 +197,82 @@ describe('what reads the answer key', () => {
     expect(CODE).not.toMatch(/explainQuestion|explainDecision|studentCopy\.results\.explain/u);
   });
 
+  // --- Story 5.8: one Question at a time, over the one read ---------------
+
+  it('maps every row and shows one, slicing and filtering nothing', () => {
+    // The literal map is unchanged and the no-reorder case above still holds: every row
+    // is still mapped, in the server's order. Only one of them is visible, and the
+    // pager is what decides which.
+    expect(CODE).toContain('results.questions.map(');
+    expect(CODE).toContain('<AnswerKeyPager');
+    expect(CODE).toContain('items={results.questions.map((row) => ({');
+    expect(CODE).not.toMatch(/\.slice\(|\.filter\(|\.sort\(/u);
+    // And the rows are still handed straight to the shared row component.
+    expect(CODE.match(/<AnswerKeyRow/gu)).toHaveLength(1);
+    expect(CODE).toContain('{...paging}');
+  });
+
+  it('owns no routing: the shown Question is handed in and reported back', () => {
+    // The page reads `?q=` and writes it back with `router.replace`. This component
+    // reads nothing from the address bar and pushes nothing onto it, which is also what
+    // keeps the one navigation it has — the guard's refusal — the only one.
+    // The page hands the parameter in exactly as the address bar has it and this
+    // component resolves it against **its own rows** — the only list a `?q=` can
+    // legally name, since a row whose stored Question vanished keeps its place with
+    // `ordinal: 0` — then reports the resolution back out.
+    expect(CODE).toContain('ordinalFromQuery(requestedQuestion, ordinals)');
+    expect(CODE).toContain('(results?.questions ?? []).map((row) => row.ordinal)');
+    expect(CODE).toContain('onNavigate(shownOrdinal)');
+    expect(CODE).toContain('currentOrdinal={shownOrdinal}');
+    expect(CODE).toContain('onNavigate={onNavigate}');
+    expect(CODE).not.toMatch(/useSearchParams|URLSearchParams|QUESTION_PARAM|router\.push/u);
+    expect(CODE.match(/router\.replace/gu)).toHaveLength(1);
+    // Nor does it persist where the child is: the URL is the only carrier.
+    expect(CODE).not.toMatch(/localStorage|sessionStorage/u);
+  });
+
+  it('adds no read for paging, and keeps its two reads its two', () => {
+    // A page turn is a state change over the response already in hand, so the
+    // one-read-per-Attempt invariant and FR-22's view-triggered retry are untouched.
+    expect(CODE.match(/parentApi\./gu)).toHaveLength(2);
+  });
+
+  it('announces the position through the region it already uses, latched apart', () => {
+    // The pager latches its announcement on the **ordinal**; the newly-graded latch
+    // above keys on the response object, which a page turn never changes. So the two
+    // sentences are distinct states in the one region and neither suppresses the other.
+    expect(CODE).toContain('announce={announce}');
+    expect(CODE.match(/announce\(/gu)).toHaveLength(1);
+  });
+
+  it('passes the page’s footer through to the pager, under every Question', () => {
+    // The control that opens another run is still the page's. It now rides inside the
+    // pager so it is visible under Question 1 as well as under the last one.
+    expect(CODE).toContain('footer={footer}');
+  });
+
+  it('hands the pager its words from the results vocabulary, never take-test’s', () => {
+    expect(CODE).toContain('labels={STUDENT_PAGER_LABELS}');
+    expect(CODE).toContain('mapLabels={STUDENT_MAP_LABELS}');
+    expect(CODE).toContain('studentCopy.results.pager.position');
+    expect(CODE).not.toMatch(/takeTest\.(counter|back|next|cellState|mapHeading)/u);
+  });
+
+  it('pages nothing for a run that presented no Question at all', () => {
+    // `Question 0 of 0` over an empty map and an empty legend is a position about
+    // nothing. The header above already says what there is to say, so the zero-row case
+    // renders the empty list the stacked version always did.
+    expect(CODE).toContain('results.questions.length === 0 ? (');
+    expect(CODE).toContain('data-testid="attempt-results-no-questions"');
+    // And the page's control is still rendered in that branch, so a child with nothing
+    // to read still has the way to another run.
+    const empty = CODE.slice(
+      CODE.indexOf('data-testid="attempt-results-no-questions"'),
+      CODE.indexOf('<AnswerKeyPager'),
+    );
+    expect(empty).toContain('{footer}');
+  });
+
   it('appears with no flourish', () => {
     // No count-up, no reveal, no celebration and no per-tick motion: a result is
     // information, and a child who got most of a paper wrong should not have it
@@ -284,6 +361,57 @@ describe('what the results say', () => {
       expect(sentence).not.toMatch(/\b(4\d\d|5\d\d)\b/u);
     }
     expect(studentCopy.results.failed).toBe('Your results could not be loaded.');
+  });
+
+  it('states where the child is from the two figures it is handed, and no more', () => {
+    const pager = studentCopy.results.pager;
+    expect(pager.position(2, 12)).toBe('Question 2 of 12');
+    // The same words announced as displayed, so the two cannot come apart.
+    expect(pager.positionAnnouncement(2, 12)).toBe(pager.position(2, 12));
+    // No percentage and no tally: the score is the header's one figure (FR-37).
+    expect(JSON.stringify(pager)).not.toMatch(/%|out of|score/iu);
+  });
+
+  it('says a cell’s whole sentence, with the grade label handed in', () => {
+    const pager = studentCopy.results.pager;
+    expect(pager.cellState(3, commonCopy.gradeState.Correct, false, false)).toBe(
+      'Question 3, Correct',
+    );
+    expect(pager.cellState(3, commonCopy.gradeState.Correct, true, false)).toContain(
+      'you are here',
+    );
+    expect(pager.cellState(3, commonCopy.gradeState.Correct, false, true)).toContain('just graded');
+    // The legend says the state's own literal and decorates nothing.
+    expect(pager.legendEntry(commonCopy.gradeState.Ungraded)).toBe('Not graded yet');
+  });
+
+  it('addresses the child on the pager too, with no exclamation mark and no code', () => {
+    const pager = studentCopy.results.pager;
+    for (const sentence of [
+      pager.position(1, 2),
+      pager.positionAnnouncement(1, 2),
+      pager.previous,
+      pager.next,
+      pager.openMap,
+      pager.closeMap,
+      pager.mapHeading,
+      pager.cellState(1, commonCopy.gradeState.Incorrect, true, true),
+      pager.legendEntry(commonCopy.gradeState.Incorrect),
+    ]) {
+      expect(sentence).not.toContain('!');
+      expect(sentence).not.toMatch(/\b(4\d\d|5\d\d)\b/u);
+    }
+  });
+
+  it('keeps the two vocabularies two, rather than reusing take-test’s words', () => {
+    // `takeTest` is progress-only and pinned by the case below to carry no grade word;
+    // the results pager is grade-only. One shared block would make those two bans a
+    // single mutable object, and the first reword would take a grade word back into a
+    // screen read while the child is still working.
+    expect(studentCopy.results.pager.mapHeading).not.toBe(studentCopy.takeTest.mapHeading);
+    expect(studentCopy.results.pager.openMap).not.toBe(studentCopy.takeTest.openMap);
+    expect(studentCopy.results.pager.cellState).not.toBe(studentCopy.takeTest.cellState);
+    expect(studentCopy.results.pager.position).not.toBe(studentCopy.takeTest.counter);
   });
 
   it('leaves the take-test vocabulary with no grade word in it', () => {

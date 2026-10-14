@@ -111,8 +111,17 @@ describe('what the disputes screen does', () => {
   });
 
   it('links into the run with a typed route rather than a bare string', () => {
-    expect(CODE).toContain('function attemptHref');
+    // `attemptHref` is `answer-key-paging.ts`'s own export, not a local copy — the
+    // Explanation flags list writes the identical link, and its body (including the
+    // `questionOrdinal === null` omission) is asserted there, not here.
+    expect(CODE).toContain("import { attemptHref } from '@/lib/answer-key-paging'");
     expect(CODE).toContain('component={AttemptLink}');
+    // Pointed at the Question, since Story 5.8. The ordinal was already on the wire for
+    // the "where" sentence beside the entry, so this cost no read and no field — and the
+    // link stays client-side, because a document navigation here would drop the provider
+    // holding the elevation bearer and ask for the PIN again.
+    expect(CODE).toContain('attemptHref(entry.attemptId, entry.questionOrdinal)');
+    expect(CODE).not.toContain('q=null');
   });
 
   it('carries no Mastery figure, no run score and no analytics', () => {

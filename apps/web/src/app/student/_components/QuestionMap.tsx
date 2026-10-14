@@ -2,10 +2,10 @@
 
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import { visuallyHidden } from '@/components/LiveRegion';
+import { QuestionGrid, type QuestionGridCell } from '@/components/QuestionGrid';
 import { studentCopy } from '@/copy/student';
 import type { QuestionProgress } from '@/lib/answers';
-import { comfortableDensity, focusRing, rounded, typeRoles } from '@/theme/tokens';
+import { comfortableDensity, rounded, typeRoles } from '@/theme/tokens';
 
 /**
  * The filled/hollow glyphs, named once.
@@ -25,6 +25,15 @@ const GLYPH = { answered: '●', 'not-answered': '○' } as const;
  * **One component, used in both the rail and the overlay**, so the persistent
  * and the opened form can never drift into saying different things about the
  * same test.
+ *
+ * **The geometry is not here any more.** Since Story 5.8 the grid rule, the button's
+ * box, the `aria-hidden` digit, the glyph slot, the single visually-hidden sentence and
+ * `aria-current` all live in `components/QuestionGrid`, which the results map is built
+ * on too — so the two maps cannot drift on the carriers accessibility depends on. What
+ * stays here is this component's actual job: **the progress vocabulary**. The glyph
+ * table, the heading, the two-count summary, the drawn bar and the two-entry legend are
+ * the words and figures of a test still being worked, and they are exactly what must not
+ * be shared with a map read after the marks are in.
  *
  * Every cell is a real `<button>` at the comfortable tap-target floor — keyboard
  * reachable by construction, because it is a button — and each announces its own
@@ -51,6 +60,31 @@ export function QuestionMap({
   const answered = progress.filter((question) => question.state === 'answered').length;
   const notAnswered = progress.length - answered;
 
+  const cells: QuestionGridCell[] = progress.map((question, index) => {
+    const current = index === currentIndex;
+    const done = question.state === 'answered';
+    return {
+      key: question.id,
+      ordinal: question.ordinal,
+      current,
+      tone: done ? 'done' : 'idle',
+      data: { 'data-state': question.state },
+      // Marked `aria-hidden` here rather than by the grid: the test id and the colour
+      // are this vocabulary's, and the grid is not allowed to know either.
+      glyph: (
+        <Box
+          component="span"
+          aria-hidden="true"
+          data-testid="question-map-glyph"
+          sx={{ color: done ? 'primary.main' : 'text.secondary', lineHeight: 1 }}
+        >
+          {GLYPH[question.state]}
+        </Box>
+      ),
+      sentence: studentCopy.takeTest.cellState(question.ordinal, done, current),
+    };
+  });
+
   return (
     <Box sx={{ display: 'grid', gap: `${comfortableDensity.gap}px` }}>
       <Typography component="h2" sx={{ ...typeRoles.cardTitle }}>
@@ -76,90 +110,12 @@ export function QuestionMap({
         <Box sx={{ flexGrow: answered, bgcolor: 'primary.main' }} />
         <Box sx={{ flexGrow: notAnswered }} />
       </Box>
-      <Box
-        component="ul"
-        // `listStyle: 'none'` strips list semantics in Safari/VoiceOver, and the
-        // item count with them — which is exactly what a child scanning what is
-        // left needs announced. Put back by hand, as Student Home does.
-        role="list"
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(auto-fill, minmax(${comfortableDensity.tapTarget}px, 1fr))`,
-          gap: `${comfortableDensity.gap / 2}px`,
-          listStyle: 'none',
-          p: 0,
-          m: 0,
-        }}
-      >
-        {progress.map((question, index) => {
-          const current = index === currentIndex;
-          const done = question.state === 'answered';
-          return (
-            <Box component="li" role="listitem" key={question.id} sx={{ listStyle: 'none' }}>
-              <Box
-                component="button"
-                type="button"
-                data-testid="question-map-cell"
-                data-ordinal={question.ordinal}
-                data-state={question.state}
-                aria-current={current ? 'true' : undefined}
-                onClick={() => onJump(index)}
-                sx={(theme) => ({
-                  display: 'inline-flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '100%',
-                  minWidth: `${comfortableDensity.tapTarget}px`,
-                  minHeight: `${comfortableDensity.tapTarget}px`,
-                  gap: '2px',
-                  cursor: 'pointer',
-                  color: 'inherit',
-                  backgroundColor: current
-                    ? theme.vars.palette.action.selected
-                    : done
-                      ? theme.vars.palette.action.hover
-                      : 'transparent',
-                  border: `1px solid ${
-                    current ? theme.vars.palette.primary.main : theme.vars.palette.divider
-                  }`,
-                  // The current cell is heavier as well as tinted: a tint alone
-                  // is a colour claim, and colour alone never carries a state here.
-                  borderWidth: current ? 2 : 1,
-                  borderRadius: `${rounded.control}px`,
-                  fontFamily: typeRoles.tableCell.fontFamily,
-                  fontSize: typeRoles.tableCell.fontSize,
-                  '&:focus-visible': {
-                    outline: `${focusRing.width}px solid ${theme.vars.palette.primary.main}`,
-                    outlineOffset: focusRing.offset,
-                  },
-                })}
-              >
-                {/* Hidden from assistive technology, both of them: the cell's
-                    accessible name is the sentence below, stated once. */}
-                <Box component="span" aria-hidden="true">
-                  {question.ordinal}
-                </Box>
-                <Box
-                  component="span"
-                  aria-hidden="true"
-                  data-testid="question-map-glyph"
-                  sx={{ color: done ? 'primary.main' : 'text.secondary', lineHeight: 1 }}
-                >
-                  {GLYPH[question.state]}
-                </Box>
-                <Box component="span" sx={visuallyHidden}>
-                  {studentCopy.takeTest.cellState(
-                    question.ordinal,
-                    question.state === 'answered',
-                    current,
-                  )}
-                </Box>
-              </Box>
-            </Box>
-          );
-        })}
-      </Box>
+      <QuestionGrid
+        cells={cells}
+        onJump={onJump}
+        testId="question-map"
+        cellTestId="question-map-cell"
+      />
       {/* The legend, on screen. Without it the glyphs would be the only account
           of a state for anyone reading the map visually. */}
       <Box

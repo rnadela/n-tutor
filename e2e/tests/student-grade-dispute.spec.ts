@@ -1,5 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createGradeLevelFixture, createSubjectFixture, uniqueParentEmail } from '../fixtures';
+import {
+  answerKeyRow,
+  createGradeLevelFixture,
+  createSubjectFixture,
+  uniqueParentEmail,
+} from '../fixtures';
 
 /**
  * A child saying a mark is wrong, and a parent setting it.
@@ -266,8 +271,12 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     const scoreBefore = (await page.getByTestId('attempt-results-score').innerText()).trim();
     await expect(page.getByTestId('attempt-results-score-change')).toHaveCount(0);
 
-    const first = childRows.first();
-    // The first row is one the marking judged, which is what makes it adjustable at all.
+    // Addressed by **ordinal**: since Story 5.8 one Question is on screen at a time, so
+    // "the first row in the DOM" is only the Question on screen because `?q=` resolved
+    // to Question 1 — which the position line states.
+    await expect(page.getByTestId('answer-key-position')).toHaveText(`Question 1 of ${total}`);
+    const first = answerKeyRow(page, 1);
+    // Question 1 is one the marking judged, which is what makes it adjustable at all.
     const firstState = await first.getAttribute('data-state');
     expect(['Correct', 'Incorrect']).toContain(firstState);
 
@@ -303,9 +312,8 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     // --- And it survives a reload, which is the only proof it was written ---
     await page.reload();
     await expect(page.getByTestId('attempt-results')).toBeVisible({ timeout: 30_000 });
-    await expect(
-      page.locator('[data-testid="answer-key-row"]').first().getByTestId('dispute-reported'),
-    ).toBeVisible();
+    await expect(page.getByTestId('answer-key-position')).toHaveText(`Question 1 of ${total}`);
+    await expect(answerKeyRow(page, 1).getByTestId('dispute-reported')).toBeVisible();
     // The reported state rode back on the results read rather than on a request of its own.
     expect(disputeCalls).toHaveLength(1);
     // And the child is told nothing about the workings on any of it.
@@ -353,8 +361,11 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
       page.getByRole('heading', { name: 'The practice test, as it was marked', level: 1 }),
     ).toBeVisible();
 
-    const parentRows = page.locator('[data-testid="answer-key-row"]');
-    const review = parentRows.first().getByTestId('grade-review');
+    // **It landed on the disputed Question**, not at the top of the paper: the entry's
+    // ordinal was already on the wire, and the link carried it.
+    await expect(page.getByTestId('answer-key-position')).toHaveText(`Question 1 of ${total}`);
+    await expect(page.locator('[data-testid="answer-key-row"]')).toHaveCount(total);
+    const review = answerKeyRow(page, 1).getByTestId('grade-review');
     await expect(review).toHaveAttribute('data-disputed', 'true');
     await expect(review).toHaveAttribute('data-adjusted', 'false');
     await expect(review.getByTestId('grade-review-disputed')).toContainText(
@@ -404,10 +415,7 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     await crossThePin(page);
     await openTheDisputedRun(page);
 
-    const returned = page
-      .locator('[data-testid="answer-key-row"]')
-      .first()
-      .getByTestId('grade-review');
+    const returned = answerKeyRow(page, 1).getByTestId('grade-review');
     // **The picked mark is still offered, and still unsaved.** The Save control is what
     // says the pick came back; `data-adjusted` is what says it was never committed.
     await expect(returned.getByTestId('grade-review-save')).toBeVisible({ timeout: 30_000 });
@@ -445,7 +453,7 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     // The pick is committed, so there is nothing left to put back.
     await expect(returned.getByTestId('grade-review-cancel')).toHaveCount(0);
     // The row reads parent-adjusted, in words.
-    await expect(parentRows.first().getByTestId('answer-key-row-parent-adjusted')).toHaveText(
+    await expect(answerKeyRow(page, 1).getByTestId('answer-key-row-parent-adjusted')).toHaveText(
       'A parent set this mark.',
     );
     // **The mark and the score moved together**, and the score is stated as a change rather
@@ -494,9 +502,10 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     await expect(page.getByTestId('parent-attempt-score')).toContainText('adjusted by parent to', {
       timeout: 30_000,
     });
-    await expect(
-      page.locator('[data-testid="answer-key-row"]').first().getByTestId('grade-review'),
-    ).toHaveAttribute('data-adjusted', 'true');
+    await expect(answerKeyRow(page, 1).getByTestId('grade-review')).toHaveAttribute(
+      'data-adjusted',
+      'true',
+    );
 
     // --- Back in Student Mode: the new mark, one plain line, and no workings
     // The way out is in the Parent View layout, so it is reachable from the run itself.
@@ -504,7 +513,7 @@ test.describe('a child saying a mark is wrong, and the parent who sets it', () =
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
     await openChildResults(page);
 
-    const backOnChild = page.locator('[data-testid="answer-key-row"]').first();
+    const backOnChild = answerKeyRow(page, 1);
     // The effective mark is the child's mark: a results screen still showing the marking's
     // own verdict would be telling a child their parent's decision did not happen.
     const adjustedState = firstState === 'Correct' ? 'Incorrect' : 'Correct';

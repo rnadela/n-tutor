@@ -13,6 +13,9 @@ import { comfortableDensity, typeRoles, rounded } from '@/theme/tokens';
 import { Hourglass, MessageCircleQuestion } from 'lucide-react';
 import { deviceIsUnbound } from '../page';
 
+/** Swapped in for `announce` while this row's Question is paged away. */
+function noopAnnounce(): void {}
+
 /**
  * One Question's "I think this is marked wrong", inline beneath its own row.
  *
@@ -50,6 +53,7 @@ export function DisputePanel({
   ordinal,
   disputed,
   onDisputed,
+  hidden,
 }: {
   attemptId: string;
   questionId: string;
@@ -70,9 +74,20 @@ export function DisputePanel({
    * mark now is.
    */
   onDisputed: (view: AttemptResultsView) => void;
+  /**
+   * Whether this row's `AnswerKeyRow` currently carries the `hidden` attribute.
+   *
+   * Every row stays mounted so a press begun off-screen still lands, but the live
+   * region is shared across every Question — so an outcome for a Question that is
+   * not the one shown would narrate the wrong row. Suppressing the announcement
+   * (not the outcome itself: the sentence still renders on the row) is the same
+   * fix the parent's `GradeReview`/`ExplanationReview` already apply.
+   */
+  hidden?: boolean;
 }) {
   const router = useRouter();
-  const { announce } = useAnnounce();
+  const { announce: liveAnnounce } = useAnnounce();
+  const announce = hidden ? noopAnnounce : liveAnnounce;
   /** Whether an objection this panel sent is still out. A double press is one call. */
   const [sending, setSending] = useState(false);
   /**

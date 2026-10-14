@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createGradeLevelFixture, createSubjectFixture, uniqueParentEmail } from '../fixtures';
+import {
+  answerKeyRow,
+  createGradeLevelFixture,
+  createSubjectFixture,
+  showQuestion,
+  uniqueParentEmail,
+} from '../fixtures';
 
 /**
  * A parent taking one explanation away from their child, and getting a replacement that
@@ -210,29 +216,31 @@ test.describe('a parent removing an explanation from their child, and replacing 
     const childRows = page.locator('[data-testid="answer-key-row"]');
     await expect(childRows).toHaveCount(total);
 
+    // Paged to by **ordinal**: since Story 5.8 one Question is on screen at a time and
+    // the rest are mounted and hidden, so reaching the second one is a page turn.
     const prose: string[] = [];
-    for (const at of [0, 1]) {
-      const row = childRows.nth(at);
+    for (const ordinal of [1, 2]) {
+      const row = await showQuestion(page, ordinal);
       await row.getByTestId('explain-control').click();
       await expect(row.getByTestId('explain-body')).toBeVisible({ timeout: 30_000 });
       prose.push((await row.getByTestId('explain-body').innerText()).trim());
-      expect(prose[at]!.length).toBeGreaterThan(0);
+      expect(prose[ordinal - 1]!.length).toBeGreaterThan(0);
     }
+    const firstChildRow = await showQuestion(page, 1);
     // The first explanation was not a replacement of anything, and the child is told so by
     // the absence of a line rather than by one.
-    await expect(childRows.first().getByTestId('explain-replacement')).toHaveCount(0);
-    await childRows.first().getByTestId('explain-flag').click();
-    await expect(childRows.first().getByTestId('explain-flagged')).toBeVisible();
+    await expect(firstChildRow.getByTestId('explain-replacement')).toHaveCount(0);
+    // And it is still open after the turns, with its prose: nothing was unmounted.
+    await expect(firstChildRow.getByTestId('explain-body')).toHaveText(prose[0]!);
+    await firstChildRow.getByTestId('explain-flag').click();
+    await expect(firstChildRow.getByTestId('explain-flagged')).toBeVisible();
 
     // What the child scored and what the grade states were, before a parent touches
     // anything. Read here so "nothing else changed" is a comparison and not an impression.
     const scoreBefore = await page.getByTestId('attempt-results-score').innerText();
-    const gradeBefore = await childRows.first().getAttribute('data-state');
-    const answerBefore = await childRows.first().getByTestId('answer-key-your-answer').innerText();
-    const correctBefore = await childRows
-      .first()
-      .getByTestId('answer-key-correct-answer')
-      .innerText();
+    const gradeBefore = await firstChildRow.getAttribute('data-state');
+    const answerBefore = await firstChildRow.getByTestId('answer-key-your-answer').innerText();
+    const correctBefore = await firstChildRow.getByTestId('answer-key-correct-answer').innerText();
 
     // --- The parent reads it, and is offered nothing until they agree -------
     await reenterParentView(page);
@@ -248,8 +256,11 @@ test.describe('a parent removing an explanation from their child, and replacing 
     ).toBeVisible();
     const attemptUrl = page.url();
 
-    const parentRows = page.locator('[data-testid="answer-key-row"]');
-    const review = parentRows.first().getByTestId('explanation-review');
+    // **It landed on the reported Question**, not at the top of the paper: the entry's
+    // ordinal was already on the wire, and the link carried it.
+    await expect(page.getByTestId('answer-key-position')).toHaveText(`Question 1 of ${total}`);
+    await expect(page.locator('[data-testid="answer-key-row"]')).toHaveCount(total);
+    const review = answerKeyRow(page, 1).getByTestId('explanation-review');
     await expect(review).toHaveAttribute('data-student-state', 'awaiting');
     // **Locked while the child's report is awaiting a decision**, and nothing at all is
     // rendered for it: a disabled control would invite a parent to wonder what they did
@@ -259,8 +270,9 @@ test.describe('a parent removing an explanation from their child, and replacing 
     await expect(review.getByTestId('explanation-regenerate')).toHaveCount(0);
     // The second Question, which nobody reported, is locked too — and stays that way for
     // the whole of this test, which is what says the removal is scoped to one explanation.
-    const other = parentRows.nth(1).getByTestId('explanation-review');
+    const other = (await showQuestion(page, 2)).getByTestId('explanation-review');
     await expect(other).toHaveAttribute('data-suppression-state', 'locked');
+    await showQuestion(page, 1);
 
     // --- Agreeing with the child unlocks it, and does not perform it --------
     await review.getByTestId('explanation-confirm').click();
@@ -330,7 +342,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
     await openChildResults(page);
 
     const afterRemoval = page.locator('[data-testid="answer-key-row"]');
-    const removedRow = afterRemoval.first();
+    const removedRow = answerKeyRow(page, 1);
     // **The late-arrival ordering, forced.** The results screen makes two independent reads, and
     // the rows mount as soon as the answer key lands — so by the time the answer key is on
     // screen the suppression read may or may not have resolved. Asserting the key is already
@@ -365,7 +377,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
     await expect(removedRow.getByTestId('answer-key-correct-answer')).toHaveText(correctBefore);
     await expect(page.getByTestId('attempt-results-score')).toHaveText(scoreBefore);
     // And the other Question's explanation is exactly where it was, still readable.
-    const untouched = afterRemoval.nth(1);
+    const untouched = await showQuestion(page, 2);
     await untouched.getByTestId('explain-control').click();
     await expect(untouched.getByTestId('explain-body')).toHaveText(prose[1]!, { timeout: 30_000 });
 
@@ -382,10 +394,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
       .getByRole('link', { name: 'Read it' })
       .click();
     await expect(page).toHaveURL(attemptUrl);
-    const afterReload = page
-      .locator('[data-testid="answer-key-row"]')
-      .first()
-      .getByTestId('explanation-review');
+    const afterReload = answerKeyRow(page, 1).getByTestId('explanation-review');
     // The removal survived a reload, which is the only proof it was written.
     await expect(afterReload).toHaveAttribute('data-suppression-state', 'suppressed', {
       timeout: 30_000,
@@ -430,7 +439,7 @@ test.describe('a parent removing an explanation from their child, and replacing 
     await expect(page.getByRole('heading', { name: 'Your practice', level: 1 })).toBeVisible();
     await openChildResults(page);
 
-    const replaced = page.locator('[data-testid="answer-key-row"]').first();
+    const replaced = answerKeyRow(page, 1);
     // The statement is gone and the control is back: the child is being served again.
     await expect(replaced.getByTestId('explain-suppressed')).toHaveCount(0);
     await replaced.getByTestId('explain-control').click();
