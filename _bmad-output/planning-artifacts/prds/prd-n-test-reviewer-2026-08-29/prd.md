@@ -214,7 +214,7 @@ A user can switch a device between Student Mode (bound to one Student Profile) a
 Parent View expires after a period of inactivity and the device returns to Student Mode without any user action.
 
 **Consequences (testable):**
-- The idle window is **15 minutes** with no parent interaction. `[ASSUMPTION: 15 minutes is long enough to review a draft Practice Test without re-entering the PIN, and short enough that a tablet left on the kitchen counter is not an open Parent View.]`
+- The idle window is **60 minutes** with no parent interaction. Interaction includes pointer movement and focus changes, not only taps and keys, so a parent reading without touching the screen is still present. `[CHANGED 2026-10-16: 15 minutes proved too tight in use — parents reviewing results and answer keys were sent back to the PIN mid-review. See sprint-change-proposal-2026-10-16-idle-window.md.]` `[ASSUMPTION: 60 minutes covers an uninterrupted review session; revisit if parents report leaving Parent View open on shared devices.]`
 - Expiry fires **silently** — no warning, no countdown, no confirmation prompt. The parent is not asked whether to extend.
 - On expiry the device lands in Student Mode bound to the Student Profile it was last bound to (FR-4), **without any prompt**. This is deliberately not the explicit-exit rule.
   *Why:* FR-4 prompts for a profile on a multi-profile device, and a silent path has nobody present to answer. Falling back to the last-bound profile is the only binding a silent expiry can make.
@@ -1037,7 +1037,7 @@ Everything here is **deferred past MVP**, not refused — each is expected to be
 
 - **Performance.** Student Mode interactions (question navigation, submission, results render) feel instant on a mid-range tablet over home wifi. Generation is explicitly asynchronous with progress feedback; a parent must be able to leave and return. Explanation generation is a foreground wait and must stay short enough not to break a study session.
 - **Reliability.** No AI failure loses student work: an in-progress Attempt survives interruption (FR-18), a failed generation is retryable without re-upload (FR-10), and unavailable AI grading degrades to *ungraded* rather than to *wrong* (FR-22).
-- **Security.** Passwords and Parent PINs stored hashed. All traffic over TLS. Authorization enforced server-side per Parent Account for every Page Image, Practice Test, Attempt, and Analytics query — Student Mode restrictions are not client-side-only (FR-4). Parent View is additionally bounded in time: it expires after 15 minutes of inactivity and returns the device to Student Mode (FR-34), so an unattended family tablet does not sit in an elevated state indefinitely. Expiry is enforced server-side; a client that fails to expire does not retain Parent View authority.
+- **Security.** Passwords and Parent PINs stored hashed. All traffic over TLS. Authorization enforced server-side per Parent Account for every Page Image, Practice Test, Attempt, and Analytics query — Student Mode restrictions are not client-side-only (FR-4). Parent View is additionally bounded in time: it expires after 60 minutes of inactivity and returns the device to Student Mode (FR-34), so an unattended family tablet does not sit in an elevated state indefinitely. Expiry is enforced server-side; a client that fails to expire does not retain Parent View authority.
 - **Observability.** Generation, Extraction, grading, and Explanation calls are logged with outcome, latency, and cost attribution per Parent Account, sufficient to answer "why was this test bad" and "what did this family cost."
 - **Data lifecycle.** Deletion requests (§5.2) propagate to Page Images, Extractions, Practice Tests, Attempts, and Mastery.
 - **Accessibility.** Its own subsection, §10.1.
@@ -1185,7 +1185,7 @@ Listed in document order. These index numbers are working references, not stable
 
 1. **§4.1** — The shared-device pattern (family tablet) is the dominant usage mode; a student on their own phone is served by the same PIN mechanism.
 2. **§4.1 / FR-1** — One timezone per Parent Account, captured at registration from the signing-up device and editable in Settings, is sufficient for allowance period boundaries; no per-device or per-Student-Profile timezone is needed.
-3. **§4.1 / FR-34** — 15 minutes is the right Parent View idle window: long enough to review a draft Practice Test without re-entering the PIN, short enough that a tablet left on the counter is not an open Parent View.
+3. **§4.1 / FR-34** — ~~15 minutes~~ Falsified 2026-10-16; window is now 60 minutes, accepting a longer open Parent View on an abandoned device in exchange for uninterrupted review.
 4. **§4.2 / FR-5** — 10 Page Images is a sufficient ceiling for a school exam.
 5. **§4.2 / FR-8** — The legibility check is advisory and overridable rather than blocking.
 6. **§4.3 / FR-10** — 5 Practice Tests is the right per-request generation cap.

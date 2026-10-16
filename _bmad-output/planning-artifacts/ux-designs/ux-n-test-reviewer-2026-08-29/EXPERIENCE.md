@@ -397,7 +397,7 @@ This is the student-facing half of FR-39, and it is delicate for a reason worth 
 
 **Binding rules.**
 
-- Fires **silently at 15 minutes of inactivity** — inactivity, not wall-clock session age — and returns to Student Mode on the **last-bound Student Profile**.
+- Fires **silently at 60 minutes of inactivity** (inactivity, not wall-clock session age; pointer movement and focus changes count as activity) and returns to Student Mode on the **last-bound Student Profile**.
 - Re-entry requires the PIN, and the three-wrong-attempts cooldown applies to re-entry identically.
 - **Because there is no warning, in-progress parent work must persist without an explicit save:** a per-Question edit typed but not committed, review position within a draft, an uncommitted grade override, and any partially completed upload or classification step all survive.
 - Re-entry returns the parent to where the session ended, not to the Parent View root.
@@ -514,7 +514,7 @@ Journey names mirror PRD §2.3 verbatim.
 5. She taps the division row. The Topic drill-down shows the three specific Questions he missed with the answers he gave — Literata, paper role, because this is generated Question content shown to a parent.
 6. **Climax:** she now knows exactly what to sit down with him about. **Generate more on this** sits directly beneath the evidence, Topic pre-selected — and states before it fires how many Practice Tests it will make and what that leaves of her Generation Allowance, in Practice Tests. She taps it knowingly.
 
-*Edge case: three wrong PIN entries lock Parent View for a cooldown, so a curious 10-year-old cannot brute-force it. If she walks away mid-drill-down, the session ends silently at 15 minutes and returns to Student Mode on the last-bound profile; her uncommitted work is intact when she PINs back in.*
+*Edge case: three wrong PIN entries lock Parent View for a cooldown, so a curious 10-year-old cannot brute-force it. If she walks away mid-drill-down, the session ends silently at 60 minutes and returns to Student Mode on the last-bound profile; her uncommitted work is intact when she PINs back in.*
 
 ### UJ-4 — Admin adds a subject before the school year
 
@@ -600,7 +600,7 @@ Each of these diverges from a stated requirement. None is silently absorbed.
 |---|---|---|---|
 | D1 | **FR-16** — Practice Tests "grouped and labeled by Subject and state" | Student Home is a **flat list with no Subject grouping**, sorted unstarted-first then completed-newest-first | **Departure stands.** Grouping adds a header for nothing at the UJ-2 case of two Math cards, and the sort does the work at 15 cards across three Subjects. A workflow deriving acceptance criteria from FR-16 must not write a grouping requirement. |
 | D3 | **§9.1 MVP scope** — dark mode is not listed | **Dark mode ships in v0**, with every token given a dark counterpart and every pair verified in both modes | **Departure stands.** Scope addition, not a contradiction. Cost is doubled contrast verification, already paid. |
-| D4 | **No PRD basis** | **Parent View idle timeout at 15 minutes**, firing silently and returning to Student Mode | **New requirement, UX-originated.** The PRD gates Parent View by PIN but never bounds the session, which on the shared-family-tablet pattern it names as dominant leaves a forgotten session open all evening. Carries a hard consequence: uncommitted parent input must persist without an explicit save. Belongs in a PRD update. |
+| D4 | **No PRD basis** (now in PRD FR-34) | **Parent View idle timeout at 60 minutes (was 15; widened 2026-10-16)**, firing silently and returning to Student Mode | **New requirement, UX-originated.** The PRD gates Parent View by PIN but never bounds the session, which on the shared-family-tablet pattern it names as dominant leaves a forgotten session open all evening. Carries a hard consequence: uncommitted parent input must persist without an explicit save. Belongs in a PRD update. |
 | D5 | **FR-4** — exiting Parent View on a multi-profile device prompts which profile to bind | Prompt **restored** on the deliberate "Back to Student Mode" path. The **silent idle timeout cannot prompt** and binds to the **last-bound Student Profile** | **Partial departure, scoped to the silent path only.** Initial binding is set at first Student Profile creation. The earlier undefined "the correct Student Profile" is replaced by this rule. |
 | D6 | **FR-28** — "Mastery is presented per Topic, filterable by Subject" | Filter was dropped | **Restored.** The Mastery table carries a Subject filter defaulting to all Subjects. Invisible with one Subject; necessary the moment two are released, since Topics are scoped per Subject under FR-26a. |
 | D7 | **FR-9a** — thin-Extraction warning states usable-question and page counts, and retaking consumes no Generation Allowance | Both were dropped | **Restored.** Both are now in the thin-Extraction warning pattern. The allowance guarantee is the load-bearing half: without it the parent chooses blind between a bad generation and an unknown cost. |

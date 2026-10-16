@@ -2981,3 +2981,13 @@ source_spec: `spec-5-8-paged-answer-key.md`
 severity: low
 reason: `AnswerKeyPager`'s own doc comment (`apps/web/src/components/AnswerKeyPager.tsx:84-94`) resolves the shown Question by `items.findIndex(ordinal === currentOrdinal)` and `jumpTo` resolves a map cell's ordinal the same way — both intentionally take the first match, because the stored ordinal is "the only unit the URL can carry". The type `AnswerKeyRowView` does not promise ordinals are distinct, and the Spec Change Log already treats one such ordinal (`0`, the analytics drill-down's vanished-Question marker) as never reaching these paged surfaces. A genuine duplicate within `grading-results.ts` output would still make the second row permanently unreachable by any address, with no test exercising that input. Raised by review and left open: fixing it would mean keying the URL by something other than the stored ordinal, which conflicts with this story's own boundary ("selected by matching row.ordinal, never by array position") and with the no-API/no-wire-change constraint, so it is a
 status: open
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-scp-parent-idle-window-60min.md`
+  summary: Programmatic `.focus()` (autofocus, dialog traps, paging) now counts as Parent View interaction; consider filtering element focus not preceded by input.
+  evidence: `focus` added to INTERACTION_EVENTS; focus events from `.focus()` are trusted, and apps/web/src has ~23 programmatic focus sites.
+- source_spec: `_bmad-output/implementation-artifacts/spec-scp-parent-idle-window-60min.md`
+  summary: Re-examine REFRESH_AT_FRACTION / RETRY_AT_FRACTION at a 60-min window (first refresh 30 min in, retries 6 min apart).
+  evidence: Fractions were tuned for 15 min; spec marked them Ask First, so left unchanged.
+- source_spec: `_bmad-output/implementation-artifacts/spec-scp-parent-idle-window-60min.md`
+  summary: Tracked stray `_tmp_review_diff.patch` at repo root pollutes git grep (still shows old '900' default).
+  evidence: Pre-existing file surfaced by review; not part of this change.

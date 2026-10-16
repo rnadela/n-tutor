@@ -13,7 +13,7 @@ const API_BASE = `http://localhost:${process.env.API_PORT ?? '3001'}/api`;
  * speed, which is the case this story is about — a parent whose Parent View
  * ended while the work they had half-typed was perfectly alive server-side.
  */
-const WINDOW_MS = Number(process.env.ELEVATION_TTL_SECONDS ?? '900') * 1000;
+const WINDOW_MS = Number(process.env.ELEVATION_TTL_SECONDS ?? '3600') * 1000;
 
 /** Comfortably more than one window, and comfortably less than two. */
 const PAST_THE_WINDOW = Math.ceil(WINDOW_MS * 1.1);

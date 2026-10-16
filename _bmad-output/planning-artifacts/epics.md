@@ -27,7 +27,7 @@ FR-3: A parent, in Parent View, can create, rename, set the Grade Level of, and 
 
 FR-4: A user can switch a device between Student Mode (bound to one Student Profile) and Parent View. Initial binding is set at first Student Profile creation; on a multi-profile device, deliberately exiting Parent View prompts for which profile to bind to (a silent expiry per FR-34 cannot prompt and falls back to last-bound); in Student Mode no upload, generation, release, cross-profile data, or Analytics surface is reachable by navigation or direct URL, and the only path out is the PIN prompt.
 
-FR-34: Parent View expires after a period of inactivity and the device returns to Student Mode without any user action. The idle window is 15 minutes; expiry is silent (no warning, no countdown); it falls back to the last-bound Student Profile without a prompt; re-entry requires the PIN and the FR-2 cool-down applies identically; applies to every Parent View surface.
+FR-34: Parent View expires after a period of inactivity and the device returns to Student Mode without any user action. The idle window is 60 minutes (pointer movement and focus count as interaction); expiry is silent (no warning, no countdown); it falls back to the last-bound Student Profile without a prompt; re-entry requires the PIN and the FR-2 cool-down applies identically; applies to every Parent View surface.
 
 FR-35: Every piece of uncommitted parent input in Parent View persists across an FR-34 expiry without an explicit save, and is restored exactly on re-entry. Covers per-Question draft edits, draft review position, an in-progress grade override (excluding the AI rationale, which is re-read on restoration), and a partially completed upload (captured/selected Page Images, order, Subject/Grade Level chosen so far). Retained state is held server-side only, keyed to the Parent Account, never written to client storage; restoration happens strictly after PIN re-entry; a cross-profile fetch of retained state is rejected server-side; retained state carries its own TTL.
 
@@ -126,7 +126,7 @@ NFR7: Security — Passwords and Parent PINs are stored hashed; all traffic is o
 
 NFR8: Security — Authorization is enforced server-side per Parent Account for every Page Image, Practice Test, Attempt, and Analytics query; Student Mode restrictions are not client-side-only (FR-4).
 
-NFR9: Security — Parent View is time-bounded: it expires after 15 minutes of inactivity and returns the device to Student Mode (FR-34), enforced server-side — a client that fails to expire does not retain Parent View authority.
+NFR9: Security — Parent View is time-bounded: it expires after 60 minutes of inactivity and returns the device to Student Mode (FR-34), enforced server-side — a client that fails to expire does not retain Parent View authority.
 
 NFR10: Observability — Generation, Extraction, grading, and Explanation calls are logged with outcome, latency, and cost attribution per Parent Account, sufficient to answer "why was this test bad" and "what did this family cost."
 
@@ -452,7 +452,7 @@ So that my child is not exposed to parent controls if I walk away.
 
 **Acceptance Criteria:**
 
-**Given** Parent View has been idle for 15 minutes
+**Given** Parent View has been idle for 60 minutes
 **When** the window elapses
 **Then** it silently (no warning, no countdown) returns to Student Mode bound to the last-bound Student Profile, with no prompt
 

@@ -8,9 +8,10 @@
  * timer functions, the refresh call and the event target as dependencies, so
  * the whole of the behaviour is drivable by a fake clock in a plain spec.
  *
- * Nothing in this module names a duration. The idle window is
+ * Nothing in this module names an idle-window duration (the pointermove
+ * throttle below is a rate limit, not a window). The idle window is
  * `expiresAt - issuedAt` — instants the server stated — so an env override on
- * the API moves this clock too, and no second definition of "15 minutes" can
+ * the API moves this clock too, and no second definition of the window can
  * drift into the browser.
  */
 
@@ -21,7 +22,26 @@
  * anything, or a screen that polls on its own would keep Parent View alive over
  * an empty room.
  */
-export const INTERACTION_EVENTS = ['pointerdown', 'keydown', 'scroll', 'touchstart'] as const;
+export const INTERACTION_EVENTS = [
+  'pointerdown',
+  'pointermove',
+  'keydown',
+  'scroll',
+  'touchstart',
+  'focus',
+] as const;
+
+/**
+ * `pointermove` fires many times a second while a parent hovers to read. One
+ * arriving this soon after the last counted interaction of any kind is ignored,
+ * so passive presence counts without re-arming the timer per event. Discrete
+ * events (taps, keys, focus) are never throttled and keep their exact deadlines.
+ *
+ * A `pointermove` whose coordinates did not change is ignored outright: browsers
+ * emit those under a resting cursor when the layout shifts or the page scrolls,
+ * so a screen that polls and re-renders would otherwise keep itself alive.
+ */
+export const POINTERMOVE_THROTTLE_MS = 1000;
 
 /**
  * How far into the window the first replacement is requested, as a fraction of
@@ -116,13 +136,24 @@ export type RefreshOutcome =
   /** A dropped connection, a 429, a 500 — a bad moment, not an idle parent. */
   | { outcome: 'failed' };
 
+/** The slice of a DOM event the clock reads. Coordinates only on pointer events. */
+export interface InteractionEvent {
+  type: string;
+  screenX?: number;
+  screenY?: number;
+}
+
 export interface InteractionTarget {
   addEventListener(
     type: string,
-    listener: () => void,
+    listener: (event?: InteractionEvent) => void,
     options?: { passive?: boolean; capture?: boolean },
   ): void;
-  removeEventListener(type: string, listener: () => void, options?: { capture?: boolean }): void;
+  removeEventListener(
+    type: string,
+    listener: (event?: InteractionEvent) => void,
+    options?: { capture?: boolean },
+  ): void;
 }
 
 export interface IdleClockDeps<Handle> {
@@ -190,6 +221,8 @@ export function createIdleClock<Handle>(deps: IdleClockDeps<Handle>): () => void
    * would install its stale instants over the newer token's.
    */
   let inFlight = false;
+  /** Where the pointer last was, so a move that did not move can be told apart. */
+  let lastPointer: { x: number; y: number } | null = null;
 
   function clearPending(): void {
     if (handle === null) return;
@@ -279,15 +312,38 @@ export function createIdleClock<Handle>(deps: IdleClockDeps<Handle>): () => void
     tick();
   }
 
-  function onInteraction(): void {
+  function onInteraction(event?: InteractionEvent): void {
     if (stopped) return;
-    state = { ...state, lastInteractionAt: deps.now() };
+    const now = deps.now();
+    // An interaction cannot revive a Parent View that has already lapsed. A
+    // backgrounded tab's expire timer can fire late; the parent's return (a
+    // window `focus`, a tap) must expire it, not stamp a fresh deadline.
+    if (decide(state, now).action === 'expire') {
+      expire();
+      return;
+    }
+    if (event?.type === 'pointermove' && !isRealPointerMove(event, now)) return;
+    state = { ...state, lastInteractionAt: now };
     tick();
   }
 
+  function isRealPointerMove(event: InteractionEvent, now: number): boolean {
+    const { screenX, screenY } = event;
+    if (typeof screenX === 'number' && typeof screenY === 'number') {
+      const unmoved =
+        lastPointer !== null && lastPointer.x === screenX && lastPointer.y === screenY;
+      lastPointer = { x: screenX, y: screenY };
+      if (unmoved) return false;
+    }
+    // Throttled only while time runs forward: a clock stepped backwards must
+    // not swallow every move until it catches up.
+    const since = now - state.lastInteractionAt;
+    return !(since >= 0 && since < POINTERMOVE_THROTTLE_MS);
+  }
+
   for (const type of INTERACTION_EVENTS) {
-    // Capturing, because `scroll` does not bubble: a parent scrolling a list
-    // inside the page is a parent who is still there.
+    // Capturing, because `scroll` and `focus` do not bubble: a parent scrolling
+    // a list or tabbing through the page is a parent who is still there.
     deps.target.addEventListener(type, onInteraction, { passive: true, capture: true });
   }
   tick();

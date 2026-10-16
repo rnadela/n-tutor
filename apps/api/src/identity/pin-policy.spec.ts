@@ -118,13 +118,15 @@ describe('the figure Parent View’s idle window comes from', () => {
 
   it('is the elevation TTL, and nothing else states it', () => {
     // The browser derives its idle window from `expiresAt - receivedAt`, both
-    // instants the API stated, precisely so no second definition of fifteen
-    // minutes can exist to drift. This is that one definition.
+    // instants the API stated, precisely so no second definition of the
+    // window can exist to drift. This is that one definition.
     delete process.env.ELEVATION_TTL_SECONDS;
     delete process.env.ELEVATION_CEILING_MS;
     resetPinRuntime();
     expect(elevationTtlSeconds()).toBe(ELEVATION_TTL_SECONDS);
     expect(elevationCeilingMs()).toBe(ELEVATION_CEILING_MS);
+    // Pinned as a literal too, so a silent revert of the default fails here.
+    expect(elevationTtlSeconds()).toBe(3600);
   });
 
   it('is a positive whole number of seconds, so a window can be derived from it', () => {

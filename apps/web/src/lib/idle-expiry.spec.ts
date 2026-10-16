@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   INTERACTION_EVENTS,
+  POINTERMOVE_THROTTLE_MS,
   REFRESH_AT_FRACTION,
   RETRY_AT_FRACTION,
   createIdleClock,
@@ -55,6 +56,13 @@ function fakeClock() {
       timers.delete(handle);
     },
     pending: (): number => timers.size,
+    /**
+     * Moves wall-clock time without running any timer — a timer the browser has
+     * not got round to firing yet. Negative steps the clock backwards.
+     */
+    jump(ms: number): void {
+      now += ms;
+    },
     /** Moves time forward, running each timer at the instant it comes due. */
     async advance(ms: number): Promise<void> {
       const target = now + ms;
@@ -85,20 +93,22 @@ function fakeClock() {
   };
 }
 
+type Listener = (event?: { type: string; screenX?: number; screenY?: number }) => void;
+
 function fakeTarget() {
-  const listeners = new Map<string, Set<() => void>>();
+  const listeners = new Map<string, Set<Listener>>();
   return {
-    addEventListener(type: string, listener: () => void): void {
-      const set = listeners.get(type) ?? new Set<() => void>();
+    addEventListener(type: string, listener: Listener): void {
+      const set = listeners.get(type) ?? new Set<Listener>();
       set.add(listener);
       listeners.set(type, set);
     },
-    removeEventListener(type: string, listener: () => void): void {
+    removeEventListener(type: string, listener: Listener): void {
       listeners.get(type)?.delete(listener);
     },
     attached: (): number => [...listeners.values()].reduce((total, set) => total + set.size, 0),
-    fire(type: string): void {
-      for (const listener of [...(listeners.get(type) ?? [])]) listener();
+    fire(type: string, coords: { screenX?: number; screenY?: number } = {}): void {
+      for (const listener of [...(listeners.get(type) ?? [])]) listener({ type, ...coords });
     },
   };
 }
@@ -267,9 +277,127 @@ describe('a parent who keeps working', () => {
 
     const ignored = start();
     await ignored.clock.advance(WINDOW - 1);
-    ignored.target.fire('mousemove');
+    ignored.target.fire('resize');
     await ignored.clock.advance(1);
     expect(ignored.onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts focus changes as interaction', async () => {
+    const rig = start();
+    await rig.clock.advance(WINDOW / 2);
+    rig.target.fire('focus');
+    // The deadline moved to exactly one window after the focus.
+    await rig.clock.advance(WINDOW - 1);
+    expect(rig.onExpire).not.toHaveBeenCalled();
+    await rig.clock.advance(1);
+    expect(rig.onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a hover-only reader present past a whole window', async () => {
+    const rig = start();
+    for (let elapsed = 0; elapsed < WINDOW * 2; elapsed += 60_000) {
+      await rig.clock.advance(60_000);
+      rig.target.fire('pointermove');
+    }
+    expect(rig.onExpire).not.toHaveBeenCalled();
+    expect(rig.refresh).toHaveBeenCalled();
+  });
+
+  it('throttles a pointermove burst to one reschedule per second', async () => {
+    const rig = start();
+    await rig.clock.advance(WINDOW / 2 - 10_000);
+    const schedule = vi.spyOn(rig.clock, 'setTimeout');
+
+    rig.target.fire('pointermove');
+    const firstCalls = schedule.mock.calls.length;
+    expect(firstCalls).toBeGreaterThan(0);
+
+    for (let step = 0; step < 50; step += 1) {
+      await rig.clock.advance(10);
+      rig.target.fire('pointermove');
+    }
+    expect(schedule.mock.calls.length).toBe(firstCalls);
+
+    // A move a full second after the last counted one extends the deadline.
+    await rig.clock.advance(POINTERMOVE_THROTTLE_MS - 500);
+    rig.target.fire('pointermove');
+    expect(schedule.mock.calls.length).toBeGreaterThan(firstCalls);
+
+    await rig.clock.advance(WINDOW - 1);
+    expect(rig.onExpire).not.toHaveBeenCalled();
+    await rig.clock.advance(1);
+    expect(rig.onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let an interaction after the deadline revive Parent View when the timer is late', async () => {
+    const rig = start();
+    // Active at a quarter window, so a replacement is fetched at the half and
+    // the token outlives the idle deadline (1.25 windows) — only the idle rule
+    // can end Parent View here.
+    await rig.clock.advance(WINDOW / 4);
+    rig.target.fire('keydown');
+    await rig.clock.advance(WINDOW / 4 + 1_000);
+    expect(rig.refresh).toHaveBeenCalledTimes(1);
+    // A backgrounded tab: the idle deadline passes but the expire timer has not run.
+    rig.clock.jump(WINDOW * 1.25 + 1_000 - rig.clock.now());
+    expect(rig.onExpire).not.toHaveBeenCalled();
+    rig.target.fire('focus');
+    expect(rig.onExpire).toHaveBeenCalledTimes(1);
+    rig.target.fire('pointerdown');
+    await rig.clock.advance(WINDOW);
+    expect(rig.onExpire).toHaveBeenCalledTimes(1);
+    expect(rig.target.attached()).toBe(0);
+  });
+
+  it('ignores a pointermove whose coordinates did not change', async () => {
+    const rig = start();
+    await rig.clock.advance(WINDOW / 2);
+    rig.target.fire('pointermove', { screenX: 10, screenY: 10 });
+    const movedAt = rig.clock.now();
+
+    // A polling screen re-renders under a resting cursor, well past the throttle.
+    for (let step = 0; step < 10; step += 1) {
+      await rig.clock.advance(5_000);
+      rig.target.fire('pointermove', { screenX: 10, screenY: 10 });
+    }
+    await rig.clock.advance(movedAt + WINDOW - 1 - rig.clock.now());
+    expect(rig.onExpire).not.toHaveBeenCalled();
+    await rig.clock.advance(1);
+    expect(rig.onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts a pointermove that did change coordinates', async () => {
+    const rig = start();
+    await rig.clock.advance(WINDOW / 2);
+    rig.target.fire('pointermove', { screenX: 10, screenY: 10 });
+    await rig.clock.advance(5_000);
+    rig.target.fire('pointermove', { screenX: 11, screenY: 10 });
+    await rig.clock.advance(WINDOW - 1);
+    expect(rig.onExpire).not.toHaveBeenCalled();
+    await rig.clock.advance(1);
+    expect(rig.onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throttle pointermove when the clock has stepped backwards', async () => {
+    const rig = start();
+    await rig.clock.advance(WINDOW / 4);
+    rig.target.fire('keydown');
+    rig.clock.jump(-5_000);
+    const schedule = vi.spyOn(rig.clock, 'setTimeout');
+    rig.target.fire('pointermove');
+    expect(schedule).toHaveBeenCalled();
+  });
+
+  it('never throttles discrete events, even inside a pointermove second', async () => {
+    const rig = start();
+    await rig.clock.advance(WINDOW / 2);
+    rig.target.fire('pointermove');
+    await rig.clock.advance(500);
+    rig.target.fire('keydown');
+    await rig.clock.advance(WINDOW - 1);
+    expect(rig.onExpire).not.toHaveBeenCalled();
+    await rig.clock.advance(1);
+    expect(rig.onExpire).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -15,7 +15,7 @@ const WRONG_PIN = '1357';
  * speed throughout, which is exactly the case this story is about: a parent who
  * walked away while their token was still perfectly refreshable.
  */
-const WINDOW_MS = Number(process.env.ELEVATION_TTL_SECONDS ?? '900') * 1000;
+const WINDOW_MS = Number(process.env.ELEVATION_TTL_SECONDS ?? '3600') * 1000;
 
 /** Comfortably more than one window, and comfortably less than two. */
 const PAST_THE_WINDOW = Math.ceil(WINDOW_MS * 1.1);

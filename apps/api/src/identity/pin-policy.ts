@@ -24,8 +24,8 @@ export const MAX_PIN_ATTEMPTS = 3;
  */
 export const PIN_COOLDOWN_MS = 15 * 60 * 1000;
 
-/** One elevation token lives 15 minutes; the parent refreshes while active. */
-export const ELEVATION_TTL_SECONDS = 15 * 60;
+/** One elevation token lives 60 minutes; the parent refreshes while active. */
+export const ELEVATION_TTL_SECONDS = 60 * 60;
 
 /**
  * The absolute ceiling, measured from the PIN crossing itself. Reaching it is

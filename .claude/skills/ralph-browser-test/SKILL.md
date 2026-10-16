@@ -57,7 +57,7 @@ Prefer the real UI; add a DB or API assertion wherever the AC is about persisten
 | Reload / typed URL inside Parent View | Lands on "Enter your PIN" | By design: elevation is in memory only. Re-enter the PIN, then navigate via the sidebar — never `navigate`/`goto` to a deep parent URL. |
 | Frozen tab missed hot reload | Code fix not visible even after reload | Restart: `./scripts/local-stop.sh && ./scripts/local-start.sh`. |
 | Free tier | Second profile refused ("allows 1 active Student Profile") | `update parent_account set tier='Family' where email='…'`; restore afterwards if the AC is about tier limits. |
-| Idle expiry (15 min) | Too slow to test | Temporarily set `ELEVATION_TTL_SECONDS=60` in `.env`, restart the stack, idle ~75 s, then **restore 900 and restart**. |
+| Idle expiry (60 min) | Too slow to test | Temporarily set `ELEVATION_TTL_SECONDS=60` in `.env`, restart the stack, idle ~75 s, then **restore 3600 and restart**. |
 | PIN lockout | Further PIN tests blocked for 15 min | Test lockout **last**; clear with `update parent_account set "pinFailedAttempts"=0, "pinLockedUntil"=null where email='…'`. |
 | MUI select offset | Ref click picks the wrong option | Screenshot the open listbox, click by coordinate, verify the chosen value. |
 | `read_page` misses checkboxes/radios | MUI hides the native input | Not an a11y bug by itself — verify with JS that the input sits inside its `<label>`. |

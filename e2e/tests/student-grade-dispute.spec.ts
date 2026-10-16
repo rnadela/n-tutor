@@ -40,7 +40,7 @@ const PIN = '4821';
  * Both are `parent-uncommitted-state.spec.ts`'s, deliberately: this suite drives the same
  * real expiry, and the two must not drift into asserting against different journeys.
  */
-const WINDOW_MS = Number(process.env.ELEVATION_TTL_SECONDS ?? '900') * 1000;
+const WINDOW_MS = Number(process.env.ELEVATION_TTL_SECONDS ?? '3600') * 1000;
 const PAST_THE_WINDOW = Math.ceil(WINDOW_MS * 1.1);
 
 const PAGE_A =

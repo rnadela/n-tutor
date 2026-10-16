@@ -97,7 +97,7 @@ One NestJS application; `api` and `worker` are the same image with different ent
 - **Binds:** all
 - **Prevents:** a module inventing a second actor model, grade state, or counter concept.
 - **Rule:**
-  - One Parent Account is the only credentialed actor; Student Profiles have no credentials; Student Mode is the device default; Parent View is PIN-gated with a 15-minute silent idle timeout (FR-34); Admin is a separate surface outside any Parent Account.
+  - One Parent Account is the only credentialed actor; Student Profiles have no credentials; Student Mode is the device default; Parent View is PIN-gated with a 60-minute silent idle timeout (FR-34); Admin is a separate surface outside any Parent Account.
   - Four AI call classes with distinct cost/latency profiles: Extraction (vision, up to 10 images), Generation, Grading, Explanation — plus FR-8 legibility as a fifth class (AD-29).
   - Four grade states — correct, incorrect, unanswered, ungraded (FR-37) — carried through Attempt storage, the answer key, parent drill-down, and Mastery.
   - Three allowances — Upload, Generation, Explanation — on a calendar month in each Parent Account's own local timezone (FR-31).
@@ -192,8 +192,8 @@ One NestJS application; `api` and `worker` are the same image with different ent
 - **Prevents:** Student Mode enforced by client routing on one surface and by a server check on another; and an idle rule that a polling screen keeps alive forever while a reading parent is dropped mid-work.
 - **Rule:**
   - The token identifies the Parent Account and carries the mode; crossing the Parent PIN mints a token with **Parent View scope**, and every parent-scoped endpoint checks that scope **server-side**.
-  - **The client owns the idle clock**, tracking real interaction — pointer, key, scroll, touch — and requesting a refreshed elevation token while the parent is active. **Polling does not touch the clock**; polling is not interaction.
-  - The client may only **request** a refresh, never extend a token: the elevation token expires on its own 15-minute window and the server mints any replacement.
+  - **The client owns the idle clock**, tracking real interaction — pointer press and movement, key, scroll, touch, focus — and requesting a refreshed elevation token while the parent is active. **Polling does not touch the clock**; polling is not interaction.
+  - The client may only **request** a refresh, never extend a token: the elevation token expires on its own idle window (`ELEVATION_TTL_SECONDS`, default 60 minutes) and the server mints any replacement.
   - **Absolute ceiling of 8 hours** on total elevation regardless of activity.
   - The parent-scoped token is held **in memory only** — never persisted to disk, cookie, or web storage.
   - FR-35 restore is gated on presenting a parent-scoped token.
